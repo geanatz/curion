@@ -121,6 +121,15 @@ import {
   type CalibrationVariantResult,
 } from "./calibration.js";
 import { buildHybridPerFamilyDelta, type HybridPerFamilyDeltaRow } from "./metrics.js";
+import {
+  runAbstentionAudit,
+  writeAbstentionAuditReport,
+  formatAbstentionAuditReport,
+} from "./abstention-audit-runner.js";
+import type {
+  AbstentionAuditConfig,
+  AbstentionAuditReport,
+} from "./abstention-audit.js";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -246,6 +255,24 @@ export interface RetrievalBenchmarkOptions {
    * lifecycle; the caller initializes and disposes it.
    */
   denseEmbedder?: DenseEmbedder;
+  /**
+   * Run the benchmark-only abstention-signal audit AFTER
+   * the regular benchmark. Default: `false`. The audit
+   * is a separate artifact (prefix
+   * `retrieval-abstention-audit-*.json`) that studies
+   * how well simple retrieval-derived signals separate
+   * answerable from no-answer queries. It is
+   * benchmark-only: it does NOT modify the production
+   * `recall(text)` behavior, the public MCP API, or
+   * the existing benchmark / calibration report shapes.
+   *
+   * The audit can be combined with `--calibrate`. The
+   * regular benchmark + calibration report is written
+   * first; the abstention-audit report is written
+   * second. Both artifacts live next to each other
+   * under `.cortex/benchmark/`.
+   */
+  abstentionAudit?: boolean | AbstentionAuditConfig;
 }
 
 /**
@@ -601,6 +628,16 @@ export function parseRetrievalCli(argv: string[]): RetrievalBenchmarkOptions {
       opts.hybridK = n;
     } else if (a === "--calibrate") {
       opts.calibration = true;
+    } else if (a === "--abstention-audit") {
+      // The flag is boolean: `--abstention-audit` enables
+      // the audit with default risk/coverage targets.
+      // A reviewer who wants custom targets can pass the
+      // `abstentionAudit: AbstentionAuditConfig` option
+      // programmatically; the CLI does not currently
+      // expose the per-target tuning because the defaults
+      // (5%/10%/20% risk, 50%/80%/95% coverage) cover
+      // the common cases.
+      opts.abstentionAudit = true;
     } else if (a === "--calibrate-direction" && argv[i + 1]) {
       const d = argv[++i];
       if (d !== "higher-is-better" && d !== "lower-is-better") {
@@ -3444,11 +3481,44 @@ async function main(): Promise<void> {
       written.push(writeDenseBenchmarkReport(r.hybridDense, dir));
       written.push(writeDenseComparisonReport(r, dir));
       process.stdout.write(formatDenseComparisonReport(r) + "\n");
+      // The abstention-audit, when requested, runs
+      // on the dense hybrid (the most informative
+      // dense variant for the audit: it has the
+      // contributor signals).
+      if (opts.abstentionAudit) {
+        const auditCfg: AbstentionAuditConfig =
+          typeof opts.abstentionAudit === "object"
+            ? opts.abstentionAudit
+            : {};
+        const auditReport = runAbstentionAuditFromDenseReport(
+          r.hybridDense,
+          auditCfg,
+        );
+        const auditFile = writeAbstentionAuditReport(auditReport, dir);
+        written.push(auditFile);
+        process.stdout.write(
+          "\n" + formatAbstentionAuditReport(auditReport) + "\n",
+        );
+        process.stdout.write(`\nartifact written: ${auditFile}\n`);
+      }
     } else {
       const r = denseReport as DenseRetrievalBenchmarkReport;
       const file = writeDenseBenchmarkReport(r, dir);
       written.push(file);
       process.stdout.write(formatDenseHumanReport(r) + "\n");
+      if (opts.abstentionAudit) {
+        const auditCfg: AbstentionAuditConfig =
+          typeof opts.abstentionAudit === "object"
+            ? opts.abstentionAudit
+            : {};
+        const auditReport = runAbstentionAuditFromDenseReport(r, auditCfg);
+        const auditFile = writeAbstentionAuditReport(auditReport, dir);
+        written.push(auditFile);
+        process.stdout.write(
+          "\n" + formatAbstentionAuditReport(auditReport) + "\n",
+        );
+        process.stdout.write(`\nartifact written: ${auditFile}\n`);
+      }
     }
     for (const f of written) {
       process.stdout.write(`\nartifact written: ${f}\n`);
@@ -3512,6 +3582,110 @@ async function main(): Promise<void> {
     process.stdout.write("\n" + formatCalibrationReport(calReport) + "\n");
     process.stdout.write(`\nartifact written: ${calFile}\n`);
   }
+  // Abstention-signal audit: benchmark-only study of
+  // how well simple retrieval-derived signals separate
+  // answerable from no-answer queries. Opt-in via
+  // `--abstention-audit`; the audit is a separate
+  // artifact (`retrieval-abstention-audit-*.json`).
+  // The audit does NOT modify the production
+  // `recall(text)` behavior, the public MCP API, or
+  // the existing benchmark / calibration report
+  // shapes. It is research-only: a study of what
+  // signals might be useful for a future, separate
+  // abstention-gate phase. Not wired into the
+  // controller.
+  if (opts.abstentionAudit) {
+    const auditCfg: AbstentionAuditConfig =
+      typeof opts.abstentionAudit === "object"
+        ? opts.abstentionAudit
+        : {};
+    const auditReport = runAbstentionAuditFromBenchmarkReport(report, {
+      variant,
+      config: auditCfg,
+    });
+    const auditFile = writeAbstentionAuditReport(auditReport, dir);
+    written.push(auditFile);
+    process.stdout.write(
+      "\n" + formatAbstentionAuditReport(auditReport) + "\n",
+    );
+    process.stdout.write(`\nartifact written: ${auditFile}\n`);
+  }
+}
+
+/**
+ * Build an abstention-audit report from a single
+ * benchmark report (sync `RetrievalBenchmarkReport`).
+ * The function is pure: it consumes the report's
+ * `evals` and emits an `AbstentionAuditReport`.
+ *
+ * For a comparison report (`variant: "all"`) the
+ * function picks the hybrid variant (the most
+ * informative variant for the audit: it has the
+ * contributor signals, so the audit can study
+ * agreement-count and per-source rank signals in
+ * addition to the retrieval signals).
+ */
+export function runAbstentionAuditFromBenchmarkReport(
+  report: RetrievalBenchmarkReport | ComparisonBenchmarkReport,
+  args: {
+    variant: BenchmarkVariant;
+    config?: AbstentionAuditConfig;
+  },
+): AbstentionAuditReport {
+  // The single-variant path is the easy one: the
+  // report's `evals` is the audit's per-query input.
+  if (isSingleVariantReport(report)) {
+    return runAbstentionAudit({
+      variant: report.variant === "lexical-baseline"
+        ? "lexical"
+        : report.variant === "fts5-benchmark"
+          ? "fts5"
+          : report.variant === "vector-benchmark"
+            ? "vector"
+            : "hybrid-dense", // hybrid-benchmark
+      evals: report.evals,
+      queries: selectQueries({ variant: args.variant }),
+      records: BENCHMARK_RECORDS,
+      config: args.config ?? {},
+    });
+  }
+  // The comparison path: pick the most informative
+  // variant the audit can run on. The hybrid report
+  // is the natural choice (it has the contributor
+  // signals). If the comparison was run with a
+  // hybrid-K override, the audit uses the same
+  // hybrid report the user got.
+  const hybrid = report.hybrid;
+  return runAbstentionAudit({
+    variant: "hybrid-dense", // uses the contributor signals
+    evals: hybrid.evals,
+    queries: selectQueries({ variant: args.variant }),
+    records: BENCHMARK_RECORDS,
+    config: args.config ?? {},
+  });
+}
+
+/**
+ * Build an abstention-audit report from a dense
+ * single-variant report. The function is pure: it
+ * consumes the report's `evals` and emits an
+ * `AbstentionAuditReport`. Used by the CLI when
+ * `--variant vector-dense --abstention-audit` is
+ * set.
+ */
+export function runAbstentionAuditFromDenseReport(
+  report: DenseRetrievalBenchmarkReport,
+  config: AbstentionAuditConfig = {},
+): AbstentionAuditReport {
+  return runAbstentionAudit({
+    variant: report.variant === "vector-dense-benchmark"
+      ? "vector-dense"
+      : "hybrid-dense",
+    evals: report.evals,
+    queries: BENCHMARK_QUERIES,
+    records: BENCHMARK_RECORDS,
+    config,
+  });
 }
 
 const isMain = (() => {
