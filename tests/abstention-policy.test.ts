@@ -1036,3 +1036,80 @@ function normalizeReport(r: AbstentionPolicyReport): void {
   // byte-equal comparison ignores the timestamp.
   r.generatedAt = "2026-06-12T00:00:00.000Z";
 }
+
+// ---------------------------------------------------------------------------
+// 10. README content regression (FP bullet header vs body count)
+// ---------------------------------------------------------------------------
+
+/**
+ * Regression guard for a class of bug a reviewer
+ * flagged in the multi-signal abstention policy
+ * evaluator section: bullet headers that said
+ * "12 paraphrase queries" / "4 orientation queries"
+ * did not match the bodies (which listed 9 and 5
+ * query IDs respectively). The test reads the
+ * README.md, finds the two FP bullets in the
+ * "Per-query false positives" subsection, and
+ * asserts that the number in the bullet header
+ * equals the number of backtick-quoted query IDs
+ * in the bullet body. Pure content test — no
+ * fixtures, no production code touched.
+ */
+test("README: per-query FP bullet headers match the number of query IDs in their bodies", () => {
+  const readmePath = path.resolve(
+    path.dirname(new URL(import.meta.url).pathname),
+    "..",
+    "README.md",
+  );
+  const readme = fs.readFileSync(readmePath, "utf8");
+
+  /**
+   * Extract the bullet header number and the number
+   * of backtick-quoted query IDs in the body for a
+   * given bullet line, identified by a literal
+   * substring in the header (e.g. "paraphrase
+   * queries:" or "orientation queries:").
+   */
+  const checkBullet = (headerAnchor: string, idPrefix: string): {
+    header: number;
+    body: number;
+  } => {
+    // The README is hard-wrapped to ~60 columns, so
+    // the bullet is guaranteed to be a single line.
+    // We match the first bullet that starts with
+    // "- <N> <headerAnchor>" and capture the count.
+    const re = new RegExp(
+      `^- (\\d+) ${headerAnchor}: (.+)$`,
+      "m",
+    );
+    const m = readme.match(re);
+    assert.ok(
+      m,
+      `README FP bullet for ${headerAnchor} not found`,
+    );
+    const header = Number(m![1]);
+    const body = m![2];
+    // Count distinct backtick-quoted query IDs with
+    // the expected prefix. Matches e.g. `para-foo`.
+    const idRegex = new RegExp(`\`${idPrefix}-[a-z0-9-]+\``, "g");
+    const ids = body.match(idRegex) ?? [];
+    // De-duplicate in case the README ever repeats
+    // an ID (the current bodies do not).
+    const unique = new Set(ids);
+    return { header, body: unique.size };
+  };
+
+  const para = checkBullet("paraphrase queries", "para");
+  assert.equal(
+    para.header,
+    para.body,
+    `README paraphrase FP bullet header (${para.header}) does not match body count (${para.body})`,
+  );
+
+  const orient = checkBullet("orientation queries", "orient");
+  assert.equal(
+    orient.header,
+    orient.body,
+    `README orientation FP bullet header (${orient.header}) does not match body count (${orient.body})`,
+  );
+});

@@ -1523,8 +1523,8 @@ moderate policy (real-MiniLM hybrid-dense):**
 **Per-query false positives on the recommended
 moderate policy (real-MiniLM hybrid-dense):**
 
-- 12 paraphrase queries: `para-deploy-strategy`, `para-review-style`, `para-storage-detail`, `para-architecture-decisions`, `para-secret-handling`, `para-upgrade-cadence`, `para-incident-comms`, `para-rate-limit`, `para-cache-strategy` (and others — the artifact carries the full list).
-- 4 orientation queries: `orient-deploy-status`, `orient-monitoring-status`, `orient-ci-extensions-status`, `orient-data-pipeline-status`, `orient-observability-extensions-status`.
+- 9 paraphrase queries: `para-deploy-strategy`, `para-review-style`, `para-storage-detail`, `para-architecture-decisions`, `para-secret-handling`, `para-upgrade-cadence`, `para-incident-comms`, `para-rate-limit`, `para-cache-strategy` (and others — the artifact carries the full list).
+- 5 orientation queries: `orient-deploy-status`, `orient-monitoring-status`, `orient-ci-extensions-status`, `orient-data-pipeline-status`, `orient-observability-extensions-status`.
 - 2 multi-hop queries: `multi-monitoring-posture`, `multi-observability-extensions`.
 - 1 temporal query: `temp-controller-validation` (the labeled divergent-current-truth case).
 
