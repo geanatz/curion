@@ -765,15 +765,26 @@ test("dense calibration: existing single-variant and comparison benchmark report
   // reports. The dense calibration support is purely
   // additive; the existing benchmark surface is
   // byte-stable. The pinned numbers here are the
-  // expanded-checkpoint (100 records / 96 queries) lexical
-  // baseline. A future corpus / query set change is a
-  // deliberate, visible change; update these numbers and
-  // the README's headline table together.
+  // adversarial-expansion-checkpoint (132 records / 176
+  // queries) lexical baseline. The numbers shifted from
+  // the prior 100-record / 96-query checkpoint for two
+  // reasons (see the matching
+  // `calibration: does not change...` test in
+  // `tests/retrieval-calibration.test.ts` for the full
+  // explanation): the new corpus (8 new clusters) added
+  // 32 candidate records that the lexical ranker can
+  // surface, and the 80 new queries include 54 positive
+  // and 22 no-answer queries. The aggregate shifts to
+  // rank1 82/130=63.1%, hit@5 111/130=85.4%,
+  // noAnswerCorrect 3/46=6.5%. A future corpus / query
+  // set change is a deliberate, visible change; update
+  // these numbers and the README's headline table
+  // together.
   const single = runRetrievalBenchmark({ variant: "lexical" });
   assert.ok(isSingleVariantReport(single));
-  assert.equal(single.metrics.hitAt5, 57);
-  assert.equal(single.metrics.rank1, 43);
-  assert.equal(single.metrics.noAnswerCorrect, 5);
+  assert.equal(single.metrics.hitAt5, 111);
+  assert.equal(single.metrics.rank1, 82);
+  assert.equal(single.metrics.noAnswerCorrect, 3);
 
   const all = runRetrievalBenchmark({ variant: "all" });
   assert.ok(isComparisonReport(all));

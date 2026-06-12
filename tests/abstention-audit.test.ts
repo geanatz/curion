@@ -451,14 +451,28 @@ test("query-shape detector: labeled hard-negative `nonexistent-load-balancer` is
 });
 
 test("query-shape detector: easy no-answer queries are NOT hard-negatives", () => {
-  // The four original easy no-answer queries
-  // (`nonexistent-company-picnic`, etc.) share
-  // essentially no tokens with real records. They
-  // should NOT be hard-negatives.
+  // The three "easy" no-answer queries that share
+  // essentially no tokens with real records. The fourth
+  // original easy no-answer query
+  // (`nonexistent-mobile-app`) became a hard-negative
+  // in the adversarial-expansion checkpoint because the
+  // new cluster-31 record 124 shares
+  // `deployment`/`target` tokens with the query. The
+  // property the test pins is the same: a small
+  // easy-no-answer subset still stays easy even with
+  // the expanded corpus; the adversarial expansion
+  // deliberately turns some of the original easy
+  // queries into hard-negatives to give the no-answer
+  // TNR more confabulation pressure. The labeled
+  // hard-negative floor (the labeled
+  // `nonexistent-load-balancer` and the now-labeled
+  // `nonexistent-mobile-app`) is pinned in the
+  // `runner: expanded checkpoint includes a labeled
+  // no-answer hard-negative query that confabulates`
+  // test below.
   for (const id of [
     "nonexistent-company-picnic",
     "nonexistent-auth-library",
-    "nonexistent-mobile-app",
     "nonexistent-customer-count",
   ]) {
     const q = BENCHMARK_QUERIES.find((q) => q.id === id);
@@ -534,13 +548,33 @@ test("query-shape detector: negation-like queries are detected", () => {
 });
 
 test("query-shape detector: DIVERGENT_TEMPORAL_IDS is the same set the existing tests pin", () => {
-  // The two divergent temporal queries are
-  // `temp-storage-raw-text` and
-  // `temp-controller-validation`. The audit's slice
-  // builder uses the same set.
-  assert.equal(DIVERGENT_TEMPORAL_IDS.size, 2);
-  assert.ok(DIVERGENT_TEMPORAL_IDS.has("temp-storage-raw-text"));
-  assert.ok(DIVERGENT_TEMPORAL_IDS.has("temp-controller-validation"));
+  // The adversarial-expansion set has 7 labeled
+  // divergent temporal queries:
+  //   - 2 from the prior expanded checkpoint
+  //     (`temp-storage-raw-text`,
+  //     `temp-controller-validation`).
+  //   - 5 new in the adversarial expansion
+  //     (`temp-superseded-postgres-15-current`,
+  //     `temp-superseded-controller-validation-current`,
+  //     `temp-superseded-oncall-handoff-current`,
+  //     `temp-superseded-stale-fact-trap-postgres`,
+  //     `temp-superseded-retrieval-design-current`).
+  // The audit's slice builder uses the same set.
+  assert.equal(DIVERGENT_TEMPORAL_IDS.size, 7);
+  for (const id of [
+    "temp-storage-raw-text",
+    "temp-controller-validation",
+    "temp-superseded-postgres-15-current",
+    "temp-superseded-controller-validation-current",
+    "temp-superseded-oncall-handoff-current",
+    "temp-superseded-stale-fact-trap-postgres",
+    "temp-superseded-retrieval-design-current",
+  ]) {
+    assert.ok(
+      DIVERGENT_TEMPORAL_IDS.has(id),
+      `expected DIVERGENT_TEMPORAL_IDS to contain ${id}`,
+    );
+  }
 });
 
 test("query-shape detector: LEGACY_DISTRACTOR_IDS is the expected set", () => {
@@ -549,6 +583,86 @@ test("query-shape detector: LEGACY_DISTRACTOR_IDS is the expected set", () => {
     assert.ok(LEGACY_DISTRACTOR_IDS.has(id));
   }
   assert.equal(LEGACY_DISTRACTOR_IDS.size, 8);
+});
+
+test("query-shape detector: isDivergentTemporal surfaces labeled divergent queries", () => {
+  // The detector's `isDivergentTemporal` flag uses
+  // the data shape (currentTruthIds.length <
+  // expectedIds.length) on the temporal family PLUS
+  // the explicit `divergentTemporal` label. Both
+  // surfaces fire for the labeled subset; the data
+  // shape alone fires for any future divergent query
+  // that forgets the label.
+  for (const id of [
+    "temp-storage-raw-text",
+    "temp-controller-validation",
+    "temp-superseded-postgres-15-current",
+    "temp-superseded-controller-validation-current",
+    "temp-superseded-oncall-handoff-current",
+    "temp-superseded-stale-fact-trap-postgres",
+    "temp-superseded-retrieval-design-current",
+  ]) {
+    const q = BENCHMARK_QUERIES.find((q) => q.id === id);
+    assert.ok(q, `expected labeled divergent query "${id}" to exist`);
+    const corpusTokenSets = buildCorpusTokenSets(BENCHMARK_RECORDS);
+    const flags = detectQueryShape(q, corpusTokenSets);
+    assert.equal(
+      flags.isDivergentTemporal,
+      true,
+      `expected isDivergentTemporal=true for labeled divergent query ${id}`,
+    );
+  }
+});
+
+test("query-shape detector: isAdversarialParaphrase surfaces labeled paraphrases", () => {
+  // The detector's `isAdversarialParaphrase` flag
+  // fires on queries with the explicit
+  // `adversarialParaphrase` label OR paraphrase queries
+  // that target one of the paraphrase-twin records
+  // (113..116). The adversarial expansion has 4
+  // labeled adversarial paraphrases targeting the
+  // paraphrase-twin records.
+  for (const id of [
+    "para-storage-twin",
+    "para-review-twin",
+    "para-provider-twin",
+    "para-observability-twin",
+  ]) {
+    const q = BENCHMARK_QUERIES.find((q) => q.id === id);
+    assert.ok(q);
+    const corpusTokenSets = buildCorpusTokenSets(BENCHMARK_RECORDS);
+    const flags = detectQueryShape(q, corpusTokenSets);
+    assert.equal(
+      flags.isAdversarialParaphrase,
+      true,
+      `expected isAdversarialParaphrase=true for labeled paraphrase ${id}`,
+    );
+  }
+});
+
+test("query-shape detector: isNearMissCurrentCluster surfaces labeled near-misses", () => {
+  // The detector's `isNearMissCurrentCluster` flag
+  // fires on queries with the explicit label OR
+  // orientation / multi-hop / paraphrase queries that
+  // target one of the near-miss cluster records
+  // (109..112). The adversarial expansion has 7
+  // labeled near-miss cases.
+  const labeledNearMiss = BENCHMARK_QUERIES.filter(
+    (q) => (q.labels ?? []).includes("nearMissCurrentCluster"),
+  );
+  assert.ok(
+    labeledNearMiss.length >= 1,
+    `expected at least 1 labeled 'nearMissCurrentCluster' query, got ${labeledNearMiss.length}`,
+  );
+  for (const q of labeledNearMiss) {
+    const corpusTokenSets = buildCorpusTokenSets(BENCHMARK_RECORDS);
+    const flags = detectQueryShape(q, corpusTokenSets);
+    assert.equal(
+      flags.isNearMissCurrentCluster,
+      true,
+      `expected isNearMissCurrentCluster=true for labeled near-miss ${q.id}`,
+    );
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -693,6 +807,15 @@ test("abstention audit runner: per-query signals carry all required fields", asy
     assert.equal(typeof p.signals.isOodEntityLike, "boolean");
     assert.equal(typeof p.signals.isParaphraseTrap, "boolean");
     assert.equal(typeof p.signals.isFalsePremiseLike, "boolean");
+    // Adversarial-expansion additions: the detector
+    // surfaces three new flag fields per query
+    // (isAdversarialParaphrase, isDivergentTemporal,
+    // isNearMissCurrentCluster). They are
+    // backward-compatible booleans; the per-query
+    // signal block carries every one of them.
+    assert.equal(typeof p.signals.isAdversarialParaphrase, "boolean");
+    assert.equal(typeof p.signals.isDivergentTemporal, "boolean");
+    assert.equal(typeof p.signals.isNearMissCurrentCluster, "boolean");
   }
 });
 
