@@ -34,6 +34,19 @@
  *   - vector: cosine similarity in [0, 1] for the
  *     non-negative L2-normalized BoW vectors produced by the
  *     default embedder. "Higher is better".
+ *   - vector-dense: cosine similarity in [0, 1] for the
+ *     non-negative L2-normalized vectors produced by the
+ *     real local dense embedder (or the deterministic stub).
+ *     "Higher is better" — same contract as `vector`. The
+ *     same threshold / margin / ratio gate math applies.
+ *   - hybrid-dense: Reciprocal Rank Fusion (RRF) score in
+ *     (0, N/(k+1)] for N contributing variants, all weights
+ *     1.0 by default. "Higher is better" — a higher RRF
+ *     score means more contributors agreed on the top
+ *     candidate. The same threshold / margin / ratio gate
+ *     math applies, with the new "contributor support"
+ *     diagnostic (per-source rank in the RRF top-1) added
+ *     to the per-query trace.
  *
  * Gate taxonomy:
  *   - `threshold` — abstain iff `topScore < t`. The simplest
@@ -125,11 +138,24 @@ export interface CalibrationConfig {
    * entry is calibrated with no extra gate (i.e. abstention
    * decision is the same as the ranker's natural empty /
    * non-empty output).
+   *
+   * The `vector-dense` and `hybrid-dense` entries are
+   * optional and only consulted by the dense calibration
+   * runner; the sync `runCalibration` ignores them. The
+   * existing lexical / fts5 / vector entries are unchanged
+   * — adding the new keys is purely additive and the
+   * existing calibration runner treats unknown keys as a
+   * no-op.
    */
   gatesByVariant: {
     lexical?: CalibrationGate[];
     fts5?: CalibrationGate[];
     vector?: CalibrationGate[];
+    /** Real dense vector variant (`vector-dense`). */
+    vectorDense?: CalibrationGate[];
+    /** Dense hybrid variant (`hybrid-dense`): RRF over
+     *  lexical / FTS5 / vector-dense. */
+    hybridDense?: CalibrationGate[];
   };
   /**
    * The "score sweep" — a small set of candidate gate values
@@ -210,6 +236,36 @@ export interface CalibrationQueryDiagnostic {
    * already abstaining on, before any of our gates.
    */
   naturallyAbstained: boolean;
+  /**
+   * Hybrid-aware contributor support diagnostic. Present
+   * only on per-query traces from the `hybrid-dense` (or
+   * future `hybrid`) calibration pass; `undefined` on the
+   * single-variant traces (lexical / FTS5 / vector /
+   * vector-dense). The block carries the per-source RRF
+   * rank for the top-1 candidate, the raw per-source
+   * score, and the RRF contribution, so a reviewer can see
+   * WHY the fusion surfaced a candidate. The block is
+   * ADDITIVE: existing fields and the per-query trace
+   * contract are unchanged.
+   */
+  contributorSupport?: ReadonlyArray<{
+    source: "lexical" | "fts5" | "vector-dense";
+    rank: number | null;
+    score: number | null;
+    contribution: number;
+  }>;
+  /**
+   * Hybrid-aware abstention-only diagnostic. Present only
+   * on `hybrid-dense` traces; `undefined` on single-variant
+   * traces. The number of contributors that returned the
+   * top-1 candidate (i.e. RRF rank-1 was non-null in their
+   * ranking). A value of 1 means only one source surfaced
+   * the candidate; 3 means all three agreed. The value is a
+   * leading indicator of confidence: a "1 of 3" agreement
+   * is a stronger abstention signal than a "3 of 3"
+   * agreement.
+   */
+  contributorAgreementCount?: number;
 }
 
 /**
@@ -217,7 +273,7 @@ export interface CalibrationQueryDiagnostic {
  * kind, candidate value) + the "no extra gate" baseline.
  */
 export interface CalibrationVariantResult {
-  variant: "lexical" | "fts5" | "vector";
+  variant: "lexical" | "fts5" | "vector" | "vector-dense" | "hybrid-dense";
   /** Stable human label for the gate. */
   gateLabel: string;
   /**
@@ -315,11 +371,24 @@ export interface CalibrationReport {
    * tie-break on smallest positive regression count, then
    * on highest hit@5. The rule is documented in the report
    * so the choice is auditable.
+   *
+   * The `vectorDense` / `hybridDense` keys are populated
+   * only on dense calibration reports; the sync calibration
+   * report leaves them `null` and the existing three
+   * calibratable variants (`lexical`, `fts5`, `vector`)
+   * remain the canonical keys for the sync report. The new
+   * keys are ADDITIVE — the existing three keys are
+   * unchanged in shape and meaning, so existing tooling
+   * that reads the sync report continues to work.
    */
   bestByVariant: {
     lexical: CalibrationVariantResult | null;
     fts5: CalibrationVariantResult | null;
     vector: CalibrationVariantResult | null;
+    /** Dense real-vector variant. */
+    vectorDense?: CalibrationVariantResult | null;
+    /** Dense hybrid (RRF over lexical / FTS5 / vector-dense). */
+    hybridDense?: CalibrationVariantResult | null;
   };
 }
 
@@ -340,6 +409,108 @@ export interface CalibrationReport {
 export const DEFAULT_CALIBRATION_SWEEP: CalibrationConfig["sweep"] = {
   threshold: [0.1, 0.2, 0.3, 0.4, 0.5],
   margin: [0.0, 0.05, 0.1, 0.2, 0.3],
+  ratio: [1.0, 1.25, 1.5, 2.0, 3.0],
+};
+
+/**
+ * Default sweep grid for the dense variants (`vector-dense`
+ * and `hybrid-dense`). The values are tuned to the
+ * empirically-observed score distribution of the dense
+ * embedder on the 60-record fixture corpus:
+ *
+ *   - For `vector-dense`, cosine similarity on the
+ *     MiniLM / stub embedder is concentrated in
+ *     [0.0, 0.9]; the `0%` no-answer TNR at the
+ *     default threshold of 0 motivates a wider
+ *     threshold grid that spans the natural gap
+ *     between confabulating and matching scores.
+ *   - For `hybrid-dense`, the RRF score is bounded by
+ *     `N / (k + 1)` for N contributing variants. With
+ *     three contributors and `k = 60`, the maximum
+ *     possible RRF is `0.0492`. The threshold grid is
+ *     scaled down to that range so the sweep explores
+ *     the full feasible space.
+ *
+ * The margin and ratio grids are the same as the sync
+ * defaults: the relative confidence of the dense
+ * embedder is on a similar scale to the hashed-BoW
+ * control, so the gap/ratio semantics are unchanged.
+ *
+ * The grid is intentionally small (3..5 values per
+ * gate family) so the dense calibration report stays
+ * readable. A reviewer who wants a finer grid can
+ * pass a custom `CalibrationConfig`.
+ */
+export const DEFAULT_DENSE_CALIBRATION_SWEEP: CalibrationConfig["sweep"] = {
+  // Cosine similarity threshold; spans the natural
+  // match / no-match gap on the dense embedder. The
+  // grid deliberately starts below the empirical
+  // confabulation floor (so the baseline row is
+  // captured) and reaches into the strong-match
+  // range (so a stricter gate is also visible).
+  threshold: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+  // Top-1 to top-2 absolute margin. The dense
+  // embedder is sharper than the hashed-BoW control
+  // for paraphrase / exact matches, so a smaller
+  // margin (e.g. 0.05) is a useful "barely
+  // confident" signal.
+  margin: [0.0, 0.05, 0.1, 0.15, 0.2, 0.3],
+  // Top-1 / top-2 ratio. Same scale as the sync
+  // default; the dense embedder naturally produces
+  // larger ratios for true matches (the top-1
+  // dominates) and ratios near 1.0 for confabulating
+  // candidates (the top-1 and top-2 are roughly
+  // tied).
+  ratio: [1.0, 1.25, 1.5, 2.0, 3.0],
+};
+
+/**
+ * Default sweep grid for the dense RRF variant
+ * (`hybrid-dense`). The RRF score scale is
+ * significantly smaller than the cosine scale: with
+ * three contributors, k = 60, the maximum possible
+ * RRF is `3 / 61 ≈ 0.0492`. The threshold grid is
+ * therefore expressed in the same units but
+ * pre-scaled to that range so the sweep explores
+ * the full feasible space:
+ *   - `0.005` ≈ "at least one contributor ranked the
+ *     candidate in the top-1 with strong weight".
+ *   - `0.01`  ≈ "two contributors both in the top-K".
+ *   - `0.02`  ≈ "two contributors both near the
+ *     top, or one strong top-1 plus a mid-list
+ *     hit".
+ *   - `0.03`  ≈ "most contributors agreed on the
+ *     top".
+ *   - `0.04`  ≈ "near-saturation; all three
+ *     contributors are near rank 1".
+ *
+ * The grid is intentionally tight at the low end
+ * (where the abstention decision is most
+ * informative) and sparse at the high end. A
+ * reviewer who wants a different distribution can
+ * pass a custom `CalibrationConfig`.
+ */
+export const DEFAULT_HYBRID_DENSE_CALIBRATION_SWEEP: CalibrationConfig["sweep"] = {
+  // The empirically-observed RRF top-1 score range on
+  // the 60-record fixture corpus is roughly
+  // [0.016, 0.049] for both positive and no-answer
+  // queries, with the natural match / confabulation
+  // gap concentrated around 0.025..0.030. The grid
+  // spans that gap densely so a reviewer can see the
+  // steep trade-off at the natural separation point.
+  // A threshold of 0.01 is a permissive "abstain only
+  // on a single-contributor weak hit" gate; 0.04 is a
+  // strict "abstain unless most contributors
+  // agreed" gate.
+  threshold: [0.01, 0.02, 0.025, 0.03, 0.04],
+  // Top-1 to top-2 absolute margin. The RRF score
+  // differences on this corpus are typically in the
+  // [0, 0.005] range, so the grid is tight at the
+  // low end.
+  margin: [0.0, 0.002, 0.005, 0.01, 0.02],
+  // Top-1 / top-2 ratio. Same scale as the sync
+  // default; the dense hybrid fusion naturally
+  // produces larger ratios for true matches.
   ratio: [1.0, 1.25, 1.5, 2.0, 3.0],
 };
 
@@ -439,6 +610,14 @@ export function gateLabel(g: CalibrationGate): string {
  * Build a `CalibrationQueryDiagnostic` from a "no threshold"
  * rank and an abstention decision. The function is pure and
  * safe to call from tests.
+ *
+ * The optional `hybridSupport` block carries the per-source
+ * RRF rank/score/contribution for the top-1 candidate and
+ * the contributor-agreement count. It is present only on
+ * the hybrid-dense (or future hybrid) calibration pass;
+ * `undefined` on the single-variant traces. The block is
+ * additive: existing fields and the per-query trace
+ * contract are unchanged.
  */
 export function buildQueryDiagnostic(
   queryId: string,
@@ -447,13 +626,22 @@ export function buildQueryDiagnostic(
   scored: ReadonlyArray<LexicalScoredCandidate>,
   gates: ReadonlyArray<CalibrationGate>,
   direction: "higher-is-better" | "lower-is-better",
+  hybridSupport?: {
+    contributors: ReadonlyArray<{
+      source: "lexical" | "fts5" | "vector-dense";
+      rank: number | null;
+      score: number | null;
+      contribution: number;
+    }>;
+    agreementCount: number;
+  },
 ): CalibrationQueryDiagnostic {
   const dist = computeScoreDistribution(scored);
   const { abstained, triggered } = evaluateGates(dist, gates, direction);
   // The "correct" abstention decision: positive queries
   // should NOT abstain; no-answer queries SHOULD abstain.
   const abstentionWasCorrect = isPositive ? !abstained : abstained;
-  return {
+  const out: CalibrationQueryDiagnostic = {
     queryId,
     family,
     isPositive,
@@ -469,6 +657,17 @@ export function buildQueryDiagnostic(
     afterAbstainTopIds: abstained ? [] : scored.map((s) => s.id),
     naturallyAbstained: scored.length === 0,
   };
+  if (hybridSupport !== undefined) {
+    // The hybrid-aware diagnostic fields are ADDITIVE: the
+    // per-query trace's existing fields are unchanged. We
+    // attach the block as `readonly` to match the public
+    // type's contract.
+    (out as { contributorSupport?: ReadonlyArray<{ source: "lexical" | "fts5" | "vector-dense"; rank: number | null; score: number | null; contribution: number }> }).contributorSupport =
+      hybridSupport.contributors;
+    (out as { contributorAgreementCount?: number }).contributorAgreementCount =
+      hybridSupport.agreementCount;
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -619,9 +818,25 @@ export function computeRegressionCounts(
  * the per-query "no threshold" score trace (the `scored` list
  * for every query) and the original `QueryEval` list (for
  * the per-family metrics).
+ *
+ * The `variant` argument accepts the dense variants
+ * (`vector-dense`, `hybrid-dense`) in addition to the three
+ * sync variants. The function uses `variant` purely as a
+ * label on the result rows; the gate math is the same for
+ * all five variants (the public `LexicalScoredCandidate.score`
+ * field is "higher is better" for every supported
+ * variant — see the score-semantics block at the top of
+ * this file).
+ *
+ * The optional `perQueryHybridSupport` argument carries the
+ * hybrid-aware per-source RRF trace for the top-1 candidate
+ * on `hybrid-dense` (and future hybrid) passes. It is
+ * `undefined` for single-variant passes. The block is
+ * ADDITIVE — it is attached to each per-query diagnostic
+ * and does not change the existing per-query fields.
  */
 export function buildSweepForVariant(
-  variant: "lexical" | "fts5" | "vector",
+  variant: "lexical" | "fts5" | "vector" | "vector-dense" | "hybrid-dense",
   baselineMetrics: BenchmarkMetrics,
   evals: ReadonlyArray<QueryEval>,
   perQueryScores: ReadonlyArray<{
@@ -629,6 +844,22 @@ export function buildSweepForVariant(
     family: string;
     isPositive: boolean;
     scored: LexicalScoredCandidate[];
+    /**
+     * Hybrid-aware per-source RRF trace for the top-1
+     * candidate. Present only on `hybrid-dense` (and future
+     * hybrid) passes; `undefined` for single-variant
+     * passes. The block is threaded through to the
+     * per-query diagnostic via `buildQueryDiagnostic`.
+     */
+    hybridSupport?: {
+      contributors: ReadonlyArray<{
+        source: "lexical" | "fts5" | "vector-dense";
+        rank: number | null;
+        score: number | null;
+        contribution: number;
+      }>;
+      agreementCount: number;
+    };
   }>,
   sweep: CalibrationConfig["sweep"],
   direction: "higher-is-better" | "lower-is-better",
@@ -648,6 +879,7 @@ export function buildSweepForVariant(
       q.scored,
       gates,
       direction,
+      q.hybridSupport,
     );
   });
   const baselineCounts = computeRegressionCounts(baselineDiagnostics);
@@ -686,6 +918,7 @@ export function buildSweepForVariant(
           q.scored,
           [g],
           direction,
+          q.hybridSupport,
         ),
       );
       const counts = computeRegressionCounts(diags);
@@ -769,4 +1002,53 @@ export function pickBestRow(
     }
   }
   return best;
+}
+
+// ---------------------------------------------------------------------------
+// Hybrid-aware abstention diagnostics
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute the per-source RRF rank/score/contribution for
+ * the top-1 candidate of a hybrid-dense (or future hybrid)
+ * trace, plus the contributor-agreement count. The function
+ * is pure: it takes a list of per-source RRF contributions
+ * for the top-1 candidate and returns the shape the
+ * per-query diagnostic's `contributorSupport` /
+ * `contributorAgreementCount` fields expect.
+ *
+ * The agreement count is the number of contributors that
+ * returned the candidate in their own ranking (`rank !== null`).
+ * A value of 1 means only one source surfaced the
+ * candidate; 3 (the maximum for the dense hybrid) means
+ * every contributor agreed. A "1 of 3" agreement is the
+ * weakest abstention signal; a "3 of 3" agreement is the
+ * strongest.
+ *
+ * The function is exposed for tests and for the dense
+ * calibration runner; the public `CalibrationConfig` /
+ * `CalibrationReport` shapes use the result through the
+ * `hybridSupport` block.
+ */
+export function computeContributorSupport(
+  contributors: ReadonlyArray<{
+    source: "lexical" | "fts5" | "vector-dense";
+    rank: number | null;
+    score: number | null;
+    contribution: number;
+  }>,
+): {
+  contributors: ReadonlyArray<{
+    source: "lexical" | "fts5" | "vector-dense";
+    rank: number | null;
+    score: number | null;
+    contribution: number;
+  }>;
+  agreementCount: number;
+} {
+  let agreementCount = 0;
+  for (const c of contributors) {
+    if (c.rank !== null) agreementCount += 1;
+  }
+  return { contributors, agreementCount };
 }

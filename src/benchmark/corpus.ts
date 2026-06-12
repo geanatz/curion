@@ -4,29 +4,46 @@
  * A hand-curated set of sanitized memory summaries that
  * approximates the kind of content `remember` would persist after
  * controller normalization. The corpus is intentionally
- * hand-curated and is the **intermediate** checkpoint (60
- * records) between the 24-record starter corpus and a future
- * 132-record adversarial corpus. The intermediate checkpoint
- * adds more topical coverage (testing, security, dependencies,
- * monitoring, team process, entity-domain, current-truth
- * supersession pairs) so the ranker's failure modes are less
+ * hand-curated and is the **expanded** checkpoint (100 records)
+ * between the 60-record intermediate corpus and a future
+ * 132-record adversarial corpus. The expanded checkpoint adds
+ * ten additional topical clusters (CI extensions, observability
+ * extensions, security extensions, agent runtime, data pipeline,
+ * client SDK, feature flags, provider routing, legacy extensions,
+ * testing extensions-2) so the ranker's failure modes are less
  * volatile run-to-run, while keeping the corpus small enough to
  * be hand-curated and reviewed.
  *
  * The topical clusters are:
  *
- *   - "stack"          — Postgres, TypeScript, Node, MCP, sqlite
- *   - "deploy"         — CI pipeline, staging vs production, releases
- *   - "people"         — team conventions, code review, on-call
- *   - "office"         — non-project context (kitchen, plants, etc.)
- *   - "docs"           — handbook and on-call runbook pointers
- *   - "temporal-old"   — historical / superseded previous versions
- *   - "testing"        — test conventions, fixtures, CI, coverage
- *   - "security"       — safety, secrets handling, auth posture
- *   - "dependencies"   — package mgmt, upgrade policy, lockfile
- *   - "monitoring"     — logs, metrics, alerts, on-call paging
- *   - "team-process"   — meetings, comms, planning cadence
- *   - "entity-domain"  — domain entities / record kinds
+ *   - "stack"                  — Postgres, TypeScript, Node, MCP, sqlite
+ *   - "deploy"                 — CI pipeline, staging vs production, releases
+ *   - "people"                 — team conventions, code review, on-call
+ *   - "office"                 — non-project context (kitchen, plants, etc.)
+ *   - "docs"                   — handbook and on-call runbook pointers
+ *   - "temporal-old"           — historical / superseded previous versions
+ *   - "testing"                — test conventions, fixtures, CI, coverage
+ *   - "security"               — safety, secrets handling, auth posture
+ *   - "dependencies"           — package mgmt, upgrade policy, lockfile
+ *   - "monitoring"             — logs, metrics, alerts, on-call paging
+ *   - "team-process"           — meetings, comms, planning cadence
+ *   - "entity-domain"          — domain entities / record kinds
+ *   - "stack-extensions"       — additional stack details that share tokens
+ *                                with cluster 1
+ *   - "testing-extensions"     — additional test infrastructure details
+ *   - "historical-extensions"  — additional historical / superseded records
+ *   - "ci-extensions"          — CI lint, coverage, matrix, nightly schedule
+ *   - "observability-extensions" — metrics endpoint, request id, digest
+ *   - "security-extensions"    — input gate, rate limit, TLS, audit
+ *   - "agent-runtime"          — process model, mutex, recall limit, cache
+ *   - "data-pipeline"          — SQLite WAL, backups, timestamps, soft delete
+ *   - "client-sdk"             — public TS client SDK surface
+ *   - "feature-flags"          — env-var source, default-empty, lifecycle
+ *   - "provider-routing"       — primary/fallback, retry, typed result union
+ *   - "legacy-extensions"      — additional historical / superseded records
+ *                                (NOT in the orientation distractor set; the
+ *                                distractor set stays {13..16, 21..24})
+ *   - "testing-extensions-2"   — additional test infrastructure details
  *
  * Each record has:
  *   - `id`       — stable, positive integer. Used as the expected id
@@ -66,11 +83,10 @@ export interface BenchmarkMemoryRecord {
  * The benchmark corpus. Stable order. IDs are dense and
  * sequential (1..N) so failure reports can show the same id a
  * query expected and what came back. The corpus is the
- * intermediate checkpoint of 60 records, 12 topical clusters of
- * 4 records each (with the temporal cluster at 4 records, see
- * the new clusters below). The exact record count is part of
- * the benchmark contract; tests pin a minimum size and a
- * per-family distribution.
+ * expanded checkpoint of 100 records, 25 topical clusters of
+ * 4 records each (see the new clusters below). The exact
+ * record count is part of the benchmark contract; tests pin a
+ * minimum size and a per-family distribution.
  */
 export const BENCHMARK_RECORDS: BenchmarkMemoryRecord[] = [
   // -------------------------------------------------------------------------
@@ -560,5 +576,363 @@ export const BENCHMARK_RECORDS: BenchmarkMemoryRecord[] = [
     summary:
       "The previous monitoring setup polled external endpoints every minute; the current setup pushes structured events from the application on the same path.",
     tags: ["monitoring", "history", "events"],
+  },
+
+  // -------------------------------------------------------------------------
+  // Cluster 16: ci-extensions (4) — additional CI / CD coverage. Pairs
+  // with cluster 2 (deploy) to give the CI / pipeline queries a richer
+  // top-K and to add exact / paraphrase anchors for the new CI queries.
+  // -------------------------------------------------------------------------
+  {
+    id: 61,
+    kind: "fact",
+    summary:
+      "The CI runs linters (eslint, prettier) on every push; the lint step is a required status check before a pull request can be merged.",
+    tags: ["ci", "lint", "process"],
+  },
+  {
+    id: 62,
+    kind: "decision",
+    summary:
+      "The CI uploads a coverage report to the team dashboard; coverage drops of more than one percentage point on changed lines fail the merge gate.",
+    tags: ["ci", "coverage", "process"],
+  },
+  {
+    id: 63,
+    kind: "fact",
+    summary:
+      "The CI uses a matrix of Node 20 and Node 22 for the test job; a single OS (Ubuntu) is used to keep the matrix narrow and predictable.",
+    tags: ["ci", "matrix", "testing"],
+  },
+  {
+    id: 64,
+    kind: "reference",
+    summary:
+      "Nightly CI runs the full benchmark suite end-to-end and publishes the result as a status badge in the project README.",
+    tags: ["ci", "benchmark", "schedule"],
+  },
+
+  // -------------------------------------------------------------------------
+  // Cluster 17: observability-extensions (4) — additional observability
+  // coverage. Pairs with cluster 10 (monitoring) to extend the
+  // observability surface: metrics, request id stitching, error log
+  // redaction, and the on-call digest cadence.
+  // -------------------------------------------------------------------------
+  {
+    id: 65,
+    kind: "fact",
+    summary:
+      "Application metrics are exported via a Prometheus endpoint on a separate port; the main MCP stdio port is unchanged.",
+    tags: ["observability", "metrics", "prometheus"],
+  },
+  {
+    id: 66,
+    kind: "decision",
+    summary:
+      "Each request is logged with a request id; the same id is returned to the client in the response so traces can be stitched end-to-end.",
+    tags: ["observability", "tracing", "request-id"],
+  },
+  {
+    id: 67,
+    kind: "decision",
+    summary:
+      "Stack traces are redacted of Authorization and Bearer headers before being persisted to the error log so a key never leaks through a failure path.",
+    tags: ["observability", "security", "redaction"],
+  },
+  {
+    id: 68,
+    kind: "preference",
+    summary:
+      "The on-call digest is a weekly summary of non-urgent warnings; the digest is posted to the team channel every Monday morning at 9:00 local time.",
+    tags: ["observability", "oncall", "digest"],
+  },
+
+  // -------------------------------------------------------------------------
+  // Cluster 18: security-extensions (4) — additional security posture
+  // coverage. Pairs with cluster 8 (security) to add input gating,
+  // rate limit, TLS, and audit retention. The cluster overlaps with
+  // cluster 8 on some tokens (auth, security) to test lexical
+  // disambiguation between the two layers.
+  // -------------------------------------------------------------------------
+  {
+    id: 69,
+    kind: "decision",
+    summary:
+      "The safety classifier runs on every input before the controller; raw-dump and secret classifications are dropped without reaching the provider.",
+    tags: ["security", "input-gate", "classifier"],
+  },
+  {
+    id: 70,
+    kind: "fact",
+    summary:
+      "Provider requests are rate-limited per environment; the limit is read from CORTEX_PROVIDER_RATE_LIMIT and defaults to sixty requests per minute.",
+    tags: ["security", "rate-limit", "provider"],
+  },
+  {
+    id: 71,
+    kind: "decision",
+    summary:
+      "All HTTP traffic to providers uses TLS 1.2 or higher; HTTP/1.1 plaintext endpoints are not allowed in any environment.",
+    tags: ["security", "tls", "transport"],
+  },
+  {
+    id: 72,
+    kind: "fact",
+    summary:
+      "Audit logs of remember and recall calls are retained for thirty days; the retention window is configured via CORTEX_AUDIT_RETENTION_DAYS.",
+    tags: ["security", "audit", "retention"],
+  },
+
+  // -------------------------------------------------------------------------
+  // Cluster 19: agent-runtime (4) — agent / MCP runtime shape. Pairs
+  // with cluster 1 (stack) to add a richer view of the runtime: process
+  // model, per-key serialization, recall limits, and the in-memory
+  // provider response cache.
+  // -------------------------------------------------------------------------
+  {
+    id: 73,
+    kind: "fact",
+    summary:
+      "The MCP server runs in a single Node process; the stdio transport multiplexes all requests over a single stdin and stdout channel.",
+    tags: ["agent", "runtime", "process"],
+  },
+  {
+    id: 74,
+    kind: "decision",
+    summary:
+      "Provider calls are serialized through a per-key mutex; concurrent calls from the same key wait for the previous one to complete.",
+    tags: ["agent", "runtime", "mutex"],
+  },
+  {
+    id: 75,
+    kind: "fact",
+    summary:
+      "The recall tool returns at most DEFAULT_TOP_K (five) memories; pagination is intentionally not supported in this phase.",
+    tags: ["agent", "recall", "limit"],
+  },
+  {
+    id: 76,
+    kind: "fact",
+    summary:
+      "The agent runtime caches provider responses in-memory for the lifetime of a single process; persistent caching is not yet implemented.",
+    tags: ["agent", "cache", "runtime"],
+  },
+
+  // -------------------------------------------------------------------------
+  // Cluster 20: data-pipeline (4) — data persistence and lifecycle.
+  // Pairs with cluster 1 (stack) to add storage lifecycle details:
+  // SQLite WAL mode, nightly backups, createdAt/updatedAt, and the
+  // soft-delete (state='invalidated') model.
+  // -------------------------------------------------------------------------
+  {
+    id: 77,
+    kind: "fact",
+    summary:
+      "Memory persistence uses a single SQLite file under .cortex/; the file is opened with WAL journaling for concurrent reads.",
+    tags: ["data", "persistence", "sqlite"],
+  },
+  {
+    id: 78,
+    kind: "decision",
+    summary:
+      "Database backups are created nightly and rotated weekly; the most recent seven backups are kept on disk at any time.",
+    tags: ["data", "backup", "rotation"],
+  },
+  {
+    id: 79,
+    kind: "fact",
+    summary:
+      "Memory records carry a createdAt and updatedAt timestamp; updatedAt is bumped on every successful controller write.",
+    tags: ["data", "timestamps", "schema"],
+  },
+  {
+    id: 80,
+    kind: "decision",
+    summary:
+      "Soft-deleted records are kept in the memories table with state set to invalidated; the recall path does not return invalidated records.",
+    tags: ["data", "soft-delete", "state"],
+  },
+
+  // -------------------------------------------------------------------------
+  // Cluster 21: client-sdk (4) — public TypeScript client SDK surface.
+  // Pairs with cluster 13 (stack-extensions) to add a richer client-
+  // facing view: the published package, the supported transport, the
+  // version policy, and the no-cache contract.
+  // -------------------------------------------------------------------------
+  {
+    id: 81,
+    kind: "fact",
+    summary:
+      "The TypeScript client SDK is published as @cortex-mcp/sdk; the package is built from src/client/ and is published from CI on every release.",
+    tags: ["client", "sdk", "publish"],
+  },
+  {
+    id: 82,
+    kind: "decision",
+    summary:
+      "The client SDK supports a single transport (stdio) in this phase; HTTP transport is a planned future addition.",
+    tags: ["client", "sdk", "transport"],
+  },
+  {
+    id: 83,
+    kind: "decision",
+    summary:
+      "The client SDK is versioned in lockstep with the server; the same major version is required for client and server to communicate.",
+    tags: ["client", "sdk", "versioning"],
+  },
+  {
+    id: 84,
+    kind: "fact",
+    summary:
+      "The client SDK does not maintain its own cache; recall responses are fetched fresh from the server on every call.",
+    tags: ["client", "sdk", "cache"],
+  },
+
+  // -------------------------------------------------------------------------
+  // Cluster 22: feature-flags (4) — feature flag system. Pairs with
+  // cluster 9 (dependencies) to add a richer release-gating view:
+  // env-var source, default-empty, per-process evaluation, and the
+  // verbose-summary mode gate.
+  // -------------------------------------------------------------------------
+  {
+    id: 85,
+    kind: "fact",
+    summary:
+      "Feature flags are read from the CORTEX_FEATURE_FLAGS environment variable; the value is a comma-separated list of flag names.",
+    tags: ["feature-flags", "config", "env"],
+  },
+  {
+    id: 86,
+    kind: "decision",
+    summary:
+      "The default feature flag set is empty; all new features ship as off by default and are rolled out via the flag system.",
+    tags: ["feature-flags", "rollout", "process"],
+  },
+  {
+    id: 87,
+    kind: "fact",
+    summary:
+      "Feature flags are evaluated per process; a flag toggle requires a server restart to take effect in this phase.",
+    tags: ["feature-flags", "runtime", "lifecycle"],
+  },
+  {
+    id: 88,
+    kind: "decision",
+    summary:
+      "The remember tool's verbose summary mode is gated behind the verbose-summary feature flag; without the flag the summary is concise.",
+    tags: ["feature-flags", "remember", "summary"],
+  },
+
+  // -------------------------------------------------------------------------
+  // Cluster 23: provider-routing (4) — provider adapter routing and
+  // retry policy. Pairs with cluster 8 (security) and cluster 14
+  // (testing-extensions) to add a richer view of the provider adapter:
+  // primary/fallback order, fallback key env, retry-with-backoff, and
+  // the typed result union that controllers switch on.
+  // -------------------------------------------------------------------------
+  {
+    id: 89,
+    kind: "decision",
+    summary:
+      "The provider adapter tries the primary first; on a 429 or 5xx it falls back to the secondary and returns a typed result union.",
+    tags: ["provider", "routing", "fallback"],
+  },
+  {
+    id: 90,
+    kind: "fact",
+    summary:
+      "The fallback provider is configured via CORTEX_PROVIDER_FALLBACK_KEY; an unset key disables fallback and the adapter errors out cleanly.",
+    tags: ["provider", "routing", "config"],
+  },
+  {
+    id: 91,
+    kind: "decision",
+    summary:
+      "The provider adapter retries on 429 with exponential backoff (one second, two seconds, four seconds); after three failed attempts it gives up and returns a typed error.",
+    tags: ["provider", "routing", "retry"],
+  },
+  {
+    id: 92,
+    kind: "fact",
+    summary:
+      "The provider adapter's typed result union has three variants: ok, retryable_error, and fatal_error; controllers MUST switch on the variant.",
+    tags: ["provider", "routing", "types"],
+  },
+
+  // -------------------------------------------------------------------------
+  // Cluster 24: legacy-extensions (4) — additional historical /
+  // superseded records. Like cluster 6 and cluster 15, these are NOT
+  // in the orientation distractor set (the distractor set stays
+  // {13..16, 21..24}); they are available as legacy distractors for
+  // the new temporal queries that exercise currentTruth divergence
+  // and for the new paraphrase / multi-hop queries that share tokens
+  // with the current cluster 18-23 records. The distractor /
+  // history-archive boundary is documented in
+  // `src/benchmark/metrics.ts` under `getKnownDistractorIds`.
+  // -------------------------------------------------------------------------
+  {
+    id: 93,
+    kind: "fact",
+    summary:
+      "Earlier the project used a single global index for all memory kinds; the current design uses a kind-scoped index for the recall path.",
+    tags: ["history", "index", "schema"],
+  },
+  {
+    id: 94,
+    kind: "fact",
+    summary:
+      "Previously the recall path was synchronous with the provider; it is now async and uses a per-key mutex to serialize provider calls.",
+    tags: ["history", "async", "mutex"],
+  },
+  {
+    id: 95,
+    kind: "fact",
+    summary:
+      "The original HTTP client kept connections open for the lifetime of the process; the current client opens a new connection per request for isolation.",
+    tags: ["history", "http", "client"],
+  },
+  {
+    id: 96,
+    kind: "fact",
+    summary:
+      "Earlier the controller accepted any provider output; the current controller validates the output against a Zod schema before persisting.",
+    tags: ["history", "validation", "controller"],
+  },
+
+  // -------------------------------------------------------------------------
+  // Cluster 25: testing-extensions-2 (4) — additional test
+  // infrastructure details. Pairs with cluster 7 (testing) and
+  // cluster 14 (testing-extensions) to give the multi-slot test
+  // queries a richer top-K. The cluster covers property-based tests,
+  // snapshot tests, the no-skip CI invariant, and the test
+  // co-location convention.
+  // -------------------------------------------------------------------------
+  {
+    id: 97,
+    kind: "fact",
+    summary:
+      "Property-based tests use fast-check; the test runner is configured to cap the number of generated examples at one hundred per case.",
+    tags: ["testing", "property", "tooling"],
+  },
+  {
+    id: 98,
+    kind: "reference",
+    summary:
+      "Snapshot tests for the benchmark report live under tests/__snapshots__/; the snapshots are checked in and reviewed as part of pull request review.",
+    tags: ["testing", "snapshot", "review"],
+  },
+  {
+    id: 99,
+    kind: "decision",
+    summary:
+      "The CI fails the build if any test is marked todo or skip on the default branch; skipped tests are only allowed on long-lived feature branches.",
+    tags: ["testing", "ci", "policy"],
+  },
+  {
+    id: 100,
+    kind: "fact",
+    summary:
+      "Test files are co-located with the source file they cover; integration tests live under tests/ and run as part of the default CI job.",
+    tags: ["testing", "layout", "convention"],
   },
 ];

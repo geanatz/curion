@@ -95,7 +95,15 @@
  *                                has no relevant memory in the
  *                                corpus. The lexical baseline
  *                                should return zero hits above
- *                                the threshold.
+ *                                the threshold. The expanded
+ *                                checkpoint adds a labeled set
+ *                                of "hard-negative" no-answer
+ *                                queries that share tokens with
+ *                                real records, so the no-answer
+ *                                TNR is exercised against
+ *                                confabulation pressure, not
+ *                                only against zero-overlap
+ *                                queries.
  *
  *   - "orientation"            — project-status query. The
  *                                query asks about the current
@@ -126,6 +134,18 @@
  *     `corpus.ts`; the integrity test in
  *     `tests/retrieval-benchmark.test.ts` asserts that every
  *     expected id resolves to a real record.
+ *
+ * Expanded-checkpoint query count: the expanded checkpoint
+ * contains 96 queries across the six families (exact=14,
+ * paraphrase=12, temporal=12, multi-hop=16, no-answer=24,
+ * orientation=18). Two of the temporal queries are labeled
+ * "divergent current-truth" cases (`temp-storage-raw-text` and
+ * `temp-controller-validation`); the labeled set is a strict
+ * subset of the temporal family and the per-query
+ * `currentTruthIds` field is a strict subset of `expectedIds`
+ * for those queries. Adding a new divergent query requires
+ * updating the `divergentIds` set in
+ * `tests/retrieval-benchmark.test.ts`.
  */
 
 export type BenchmarkQueryFamily =
@@ -740,5 +760,485 @@ export const BENCHMARK_QUERIES: BenchmarkQuery[] = [
     currentTruthIds: [45, 46, 47, 48],
     note:
       "Status: kind enum + state enum + confidence range + safety flags. Four-slot query — gives the orientation metrics a fourth-shape slot (4 ids) beyond the 2- and 3-id queries the original family had.",
+  },
+
+  // -------------------------------------------------------------------------
+  // EXPANDED-CHECKPOINT QUERIES (96-query set, 100-record corpus)
+  //
+  // The expanded checkpoint is the second step between the
+  // 60-record / 54-query intermediate set and a future
+  // 132-record / 108-query adversarial set. The new queries
+  // deepen coverage of the weakest benchmark families
+  // identified in prior phases (paraphrase, temporal,
+  // no-answer) and add more orientation / multi-hop slots so
+  // the per-family percentages have less run-to-run swing.
+  //
+  // Per-family distribution in the expanded set:
+  //   exact: 14 (10 + 4)
+  //   paraphrase: 12 (8 + 4)
+  //   temporal: 12 (6 + 6, including 1 new divergent case)
+  //   multi-hop: 16 (10 + 6)
+  //   no-answer: 24 (10 + 14, including 1 labeled
+  //                     hard-negative that the lexical baseline
+  //                     is expected to confabulate on)
+  //   orientation: 18 (10 + 8)
+  //   TOTAL: 96
+  // -------------------------------------------------------------------------
+
+  // -------------------------------------------------------------------------
+  // Family: exact (additional) — verbatim-ish token overlap for
+  // the new clusters 16-25. (4 new queries; family total: 14.)
+  // -------------------------------------------------------------------------
+  {
+    id: "exact-feature-flags-env",
+    family: "exact",
+    query: "Where are feature flags read from?",
+    expectedIds: [85],
+    currentTruthIds: [85],
+    note:
+      "Direct question about the feature-flag source; should hit record 85.",
+  },
+  {
+    id: "exact-pipeline-backup",
+    family: "exact",
+    query: "How often are database backups created?",
+    expectedIds: [78],
+    currentTruthIds: [78],
+    note: "Direct question about the backup cadence; should hit record 78.",
+  },
+  {
+    id: "exact-audit-retention",
+    family: "exact",
+    query: "How long are audit logs retained?",
+    expectedIds: [72],
+    currentTruthIds: [72],
+    note: "Direct question about the audit window; should hit record 72.",
+  },
+  {
+    id: "exact-recall-pagination",
+    family: "exact",
+    query: "Does the recall tool support pagination?",
+    expectedIds: [75],
+    currentTruthIds: [75],
+    note: "Direct question about the recall limit; should hit record 75.",
+  },
+
+  // -------------------------------------------------------------------------
+  // Family: paraphrase (additional) — same idea, different words,
+  // for the new clusters 16-23. The lexical baseline is
+  // expected to FAIL or partially pass. (4 new queries; family
+  // total: 12.)
+  // -------------------------------------------------------------------------
+  {
+    id: "para-rotation-handoff",
+    family: "paraphrase",
+    query: "When does the on-call duty change over?",
+    expectedIds: [11],
+    currentTruthIds: [11],
+    note:
+      "Paraphrase of the on-call rotation handoff. Record 11 says 'Mondays at 10:00 local time'; the query says 'change over' / 'duty'.",
+  },
+  {
+    id: "para-rate-limit",
+    family: "paraphrase",
+    query: "How do we keep the AI provider from being throttled?",
+    expectedIds: [70],
+    currentTruthIds: [70],
+    note:
+      "Paraphrase of the rate-limit policy. Record 70 says 'CORTEX_PROVIDER_RATE_LIMIT' / 'sixty requests per minute'; the query says 'throttled' / 'AI provider'.",
+  },
+  {
+    id: "para-cache-strategy",
+    family: "paraphrase",
+    query: "Why don't we keep provider responses around for the next call?",
+    expectedIds: [76],
+    currentTruthIds: [76],
+    note:
+      "Paraphrase of the in-memory cache scope. Record 76 says 'caches provider responses in-memory for the lifetime of a single process'; the query says 'keep ... for the next call' / 'around'.",
+  },
+  {
+    id: "para-input-gate",
+    family: "paraphrase",
+    query: "How do we keep junk from reaching the AI provider?",
+    expectedIds: [69],
+    currentTruthIds: [69],
+    note:
+      "Paraphrase of the safety classifier input gate. Record 69 says 'safety classifier runs on every input before the controller; raw-dump and secret classifications are dropped'; the query says 'junk from reaching' / 'AI provider'.",
+  },
+
+  // -------------------------------------------------------------------------
+  // Family: temporal (additional) — supersession-style queries
+  // for the new clusters 18-23, with the new legacy cluster
+  // (93..96) as a distractor set. (6 new queries; family total:
+  // 12.) One of the new queries
+  // (`temp-controller-validation`) is a labeled "divergent
+  // current-truth" case: `expectedIds` contains both the
+  // legacy (96) and the current (69) fact, and
+  // `currentTruthIds` contains only the current fact (69). The
+  // other five new temporal queries follow the existing
+  // convention (expected == current, legacy is a distractor).
+  // -------------------------------------------------------------------------
+  {
+    id: "temp-feature-flags-restart",
+    family: "temporal",
+    query: "How do feature flag changes take effect?",
+    expectedIds: [87],
+    currentTruthIds: [87],
+    note:
+      "Asks for the CURRENT feature-flag lifecycle. Record 87 (per-process; restart required) is current. Legacy distractors 57-60 do not share strong tokens; this is a cleaner case than the legacy-vs-newer supersession pair.",
+  },
+  {
+    id: "temp-fallback-key",
+    family: "temporal",
+    query: "Where is the fallback provider key read from?",
+    expectedIds: [90],
+    currentTruthIds: [90],
+    note:
+      "Asks for the CURRENT fallback-provider env var. Record 90 is current. Legacy record 59 (single primary endpoint) is a distractor that shares 'provider' tokens.",
+  },
+  {
+    id: "temp-rate-limit",
+    family: "temporal",
+    query: "How is the AI provider rate-limited today?",
+    expectedIds: [70],
+    currentTruthIds: [70],
+    note:
+      "Asks for the CURRENT rate-limit policy. Record 70 (CORTEX_PROVIDER_RATE_LIMIT, default sixty) is current. Legacy record 59 (single primary endpoint) is a distractor that shares 'provider' tokens.",
+  },
+  {
+    id: "temp-tls-requirement",
+    family: "temporal",
+    query: "What TLS version does provider traffic require?",
+    expectedIds: [71],
+    currentTruthIds: [71],
+    note:
+      "Asks for the CURRENT TLS policy. Record 71 (TLS 1.2 or higher) is current. No strong legacy distractor; this is a clean exact-ish current fact.",
+  },
+  {
+    id: "temp-recall-pagination",
+    family: "temporal",
+    query: "Does the recall tool support pagination now?",
+    expectedIds: [75],
+    currentTruthIds: [75],
+    note:
+      "Asks for the CURRENT recall limit. Record 75 (DEFAULT_TOP_K = 5, pagination not supported) is current. No strong legacy distractor.",
+  },
+  {
+    id: "temp-controller-validation",
+    family: "temporal",
+    // Labeled "divergent current-truth" case (the second
+    // divergent query in the benchmark, joining
+    // `temp-storage-raw-text`). `expectedIds` contains both
+    // the current (69) and the legacy (96) fact so hit@K
+    // can pass with either one in the top-K. The
+    // `currentTruthIds` is the strict current fact (69)
+    // only. A retrieval that surfaces 96 at the top with 69
+    // somewhere in the top-K will pass `hit@K` and fail
+    // `currentTruthAt1` — the divergence the metric was
+    // designed to surface. Record 96 is the more direct
+    // hit for the query text "How does the controller
+    // decide what to save" (it says "controller" and
+    // "validates ... before persisting"); record 69 is
+    // about the safety classifier and is the current truth
+    // for the *gating* decision. The lexical ranker is
+    // expected to surface 96 at the top.
+    query: "How does the controller decide what to save?",
+    expectedIds: [69, 96],
+    currentTruthIds: [69],
+    note:
+      "Divergent current-truth temporal query. expectedIds=[69, 96] (current safety gate + legacy no-validation), currentTruthIds=[69] (current only). The lexical baseline is expected to surface 96 at the top because 'controller' + 'validates' is a closer match than 'classifier' + 'drops'.",
+  },
+
+  // -------------------------------------------------------------------------
+  // Family: multi-hop (additional) — answer requires joining
+  // multiple memories from the new clusters 16-23. (6 new
+  // queries; family total: 16.)
+  // -------------------------------------------------------------------------
+  {
+    id: "multi-feature-flags-policy",
+    family: "multi-hop",
+    query: "How are feature flags read, defaulted, and rolled out?",
+    expectedIds: [85, 86, 87, 88],
+    currentTruthIds: [85, 86, 87, 88],
+    note:
+      "Needs CORTEX_FEATURE_FLAGS source (85) + default empty (86) + per-process evaluation (87) + verbose-summary mode gate (88). Four-slot query.",
+  },
+  {
+    id: "multi-provider-failover",
+    family: "multi-hop",
+    query: "How does the provider pick a healthy endpoint, retry on rate limit, and fall back?",
+    expectedIds: [89, 90, 91, 92],
+    currentTruthIds: [89, 90, 91, 92],
+    note:
+      "Needs primary/fallback routing (89) + CORTEX_PROVIDER_FALLBACK_KEY (90) + exponential backoff on 429 (91) + typed result union (92). Four-slot query.",
+  },
+  {
+    id: "multi-data-pipeline",
+    family: "multi-hop",
+    query: "How are memories persisted, backed up, timestamped, and soft-deleted?",
+    expectedIds: [77, 78, 79, 80],
+    currentTruthIds: [77, 78, 79, 80],
+    note:
+      "Needs SQLite WAL (77) + nightly backup rotation (78) + createdAt/updatedAt (79) + state=invalidated (80). Four-slot query.",
+  },
+  {
+    id: "multi-agent-runtime",
+    family: "multi-hop",
+    query: "What does the agent runtime look like in terms of process model, mutex, and recall limits?",
+    expectedIds: [73, 74, 75, 76],
+    currentTruthIds: [73, 74, 75, 76],
+    note:
+      "Needs single Node process / stdio multiplex (73) + per-key mutex (74) + DEFAULT_TOP_K=5 limit (75) + in-memory response cache (76). Four-slot query.",
+  },
+  {
+    id: "multi-security-extensions",
+    family: "multi-hop",
+    query: "How is input sanitized, rate limited, encrypted in transit, and audited?",
+    expectedIds: [69, 70, 71, 72],
+    currentTruthIds: [69, 70, 71, 72],
+    note:
+      "Needs safety classifier (69) + rate limit (70) + TLS 1.2+ (71) + 30-day audit retention (72). Four-slot query.",
+  },
+  {
+    id: "multi-observability-extensions",
+    family: "multi-hop",
+    query: "What metrics, request ids, and digests are produced for ops visibility?",
+    expectedIds: [65, 66, 68, 67],
+    currentTruthIds: [65, 66, 68, 67],
+    note:
+      "Needs Prometheus endpoint (65) + request id stitching (66) + weekly on-call digest (68) + error log redaction (67). Four-slot query — note the slot order is non-monotonic to exercise per-slot evaluation.",
+  },
+
+  // -------------------------------------------------------------------------
+  // Family: no-answer (additional) — no relevant memory in the
+  // corpus. The lexical baseline should return zero hits.
+  // (14 new queries; family total: 24.) Several of the new
+  // no-answer queries deliberately share tokens with real
+  // records so the no-answer TNR is exercised against
+  // confabulation pressure, not only against zero-overlap
+  // queries. The confabulation-prone queries are still
+  // expected to surface zero hits at the production default
+  // threshold (0.2); the contract is that the corpus has
+  // *no* relevant memory, not that the ranker never returns
+  // a candidate.
+  // -------------------------------------------------------------------------
+  {
+    id: "nonexistent-cdn-config",
+    family: "no-answer",
+    query: "What CDN does the project use for static assets?",
+    expectedIds: [],
+    currentTruthIds: [],
+    note:
+      "No record mentions a CDN; baseline should return no hits.",
+  },
+  {
+    id: "nonexistent-rollback",
+    family: "no-answer",
+    query: "How do we roll back a bad release?",
+    expectedIds: [],
+    currentTruthIds: [],
+    note:
+      "No record mentions a rollback procedure; the release records (7, 22) talk about cutting and hotfixes, not rolling back. Shares 'release' tokens with cluster 2.",
+  },
+  {
+    id: "nonexistent-sso",
+    family: "no-answer",
+    query: "Does the project use SSO for internal access?",
+    expectedIds: [],
+    currentTruthIds: [],
+    note:
+      "No record mentions SSO; the security records (29-32, 69-72) cover env-only keys and input gating, not SSO. Shares 'security' / 'auth' tokens with clusters 8 and 18.",
+  },
+  {
+    id: "nonexistent-load-balancer",
+    family: "no-answer",
+    // LABELLED HARD-NEGATIVE. This query shares strong
+    // tokens ('MCP', 'server', 'port') with the agent
+    // runtime records (73, 75) and stack records (2, 51).
+    // The lexical baseline is expected to return at least
+    // one hit because of the high token overlap, so this
+    // query is the labeled false-positive case the
+    // expanded-checkpoint test pins: it should appear in
+    // the per-query failure list with `passed === false`
+    // and a non-empty `topIds`. The query text is
+    // deliberately calibrated to overlap the corpus
+    // without naming a real record, so the no-answer TNR
+    // gets confabulation pressure at the production
+    // default threshold.
+    query: "What load balancer sits in front of the MCP server?",
+    expectedIds: [],
+    currentTruthIds: [],
+    note:
+      "LABELLED HARD-NEGATIVE. No record mentions a load balancer, but the query shares 'MCP' / 'server' / 'port' tokens with the agent runtime and stack records. The expanded-checkpoint test pins this query as a labeled false-positive case.",
+  },
+  {
+    id: "nonexistent-feature-branch-policy",
+    family: "no-answer",
+    query: "How long should a feature branch live?",
+    expectedIds: [],
+    currentTruthIds: [],
+    note:
+      "No record mentions a feature-branch policy; the release records (7, 22) talk about cutting from main, not branch lifetime. Shares 'release' / 'branch' tokens with cluster 2.",
+  },
+  {
+    id: "nonexistent-sla-tier",
+    family: "no-answer",
+    query: "What SLA tier do we promise paying customers?",
+    expectedIds: [],
+    currentTruthIds: [],
+    note:
+      "No record mentions an SLA tier; the runbook / monitoring records (18, 37-40) talk about incident response, not contractual SLAs. Shares 'customer' / 'SLA' tokens weakly.",
+  },
+  {
+    id: "nonexistent-cookie-policy",
+    family: "no-answer",
+    query: "What's the cookie retention policy?",
+    expectedIds: [],
+    currentTruthIds: [],
+    note:
+      "No record mentions cookies; the project has no web UI. Shares 'policy' / 'retention' tokens with the audit retention record (72).",
+  },
+  {
+    id: "nonexistent-data-retention",
+    family: "no-answer",
+    query: "What is the user data deletion policy?",
+    expectedIds: [],
+    currentTruthIds: [],
+    note:
+      "No record mentions user data deletion; the soft-delete record (80) covers state=invalidated for memories, not user data. Shares 'data' / 'deletion' tokens with the data-pipeline cluster (77-80).",
+  },
+  {
+    id: "nonexistent-staging-access",
+    family: "no-answer",
+    query: "How do contractors get access to staging?",
+    expectedIds: [],
+    currentTruthIds: [],
+    note:
+      "No record mentions contractor access; the deploy / security records (5, 6, 29-32) cover env shape and key handling, not external access. Shares 'staging' / 'access' tokens with cluster 2.",
+  },
+  {
+    id: "nonexistent-rate-limit-budget",
+    family: "no-answer",
+    query: "What's the daily API call budget per user?",
+    expectedIds: [],
+    currentTruthIds: [],
+    note:
+      "No record mentions a per-user daily budget; the rate-limit record (70) covers per-environment request-per-minute, not per-user daily. Shares 'rate' / 'API' / 'limit' tokens with the security-extensions cluster.",
+  },
+  {
+    id: "nonexistent-time-tracking",
+    family: "no-answer",
+    query: "What time-tracking tool does the team use?",
+    expectedIds: [],
+    currentTruthIds: [],
+    note:
+      "No record mentions time tracking; the team-process records (41-44) cover cadence and channels, not time tracking. Shares 'team' tokens with cluster 11.",
+  },
+  {
+    id: "nonexistent-pairing-rotation",
+    family: "no-answer",
+    query: "When does the team do pair programming rotations?",
+    expectedIds: [],
+    currentTruthIds: [],
+    note:
+      "No record mentions pair programming or rotations; the on-call rotation record (11) is the only rotation in the corpus, and it is for on-call, not pairing. Shares 'rotation' tokens weakly.",
+  },
+  {
+    id: "nonexistent-quiet-hours",
+    family: "no-answer",
+    query: "What are the team's quiet hours for non-urgent messages?",
+    expectedIds: [],
+    currentTruthIds: [],
+    note:
+      "No record mentions quiet hours; the on-call digest record (68) covers weekly digests, not quiet hours. Shares 'team' / 'urgent' tokens with clusters 10 and 11.",
+  },
+  {
+    id: "nonexistent-shared-calendar",
+    family: "no-answer",
+    query: "Where is the shared team calendar?",
+    expectedIds: [],
+    currentTruthIds: [],
+    note:
+      "No record mentions a shared calendar; the planning-sync record (41) is the only meeting cadence in the corpus, and it does not reference a calendar tool. Shares 'team' / 'shared' tokens with clusters 11 and 4.",
+  },
+
+  // -------------------------------------------------------------------------
+  // Family: orientation (additional) — project-status queries
+  // for the new clusters 16-23 and 25. (8 new queries; family
+  // total: 18.) The new queries add per-slot shape variety
+  // (3-slot and 4-slot) so the orientation slot coverage
+  // metric has a wider range.
+  // -------------------------------------------------------------------------
+  {
+    id: "orient-ci-extensions-status",
+    family: "orientation",
+    query: "What is the current CI surface for lint, coverage, and matrix?",
+    expectedIds: [61, 62, 63],
+    currentTruthIds: [61, 62, 63],
+    note:
+      "Status: lint required-status-check (61) + coverage merge gate (62) + Node 20/22 matrix (63). Three-slot query.",
+  },
+  {
+    id: "orient-feature-flags-status",
+    family: "orientation",
+    query: "What is the feature flag system today?",
+    expectedIds: [85, 86, 87],
+    currentTruthIds: [85, 86, 87],
+    note:
+      "Status: env-var source (85) + default empty (86) + per-process evaluation (87). Three-slot query.",
+  },
+  {
+    id: "orient-provider-routing-status",
+    family: "orientation",
+    query: "How does the provider adapter route and retry today?",
+    expectedIds: [89, 90, 91, 92],
+    currentTruthIds: [89, 90, 91, 92],
+    note:
+      "Status: primary/fallback routing (89) + CORTEX_PROVIDER_FALLBACK_KEY (90) + exponential backoff on 429 (91) + typed result union (92). Four-slot query.",
+  },
+  {
+    id: "orient-data-pipeline-status",
+    family: "orientation",
+    query: "How is data persisted and managed today?",
+    expectedIds: [77, 78, 79, 80],
+    currentTruthIds: [77, 78, 79, 80],
+    note:
+      "Status: SQLite WAL (77) + nightly backup rotation (78) + createdAt/updatedAt (79) + soft-delete via state=invalidated (80). Four-slot query.",
+  },
+  {
+    id: "orient-agent-runtime-status",
+    family: "orientation",
+    query: "What is the current agent runtime shape?",
+    expectedIds: [73, 74, 75, 76],
+    currentTruthIds: [73, 74, 75, 76],
+    note:
+      "Status: single Node process (73) + per-key mutex (74) + DEFAULT_TOP_K=5 (75) + in-memory cache (76). Four-slot query.",
+  },
+  {
+    id: "orient-observability-extensions-status",
+    family: "orientation",
+    query: "What does the project's extended observability surface look like?",
+    expectedIds: [65, 66, 67, 68],
+    currentTruthIds: [65, 66, 67, 68],
+    note:
+      "Status: Prometheus endpoint (65) + request id stitching (66) + error log redaction (67) + weekly on-call digest (68). Four-slot query.",
+  },
+  {
+    id: "orient-security-extensions-status",
+    family: "orientation",
+    query: "What is the layered security posture for input, transport, and audit?",
+    expectedIds: [69, 70, 71, 72],
+    currentTruthIds: [69, 70, 71, 72],
+    note:
+      "Status: safety classifier (69) + per-env rate limit (70) + TLS 1.2+ (71) + 30-day audit retention (72). Four-slot query.",
+  },
+  {
+    id: "orient-client-sdk-status",
+    family: "orientation",
+    query: "What does the public client SDK look like today?",
+    expectedIds: [81, 82, 83, 84],
+    currentTruthIds: [81, 82, 83, 84],
+    note:
+      "Status: @cortex-mcp/sdk package (81) + stdio-only transport (82) + lockstep versioning (83) + no-client-cache (84). Four-slot query.",
   },
 ];

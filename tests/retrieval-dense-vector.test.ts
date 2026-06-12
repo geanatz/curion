@@ -596,16 +596,71 @@ test("runDenseRetrievalBenchmark: rejects a non-dense variant", async () => {
   );
 });
 
-test("runDenseRetrievalBenchmark: rejects --calibrate (future phase)", async () => {
-  await assert.rejects(
-    async () =>
-      runDenseRetrievalBenchmark({
-        variant: "vector-dense",
-        calibration: true,
-        denseEmbedderSpec: "stub-dense",
-      }),
-    /--calibrate/,
+test("runDenseRetrievalBenchmark: --calibrate is now supported on dense variants (was future phase)", async () => {
+  // The dense calibration experiment was a "future phase"
+  // until the dense abstention calibration work landed.
+  // The contract changed: `--calibrate` on the dense
+  // variants now runs `runDenseCalibration` and returns
+  // a `DenseCalibrationReport` (a strict superset of the
+  // existing `CalibrationReport`).
+  //
+  // The test pins the new contract: the call no longer
+  // throws, and the returned report carries the dense
+  // `embeddingBackend` block and the dense `bestByVariant`
+  // keys.
+  const report = await runDenseRetrievalBenchmark({
+    variant: "vector-dense",
+    calibration: true,
+    denseEmbedderSpec: "stub-dense:dim=64",
+  });
+  const r = report as {
+    variant?: string;
+    config?: { embeddingBackend?: { backend: string } };
+    bestByVariant?: {
+      vectorDense?: unknown;
+      hybridDense?: unknown;
+      lexical: null;
+      fts5: null;
+      vector: null;
+    };
+  };
+  // The dense calibration report does NOT carry a
+  // `variant: "..."` field (it is a `CalibrationReport`
+  // superset, not a single-variant report). The dense
+  // embedder metadata is at the top level on the
+  // `embeddingBackend` field, not on a `config` block
+  // (the `CalibrationReport.config` block carries
+  // `recordCount / queryCount / direction` only).
+  const r2 = report as {
+    embeddingBackend?: { backend?: string; dim?: number };
+    bestByVariant?: {
+      vectorDense?: unknown;
+      hybridDense?: unknown;
+      lexical: null;
+      fts5: null;
+      vector: null;
+    };
+  };
+  assert.equal(r2.embeddingBackend?.backend, "stub-dense");
+  assert.equal(r2.embeddingBackend?.dim, 64);
+  // The dense best keys exist; the sync keys are
+  // explicitly `null` (the dense calibration report does
+  // not run the sync variants).
+  assert.equal(r2.bestByVariant?.lexical, null);
+  assert.equal(r2.bestByVariant?.fts5, null);
+  assert.equal(r2.bestByVariant?.vector, null);
+  // The `vector-dense` best key is populated (we asked
+  // for `variant: "vector-dense"`).
+  assert.ok(
+    r2.bestByVariant?.vectorDense !== undefined,
+    "vectorDense best key should be present on a dense calibration report",
   );
+  // The `hybrid-dense` best key is `null` when only
+  // `vector-dense` was requested (the dense calibration
+  // runner initializes the key explicitly so the report
+  // shape is stable regardless of which dense variants
+  // were run).
+  assert.equal(r2.bestByVariant?.hybridDense, null);
 });
 
 // ---------------------------------------------------------------------------

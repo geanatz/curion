@@ -1473,12 +1473,16 @@ test("calibration: does not change the existing single-variant or comparison rep
   // Pin the existing single-variant and comparison
   // reports. The calibration experiment is a separate
   // artifact; it must not change the shape or numbers of
-  // the existing reports.
+  // the existing reports. The pinned numbers here are the
+  // expanded-checkpoint (100 records / 96 queries) lexical
+  // baseline. A future corpus / query set change is a
+  // deliberate, visible change; update these numbers and
+  // the README's headline table together.
   const single = runRetrievalBenchmark({ variant: "lexical" });
   assert.ok(isSingleVariantReport(single));
-  assert.equal(single.metrics.hitAt5, 34, "lexical hit@5 unchanged");
-  assert.equal(single.metrics.rank1, 26, "lexical rank1 unchanged");
-  assert.equal(single.metrics.noAnswerCorrect, 3, "lexical noAnswerCorrect unchanged");
+  assert.equal(single.metrics.hitAt5, 57, "lexical hit@5 unchanged");
+  assert.equal(single.metrics.rank1, 43, "lexical rank1 unchanged");
+  assert.equal(single.metrics.noAnswerCorrect, 5, "lexical noAnswerCorrect unchanged");
 
   const all = runRetrievalBenchmark({ variant: "all" });
   assert.ok(isComparisonReport(all));
