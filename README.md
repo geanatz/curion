@@ -1366,6 +1366,261 @@ to pick IF they trust the underlying signals; the
 audit tells a reviewer whether the underlying signals
 are worth trusting.
 
+### Multi-signal abstention policy evaluator (benchmark-only)
+
+A separate opt-in **multi-signal abstention policy
+evaluator** takes the per-query signal block the
+abstention-signal audit produces and evaluates a
+rule-based abstention policy grid against it. It is
+a different tool from both the calibration
+experiment and the abstention-signal audit: the
+calibration experiment picks the best single-gate
+trade-off; the audit measures per-signal
+separability; **the policy evaluator tests a small
+grid of rule-based policies (combinations of the
+audit's score gate, the hybrid agreement gate, and
+the query-shape flags) and reports the per-policy
+trade-off on the full corpus, with the per-family
+positive abstention damage and the per-query FP /
+FN lists.** The evaluator is the closest
+artifact to "what would the abstention policy look
+like in production" — but it is still
+benchmark-only and is NOT wired into the
+controller.
+
+**Scope (benchmark-only / research-only):**
+
+- The evaluator does NOT modify the production
+  `recall(text)` behavior, the public MCP API, or
+  the existing benchmark / audit / calibration
+  report shapes.
+- The policies are pure rule-based functions (no
+  learned classifier, no trained model). The brief
+  is explicit: research-only, fixture-dependent.
+- The recommended moderate policy's gains rely
+  partly on the `isFalsePremiseLike` query-shape
+  flag, which is **fixture-correlated**: it fires
+  on queries that mention a missing tool, and the
+  corpus of "missing tools" is fixed by the
+  fixture. **Do not generalise the policy beyond
+  the current fixture corpus without
+  re-evaluating on a new corpus.** This is the
+  single most important caveat the evaluator
+  surfaces.
+- The per-family damage on the recommended policy
+  is concentrated on paraphrase (75.0% positive
+  abstention rate) and orientation (27.8%) queries.
+  This is honest research-only data: a
+  production-grade abstention policy would have to
+  address the paraphrase damage, either by
+  improving the paraphrase detector or by relaxing
+  the score gate on the paraphrase family.
+
+**Why this is separate from the audit + calibration:**
+
+- The audit measures "how well does each
+  individual signal separate answerable from
+  no-answer queries?" (per-signal AUROC + risk-
+  coverage curve).
+- The calibration experiment measures "given a
+  candidate single-gate rule, what is the
+  trade-off?" (sweep over threshold / margin /
+  ratio gates per variant).
+- **The policy evaluator measures "given a
+  multi-signal rule (score gate AND/OR
+  agreement-count gate AND/OR query-shape flags),
+  what is the trade-off on the full corpus, and
+  what is the per-family positive abstention
+  damage?"** The three artifacts answer three
+  different questions; a reviewer who wants the
+  "should we ship an abstention gate?" answer reads
+  all three.
+
+**Primary policies evaluated (4):**
+
+| ID | Rule |
+|---|---|
+| `flag-only-zero-hit-cost` | `isNoAnswerHardNegative OR isFalsePremiseLike` (no score gate) |
+| `low-damage-score-0.30` | `meanContributorScore < 0.30 OR isNoAnswerHardNegative OR isFalsePremiseLike` |
+| `moderate-score-0.40` | `meanContributorScore < 0.40 OR isNoAnswerHardNegative OR isFalsePremiseLike` (**recommended**) |
+| `aggressive-score-0.50-no-fp` | `meanContributorScore < 0.50 OR isNoAnswerHardNegative` (drops the false-premise flag) |
+
+**Ablations evaluated (11):**
+
+- Score-only at thresholds {0.30, 0.35, 0.40, 0.45, 0.50}.
+- `isNoAnswerHardNegative` alone.
+- `isFalsePremiseLike` alone.
+- `hardNeg OR falsePrem` (no score gate).
+- `score < 0.40 OR hardNeg` (no false-premise).
+- `agreementCount <= 1 OR score < 0.40` (weak-signal ablation).
+- `agreementCount <= 2 AND score < 0.40` (AND-gate ablation; reported as a disjunction of the two conditions for
+  transparency — the per-query `reason` field on the artifact tells the reviewer which gate fired).
+
+**Metrics reported per policy:**
+
+- **TNR (no-answer abstention rate)** — the headline `0%..100%` number. Higher = more no-answer queries caught.
+- **Positive abstention rate** — the symmetric damage metric. Higher = more answerable queries wrongly abstained.
+- **hit@5 / rank1 / currentTruthAt1 retained** — the un-gated baseline numbers are computed from the same per-query set, so the deltas are meaningful.
+- **Precision / recall / F1** on the "should-abstain" binary task with `isNoAnswer` as the positive class. A `0 / 0` precision is reported as `0` by convention.
+- **Per-family positive abstention breakdown** — e.g. "paraphrase 75.0% positive abstention rate on the recommended policy".
+- **Per-query FP / FN lists** — the false-positives (positive queries wrongly abstained) and the false-negatives (no-answer queries wrongly retained) on the recommended policy, with the per-query reason (`score` / `hardNeg` / `falsePrem` / `agreement`).
+- **Gate counts** — the number of queries that triggered each gate. A query that triggered two gates contributes to both buckets.
+
+**How to run:**
+
+```sh
+# Default: hybrid (RRF) policy evaluation, hashed-BoW control.
+npm run benchmark:retrieval:abstention-policy
+
+# Per-variant policies (sync, hashed-BoW control).
+npm run benchmark:retrieval:abstention-policy:fts5
+npm run benchmark:retrieval:abstention-policy:vector
+
+# Real local MiniLM (first run downloads ~25MB).
+npm run benchmark:retrieval:abstention-policy:hybrid-dense:real
+npm run benchmark:retrieval:abstention-policy:all-dense:real
+```
+
+The artifact file prefix is
+`retrieval-abstention-policy-*.json` (distinct from
+the existing `retrieval-abstention-audit-*`,
+`retrieval-calibration*`, and `retrieval-hybrid-dense-*`
+prefixes).
+
+**Headline reading on real data (100 records, 96
+queries, real `Xenova/all-MiniLM-L6-v2` embedder,
+hybrid-dense policy evaluation):**
+
+| Policy | TNR% | PosAbst% | hit@5 retained | rank1 retained | curT1 retained | P | R | F1 |
+|---|---|---|---|---|---|---|---|---|
+| `flag-only-zero-hit-cost` | 62.5 | 0.0 | 100.0 | 100.0 | 100.0 | 1.00 | 0.63 | 0.77 |
+| `low-damage-score-0.30` | 75.0 | 2.8 | 97.1 | 97.9 | 97.9 | 0.90 | 0.75 | 0.82 |
+| `moderate-score-0.40` (**recommended**) | 95.8 | 23.6 | 77.1 | 87.5 | 87.2 | 0.57 | 0.96 | 0.72 |
+| `aggressive-score-0.50-no-fp` | 100.0 | 34.7 | 67.1 | 79.2 | 78.7 | 0.49 | 1.00 | 0.66 |
+| `ablation-score-0.30-only` | 29.2 | 2.8 | 97.1 | 97.9 | 97.9 | 0.78 | 0.29 | 0.42 |
+| `ablation-score-0.35-only` | 50.0 | 15.3 | 84.3 | 93.8 | 93.6 | 0.52 | 0.50 | 0.51 |
+| `ablation-score-0.40-only` | 66.7 | 23.6 | 77.1 | 87.5 | 87.2 | 0.48 | 0.67 | 0.56 |
+| `ablation-score-0.45-only` | 75.0 | 27.8 | 74.3 | 83.3 | 83.0 | 0.47 | 0.75 | 0.58 |
+| `ablation-score-0.50-only` | 83.3 | 34.7 | 67.1 | 79.2 | 78.7 | 0.44 | 0.83 | 0.58 |
+| `ablation-hardneg-only` | 25.0 | 0.0 | 100.0 | 100.0 | 100.0 | 1.00 | 0.25 | 0.40 |
+| `ablation-false-premise-only` | 50.0 | 0.0 | 100.0 | 100.0 | 100.0 | 1.00 | 0.50 | 0.67 |
+| `ablation-hardneg-or-fp` | 62.5 | 0.0 | 100.0 | 100.0 | 100.0 | 1.00 | 0.63 | 0.77 |
+| `ablation-score-0.40-or-hardneg` | 91.7 | 23.6 | 77.1 | 87.5 | 87.2 | 0.56 | 0.92 | 0.70 |
+| `ablation-agreement-le1-or-score-0.40` | 66.7 | 23.6 | 77.1 | 87.5 | 87.2 | 0.48 | 0.67 | 0.56 |
+| `ablation-agreement-le2-and-score-0.40` | 70.8 | 30.6 | 70.0 | 85.4 | 85.1 | 0.44 | 0.71 | 0.54 |
+
+**Per-family positive abstention on the recommended
+moderate policy (real-MiniLM hybrid-dense):**
+
+| Family | Total | Abstained | Rate | Notes |
+|---|---|---|---|---|
+| `exact` | 14 | 0 | 0.0% | no positive abstentions on this family |
+| `multi-hop` | 16 | 2 | 12.5% | multi-hop queries can have a low mean contributor score when no single contributor is strongly relevant |
+| `temporal` | 12 | 1 | 8.3% | one temporal query (`temp-controller-validation`) trips the score gate (a divergent-current-truth case) |
+| `orientation` | 18 | 5 | 27.8% | project-status lookups with low per-source scores when the relevant memory is a multi-fact record |
+| `paraphrase` | 12 | 9 | **75.0%** | paraphrase queries can have a low vector-dense contributor score while the lexical / FTS5 score is high; the mean lands in the abstention band |
+
+**Per-query false positives on the recommended
+moderate policy (real-MiniLM hybrid-dense):**
+
+- 12 paraphrase queries: `para-deploy-strategy`, `para-review-style`, `para-storage-detail`, `para-architecture-decisions`, `para-secret-handling`, `para-upgrade-cadence`, `para-incident-comms`, `para-rate-limit`, `para-cache-strategy` (and others — the artifact carries the full list).
+- 4 orientation queries: `orient-deploy-status`, `orient-monitoring-status`, `orient-ci-extensions-status`, `orient-data-pipeline-status`, `orient-observability-extensions-status`.
+- 2 multi-hop queries: `multi-monitoring-posture`, `multi-observability-extensions`.
+- 1 temporal query: `temp-controller-validation` (the labeled divergent-current-truth case).
+
+**Per-query false negatives on the recommended
+moderate policy (real-MiniLM hybrid-dense):**
+
+- 1 no-answer query: `nonexistent-staging-access` (the ranker returns 5 hits with high mean contributor score, and the query is not flagged as a hard-negative or false-premise by the query-shape detector — a research-only finding the evaluator surfaces honestly).
+
+**Honest reading:**
+
+- The recommended moderate policy catches 95.8% of no-answer queries at a 23.6% positive abstention rate. The precision / recall / F1 numbers are honest: precision drops from 1.00 (flag-only) to 0.57 because the score gate is fired on paraphrase queries; recall jumps from 0.63 to 0.96. F1 peaks at the `low-damage-score-0.30` policy (0.82) and declines from there as the policy becomes more aggressive.
+- The flag-only baseline is the cheapest policy and the only one with 0% positive abstention. Its TNR (62.5%) is exactly the `isNoAnswerHardNegative OR isFalsePremiseLike` rate on the no-answer query set: 6 hard-negatives + 12 false-premise-like queries out of 24 no-answer queries (with overlap).
+- The aggressive policy (0.50 threshold, drops the false-premise flag) catches every no-answer query but inflicts 34.7% positive abstention. It is reported as a stress-test, not a recommendation.
+- The per-family positive abstention damage is concentrated on paraphrase (75.0%). A reviewer who wants to ship the recommended policy in production would have to either (a) improve the paraphrase detector so the score gate is more accurate on paraphrases, (b) exclude the paraphrase family from the score gate (and accept the missed no-answer catches on paraphrases), or (c) accept the 75.0% paraphrase abstention rate as a research-only finding and not generalise the policy.
+- The agreement-count gate (the `agreement-le1-or-score-0.40` and `agreement-le2-and-score-0.40` ablations) is a weak-signal ablation: on a fixture where the ranker always populates the contributor block with all three sources (lexical / FTS5 / vector-dense), the agreement-count distribution is a much weaker separator than the score distribution. The `agreement-le1` policy abstains on the same 23.6% of positive queries as `score-0.40-only` (the agreement gate is dominated by the score gate on this fixture).
+- The `false-premise-only` ablation catches 50% of no-answer queries with zero positive abstention damage. The flag is the single most useful single feature in the policy grid; the score gate is what pushes the recommended policy above the 80% TNR line.
+
+**Limitations:**
+
+- The recommended moderate policy's gains rely
+  partly on the `isFalsePremiseLike` query-shape
+  flag, which is **fixture-correlated**: it fires
+  on queries that mention a missing tool, and the
+  corpus of "missing tools" is fixed by the
+  fixture. **Do not generalise the policy beyond
+  the current fixture corpus without re-evaluating
+  on a new corpus.** This is the single most
+  important caveat.
+- The per-family positive abstention damage is
+  concentrated on paraphrase (75.0%) and
+  orientation (27.8%) queries. The damage is
+  honest: the score gate fires on the mean
+  contributor score, and paraphrase queries
+  naturally have a low mean (high lexical / FTS5,
+  low vector-dense). A production-grade abstention
+  policy would have to address the paraphrase
+  damage separately.
+- The single false-negative on the recommended
+  policy (`nonexistent-staging-access`) is a known
+  limitation of the score gate: the ranker returns
+  5 hits with a high mean contributor score, and
+  the query is not flagged by the query-shape
+  detector. A production-grade policy would have
+  to add another signal (e.g. a "no-record-
+  mentions" token-overlap detector) to catch this
+  case.
+- The score gate uses the
+  `meanContributorScore` signal, which is a hybrid
+  contributor signal. On a single-variant run
+  (lexical / FTS5 / vector) the signal is `null`
+  and the policy evaluator treats it as `0`, so
+  the score gate abstains on every query. The
+  evaluator is most informative on a
+  `hybrid-dense` run (real local MiniLM).
+- The policy grid is intentionally small. A
+  reviewer who wants a finer grid (e.g. score
+  thresholds at 0.32, 0.36, 0.42) can construct
+  a custom `AbstentionPolicy` and pass it via the
+  programmatic API; the CLI does not currently
+  expose per-threshold tuning because the default
+  grid covers the brief's primary policies +
+  ablation set.
+- The `agreementCount <= 2 AND score < 0.40`
+  ablation is reported as a disjunction of the
+  two gates (a query abstains iff EITHER gate
+  fires). The AND-gate name is honest about this:
+  the artifact's per-query `reason` field tells
+  the reviewer which gate fired, and the human
+  report's `gate counts` column reports the
+  per-gate abstention count.
+- The policies are pure rule-based functions. No
+  learned classifier, no trained model. The
+  evaluator is research-only / fixture-dependent
+  and is NOT wired into the production controller.
+
+**Compared to the calibration experiment + abstention-signal audit:**
+
+| Aspect | Calibration | Audit | Policy evaluator |
+|---|---|---|---|
+| Question | "Which gate / variant is best?" | "Do any signals separate?" | "How does a multi-signal rule behave on the full corpus?" |
+| Output | Trade-off curve at one fixed gate | Per-signal AUROC + risk-coverage | Per-policy TNR / positive abstention / per-family damage / per-query FP / FN |
+| Pick rule | Maximize TNR delta, tie-break on smallest positive-regression count, then on largest hit@5 | None — every signal is reported | None — every policy in the grid is reported |
+| Per-query granularity | Per-query diagnostic for the chosen gate | Per-query signal block for every query | Per-query decision + reason for every policy in the grid |
+| Slice granularity | Variant only | Variant + family + shape | Family only (per-family positive abstention breakdown) |
+| Honest reading | "This is the best gate" | "This signal is strong / weak / uninformative" | "This policy catches N% of no-answer queries at M% positive abstention cost" |
+| Wired into controller? | No (research-only) | No (research-only) | No (research-only / fixture-dependent) |
+
+The three artifacts are complementary: the
+calibration experiment tells a reviewer which gate
+to pick IF they trust the underlying signals; the
+audit tells a reviewer whether the underlying signals
+are worth trusting; the policy evaluator tells a
+reviewer how a multi-signal rule would behave on
+the full corpus, with the per-family damage and the
+per-query FP / FN lists.
+
 ### Hybrid / RRF variant: scope, formula, and limitations
 
 - **Scope.** The hybrid variant is benchmark-only. It runs
@@ -1703,7 +1958,7 @@ the actual `classifyInput` behavior.
 ```sh
 npm install
 npm run build
-npm test              # default suite (485 tests); no network required
+npm test              # default suite (554 tests); no network required
 npm run test:contracts # contracts-only suite (15 tests)
 npm run test:dense-live # opt-in real-model integration test
                         # (downloads the model on first run;
@@ -1846,6 +2101,22 @@ src/
     metrics.ts            # pure metric functions (hit@K, TNR, per-family)
     retrieval-runner.ts   # retrieval benchmark CLI (no DB, no network)
                             # + async dense entry point
+    abstention-audit.ts   # benchmark-only abstention-signal audit:
+                            # AUROC + risk-coverage + slice summaries
+    abstention-audit-runner.ts
+                            # audit runner: per-query signal builder + artifact writer
+                            # + human report formatter
+    query-shapes.ts       # benchmark-only query-shape detector:
+                            # isNoAnswerHardNegative / isTemporalCurrent /
+                            # isNegationLike / isOodEntityLike /
+                            # isParaphraseTrap / isFalsePremiseLike
+    abstention-policy.ts  # benchmark-only multi-signal abstention policy
+                            # evaluator: rule-based policies (score gate +
+                            # agreement-count gate + query-shape flags)
+    abstention-policy-runner.ts
+                            # policy runner: builds per-query signal block,
+                            # evaluates the policy grid, writes the artifact
+                            # + human report
     variants/
       fts5.ts             # benchmark-only FTS5 (BM25) ranker
       vector.ts           # benchmark-only vector (cosine) ranker

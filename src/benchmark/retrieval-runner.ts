@@ -125,11 +125,19 @@ import {
   runAbstentionAudit,
   writeAbstentionAuditReport,
   formatAbstentionAuditReport,
+  buildAbstentionAuditPerQuery,
 } from "./abstention-audit-runner.js";
 import type {
   AbstentionAuditConfig,
   AbstentionAuditReport,
 } from "./abstention-audit.js";
+import {
+  runAbstentionPolicy,
+  writeAbstentionPolicyReport,
+  formatAbstentionPolicyReport,
+  type AbstentionPolicyConfig,
+  type AbstentionPolicyReport,
+} from "./abstention-policy-runner.js";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -273,6 +281,35 @@ export interface RetrievalBenchmarkOptions {
    * under `.cortex/benchmark/`.
    */
   abstentionAudit?: boolean | AbstentionAuditConfig;
+  /**
+   * Run the benchmark-only multi-signal abstention
+   * policy evaluator AFTER the regular benchmark.
+   * Default: `false`. The evaluator is a separate
+   * artifact (prefix
+   * `retrieval-abstention-policy-*.json`) that tests
+   * a rule-based abstention policy grid on the
+   * per-query `AbstentionSignals` block the audit
+   * runner produces.
+   *
+   * The evaluator consumes the per-query signals
+   * block from the audit; a caller who wants the
+   * policy report should also pass `--abstention-audit`
+   * (the audit attaches the signals; the policy
+   * evaluator consumes them). When
+   * `abstentionPolicy` is `true` and
+   * `abstentionAudit` is `false`, the evaluator
+   * falls back to empty signal blocks (so the
+   * policy grid runs against a "no signal" input
+   * and only the flag-only policies fire).
+   *
+   * The evaluator is benchmark-only: it does NOT
+   * modify the production `recall(text)` behavior,
+   * the public MCP API, or the existing audit /
+   * calibration / benchmark report shapes. The
+   * policies are research artifacts, not
+   * deployment policies.
+   */
+  abstentionPolicy?: boolean | AbstentionPolicyConfig;
 }
 
 /**
@@ -638,6 +675,17 @@ export function parseRetrievalCli(argv: string[]): RetrievalBenchmarkOptions {
       // (5%/10%/20% risk, 50%/80%/95% coverage) cover
       // the common cases.
       opts.abstentionAudit = true;
+    } else if (a === "--abstention-policy") {
+      // The flag is boolean: `--abstention-policy` enables
+      // the multi-signal policy evaluator with the
+      // default policy grid. A reviewer who wants a
+      // custom policy set or a subset of policies can
+      // pass the `abstentionPolicy: AbstentionPolicyConfig`
+      // option programmatically; the CLI does not
+      // currently expose per-policy-id filtering
+      // because the defaults cover the brief's
+      // primary policies + ablation grid.
+      opts.abstentionPolicy = true;
     } else if (a === "--calibrate-direction" && argv[i + 1]) {
       const d = argv[++i];
       if (d !== "higher-is-better" && d !== "lower-is-better") {
@@ -744,6 +792,13 @@ function printRetrievalHelp(): void {
       "                         benchmark. Benchmark-only: no production path or API change.",
       "  --calibrate-direction <dir>  Score direction for the calibration gate comparison.",
       "                         higher-is-better (default) | lower-is-better.",
+      "  --abstention-audit     Run the abstention-signal audit after the regular benchmark.",
+      "                         Benchmark-only: no production path or API change.",
+      "  --abstention-policy    Run the multi-signal abstention policy evaluator after the",
+      "                         regular benchmark. Benchmark-only; research-only / fixture-",
+      "                         dependent; not wired into the production controller. Pair",
+      "                         with --abstention-audit on a hybrid / hybrid-dense run so",
+      "                         the per-query signal block is populated.",
       "  -h, --help             Show this help.",
       "",
       "Default artifacts directory: <cwd>/.cortex/benchmark/",
@@ -3501,6 +3556,22 @@ async function main(): Promise<void> {
         );
         process.stdout.write(`\nartifact written: ${auditFile}\n`);
       }
+      if (opts.abstentionPolicy) {
+        const policyCfg: AbstentionPolicyConfig =
+          typeof opts.abstentionPolicy === "object"
+            ? opts.abstentionPolicy
+            : {};
+        const policyReport = runAbstentionPolicyFromDenseReport(
+          r.hybridDense,
+          policyCfg,
+        );
+        const policyFile = writeAbstentionPolicyReport(policyReport, dir);
+        written.push(policyFile);
+        process.stdout.write(
+          "\n" + formatAbstentionPolicyReport(policyReport) + "\n",
+        );
+        process.stdout.write(`\nartifact written: ${policyFile}\n`);
+      }
     } else {
       const r = denseReport as DenseRetrievalBenchmarkReport;
       const file = writeDenseBenchmarkReport(r, dir);
@@ -3518,6 +3589,19 @@ async function main(): Promise<void> {
           "\n" + formatAbstentionAuditReport(auditReport) + "\n",
         );
         process.stdout.write(`\nartifact written: ${auditFile}\n`);
+      }
+      if (opts.abstentionPolicy) {
+        const policyCfg: AbstentionPolicyConfig =
+          typeof opts.abstentionPolicy === "object"
+            ? opts.abstentionPolicy
+            : {};
+        const policyReport = runAbstentionPolicyFromDenseReport(r, policyCfg);
+        const policyFile = writeAbstentionPolicyReport(policyReport, dir);
+        written.push(policyFile);
+        process.stdout.write(
+          "\n" + formatAbstentionPolicyReport(policyReport) + "\n",
+        );
+        process.stdout.write(`\nartifact written: ${policyFile}\n`);
       }
     }
     for (const f of written) {
@@ -3610,6 +3694,29 @@ async function main(): Promise<void> {
     );
     process.stdout.write(`\nartifact written: ${auditFile}\n`);
   }
+  // Multi-signal abstention policy evaluator.
+  // Benchmark-only; research-only / fixture-dependent.
+  // The evaluator re-runs the audit's per-query
+  // signal builder internally, so the user does NOT
+  // need to pass `--abstention-audit` to get a
+  // meaningful score gate. The artifact is separate
+  // (`retrieval-abstention-policy-*.json`).
+  if (opts.abstentionPolicy) {
+    const policyCfg: AbstentionPolicyConfig =
+      typeof opts.abstentionPolicy === "object"
+        ? opts.abstentionPolicy
+        : {};
+    const policyReport = runAbstentionPolicyFromBenchmarkReport(report, {
+      variant,
+      config: policyCfg,
+    });
+    const policyFile = writeAbstentionPolicyReport(policyReport, dir);
+    written.push(policyFile);
+    process.stdout.write(
+      "\n" + formatAbstentionPolicyReport(policyReport) + "\n",
+    );
+    process.stdout.write(`\nartifact written: ${policyFile}\n`);
+  }
 }
 
 /**
@@ -3686,6 +3793,109 @@ export function runAbstentionAuditFromDenseReport(
     records: BENCHMARK_RECORDS,
     config,
   });
+}
+
+/**
+ * Build a multi-signal abstention policy report from
+ * a sync benchmark report. The function is pure: it
+ * consumes the report's `evals`, re-runs the audit's
+ * per-query signal builder to populate the policy
+ * evaluator's input, and emits the
+ * `AbstentionPolicyReport`.
+ *
+ * For a comparison report (`variant: "all"`) the
+ * function picks the hybrid variant (the most
+ * informative variant for the policy evaluator: it
+ * has the contributor signals, so the score gate is
+ * meaningful). The single-variant path picks the
+ * report's own variant; on a `lexical` / `fts5` /
+ * `vector` run the contributor signals are absent
+ * (the audit's `meanContributorScore` is `null`),
+ * the policy evaluator treats the missing score as
+ * 0, and the score gate abstains on every query
+ * (which is a research-only finding the artifact
+ * surfaces honestly).
+ */
+export function runAbstentionPolicyFromBenchmarkReport(
+  report: RetrievalBenchmarkReport | ComparisonBenchmarkReport,
+  args: {
+    variant: BenchmarkVariant;
+    config?: AbstentionPolicyConfig;
+  },
+): AbstentionPolicyReport {
+  // Pick the most informative evals to feed the
+  // policy evaluator. The single-variant path uses
+  // the report's own evals; the comparison path uses
+  // the hybrid variant's evals (the contributor
+  // signals are populated there).
+  let variantLabel: string;
+  let evals: ReadonlyArray<QueryEval>;
+  let queries = selectQueries({ variant: args.variant });
+  if (isSingleVariantReport(report)) {
+    evals = report.evals;
+    variantLabel = report.variant;
+  } else {
+    evals = report.hybrid.evals;
+    variantLabel = "hybrid-benchmark";
+  }
+  // Build the per-query signals via the shared
+  // helper. The helper runs the query-shape detector
+  // and the per-source rank / score extraction, so
+  // the policy evaluator sees the same input the
+  // audit would have seen.
+  const perQuerySignals = buildAbstentionAuditPerQuery({
+    evals,
+    queries,
+    records: BENCHMARK_RECORDS,
+  });
+  const signalsByQueryId = new Map<string, import("./metrics.js").AbstentionSignals>();
+  for (const p of perQuerySignals) {
+    signalsByQueryId.set(p.queryId, p.signals);
+  }
+  const result = runAbstentionPolicy({
+    variant: variantLabel,
+    evals,
+    signalsByQueryId,
+    config: args.config,
+  });
+  // Backfill the recordCount so the artifact is
+  // self-describing without re-loading the corpus.
+  result.config.recordCount = BENCHMARK_RECORDS.length;
+  return result;
+}
+
+/**
+ * Build a multi-signal abstention policy report from
+ * a dense single-variant report. The function is
+ * pure: it consumes the report's `evals`, builds the
+ * per-query signal block, and emits the
+ * `AbstentionPolicyReport`. Used by the CLI when
+ * `--variant vector-dense --abstention-policy` or
+ * `--variant hybrid-dense --abstention-policy` is
+ * set.
+ */
+export function runAbstentionPolicyFromDenseReport(
+  report: DenseRetrievalBenchmarkReport,
+  config: AbstentionPolicyConfig = {},
+): AbstentionPolicyReport {
+  const evals = report.evals;
+  const perQuerySignals = buildAbstentionAuditPerQuery({
+    evals,
+    queries: BENCHMARK_QUERIES,
+    records: BENCHMARK_RECORDS,
+  });
+  const signalsByQueryId = new Map<string, import("./metrics.js").AbstentionSignals>();
+  for (const p of perQuerySignals) {
+    signalsByQueryId.set(p.queryId, p.signals);
+  }
+  const result = runAbstentionPolicy({
+    variant: report.variant,
+    evals,
+    signalsByQueryId,
+    config,
+  });
+  result.config.recordCount = BENCHMARK_RECORDS.length;
+  return result;
 }
 
 const isMain = (() => {

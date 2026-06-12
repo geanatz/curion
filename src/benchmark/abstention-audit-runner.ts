@@ -425,33 +425,36 @@ export function buildPerQueryExamples(
 }
 
 // ---------------------------------------------------------------------------
-// Audit runner
+// Per-query signal builder (shared with the policy evaluator)
 // ---------------------------------------------------------------------------
 
 /**
- * The top-level audit runner. Consumes a
- * `QueryEval[]` + the corpus + the query set, emits
- * the `AbstentionAuditReport` + the JSON artifact.
+ * Build the per-query signal block the audit + the
+ * policy evaluator consume. The function is pure.
+ * The detector is run on every query; the per-query
+ * `eval` provides the retrieval signals (top score,
+ * gap, ratio, returned count, hybrid contributors).
  *
- * The function is pure. No I/O, no provider calls, no
- * network. The CLI entry point writes the artifact to
- * disk; the function itself is a pure orchestrator.
+ * Exposed at module scope (not just inside
+ * `runAbstentionAudit`) so the policy evaluator can
+ * re-use the same per-query signals without
+ * duplicating the detector. The shape of the
+ * returned array is the same one the audit's
+ * `perQuerySignals` block carries, so the two
+ * modules stay in sync.
  */
-export function runAbstentionAudit(args: {
-  variant: "lexical" | "fts5" | "vector" | "vector-dense" | "hybrid-dense";
+export function buildAbstentionAuditPerQuery(args: {
   evals: ReadonlyArray<QueryEval>;
   queries: ReadonlyArray<BenchmarkQuery>;
   records: ReadonlyArray<BenchmarkMemoryRecord>;
-  config: AbstentionAuditConfig;
-}): AbstentionAuditReport {
-  const { evals, queries, records, config } = args;
-  // Build the per-record token sets once. The
-  // per-query detection loop reuses the same sets.
+}): Array<{
+  queryId: string;
+  family: string;
+  isPositive: boolean;
+  signals: AbstentionSignals;
+}> {
+  const { evals, queries, records } = args;
   const corpusTokenSets = buildCorpusTokenSets(records);
-  // Build the per-query abstention signals. The
-  // detector is run on every query; the per-query
-  // `eval` provides the retrieval signals (top score,
-  // gap, ratio, returned count, hybrid contributors).
   const perQuery: Array<{
     queryId: string;
     family: string;
@@ -472,6 +475,40 @@ export function runAbstentionAudit(args: {
       signals,
     });
   }
+  return perQuery;
+}
+
+// ---------------------------------------------------------------------------
+// Audit runner
+// ---------------------------------------------------------------------------
+
+/**
+ * The top-level audit runner. Consumes a
+ * `QueryEval[]` + the corpus + the query set, emits
+ * the `AbstentionAuditReport` + the JSON artifact.
+ *
+ * The function is pure. No I/O, no provider calls, no
+ * network. The CLI entry point writes the artifact to
+ * disk; the function itself is a pure orchestrator.
+ */
+export function runAbstentionAudit(args: {
+  variant: "lexical" | "fts5" | "vector" | "vector-dense" | "hybrid-dense";
+  evals: ReadonlyArray<QueryEval>;
+  queries: ReadonlyArray<BenchmarkQuery>;
+  records: ReadonlyArray<BenchmarkMemoryRecord>;
+  config: AbstentionAuditConfig;
+}): AbstentionAuditReport {
+  const { evals, queries, records, config } = args;
+  // Build the per-query abstention signals via the
+  // shared helper. The helper is exposed so the
+  // multi-signal policy evaluator can re-use the
+  // same per-query signal block without re-running
+  // the detector.
+  const perQuery = buildAbstentionAuditPerQuery({
+    evals,
+    queries,
+    records,
+  });
   // Build the slices. The audit uses the per-query
   // signals + the binary label ("is this a no-answer
   // query?") as the AUROC / risk-coverage input.

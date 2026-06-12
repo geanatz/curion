@@ -49,6 +49,11 @@
     "benchmark:retrieval:abstention-audit:vector-dense": "tsx src/benchmark/retrieval-runner.ts --variant vector-dense --embedder stub-dense --abstention-audit",
     "benchmark:retrieval:abstention-audit:vector-dense:real": "tsx src/benchmark/retrieval-runner.ts --variant vector-dense --embedder transformersjs --abstention-audit",
     "benchmark:retrieval:abstention-audit:hybrid-dense:real": "tsx src/benchmark/retrieval-runner.ts --variant hybrid-dense --embedder transformersjs --abstention-audit",
+    "benchmark:retrieval:abstention-policy": "tsx src/benchmark/retrieval-runner.ts --variant hybrid --abstention-policy",
+    "benchmark:retrieval:abstention-policy:fts5": "tsx src/benchmark/retrieval-runner.ts --variant fts5 --abstention-policy",
+    "benchmark:retrieval:abstention-policy:vector": "tsx src/benchmark/retrieval-runner.ts --variant vector --abstention-policy",
+    "benchmark:retrieval:abstention-policy:hybrid-dense:real": "tsx src/benchmark/retrieval-runner.ts --variant hybrid-dense --embedder transformersjs --abstention-policy",
+    "benchmark:retrieval:abstention-policy:all-dense:real": "tsx src/benchmark/retrieval-runner.ts --variant all-dense --embedder transformersjs --abstention-policy",
     "test:dense-live": "node --import tsx --test tests/_helpers/retrieval-dense-vector-live.test.ts"
   },
   "engines": {
