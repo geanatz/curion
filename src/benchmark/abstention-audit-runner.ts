@@ -193,6 +193,9 @@ export function buildAbstentionSignals(
     isOodEntityLike: flags.isOodEntityLike,
     isParaphraseTrap: flags.isParaphraseTrap,
     isFalsePremiseLike: flags.isFalsePremiseLike,
+    isAdversarialParaphrase: flags.isAdversarialParaphrase,
+    isDivergentTemporal: flags.isDivergentTemporal,
+    isNearMissCurrentCluster: flags.isNearMissCurrentCluster,
   };
 }
 
@@ -343,11 +346,26 @@ export function buildSlices(
  * The audit uses this list to slice the corpus into
  * "temporal-divergent" / "temporal-non-divergent".
  * The list is the same one the existing tests pin
- * (see `tests/retrieval-benchmark.test.ts`).
+ * (see `tests/retrieval-benchmark.test.ts`). The
+ * adversarial-expansion checkpoint adds five more
+ * labeled divergent cases (raising the total from 2
+ * to 7). The set is the explicit, fixture-truth
+ * divergent set; the detector's `isDivergentTemporal`
+ * flag uses the data shape (currentTruthIds.length
+ * < expectedIds.length) so the two surfaces are
+ * decoupled — a reviewer can audit the explicit set
+ * against the detector's approximation.
  */
 export const DIVERGENT_TEMPORAL_IDS: ReadonlySet<string> = new Set([
+  // Prior expanded-checkpoint divergent set (2).
   "temp-storage-raw-text",
   "temp-controller-validation",
+  // Adversarial-expansion additions (5).
+  "temp-superseded-postgres-15-current",
+  "temp-superseded-controller-validation-current",
+  "temp-superseded-oncall-handoff-current",
+  "temp-superseded-stale-fact-trap-postgres",
+  "temp-superseded-retrieval-design-current",
 ]);
 
 function queryIsDivergent(

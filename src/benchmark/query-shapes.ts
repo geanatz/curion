@@ -296,6 +296,23 @@ function tokenOverlap(a: Set<string>, b: Set<string>): number {
  * `AbstentionSignals.isXxx` flags so the audit runner
  * can attach it directly. The detector is pure: same
  * (query, corpus) -> same flags.
+ *
+ * The `isAdversarialParaphrase` / `isDivergentTemporal`
+ * / `isNearMissCurrentCluster` flags are the
+ * adversarial-expansion additions. They are derived
+ * from the query's explicit `labels?: string[]` field
+ * (the fixture truth) when present, AND approximated
+ * by the detector for unlabeled queries when the
+ * family / corpus / token-overlap signals support
+ * it. The detection is additive: existing queries
+ * without `labels` get the same flags they would have
+ * had under the prior detector; queries WITH `labels`
+ * get the explicit-truth flag plus the detector's
+ * best-effort approximation for the OTHER flags. The
+ * `abstention-audit-runner` keeps the explicit
+ * `queryId -> labels` map on the per-query signals
+ * block so a reviewer can audit the detector's
+ * approximation against the fixture truth.
  */
 export interface QueryShapeFlags {
   isNoAnswerHardNegative: boolean;
@@ -304,6 +321,46 @@ export interface QueryShapeFlags {
   isOodEntityLike: boolean;
   isParaphraseTrap: boolean;
   isFalsePremiseLike: boolean;
+  /**
+   * Additive (v1): the query is an `adversarialParaphrase`
+   * (per the explicit `labels` field when present) OR
+   * is a paraphrase family query that targets one of
+   * the paraphrase-twin records (113..116) — the
+   * "deep positive paraphrase with very low lexical
+   * overlap" case. The detector approximates this by
+   * flagging paraphrase queries whose query text
+   * shares fewer than a low-overlap threshold of
+   * tokens with the expected records; queries WITH
+   * the explicit `adversarialParaphrase` label are
+   * flagged directly.
+   */
+  isAdversarialParaphrase: boolean;
+  /**
+   * Additive (v1): the query is a labeled divergent
+   * temporal query (per the explicit `labels` field
+   * when present). A divergent temporal query has
+   * `expectedIds` that includes BOTH the current and
+   * the old / superseded fact, with `currentTruthIds`
+   * containing only the current fact. The detector
+   * uses the same `DIVERGENT_TEMPORAL_IDS` set the
+   * abstention audit uses (extended by the
+   * adversarial-expansion additions). Queries with
+   * the explicit `divergentTemporal` label are
+   * flagged directly.
+   */
+  isDivergentTemporal: boolean;
+  /**
+   * Additive (v1): the query is a near-miss
+   * disambiguation (per the explicit `labels` field
+   * when present) OR is an orientation / multi-hop /
+   * paraphrase query that targets one of the
+   * near-miss-cluster records (109..112) — the
+   * "near-miss distractor pressure" case. The
+   * detector approximates this by flagging queries
+   * whose `expectedIds` intersect the near-miss
+   * cluster ids.
+   */
+  isNearMissCurrentCluster: boolean;
 }
 
 /**
@@ -330,6 +387,33 @@ export const HARD_NEGATIVE_MIN_OVERLAP = 2;
  */
 export const LEGACY_DISTRACTOR_IDS: ReadonlySet<number> = new Set([
   21, 22, 23, 24, 93, 94, 95, 96,
+]);
+
+/**
+ * Pre-built set of record ids the
+ * `isNearMissCurrentCluster` detector considers
+ * "near-miss current cluster" — the new cluster-28
+ * records (109..112) that are intentionally close to
+ * a current cluster but name a different specific
+ * fact (different team / service / product area).
+ * A reviewer who wants to extend the detector can
+ * edit this list; the tests pin it.
+ */
+export const NEAR_MISS_CURRENT_CLUSTER_IDS: ReadonlySet<number> = new Set([
+  109, 110, 111, 112,
+]);
+
+/**
+ * Pre-built set of record ids the
+ * `isAdversarialParaphrase` detector considers
+ * "paraphrase-twin" — the new cluster-29 records
+ * (113..116) that paraphrase a current cluster
+ * record with deliberately LOW lexical-overlap
+ * vocabulary. A reviewer who wants to extend the
+ * detector can edit this list; the tests pin it.
+ */
+export const PARAPHRASE_TWIN_IDS: ReadonlySet<number> = new Set([
+  113, 114, 115, 116,
 ]);
 
 /**
@@ -436,6 +520,64 @@ export function detectQueryShape(
       }
     }
   }
+  // ---- isAdversarialParaphrase (additive) ------------------------------
+  // The query is labeled `adversarialParaphrase` OR
+  // is a paraphrase query that targets one of the
+  // PARAPHRASE_TWIN_IDS records (113..116). The
+  // detector approximates the labeled case from the
+  // family + the expected-ids intersection.
+  let isAdversarialParaphrase = false;
+  if (query.labels && query.labels.includes("adversarialParaphrase")) {
+    isAdversarialParaphrase = true;
+  } else if (query.family === "paraphrase" && query.expectedIds.length > 0) {
+    for (const id of query.expectedIds) {
+      if (PARAPHRASE_TWIN_IDS.has(id)) {
+        isAdversarialParaphrase = true;
+        break;
+      }
+    }
+  }
+  // ---- isDivergentTemporal (additive) ---------------------------------
+  // The query is labeled `divergentTemporal` OR
+  // its `currentTruthIds.length` is a strict subset
+  // of `expectedIds.length` (the labeled divergent
+  // pattern). The detector uses the data shape
+  // rather than the `DIVERGENT_TEMPORAL_IDS` set
+  // (which lives in the abstention-audit-runner)
+  // so the two surfaces are decoupled.
+  let isDivergentTemporal = false;
+  if (query.labels && query.labels.includes("divergentTemporal")) {
+    isDivergentTemporal = true;
+  } else if (
+    query.family === "temporal" &&
+    query.currentTruthIds.length < query.expectedIds.length &&
+    query.currentTruthIds.length > 0
+  ) {
+    isDivergentTemporal = true;
+  }
+  // ---- isNearMissCurrentCluster (additive) ----------------------------
+  // The query is labeled `nearMissCurrentCluster` OR
+  // is an orientation / multi-hop / paraphrase
+  // query that targets one of the
+  // NEAR_MISS_CURRENT_CLUSTER_IDS records (109..112).
+  // The detector approximates the labeled case from
+  // the family + the expected-ids intersection.
+  let isNearMissCurrentCluster = false;
+  if (query.labels && query.labels.includes("nearMissCurrentCluster")) {
+    isNearMissCurrentCluster = true;
+  } else if (
+    query.expectedIds.length > 0 &&
+    (query.family === "orientation" ||
+      query.family === "multi-hop" ||
+      query.family === "paraphrase")
+  ) {
+    for (const id of query.expectedIds) {
+      if (NEAR_MISS_CURRENT_CLUSTER_IDS.has(id)) {
+        isNearMissCurrentCluster = true;
+        break;
+      }
+    }
+  }
   return {
     isNoAnswerHardNegative,
     isTemporalCurrent,
@@ -443,6 +585,9 @@ export function detectQueryShape(
     isOodEntityLike,
     isParaphraseTrap,
     isFalsePremiseLike,
+    isAdversarialParaphrase,
+    isDivergentTemporal,
+    isNearMissCurrentCluster,
   };
 }
 

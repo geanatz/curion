@@ -160,6 +160,18 @@ export interface PolicyDecision {
   rank1: boolean;
   currentTruthAt1: boolean;
   hitAt5: boolean;
+  /**
+   * Optional, additive: the query's explicit adversarial
+   * labels (the fixture truth, NOT derived from the
+   * detector). A reviewer who wants to audit which
+   * labels a per-query decision is associated with
+   * reads this field. The field is `undefined` for
+   * queries that have no explicit labels (the
+   * backward-compatible default). The
+   * adversarial-expansion checkpoint sets this on
+   * queries with `labels` defined in the corpus.
+   */
+  queryLabels?: string[];
 }
 
 /**
@@ -408,6 +420,16 @@ export function evaluatePolicy(
     rank1: boolean;
     currentTruthAt1: boolean;
     hitAt5: boolean;
+    /**
+     * Optional, additive: the query's explicit
+     * adversarial labels. The field flows through to
+     * the per-decision `queryLabels` so a reviewer
+     * can audit which labeled subset a decision is
+     * associated with. The field is `undefined` for
+     * queries without explicit labels (the
+     * backward-compatible default).
+     */
+    queryLabels?: string[];
   }>,
 ): PolicyDecision[] {
   const out: PolicyDecision[] = new Array(perQuery.length);
@@ -454,6 +476,9 @@ export function evaluatePolicy(
       rank1: p.rank1,
       currentTruthAt1: p.currentTruthAt1,
       hitAt5: p.hitAt5,
+      ...(p.queryLabels !== undefined
+        ? { queryLabels: [...p.queryLabels] }
+        : {}),
     };
   }
   return out;
@@ -644,6 +669,19 @@ export function computePolicyMetrics(
 export function buildPolicyPerQuery(
   evals: ReadonlyArray<QueryEval>,
   signalsByQueryId: ReadonlyMap<string, AbstentionSignals> = new Map(),
+  /**
+   * Optional, additive: an explicit
+   * `queryId -> labels[]` map. The fields flow
+   * through to the per-decision `queryLabels`
+   * so a reviewer can audit which labeled
+   * subset a per-query decision is associated
+   * with. The map is empty by default (the
+   * backward-compatible default). The
+   * adversarial-expansion corpus uses this to
+   * surface the labeled adversarial property
+   * subsets on the policy artifact.
+   */
+  labelsByQueryId: ReadonlyMap<string, string[]> = new Map(),
 ): Array<{
   queryId: string;
   family: string;
@@ -652,6 +690,7 @@ export function buildPolicyPerQuery(
   rank1: boolean;
   currentTruthAt1: boolean;
   hitAt5: boolean;
+  queryLabels?: string[];
 }> {
   const out: Array<{
     queryId: string;
@@ -661,6 +700,7 @@ export function buildPolicyPerQuery(
     rank1: boolean;
     currentTruthAt1: boolean;
     hitAt5: boolean;
+    queryLabels?: string[];
   }> = [];
   for (const e of evals) {
     // Use the provided signals if available; otherwise
@@ -693,6 +733,7 @@ export function buildPolicyPerQuery(
       const expected = new Set(e.expectedIds);
       hitAt5 = e.topIds.slice(0, 5).some((id) => expected.has(id));
     }
+    const labels = labelsByQueryId.get(e.queryId);
     out.push({
       queryId: e.queryId,
       family: e.family,
@@ -701,6 +742,7 @@ export function buildPolicyPerQuery(
       rank1: e.rank1,
       currentTruthAt1: e.currentTruthAt1,
       hitAt5,
+      ...(labels !== undefined ? { queryLabels: [...labels] } : {}),
     });
   }
   return out;
@@ -735,5 +777,8 @@ export function emptyAbstentionSignals(): AbstentionSignals {
     isOodEntityLike: false,
     isParaphraseTrap: false,
     isFalsePremiseLike: false,
+    isAdversarialParaphrase: false,
+    isDivergentTemporal: false,
+    isNearMissCurrentCluster: false,
   };
 }

@@ -171,6 +171,17 @@ export interface AbstentionPolicyReport {
     rank1: boolean;
     currentTruthAt1: boolean;
     hitAt5: boolean;
+    /**
+     * Optional, additive: the query's explicit
+     * adversarial labels. The field flows through
+     * to the per-decision `queryLabels` so a
+     * reviewer can audit which labeled subset a
+     * per-query decision is associated with. The
+     * field is `undefined` for queries that have
+     * no explicit labels (the backward-compatible
+     * default).
+     */
+    queryLabels?: string[];
   }>;
   /**
    * The full per-policy per-query decisions. The
@@ -206,10 +217,27 @@ export function runAbstentionPolicy(args: {
   evals: ReadonlyArray<QueryEval>;
   signalsByQueryId: ReadonlyMap<string, AbstentionSignals>;
   config?: AbstentionPolicyConfig;
+  /**
+   * Optional, additive: an explicit
+   * `queryId -> labels[]` map. The fields flow
+   * through to the per-decision `queryLabels`
+   * so a reviewer can audit which labeled
+   * subset a per-query decision is associated
+   * with. The map is empty by default (the
+   * backward-compatible default). The
+   * adversarial-expansion corpus uses this to
+   * surface the labeled adversarial property
+   * subsets on the policy artifact.
+   */
+  labelsByQueryId?: ReadonlyMap<string, string[]>;
 }): AbstentionPolicyReport {
-  const { evals, signalsByQueryId, config = {} } = args;
+  const { evals, signalsByQueryId, config = {}, labelsByQueryId } = args;
   const variant = args.variant;
-  const perQuery = buildPolicyPerQuery(evals, signalsByQueryId);
+  const perQuery = buildPolicyPerQuery(
+    evals,
+    signalsByQueryId,
+    labelsByQueryId ?? new Map(),
+  );
   // Build the policy list. The custom policies come
   // first (in the order given); the built-in policies
   // follow. The `onlyPolicyIds` filter, when set,
@@ -453,8 +481,26 @@ export function formatAbstentionPolicyReport(
     if (recommended.falsePositives.length === 0) {
       lines.push("  (none)");
     } else {
+      // Build a per-queryId -> labels map from the
+      // perQuery block so the FP / FN lists can show
+      // the explicit adversarial label alongside the
+      // reason. A reviewer who wants to audit "which
+      // labeled paraphrases / near-misses / divergent
+      // temporals the recommended policy abstained on"
+      // reads this column.
+      const labelsByQueryId = new Map<string, string[]>();
+      for (const p of report.perQuery) {
+        if (p.queryLabels && p.queryLabels.length > 0) {
+          labelsByQueryId.set(p.queryId, p.queryLabels);
+        }
+      }
       for (const fp of recommended.falsePositives) {
-        lines.push(`  [${fp.family}] ${fp.queryId}  reason=${fp.reason}`);
+        const labels = labelsByQueryId.get(fp.queryId);
+        const labelStr =
+          labels && labels.length > 0 ? `  labels=${labels.join("|")}` : "";
+        lines.push(
+          `  [${fp.family}] ${fp.queryId}  reason=${fp.reason}${labelStr}`,
+        );
       }
     }
     lines.push("");
@@ -462,8 +508,19 @@ export function formatAbstentionPolicyReport(
     if (recommended.falseNegatives.length === 0) {
       lines.push("  (none)");
     } else {
+      const labelsByQueryId = new Map<string, string[]>();
+      for (const p of report.perQuery) {
+        if (p.queryLabels && p.queryLabels.length > 0) {
+          labelsByQueryId.set(p.queryId, p.queryLabels);
+        }
+      }
       for (const fn of recommended.falseNegatives) {
-        lines.push(`  [${fn.family}] ${fn.queryId}  reason=${fn.reason}`);
+        const labels = labelsByQueryId.get(fn.queryId);
+        const labelStr =
+          labels && labels.length > 0 ? `  labels=${labels.join("|")}` : "";
+        lines.push(
+          `  [${fn.family}] ${fn.queryId}  reason=${fn.reason}${labelStr}`,
+        );
       }
     }
     lines.push("");

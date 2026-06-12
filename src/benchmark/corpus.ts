@@ -44,6 +44,107 @@
  *                                (NOT in the orientation distractor set; the
  *                                distractor set stays {13..16, 21..24})
  *   - "testing-extensions-2"   — additional test infrastructure details
+ *   - "adversarial-conflict"   — a labeled record that
+ *                                DELIBERATELY contradicts a
+ *                                current cluster-8/18/22 fact
+ *                                so the conflict/contradiction
+ *                                is visible in the corpus (a
+ *                                reviewer can audit whether
+ *                                the ranker is misled by a
+ *                                contradicting record).
+ *   - "adversarial-superseded"— a labeled record that
+ *                                represents a SUPERSEDED
+ *                                version of a current fact
+ *                                (paired with the current
+ *                                fact in the corpus, e.g.
+ *                                "Postgres 15" alongside
+ *                                "Postgres 16"), with a
+ *                                CLEARER lexical hook than
+ *                                the previous temporal-old
+ *                                records. Used to test
+ *                                "lexically stronger old
+ *                                fact" temporal traps.
+ *   - "adversarial-near-miss"  — a labeled record that is
+ *                                intentionally close to a
+ *                                current cluster but
+ *                                names a different specific
+ *                                fact (e.g. a different
+ *                                team owner, a different
+ *                                service, a different
+ *                                product area). The
+ *                                near-miss records are the
+ *                                within-cluster distractors
+ *                                the `nearMissCurrentCluster`
+ *                                label exercises.
+ *   - "adversarial-paraphrase-twin" — a labeled record
+ *                                that paraphrases a current
+ *                                cluster record with
+ *                                deliberately LOW
+ *                                lexical-overlap vocabulary.
+ *                                The twin is the corpus-
+ *                                side anchor for the
+ *                                `adversarialParaphrase`
+ *                                label: a positive query
+ *                                that targets the twin has
+ *                                to find the right
+ *                                paraphrase, not a more
+ *                                lexically obvious current
+ *                                record in the same
+ *                                cluster.
+ *   - "adversarial-temporal-current-vs-previous" — a
+ *                                labeled record that pairs
+ *                                a CURRENT fact with a
+ *                                NEAR-MISS / PREVIOUS fact
+ *                                in the same cluster, so a
+ *                                "current vs previous"
+ *                                temporal query has to
+ *                                distinguish them by
+ *                                semantic detail (not by
+ *                                lexical rarity).
+ *   - "adversarial-false-premise-anchor" — a labeled
+ *                                record that mentions a
+ *                                NEAR-MISS tool that the
+ *                                corpus does NOT
+ *                                officially use. The
+ *                                anchor is the
+ *                                corpus-side co-occurrence
+ *                                surface for the new
+ *                                "OOD entity not in the
+ *                                legacy token list"
+ *                                no-answer queries: a
+ *                                no-answer query that
+ *                                mentions the near-miss
+ *                                tool will share tokens
+ *                                with the anchor and
+ *                                become a labeled
+ *                                confabulation pressure.
+ *   - "adversarial-orientation-extension" — a labeled
+ *                                record that extends an
+ *                                existing orientation
+ *                                cluster (e.g. an
+ *                                additional CI extension
+ *                                detail) so orientation
+ *                                queries can test the
+ *                                "newer" record while
+ *                                still having the older
+ *                                record as a near-miss
+ *                                distractor.
+ *   - "adversarial-multi-hop-bridge" — a labeled
+ *                                record that is the
+ *                                MISSING BRIDGE in a
+ *                                multi-hop query: a
+ *                                query that needs a
+ *                                fact from cluster A
+ *                                AND a fact from
+ *                                cluster B can only
+ *                                succeed if the
+ *                                bridge record is
+ *                                surfaced. The bridge
+ *                                is the corpus-side
+ *                                anchor for the
+ *                                "multi-hop with a
+ *                                near-miss distractor
+ *                                on one hop" query.
  *
  * Each record has:
  *   - `id`       — stable, positive integer. Used as the expected id
@@ -83,10 +184,10 @@ export interface BenchmarkMemoryRecord {
  * The benchmark corpus. Stable order. IDs are dense and
  * sequential (1..N) so failure reports can show the same id a
  * query expected and what came back. The corpus is the
- * expanded checkpoint of 100 records, 25 topical clusters of
- * 4 records each (see the new clusters below). The exact
- * record count is part of the benchmark contract; tests pin a
- * minimum size and a per-family distribution.
+ * adversarial-expansion checkpoint of 132 records, 33 topical
+ * clusters of 4 records each (see the new clusters below).
+ * The exact record count is part of the benchmark contract;
+ * tests pin a minimum size and a per-family distribution.
  */
 export const BENCHMARK_RECORDS: BenchmarkMemoryRecord[] = [
   // -------------------------------------------------------------------------
@@ -934,5 +1035,343 @@ export const BENCHMARK_RECORDS: BenchmarkMemoryRecord[] = [
     summary:
       "Test files are co-located with the source file they cover; integration tests live under tests/ and run as part of the default CI job.",
     tags: ["testing", "layout", "convention"],
+  },
+
+  // -------------------------------------------------------------------------
+  // Cluster 26: adversarial-conflict (4) — labeled records
+  // that DELIBERATELY contradict a current cluster fact so
+  // the conflict/contradiction is visible in the corpus.
+  // The records are NOT marked "wrong" in storage (the
+  // benchmark fixture has no notion of a "wrong" record);
+  // they are EXTRA records that share many tokens with a
+  // current fact but assert a different conclusion. A
+  // paraphrase or temporal query that has a clean
+  // current-truth target will, on this cluster, see the
+  // conflict record as a near-miss distractor. The
+  // cluster pairs deliberately: (101, 102) vs. the
+  // current cluster-8 / cluster-22 facts; (103, 104) vs.
+  // the current cluster-9 / cluster-18 facts.
+  // -------------------------------------------------------------------------
+  {
+    id: 101,
+    kind: "fact",
+    summary:
+      "API keys are stored in the .cortex/secrets.json file with a chmod 600 permission; the file is gitignored but is the source of truth at runtime.",
+    tags: ["adversarial", "conflict", "security", "secrets"],
+  },
+  {
+    id: 102,
+    kind: "decision",
+    summary:
+      "The HTTP client logs the full auth credential header on a 401 so on-call has the key shape for an auth-bypass investigation.",
+    tags: ["adversarial", "conflict", "http", "sanitization"],
+  },
+  {
+    id: 103,
+    kind: "decision",
+    summary:
+      "Releases are cut from a long-lived release branch on Thursdays; the release branch is rebased onto main weekly and hotfixes are cherry-picked onto the release branch.",
+    tags: ["adversarial", "conflict", "release", "process"],
+  },
+  {
+    id: 104,
+    kind: "fact",
+    summary:
+      "The retrieval layer uses a single pass over summaries with no re-ranking; the design predates the current re-rank-before-synthesis layout.",
+    tags: ["adversarial", "conflict", "retrieval", "history"],
+  },
+
+  // -------------------------------------------------------------------------
+  // Cluster 27: adversarial-superseded (4) — labeled records
+  // that represent a SUPERSEDED version of a current fact,
+  // paired with the current fact in the corpus. Each
+  // superseded record has a CLEARER lexical hook than the
+  // legacy records 21..24 / 57..60 / 93..96 so it is the
+  // deliberate "old fact that is lexically stronger than
+  // the current fact" temporal trap. The trap is what
+  // the new "temporal stale-fact trap" queries exercise.
+  // -------------------------------------------------------------------------
+  {
+    id: 105,
+    kind: "fact",
+    summary:
+      "As of last quarter, the project primary data store is Postgres 15; the migration to a newer major version is being scoped.",
+    tags: ["adversarial", "superseded", "postgres", "history"],
+  },
+  {
+    id: 106,
+    kind: "fact",
+    summary:
+      "Until recently the runtime was Node 20 with the legacy ESM loader; the team has since moved to Node 22 with the modern ESM resolver.",
+    tags: ["adversarial", "superseded", "node", "history"],
+  },
+  {
+    id: 107,
+    kind: "decision",
+    summary:
+      "Previously the controller accepted any provider output without validation; the current controller validates against a Zod schema before persisting.",
+    tags: ["adversarial", "superseded", "controller", "validation"],
+  },
+  {
+    id: 108,
+    kind: "fact",
+    summary:
+      "Earlier the safety classifier was a hard-coded blocklist; the current classifier is regex-based with a small allow-list for test scope.",
+    tags: ["adversarial", "superseded", "safety", "history"],
+  },
+
+  // -------------------------------------------------------------------------
+  // Cluster 28: adversarial-near-miss (4) — labeled records
+  // that are intentionally close to a current cluster but
+  // name a different specific fact (different team, different
+  // service, different product area). The near-miss
+  // records are the within-cluster distractors the
+  // `nearMissCurrentCluster` query label exercises. Each
+  // record is anchored to a current cluster so a paraphrase
+  // / exact / multi-hop query that should hit the current
+  // fact will also see the near-miss as a top-1 candidate.
+  // -------------------------------------------------------------------------
+  {
+    id: 109,
+    kind: "fact",
+    summary:
+      "The mobile team's primary data store is Postgres 14 with a separate read replica; the platform team uses Postgres 16 in a different cluster.",
+    tags: ["adversarial", "near-miss", "postgres", "team"],
+  },
+  {
+    id: 110,
+    kind: "decision",
+    summary:
+      "The web team's MCP transport is a community HTTP bridge; the platform team's MCP transport is the official stdio SDK.",
+    tags: ["adversarial", "near-miss", "mcp", "transport"],
+  },
+  {
+    id: 111,
+    kind: "fact",
+    summary:
+      "The data team's on-call rotation is shared with the analytics team and handoff happens on Wednesdays at 14:00; the platform team handoff is on Mondays at 10:00.",
+    tags: ["adversarial", "near-miss", "oncall", "team"],
+  },
+  {
+    id: 112,
+    kind: "decision",
+    summary:
+      "The docs team's release cut schedule is bi-weekly on Fridays from a docs-only branch; the platform team cuts from main on Tuesdays.",
+    tags: ["adversarial", "near-miss", "release", "docs"],
+  },
+
+  // -------------------------------------------------------------------------
+  // Cluster 29: adversarial-paraphrase-twin (4) — labeled
+  // records that paraphrase a current cluster record with
+  // deliberately LOW lexical-overlap vocabulary. The twin
+  // is the corpus-side anchor for the `adversarialParaphrase`
+  // label: a positive query that targets the twin has to
+  // find the right paraphrase, not a more lexically obvious
+  // current record in the same cluster. The twins are
+  // the additional paraphrase stress the new "deep
+  // positive paraphrases" queries target.
+  // -------------------------------------------------------------------------
+  {
+    id: 113,
+    kind: "fact",
+    summary:
+      "The project keeps its saved insights in a hidden folder at the repository root, in a single self-contained database file.",
+    tags: ["adversarial", "paraphrase-twin", "storage", "sqlite"],
+  },
+  {
+    id: 114,
+    kind: "fact",
+    summary:
+      "Code change requests are expected to summarize the user-visible outcome in the title and to leave at least one substantive review note per nontrivial change.",
+    tags: ["adversarial", "paraphrase-twin", "review", "style"],
+  },
+  {
+    id: 115,
+    kind: "decision",
+    summary:
+      "The model provider tries the primary endpoint first; on a transient failure it falls back to the secondary and returns a typed result the controller can switch on.",
+    tags: ["adversarial", "paraphrase-twin", "provider", "routing"],
+  },
+  {
+    id: 116,
+    kind: "fact",
+    summary:
+      "Application observability is exposed through a separate metrics port; the main protocol port is reserved for the protocol transport and is unchanged.",
+    tags: ["adversarial", "paraphrase-twin", "observability", "prometheus"],
+  },
+
+  // -------------------------------------------------------------------------
+  // Cluster 30: adversarial-temporal-current-vs-previous
+  // (4) — labeled records that pair a CURRENT fact with a
+  // NEAR-MISS / PREVIOUS fact in the same cluster, so a
+  // "current vs previous" temporal query has to distinguish
+  // them by semantic detail (not by lexical rarity). The
+  // pair is the corpus-side anchor for the new
+  // "distinguishing current from previous" temporal
+  // queries. The labels on the queries (`divergentTemporal`
+  // for the labeled gap, `nearMissCurrentCluster` for the
+  // current-vs-near-miss disambiguation) drive the fixture
+  // truth; the ranker sees both records and has to pick
+  // the current one.
+  // -------------------------------------------------------------------------
+  {
+    id: 117,
+    kind: "fact",
+    summary:
+      "The current primary data store is Postgres 16 with logical replication to a warm standby; the previous setup was Postgres 14 with a single hot standby.",
+    tags: ["adversarial", "current-vs-previous", "postgres", "history"],
+  },
+  {
+    id: 118,
+    kind: "decision",
+    summary:
+      "The current release cut is from main on Tuesdays; the previous cut was from a release branch on Thursdays with a weekly rebase.",
+    tags: ["adversarial", "current-vs-previous", "release", "process"],
+  },
+  {
+    id: 119,
+    kind: "fact",
+    summary:
+      "The current safety pipeline runs the classifier on every input before the controller; the previous pipeline ran the classifier on a sampled subset only.",
+    tags: ["adversarial", "current-vs-previous", "safety", "pipeline"],
+  },
+  {
+    id: 120,
+    kind: "fact",
+    summary:
+      "The current on-call handoff is on Mondays at 10:00 local time; the previous handoff was on Fridays at 16:00 local time.",
+    tags: ["adversarial", "current-vs-previous", "oncall", "schedule"],
+  },
+
+  // -------------------------------------------------------------------------
+  // Cluster 31: adversarial-false-premise-anchor (4) —
+  // labeled records that mention a NEAR-MISS tool the
+  // corpus does NOT officially use. The anchor is the
+  // corpus-side co-occurrence surface for the new "OOD
+  // entity not in the legacy token list" no-answer
+  // queries: a no-answer query that mentions the
+  // near-miss tool will share tokens with the anchor
+  // and become a labeled confabulation pressure. The
+  // four anchors are deliberately chosen to be CLOSE to
+  // an existing cluster (so the token overlap is real
+  // but the answer is still "no relevant memory") and
+  // are NOT in the existing `FALSE_PREMISE_TOKENS` /
+  // `OOD_ENTITY_TOKENS` lists in `query-shapes.ts` —
+  // that is the "new entity, not in the legacy list"
+  // requirement the brief asks for.
+  // -------------------------------------------------------------------------
+  {
+    id: 121,
+    kind: "fact",
+    summary:
+      "The team briefly evaluated a Prometheus sidecar called vector-exporter for the MCP server's metrics; the sidecar was not adopted and the project's metrics are exported directly via a Prometheus endpoint on a separate port.",
+    tags: ["adversarial", "false-premise-anchor", "observability", "sidecar"],
+  },
+  {
+    id: 122,
+    kind: "fact",
+    summary:
+      "A previous spike evaluated a Vector index for embeddings alongside SQLite; the team chose to keep the dependency surface small and the dense path runs in-memory only.",
+    tags: ["adversarial", "false-premise-anchor", "index", "vector"],
+  },
+  {
+    id: 123,
+    kind: "decision",
+    summary:
+      "The team has decided not to add a Kafka topic for cross-process event delivery; the project-local event bus is a single-process in-memory channel.",
+    tags: ["adversarial", "false-premise-anchor", "events", "kafka"],
+  },
+  {
+    id: 124,
+    kind: "fact",
+    summary:
+      "The project's deployment target is the team-managed cluster; the team does not run any portion of the service on AWS Lambda or any other serverless runtime.",
+    tags: ["adversarial", "false-premise-anchor", "deploy", "lambda"],
+  },
+
+  // -------------------------------------------------------------------------
+  // Cluster 32: adversarial-orientation-extension (4) —
+  // labeled records that EXTEND an existing orientation
+  // cluster (e.g. an additional CI extension detail) so
+  // orientation queries can test the "newer" record while
+  // still having the older record as a near-miss
+  // distractor. The cluster also includes a labeled
+  // "legacy distractor" record so the
+  // `nearMissCurrentCluster` orientation query has a
+  // pair of near-miss distractors to choose from.
+  // -------------------------------------------------------------------------
+  {
+    id: 125,
+    kind: "decision",
+    summary:
+      "The CI runs a nightly job that exercises the retrieval benchmark against the current corpus and publishes the headline numbers as a status badge in the project README.",
+    tags: ["adversarial", "orientation-extension", "ci", "benchmark"],
+  },
+  {
+    id: 126,
+    kind: "fact",
+    summary:
+      "The CI uploads a coverage delta to the team dashboard; coverage drops on changed lines of more than one percentage point fail the merge gate.",
+    tags: ["adversarial", "orientation-extension", "ci", "coverage"],
+  },
+  {
+    id: 127,
+    kind: "fact",
+    summary:
+      "The CI enforces the deterministic no-skip invariant: any test marked todo or skip on the default branch fails the build before the coverage report is generated.",
+    tags: ["adversarial", "orientation-extension", "ci", "policy"],
+  },
+  {
+    id: 128,
+    kind: "fact",
+    summary:
+      "The CI uses a matrix of Node 20 and Node 22 on Ubuntu for the test job; the team intentionally keeps the matrix narrow to keep the build predictable.",
+    tags: ["adversarial", "orientation-extension", "ci", "matrix"],
+  },
+
+  // -------------------------------------------------------------------------
+  // Cluster 33: adversarial-multi-hop-bridge (4) — labeled
+  // records that are the MISSING BRIDGE in a multi-hop
+  // query: a query that needs a fact from cluster A AND
+  // a fact from cluster B can only succeed if the bridge
+  // record is surfaced. The bridges are the corpus-side
+  // anchor for the "multi-hop with a near-miss
+  // distractor on one hop" query: each bridge is the
+  // single record that links two otherwise-disconnected
+  // clusters, and a near-miss distractor (a record that
+  // mentions one side of the bridge but not the other)
+  // is included in the same cluster so the multi-hop
+  // query has to surface the right bridge. The labeled
+  // "current-vs-previous" records above are the
+  // single-hop temporal near-miss; these bridges are the
+  // two-hop bridge near-miss.
+  // -------------------------------------------------------------------------
+  {
+    id: 129,
+    kind: "fact",
+    summary:
+      "The audit retention window is configured via CORTEX_AUDIT_RETENTION_DAYS and the audit log is consumed by the weekly on-call digest; the digest is posted to the team channel every Monday morning at 9:00 local time.",
+    tags: ["adversarial", "multi-hop-bridge", "security", "monitoring"],
+  },
+  {
+    id: 130,
+    kind: "fact",
+    summary:
+      "The provider rate-limit is read from CORTEX_PROVIDER_RATE_LIMIT and defaults to sixty requests per minute; the rate-limit interacts with the exponential-backoff retry on 429 that the provider adapter applies before giving up.",
+    tags: ["adversarial", "multi-hop-bridge", "provider", "rate-limit"],
+  },
+  {
+    id: 131,
+    kind: "fact",
+    summary:
+      "The recall tool returns at most DEFAULT_TOP_K (five) memories; the in-memory provider response cache is scoped to a single process and is not shared with the recall path, which always fetches fresh from the server.",
+    tags: ["adversarial", "multi-hop-bridge", "recall", "cache"],
+  },
+  {
+    id: 132,
+    kind: "fact",
+    summary:
+      "The MCP stdio transport multiplexes all requests over a single stdin and stdout channel; application logs go to stderr only and the protocol port is never written to outside of MCP protocol frames.",
+    tags: ["adversarial", "multi-hop-bridge", "agent", "stdio"],
   },
 ];

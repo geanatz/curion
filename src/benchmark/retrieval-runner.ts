@@ -3852,11 +3852,27 @@ export function runAbstentionPolicyFromBenchmarkReport(
   for (const p of perQuerySignals) {
     signalsByQueryId.set(p.queryId, p.signals);
   }
+  // Build the labels-by-queryId map from the fixture
+  // truth. The adversarial-expansion corpus sets the
+  // optional `labels` field on a subset of queries;
+  // the policy runner threads the labels through to
+  // the per-decision `queryLabels` so a reviewer can
+  // audit which labeled subset a per-query decision
+  // is associated with. The map is empty for queries
+  // without explicit labels (the backward-compatible
+  // default).
+  const labelsByQueryId = new Map<string, string[]>();
+  for (const q of queries) {
+    if (q.labels && q.labels.length > 0) {
+      labelsByQueryId.set(q.id, [...q.labels]);
+    }
+  }
   const result = runAbstentionPolicy({
     variant: variantLabel,
     evals,
     signalsByQueryId,
     config: args.config,
+    labelsByQueryId,
   });
   // Backfill the recordCount so the artifact is
   // self-describing without re-loading the corpus.
@@ -3888,11 +3904,23 @@ export function runAbstentionPolicyFromDenseReport(
   for (const p of perQuerySignals) {
     signalsByQueryId.set(p.queryId, p.signals);
   }
+  // Build the labels-by-queryId map from the fixture
+  // truth. Same shape as the sync path; see the
+  // matching comment in
+  // `runAbstentionPolicyFromBenchmarkReport` for the
+  // full rationale.
+  const labelsByQueryId = new Map<string, string[]>();
+  for (const q of BENCHMARK_QUERIES) {
+    if (q.labels && q.labels.length > 0) {
+      labelsByQueryId.set(q.id, [...q.labels]);
+    }
+  }
   const result = runAbstentionPolicy({
     variant: report.variant,
     evals,
     signalsByQueryId,
     config,
+    labelsByQueryId,
   });
   result.config.recordCount = BENCHMARK_RECORDS.length;
   return result;

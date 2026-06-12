@@ -396,6 +396,49 @@ export interface AbstentionSignals {
    * query ids.
    */
   isFalsePremiseLike: boolean;
+  /**
+   * Additive (adversarial-expansion): true iff the
+   * query is an `adversarialParaphrase` (per the
+   * explicit `labels` field when present) OR
+   * targets one of the paraphrase-twin records
+   * (113..116). The flag is the additive,
+   * backward-compatible channel for the
+   * adversarial-expansion paraphrases the brief
+   * targets (12 deep positive paraphrases, 4
+   * adversarial positive paraphrases with low
+   * lexical overlap, 2 paraphrases that resemble
+   * no-answer / false-premise wording). The flag is
+   * surfaced on the audit and policy artifacts so a
+   * reviewer can audit the paraphrase detector's
+   * coverage on the labeled subset.
+   */
+  isAdversarialParaphrase: boolean;
+  /**
+   * Additive (adversarial-expansion): true iff the
+   * query is a labeled divergent temporal query
+   * (per the explicit `labels` field when present)
+   * OR has `currentTruthIds.length <
+   * expectedIds.length` on the temporal family
+   * (the labeled divergent pattern). The
+   * adversarial-expansion corpus adds 5 labeled
+   * divergent cases (2 from the prior expanded
+   * checkpoint + 5 new in the expansion = 7
+   * total). The flag is surfaced on the audit
+   * and policy artifacts.
+   */
+  isDivergentTemporal: boolean;
+  /**
+   * Additive (adversarial-expansion): true iff the
+   * query is a labeled `nearMissCurrentCluster`
+   * (per the explicit `labels` field when present)
+   * OR targets one of the near-miss cluster
+   * records (109..112). The adversarial-expansion
+   * corpus adds 7 labeled near-miss cases (3
+   * paraphrases + 2 multi-hop + 2 orientation).
+   * The flag is surfaced on the audit and policy
+   * artifacts.
+   */
+  isNearMissCurrentCluster: boolean;
 }
 
 // ---------------------------------------------------------------------------
