@@ -1072,6 +1072,286 @@ dense-specific additions are:
   answers; the abstention decision is purely a
   retrieval signal.
 
+### Abstention-signal audit (benchmark-only)
+
+A separate opt-in **abstention-signal audit** studies
+how well simple retrieval-derived signals separate
+answerable from no-answer queries. It is a different
+tool from the calibration experiment: the calibration
+experiment picks the best (gate, variant) trade-off
+under a fixed rule; the audit measures how much
+*separability* the underlying signals carry at all.
+
+**Scope (benchmark-only):**
+- The audit does NOT modify the production
+  `recall(text)` behavior, the public MCP API, or
+  the existing benchmark / calibration report shapes.
+- It is a research artifact: a study of what
+  retrieval-derived signals could carry
+  abstention-decision information. The brief asks for
+  an honest answer, not a sale — if a signal is weak
+  on real data, the report says so.
+- The audit does NOT add a learned classifier or a
+  trained model. The signals are pure retrieval
+  diagnostics.
+
+**Why this is separate from calibration:**
+The calibration experiment is a *gate* study: given a
+candidate abstention gate (threshold / margin /
+ratio), what is the trade-off? The audit is a
+*signal* study: how well does each candidate signal
+distinguish answerable from no-answer queries in the
+first place? The audit's output feeds the
+calibration experiment's input: a signal that
+separates well is a candidate for the calibration
+sweep's gate family.
+
+**What the audit measures:**
+
+For each query, the audit attaches an
+`AbstentionSignals` block to the per-query eval. The
+block carries:
+
+- *Retrieval signals* — `topScore`, `top1Top2Gap`,
+  `top1Top2Ratio`, `returnedCount`.
+- *Hybrid contributor signals* (hybrid / hybrid-dense
+  only) — `agreementCount`, `minContributorRank`,
+  `maxContributorRank`, `meanContributorRank`,
+  `minContributorScore`, `maxContributorScore`,
+  `meanContributorScore`, `sourcePresence` (e.g.
+  `"LFV"` = all three contributors surfaced the
+  top-1, `"_V_"` = only the vector surfaced).
+- *Query-shape flags* (benchmark-only diagnostics,
+  NOT hardcoded to specific query ids) —
+  `isNoAnswerHardNegative` (no-answer query that
+  shares tokens with real records),
+  `isTemporalCurrent` (contains "current" / "now" /
+  "today"), `isNegationLike` (contains "not" / "no" /
+  "never"), `isOodEntityLike` (mentions a tool the
+  corpus does not have, sharing tokens with a legacy
+  record), `isParaphraseTrap` (family = paraphrase),
+  `isFalsePremiseLike` (no-answer query that mentions
+  a missing tool).
+
+For each signal, the audit computes:
+
+- **AUROC** for the "answerable vs no-answer" binary
+  task. AUROC 0.5 = uninformative; 1.0 = perfect
+  separation. The audit reports the AUROC in the
+  better of the two directions (raw signal or
+  negated signal); the `scoreIsHigherIsMorePositive`
+  flag tells the reviewer which direction won. A
+  signal that is HIGH for answerable (e.g. `topScore`)
+  has `scoreIsHigherIsMorePositive = false` because
+  the audit has to invert to detect no-answer.
+- **Risk-coverage curve data** — the
+  (coverage, confabulation rate) trade-off at every
+  candidate signal threshold.
+- **Coverage at fixed risk** (5%, 10%, 20%) — "at
+  most X% confabulation, how much of the corpus can
+  we keep?".
+- **Risk at fixed coverage** (50%, 80%, 95%) —
+  "at least Y% coverage, what is the minimum
+  confabulation?".
+- **Slice summaries** — the same per-signal metrics
+  scoped to a slice: "all", per-family
+  ("exact" / "paraphrase" / "temporal" / "multi-hop" /
+  "no-answer" / "orientation"), and per-shape
+  ("no-answer-easy" / "no-answer-hard" /
+  "temporal-divergent" / "temporal-non-divergent" /
+  "temporal-current" / "negation-like" /
+  "ood-entity-like" / "paraphrase-trap" /
+  "false-premise-like").
+- **Honest per-query examples** — the most / least
+  confident no-answer / positive queries, with their
+  full per-query signal block, so a reviewer can see
+  the most informative cases (the confabulations
+  that look like answers, the abstentions that look
+  like refusers).
+
+**How to run:**
+
+```sh
+# Default: hybrid (RRF) abstention audit, hashed-BoW control.
+npm run benchmark:retrieval:abstention-audit
+
+# Per-variant audits (sync, hashed-BoW control).
+npm run benchmark:retrieval:abstention-audit:lexical
+npm run benchmark:retrieval:abstention-audit:fts5
+npm run benchmark:retrieval:abstention-audit:vector
+
+# Dense audits, stub embedder (no model download).
+npm run benchmark:retrieval:abstention-audit:vector-dense
+
+# Real local MiniLM (first run downloads ~25MB).
+npm run benchmark:retrieval:abstention-audit:real
+npm run benchmark:retrieval:abstention-audit:hybrid-dense:real
+```
+
+**Headline reading on real data (100 records, 96
+queries, real `Xenova/all-MiniLM-L6-v2` embedder,
+hybrid-dense audit):**
+
+| Signal | AUROC | Direction | Coverage @ 5% risk | Coverage @ 10% risk | Coverage @ 20% risk |
+|---|---|---|---|---|---|
+| `meanContributorScore` | 0.831 | lower=positive | 45.8% | 62.5% | 93.8% |
+| `maxContributorScore` | 0.806 | lower=positive | 26.0% | 63.5% | 91.7% |
+| `minContributorScore` | 0.790 | lower=positive | 47.9% | 55.2% | 76.0% |
+| `topScore` | 0.741 | lower=positive | 27.1% | 60.4% | 89.6% |
+| `maxContributorRank` | 0.684 | higher=positive | n/a | n/a | n/a |
+| `meanContributorRank` | 0.668 | higher=positive | n/a | n/a | n/a |
+| `agreementCount` | 0.612 | lower=positive | n/a | n/a | n/a |
+| `top1Top2Gap` | 0.556 | lower=positive | n/a | n/a | n/a |
+| `top1Top2Ratio` | 0.502 | higher=positive | n/a | n/a | n/a |
+| `returnedCount` | 0.500 | higher=positive | n/a | n/a | n/a |
+
+**Honest reading:**
+
+- The strongest single signal is `meanContributorScore`
+  (AUROC 0.831). It is the mean of the per-source
+  raw scores (lexical / FTS5 / vector-dense) the
+  top-1 candidate received. A no-answer query that
+  confabulates tends to have ALL three contributors
+  return a candidate with a moderate-to-high raw
+  score, but the MEAN of those scores is LOWER than
+  the mean for an answerable query (because
+  answerable queries have at least one contributor
+  with a strong semantic match). The signal works
+  in the `lower=positive` direction (lower mean =
+  more likely no-answer).
+- `topScore` (the fused RRF score) is meaningfully
+  weaker (AUROC 0.741). The hybrid fusion's
+  contribution-distribution carries more separability
+  than the fused score alone.
+- `top1Top2Gap` / `top1Top2Ratio` are essentially
+  uninformative on this corpus (AUROC ~0.5). The
+  gap is small for both confabulating and matching
+  candidates; a single candidate often dominates.
+- `returnedCount` is exactly 0.5 — the ranker always
+  returns a non-empty top-K for no-answer queries
+  (this is the "0% TNR at the default threshold"
+  finding the calibration experiment already
+  documents). The signal carries no information.
+- At 5% confabulation, the strongest signal keeps
+  ~46% of the corpus. At 10% it keeps ~63%. At
+  20% it keeps ~94%. The trade-off is real but
+  not strong: a real abstention gate would still
+  let ~50% of no-answer queries through at 5%
+  FPR.
+- The per-family and per-shape slice AUROCs (the
+  numbers the brief asks for) show that the
+  headline AUROC is driven by the
+  answerable-vs-no-answer split, NOT by intra-family
+  differences. The strongest intra-family separation
+  is on the `no-answer` family (trivially: the
+  query family IS the label) and on the
+  `false-premise-like` shape (the no-answer subset
+  that mentions a missing tool).
+
+**How to interpret the audit:**
+
+```
+AUROC 0.5  = uninformative (the signal does not
+             separate answerable from no-answer).
+AUROC 0.6  = weak (a useful marginal feature; not a
+             reliable gate on its own).
+AUROC 0.7  = moderate (a reasonable gate candidate;
+             pair with another signal for production).
+AUROC 0.8+ = strong (a good signal; still far from
+             perfect — the residual FPR is non-zero).
+```
+
+The "coverage @ X% risk" number is the headline
+trade-off: "at most X% confabulation rate, how much
+of the corpus can we keep?". A low number means the
+signal is weak at that risk target; a high number
+(>= 80%) means the signal is useful at that target.
+
+The "risk @ Y% coverage" number is the symmetric
+reading: "at least Y% coverage, what is the minimum
+confabulation?". A low number means the signal is
+strong; a high number means the signal lets the
+ranker be confident at the cost of confabulation.
+
+A signal that works on the `no-answer-hard` slice
+but NOT on the `all` slice is a hard-negative
+detector, not a general abstention signal. The
+audit's per-shape slice table makes this distinction
+visible: if the strongest signal on `all` is
+`topScore` but the strongest signal on
+`no-answer-hard` is `meanContributorScore`, the
+`meanContributorScore` is the more useful
+hard-negative detector.
+
+**Limitations:**
+
+- The audit is benchmark-only. The abstention gates
+  it surfaces are a research artifact, not a
+  deployment policy. They are NOT wired into the
+  production `recall(text)` controller. Wiring the
+  gates in is a separate, later phase that would
+  require a production-impact analysis the
+  benchmark-only pass intentionally does not
+  perform.
+- The audit's per-query `AbstentionSignals` block is
+  populated only by the abstention-audit runner. The
+  regular single-variant / comparison / calibration
+  reports leave the field `undefined` so a reviewer
+  can distinguish "the audit ran on this row" from
+  "this row was generated by the regular benchmark".
+  This is the contract: a regular benchmark run
+  produces the same artifact it produced before
+  this phase, byte-for-byte.
+- The hybrid contributor signals are populated only
+  on the `hybrid` / `hybrid-dense` audits. On a
+  single-variant audit the contributor signals are
+  `null` and the agreement count is 0; the
+  per-source rank / score signals are undefined for
+  those signals.
+- The query-shape flags are simple regex / set-
+  membership heuristics. They WILL miss some cases
+  (e.g. a paraphrase that uses a synonym the
+  detector does not know) and WILL fire on a query
+  that happens to share a token with a real record
+  but is not actually a hard-negative. The audit
+  reports the count of queries that fired each flag
+  so a reviewer can see the detector's effective
+  coverage.
+- The audit reports the AUROC in the better of the
+  two signal directions. A reviewer who wants the
+  raw direction's AUROC reads the
+  `aurocOtherDirection` field on the JSON artifact.
+- The "best" signal per slice is sorted by AUROC
+  descending; the sort is the same on every run.
+  A future audit could add a Pareto-frontier view
+  (TNR vs. regressions vs. hit@5 vs. F1@5).
+- The default `riskTargets` are `[0.05, 0.1, 0.2]`
+  and the default `coverageTargets` are
+  `[0.5, 0.8, 0.95]`. A reviewer who wants a
+  finer grid can pass an `AbstentionAuditConfig` to
+  the `runAbstentionAudit` function directly from a
+  Node script. The CLI does not currently expose
+  per-target tuning because the defaults cover the
+  common cases.
+
+**Compared to the calibration experiment:**
+
+| Aspect | Calibration | Audit |
+|---|---|---|
+| Question | "Which gate / variant is best?" | "Do any signals separate?" |
+| Output | Trade-off curve at one fixed gate | Per-signal AUROC + risk-coverage |
+| Pick rule | Maximize TNR delta, tie-break on smallest positive-regression count, then on largest hit@5 | None — every signal is reported |
+| Per-query granularity | Per-query diagnostic for the chosen gate | Per-query signal block for every query |
+| Slice granularity | Variant only | Variant + family + shape |
+| Honest reading | "This is the best gate" | "This signal is strong / weak / uninformative" |
+| Wired into controller? | No (research-only) | No (research-only) |
+
+The two artifacts are complementary: the
+calibration experiment tells a reviewer which gate
+to pick IF they trust the underlying signals; the
+audit tells a reviewer whether the underlying signals
+are worth trusting.
+
 ### Hybrid / RRF variant: scope, formula, and limitations
 
 - **Scope.** The hybrid variant is benchmark-only. It runs
@@ -1233,6 +1513,44 @@ npm run benchmark:retrieval:calibrate:vector
 # value.
 npx tsx src/benchmark/retrieval-runner.ts --variant all --calibrate
 ```
+
+### Abstention-signal audit (benchmark-only)
+
+A separate opt-in **abstention-signal audit** studies
+how well simple retrieval-derived signals separate
+answerable from no-answer queries. The audit's CLI
+flag is `--abstention-audit`; it can be combined
+with `--variant` to pick the ranker underneath.
+
+```sh
+# Default: hybrid (RRF) audit, hashed-BoW control.
+npm run benchmark:retrieval:abstention-audit
+
+# Per-variant sync audits.
+npm run benchmark:retrieval:abstention-audit:lexical
+npm run benchmark:retrieval:abstention-audit:fts5
+npm run benchmark:retrieval:abstention-audit:vector
+
+# Dense audit, stub embedder (no model download).
+npm run benchmark:retrieval:abstention-audit:vector-dense
+
+# Real local MiniLM (first run downloads ~25MB).
+npm run benchmark:retrieval:abstention-audit:real
+npm run benchmark:retrieval:abstention-audit:hybrid-dense:real
+
+# Underlying CLI flag: --abstention-audit enables the
+# experiment; the audit consumes the per-query evals
+# of the chosen variant.
+npx tsx src/benchmark/retrieval-runner.ts --variant hybrid --abstention-audit
+```
+
+The audit writes a single
+`retrieval-abstention-audit-*.json` artifact under
+`.cortex/benchmark/`. See the
+[Abstention-signal audit (benchmark-only)](#abstention-signal-audit-benchmark-only)
+section above for the interpretation guide.
+
+
 
 The calibration report writes a single
 `retrieval-calibration-*.json` artifact under

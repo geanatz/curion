@@ -41,6 +41,14 @@
     "benchmark:retrieval:hybrid-dense:real": "tsx src/benchmark/retrieval-runner.ts --variant hybrid-dense --embedder transformersjs",
     "benchmark:retrieval:all-dense": "tsx src/benchmark/retrieval-runner.ts --variant all-dense --embedder stub-dense",
     "benchmark:retrieval:all-dense:real": "tsx src/benchmark/retrieval-runner.ts --variant all-dense --embedder transformersjs",
+    "benchmark:retrieval:abstention-audit": "tsx src/benchmark/retrieval-runner.ts --variant hybrid --abstention-audit",
+    "benchmark:retrieval:abstention-audit:real": "tsx src/benchmark/retrieval-runner.ts --variant hybrid-dense --embedder transformersjs --abstention-audit",
+    "benchmark:retrieval:abstention-audit:lexical": "tsx src/benchmark/retrieval-runner.ts --variant lexical --abstention-audit",
+    "benchmark:retrieval:abstention-audit:fts5": "tsx src/benchmark/retrieval-runner.ts --variant fts5 --abstention-audit",
+    "benchmark:retrieval:abstention-audit:vector": "tsx src/benchmark/retrieval-runner.ts --variant vector --abstention-audit",
+    "benchmark:retrieval:abstention-audit:vector-dense": "tsx src/benchmark/retrieval-runner.ts --variant vector-dense --embedder stub-dense --abstention-audit",
+    "benchmark:retrieval:abstention-audit:vector-dense:real": "tsx src/benchmark/retrieval-runner.ts --variant vector-dense --embedder transformersjs --abstention-audit",
+    "benchmark:retrieval:abstention-audit:hybrid-dense:real": "tsx src/benchmark/retrieval-runner.ts --variant hybrid-dense --embedder transformersjs --abstention-audit",
     "test:dense-live": "node --import tsx --test tests/_helpers/retrieval-dense-vector-live.test.ts"
   },
   "engines": {
