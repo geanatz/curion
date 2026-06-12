@@ -719,6 +719,25 @@ export interface AuditSlice {
   total: number;
   /** Number of no-answer queries in the slice. */
   noAnswerCount: number;
+  /**
+   * `true` iff the slice is single-class: it contains
+   * ONLY answerable queries (label = 0) or ONLY
+   * no-answer queries (label = 1). A single-class
+   * slice has no positive / negative pairs to rank
+   * against, so the per-signal AUROC is the
+   * "uninformative prior" (`0.5`) by definition
+   * (the math is well-defined but the number carries
+   * no information). The JSON artifact keeps the
+   * documented `0.5` AUROC for backward compatibility
+   * (so existing consumers that key on the value do
+   * not break), and the human report renders
+   * `n/a` in place of `0.500` so a reviewer is not
+   * misled into reading a real signal where there is
+   * only an undefined prior. The flag is the bridge:
+   * the formatter can render `n/a` without changing
+   * the on-disk AUROC value.
+   */
+  singleClass: boolean;
   /** Per-signal AUROC for the slice. */
   signalResults: AuditSignalResult[];
 }
@@ -755,11 +774,21 @@ export function auditSlice(
   }
   let noAnswerCount = 0;
   for (const l of labels) if (l === 1) noAnswerCount += 1;
+  // A slice is "single-class" iff it contains only
+  // answerable queries (noAnswerCount === 0) or only
+  // no-answer queries (noAnswerCount === total). In
+  // either case the AUROC is the "uninformative prior"
+  // (0.5) by definition; the on-disk artifact still
+  // emits that value (so existing consumers do not
+  // break), and the human report renders `n/a`.
+  const singleClass =
+    noAnswerCount === 0 || noAnswerCount === labels.length;
   return {
     name,
     description,
     total: labels.length,
     noAnswerCount,
+    singleClass,
     signalResults,
   };
 }

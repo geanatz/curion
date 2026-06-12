@@ -1003,4 +1003,159 @@ test("abstention audit: auditSlice is a thin wrapper that emits AUDIT_SIGNAL_NAM
     assert.equal(typeof s.scoreIsHigherIsMorePositive, "boolean");
     assert.equal(typeof s.aurocOtherDirection, "number");
   }
+  // A mixed-class slice is NOT single-class.
+  assert.equal(slice.singleClass, false);
+});
+
+test("abstention audit: auditSlice flags singleClass and the report renders n/a for those slices", () => {
+  // Build a tiny per-query array that produces at
+  // least one single-class slice (all-positive) and
+  // one mixed-class slice. The single-class slice
+  // must:
+  //   1. Be flagged `singleClass: true` on the JSON
+  //      artifact (so a consumer can tell the AUROC
+  //      prior from a real reading).
+  //   2. Keep the documented `0.5` AUROC value on the
+  //      JSON (so existing consumers that key on the
+  //      value do not break).
+  //   3. Render `n/a` in the human report (per-family
+  //      / per-shape tables) so a reviewer is not
+  //      misled into reading a real signal where there
+  //      is only an undefined prior.
+  const mkSignals = (topScore: number): AbstentionSignals => ({
+    topScore,
+    top1Top2Gap: 0.1,
+    top1Top2Ratio: 1.5,
+    returnedCount: 3,
+    agreementCount: 1,
+    minContributorRank: 1,
+    maxContributorRank: 5,
+    meanContributorRank: 3,
+    minContributorScore: 0.3,
+    maxContributorScore: 0.7,
+    meanContributorScore: 0.5,
+    sourcePresence: "L__",
+    isNoAnswerHardNegative: false,
+    isTemporalCurrent: false,
+    isNegationLike: false,
+    isOodEntityLike: false,
+    isParaphraseTrap: false,
+    isFalsePremiseLike: false,
+  });
+  // All-positive slice: 4 queries, labels all 0.
+  const allPosSignals = [0.8, 0.7, 0.6, 0.5].map(mkSignals);
+  const allPosLabels: Array<0 | 1> = [0, 0, 0, 0];
+  const allPosSlice = auditSlice(
+    "all-positive",
+    "synthetic single-class slice (all answerable)",
+    allPosSignals,
+    allPosLabels,
+  );
+  assert.equal(allPosSlice.singleClass, true);
+  // JSON still emits the documented 0.5 AUROC.
+  for (const s of allPosSlice.signalResults) {
+    assert.equal(s.auroc, 0.5);
+  }
+  // All-no-answer slice: 4 queries, labels all 1.
+  const allNoAnsSignals = [0.05, 0.04, 0.03, 0.02].map(mkSignals);
+  const allNoAnsLabels: Array<0 | 1> = [1, 1, 1, 1];
+  const allNoAnsSlice = auditSlice(
+    "all-no-answer",
+    "synthetic single-class slice (all no-answer)",
+    allNoAnsSignals,
+    allNoAnsLabels,
+  );
+  assert.equal(allNoAnsSlice.singleClass, true);
+  for (const s of allNoAnsSlice.signalResults) {
+    assert.equal(s.auroc, 0.5);
+  }
+  // Mixed-class slice: not single-class.
+  const mixedSignals = [0.8, 0.05, 0.7, 0.04].map(mkSignals);
+  const mixedLabels: Array<0 | 1> = [0, 1, 0, 1];
+  const mixedSlice = auditSlice(
+    "mixed",
+    "synthetic mixed-class slice",
+    mixedSignals,
+    mixedLabels,
+  );
+  assert.equal(mixedSlice.singleClass, false);
+  // The mixed slice should NOT have AUROC = 0.5 for
+  // topScore (it has a real separation).
+  const topScore = mixedSlice.signalResults.find(
+    (s) => s.signal === "topScore",
+  );
+  assert.ok(topScore);
+  assert.notEqual(topScore!.auroc, 0.5);
+  // Now build a report with a single-class per-family
+  // slice and a mixed per-family slice, and assert
+  // the human report renders `n/a` for the single-
+  // class row and a numeric AUROC for the mixed row.
+  const perQuery = [
+    // Mixed per-family slice: family "exact" with 2
+    // positives and 2 no-answers.
+    { queryId: "a", family: "exact", isPositive: true, signals: mkSignals(0.8) },
+    { queryId: "b", family: "exact", isPositive: true, signals: mkSignals(0.7) },
+    { queryId: "c", family: "exact", isPositive: false, signals: mkSignals(0.05) },
+    { queryId: "d", family: "exact", isPositive: false, signals: mkSignals(0.04) },
+    // Single-class per-family slice: family
+    // "no-answer" with 2 no-answers and 0 positives.
+    { queryId: "e", family: "no-answer", isPositive: false, signals: mkSignals(0.03) },
+    { queryId: "f", family: "no-answer", isPositive: false, signals: mkSignals(0.02) },
+  ];
+  const slices = buildSlices(perQuery, {});
+  const report = {
+    generatedAt: "2026-06-12T00:00:00.000Z",
+    config: {
+      recordCount: 0,
+      queryCount: perQuery.length,
+      total: perQuery.length,
+      noAnswerCount: 4,
+      positiveCount: 2,
+      riskTargets: [0.05, 0.1, 0.2],
+      coverageTargets: [0.5, 0.8, 0.95],
+    },
+    slices,
+    allSlices: [slices[0]!],
+    perQueryExamples: {
+      mostConfidentNoAnswer: [],
+      leastConfidentPositive: [],
+      leastConfidentNoAnswer: [],
+      mostConfidentPositive: [],
+    },
+    perQuerySignals: perQuery,
+  };
+  const exactSlice = slices.find((s) => s.name === "family:exact");
+  const noAnsSlice = slices.find((s) => s.name === "family:no-answer");
+  assert.ok(exactSlice);
+  assert.ok(noAnsSlice);
+  assert.equal(exactSlice!.singleClass, false);
+  assert.equal(noAnsSlice!.singleClass, true);
+  // JSON artifact preserves the documented 0.5 on the
+  // single-class slice (backward compat for
+  // consumers).
+  for (const s of noAnsSlice!.signalResults) {
+    assert.equal(s.auroc, 0.5);
+  }
+  // Human report renders `n/a` for the single-class
+  // row and a numeric AUROC for the mixed row.
+  const out = formatAbstentionAuditReport(report);
+  // The per-family table has one row per family; the
+  // single-class `no-answer` row should have `n/a`
+  // in place of the AUROC and coverage@5%risk cells.
+  const noAnsLine = out
+    .split("\n")
+    .find((l) => l.includes("no-answer") && l.includes("single-class slice"));
+  assert.ok(
+    noAnsLine,
+    `expected a single-class slice marker line for family:no-answer, got:\n${out}`,
+  );
+  assert.match(noAnsLine!, /\bn\/a\b/);
+  // The mixed `exact` row should have a numeric AUROC
+  // and should NOT carry the single-class marker.
+  const exactLine = out
+    .split("\n")
+    .find((l) => /^\s*exact\s/.test(l));
+  assert.ok(exactLine, "expected a per-family row for exact");
+  assert.doesNotMatch(exactLine!, /single-class slice/);
+  assert.match(exactLine!, /\b\d+\.\d{3}\b/);
 });

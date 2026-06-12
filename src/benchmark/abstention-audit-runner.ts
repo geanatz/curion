@@ -659,6 +659,21 @@ export function formatAbstentionAuditReport(
     );
     const best = sortedSliceSignals[0];
     if (!best) continue;
+    // A single-class slice has no positive / negative
+    // pairs to rank against, so the AUROC is the
+    // uninformative prior (0.5) by definition. Render
+    // `n/a` in the human report so a reviewer is not
+    // misled into reading a real signal where there is
+    // only an undefined prior. The on-disk JSON
+    // artifact keeps the documented 0.5 value (with a
+    // `singleClass: true` flag the formatter uses to
+    // make this decision).
+    if (slice.singleClass) {
+      lines.push(
+        `  ${slice.name.replace("family:", "").padEnd(22)} ${String(slice.total).padStart(3)}   ${String(slice.noAnswerCount).padStart(5)}   ${best.signal.padEnd(12)}     n/a            n/a  (single-class slice)`,
+      );
+      continue;
+    }
     const cov5 = best.coverageAtRisk.find((c) =>
       Math.abs(c.riskTarget - 0.05) < 1e-9,
     )?.coverage ?? 0;
@@ -683,6 +698,16 @@ export function formatAbstentionAuditReport(
     );
     const best = sortedSliceSignals[0];
     if (!best) continue;
+    // See the per-family block above for the
+    // rationale: a single-class slice has no AUROC
+    // signal; render `n/a` so a reviewer can tell the
+    // prior from a real reading.
+    if (slice.singleClass) {
+      lines.push(
+        `  ${slice.name.padEnd(22)} ${String(slice.total).padStart(3)}   ${String(slice.noAnswerCount).padStart(5)}   ${best.signal.padEnd(12)}     n/a            n/a  (single-class slice)`,
+      );
+      continue;
+    }
     const cov5 = best.coverageAtRisk.find((c) =>
       Math.abs(c.riskTarget - 0.05) < 1e-9,
     )?.coverage ?? 0;

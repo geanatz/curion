@@ -1202,6 +1202,7 @@ hybrid-dense audit):**
 | `meanContributorRank` | 0.668 | higher=positive | n/a | n/a | n/a |
 | `agreementCount` | 0.612 | lower=positive | n/a | n/a | n/a |
 | `top1Top2Gap` | 0.556 | lower=positive | n/a | n/a | n/a |
+| `minContributorRank` | 0.515 | lower=positive | n/a | n/a | n/a |
 | `top1Top2Ratio` | 0.502 | higher=positive | n/a | n/a | n/a |
 | `returnedCount` | 0.500 | higher=positive | n/a | n/a | n/a |
 
@@ -1239,14 +1240,27 @@ hybrid-dense audit):**
   let ~50% of no-answer queries through at 5%
   FPR.
 - The per-family and per-shape slice AUROCs (the
-  numbers the brief asks for) show that the
-  headline AUROC is driven by the
-  answerable-vs-no-answer split, NOT by intra-family
-  differences. The strongest intra-family separation
-  is on the `no-answer` family (trivially: the
-  query family IS the label) and on the
-  `false-premise-like` shape (the no-answer subset
-  that mentions a missing tool).
+  numbers the brief asks for) are reported, but
+  on a single-variant corpus most per-family and
+  per-shape slices are single-class (e.g. the
+  `exact` family contains only answerable
+  queries; the `no-answer` family contains only
+  no-answer queries; the `no-answer-easy` shape
+  contains only no-answer queries). A single-class
+  slice has no positive/negative pairs to rank
+  against, so the AUROC is the uninformative
+  prior (0.5) by definition; the human report
+  renders `n/a` for those rows so a reviewer can
+  tell the prior from a real reading. The
+  on-disk JSON artifact still carries the
+  documented `0.5` AUROC (so existing consumers
+  that key on the value do not break) and adds a
+  `singleClass: true` flag the formatter uses to
+  decide between `0.500` and `n/a`. The headline
+  AUROC is driven by the answerable-vs-no-answer
+  split on the `all` slice (which IS mixed-class
+  on the real corpus), NOT by intra-family
+  differences.
 
 **How to interpret the audit:**
 
