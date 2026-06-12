@@ -562,6 +562,15 @@ test("vector variant: only the benchmark runner imports the vector module", () =
     path.join("benchmark", "retrieval-runner.ts"),
     path.join("benchmark", "variants", "vector.ts"),
     path.join("benchmark", "variants", "hybrid.ts"),
+    // The dense vector module composes the existing
+    // cosine similarity helper from the vector module.
+    // It is a benchmark-only consumer, in the same
+    // variants directory. The whitelist is for the
+    // "no production import" contract; the dense
+    // variant lives next to the hashed-BoW control and
+    // shares its math.
+    path.join("benchmark", "variants", "dense-vector.ts"),
+    path.join("benchmark", "variants", "dense-embedder.ts"),
   ]);
   function walk(dir: string): string[] {
     const out: string[] = [];

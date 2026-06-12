@@ -520,11 +520,12 @@ edge case.
 
 ## Retrieval benchmarks (current state)
 
-The benchmark harness supports four retrieval variants. The
-lexical variant is the production baseline; the FTS5, vector,
-and hybrid (RRF) variants are **benchmark-only comparison
-points** — they are not wired into the production `recall(text)`
-controller and the public MCP API is unchanged.
+The benchmark harness supports six retrieval variants. The
+lexical variant is the production baseline; the FTS5,
+vector, hybrid (RRF), vector-dense, and hybrid-dense
+variants are **benchmark-only comparison points** — they
+are not wired into the production `recall(text)` controller
+and the public MCP API is unchanged.
 
 Implemented variants:
 
@@ -539,7 +540,9 @@ Implemented variants:
   embedder (ONNX, sentence-transformers, etc.) can be
   plugged in by passing a custom `embedder` to
   `rankVector` or the runner; the default embedder is
-  dependency-free and CI-stable.
+  dependency-free and CI-stable. The `vector` variant is
+  preserved as a deterministic control for the
+  `vector-dense` variant below.
 - `hybrid` — benchmark-only `rankHybrid` (Reciprocal Rank
   Fusion over lexical / FTS5 / vector). See
   `src/benchmark/variants/hybrid.ts`. RRF fuses the three
@@ -549,6 +552,22 @@ Implemented variants:
   `k ∈ {20, 60, 100}`. The variant is **rank-only** and does
   not introduce an abstention gate of its own; calibration
   of the fusion is a future phase.
+- `vector-dense` — benchmark-only `rankDenseVectorAsync`
+  (cosine similarity over a real local dense embedding
+  via a pluggable `DenseEmbedder`). The default
+  embedder is a deterministic stub
+  (`StubDeterministicDenseEmbedder`); the
+  `transformersjs` backend runs a real local ONNX model
+  (`Xenova/all-MiniLM-L6-v2`, quantized, 384-dim) via
+  `@xenova/transformers`. See
+  `src/benchmark/variants/dense-embedder.ts` and
+  `src/benchmark/variants/dense-vector.ts`.
+- `hybrid-dense` — benchmark-only `rankHybridAsync`
+  (RRF over lexical / FTS5 / `vector-dense`).
+  Asynchronous, async-only entry point. The
+  contributor's source label on the diagnostic is
+  `vector-dense` so a reviewer can see which embedder
+  produced each rank-1 hit.
 
 Not yet implemented (placeholders):
 
@@ -594,6 +613,210 @@ Not yet implemented (placeholders):
   the default threshold of 0 is a known limitation of the
   default; callers that need abstention should pass a
   positive threshold or extend the runner.
+
+### Dense embedding variant (`vector-dense` / `hybrid-dense`)
+
+The dense phase adds a **pluggable real local
+semantic-embedding backend** behind the existing
+`VectorEmbedder` seam. The architecture is the same as
+the existing four sync variants: a benchmark-only
+comparison point, no production path or MCP API change,
+source-tree guards pin the whitelist, and the existing
+`vector` (hashed-BoW) variant is preserved as a control.
+
+#### Why a real local embedder
+
+The hashed-BoW control is a useful, CI-stable baseline
+but it is fundamentally a token-overlap ranker in dense
+disguise: two texts that share tokens share vector
+components, two texts that don't share tokens
+decorrelate. A real semantic embedder captures
+paraphrase / synonym / topic-level similarity that
+token overlap misses. The benchmark uses
+[`@xenova/transformers`](https://github.com/xenova/transformers.js)
+(v2.17+) for the local ONNX forward pass:
+
+- The library runs ONNX models entirely on the local
+  machine (CPU; no GPU required). The model is
+  downloaded once from the Hugging Face CDN and cached
+  on disk.
+- The default pinned model is
+  `Xenova/all-MiniLM-L6-v2` (quantized, 384-dim,
+  ~25MB cached, ~700ms first-load on a modern CPU).
+  The model is a sentence-transformers MiniLM; the
+  quantized form is bit-deterministic for a fixed
+  input and a fixed runtime.
+- The architecture is **local-only**: no external API,
+  no key, no remote inference. The first-run model
+  download is the only network call and it is to the
+  Hugging Face CDN, the same fetch any first-run user
+  of the library would do.
+
+#### Embedder interface and metadata
+
+The `DenseEmbedder` interface in
+`src/benchmark/variants/dense-embedder.ts` is the
+stable contract. Every embedder carries a
+`metadata` block on the report:
+
+```json
+"config": {
+  "embeddingBackend": {
+    "backend":   "transformersjs",
+    "modelId":   "Xenova/all-MiniLM-L6-v2",
+    "dim":       384,
+    "quantized": true,
+    "runtimeVersion": "2.17.2",
+    "status":    "ready",
+    "loadMs":    898,
+    "embedMs":   20702,
+    "embedCount": 3294,
+    "cacheDir":  "<cwd>/.cortex/transformers-cache"
+  }
+}
+```
+
+`status` distinguishes:
+- `"ready"` — the embedder actually executed the
+  queries / corpus during the benchmark.
+- `"skipped"` — the runner was configured with
+  `--dense-skip` and the embedder was not invoked.
+- `"error"` — the embedder failed at construction or
+  first use; the runner falls back to the deterministic
+  stub so the report shape is preserved. The error
+  message is captured on `errorMessage`.
+
+The same metadata is on the `--variant all-dense`
+comparison report and on each per-variant artifact
+(`retrieval-vector-dense-*.json` /
+`retrieval-hybrid-dense-*.json` /
+`retrieval-compare-dense-*.json`).
+
+#### Implementations
+
+- `StubDeterministicDenseEmbedder` — dependency-free
+  deterministic projection (feature hashing + L2
+  normalization). Default. CI-friendly, no model
+  download. Dim is configurable (`stub-dense:dim=128`).
+- `TransformersJsEmbedder` — the real local ONNX
+  embedder. Async `init()` builds the pipeline once;
+  sync `embed()` / async `embedBatch()` calls are
+  the hot path. Falls back to the stub when
+  `init()` fails or `--dense-skip` is set, so a
+  transient network failure does not break the
+  benchmark.
+- A custom embedder can be plugged in by implementing
+  the `DenseEmbedder` interface and passing it to
+  `runDenseRetrievalBenchmark({ denseEmbedder })`.
+  The benchmark does NOT take ownership of the
+  embedder's lifecycle.
+
+#### CLI flags
+
+| Flag | Default | Notes |
+|---|---|---|
+| `--variant vector-dense` / `hybrid-dense` / `all-dense` | `lexical` | Async dense variants. The sync `runRetrievalBenchmark` throws on them. |
+| `--embedder stub-dense` | `stub-dense` | Deterministic, no model download. |
+| `--embedder stub-dense:dim=N` | `dim=64` | Stub with a custom dim. |
+| `--embedder transformersjs` | `Xenova/all-MiniLM-L6-v2` (quantized) | Real local ONNX embedder. |
+| `--embedder transformersjs:model=<id>,quantized=true\|false` | — | Custom model id / quantization. |
+| `--dense-cache-dir <path>` | `<cwd>/.cortex/transformers-cache/` | Local model cache directory. |
+| `--dense-skip` | off | Skip live model execution; use the stub. Useful for CI without network. |
+
+#### How to run
+
+```sh
+# Deterministic stub (default; no model download; CI-friendly)
+npm run benchmark:retrieval:vector-dense
+npm run benchmark:retrieval:hybrid-dense
+npm run benchmark:retrieval:all-dense
+
+# Real local model (first run downloads ~25MB to .cortex/transformers-cache)
+npm run benchmark:retrieval:vector-dense:real
+npm run benchmark:retrieval:hybrid-dense:real
+npm run benchmark:retrieval:all-dense:real
+
+# Skip the model execution explicitly (deterministic-only)
+npm run benchmark:retrieval:vector-dense:skip
+```
+
+The first real run downloads the ONNX model to
+`<cwd>/.cortex/transformers-cache/` (override via
+`--dense-cache-dir <path>`). Subsequent runs use the
+local cache. No external API is called; the model is
+100% on-device.
+
+#### Measured results (60-record corpus, 54 queries)
+
+The real `transformersjs` MiniLM embedder was run on the
+60-record sanitized corpus and the 54 retrieval-only
+queries. Headline numbers from a real
+`benchmark:retrieval:all-dense:real` run (the artifact
+under `.cortex/benchmark/` is the source of truth):
+
+| Metric | vector (hashed-BoW) | vector-dense (real) | hybrid (RRF, hashed) | hybrid-dense (RRF, real) |
+|---|---|---|---|---|
+| rank1 (positive) | 26 / 44 = 59.1% | **32 / 44 = 72.7%** | 28 / 44 = 63.6% | **32 / 44 = 72.7%** |
+| hit@5 (positive) | 39 / 44 = 88.6% | **43 / 44 = 97.7%** | 39 / 44 = 88.6% | 41 / 44 = 93.2% |
+| no-answer TNR | 0 / 10 = 0.0% | 0 / 10 = 0.0% | 0 / 10 = 0.0% | 0 / 10 = 0.0% |
+
+The real dense vector improves rank1 by **+13.6pp** and
+hit@5 by **+9.1pp** over the hashed-BoW control. The
+hybrid-dense fusion does not strictly improve over
+vector-dense alone on this corpus: the lexical / FTS5
+contributors add noise to the RRF ranking when the
+real dense vector is already strong. This is a
+corpus-size artifact; a larger benchmark with more
+adversarial paraphrase queries is expected to surface
+a positive hybrid-dense delta. The dense run is
+deliberately a research artifact, not a recommendation
+to wire dense into the production `recall(text)`
+controller.
+
+The dense variant's `no-answer TNR = 0%` at the
+default threshold of 0 is the same limitation the
+hashed-BoW control has: cosine similarity of a unit
+vector to a random unrelated unit vector is near 0, and
+the default threshold passes every candidate with a
+non-zero overlap. A future calibration pass against
+the dense vector (or a positive `--threshold`) is the
+path to a meaningful TNR.
+
+#### Limitations
+
+- The dense variant is **retrieval-only**. No
+  answer-quality / LLM judging is performed. The
+  scaffold stays at `enabled: false`.
+- No production `sqlite-vec` migration or
+  persistent dense embedding storage. The dense
+  index is built in-memory for the lifetime of a
+  single benchmark run.
+- No external API embedding providers. The
+  transformers.js backend is local-only; the
+  first-run model download is the only network
+  call and it is to the Hugging Face CDN.
+- The CLI is opt-in: existing benchmark commands
+  (`benchmark:retrieval:fts5`, `vector`, `hybrid`,
+  `all`, `calibrate*`) keep working unchanged. The
+  dense variants are reached only via the
+  `vector-dense` / `hybrid-dense` / `all-dense`
+  variant names.
+- The CLI flag `--calibrate` does NOT support the
+  dense variants. Calibration of the dense vector
+  is a future phase.
+- The `vector-dense` (and `hybrid-dense`) variants
+  are **async-only**; the sync `runRetrievalBenchmark`
+  throws on them. The async entry point is
+  `runDenseRetrievalBenchmark`.
+- The transformers.js model is bit-deterministic
+  for a fixed input and a fixed runtime, so the
+  benchmark artifact is reproducible across runs
+  on the same machine. Different ONNX Runtime
+  thread counts or different quantization
+  variants will produce different (but still
+  semantically meaningful) vectors.
+
+
 
 ### Hybrid / RRF variant: scope, formula, and limitations
 
@@ -691,7 +914,7 @@ npm run benchmark:retrieval
 # Benchmark-only FTS5 variant.
 npm run benchmark:retrieval:fts5
 
-# Benchmark-only vector variant.
+# Benchmark-only vector variant (hashed-BoW control).
 npm run benchmark:retrieval:vector
 
 # Benchmark-only hybrid / RRF variant (default k = 60).
@@ -702,12 +925,25 @@ npm run benchmark:retrieval:hybrid:k20
 npm run benchmark:retrieval:hybrid:k60
 npm run benchmark:retrieval:hybrid:k100
 
-# Side-by-side comparison across all four variants.
+# Side-by-side comparison across the four sync variants.
 # Writes one lexical, one fts5, one vector, one hybrid,
 # and one combined comparison artifact under
 # .cortex/benchmark/. The combined file includes a
 # per-family "hybrid vs best baseline" delta table.
 npm run benchmark:retrieval:all
+
+# Dense (real local semantic embedding) variants.
+# All three use the deterministic stub by default; the
+# `:real` variants download + run the local ONNX model.
+npm run benchmark:retrieval:vector-dense
+npm run benchmark:retrieval:vector-dense:real
+npm run benchmark:retrieval:hybrid-dense
+npm run benchmark:retrieval:hybrid-dense:real
+npm run benchmark:retrieval:all-dense
+npm run benchmark:retrieval:all-dense:real
+
+# Skip live model execution (deterministic-only CI path).
+npm run benchmark:retrieval:vector-dense:skip
 ```
 
 All four variants write their JSON reports under
@@ -881,7 +1117,11 @@ the actual `classifyInput` behavior.
 ```sh
 npm install
 npm run build
-npm test
+npm test              # default suite (457 tests); no network required
+npm run test:contracts # contracts-only suite (15 tests)
+npm run test:dense-live # opt-in real-model integration test
+                        # (downloads the model on first run;
+                        # ~25MB; ~700ms first-load)
 ```
 
 ## Provider prototype runner
@@ -1019,11 +1259,21 @@ src/
     queries.ts            # retrieval benchmark query set
     metrics.ts            # pure metric functions (hit@K, TNR, per-family)
     retrieval-runner.ts   # retrieval benchmark CLI (no DB, no network)
+                            # + async dense entry point
     variants/
       fts5.ts             # benchmark-only FTS5 (BM25) ranker
       vector.ts           # benchmark-only vector (cosine) ranker
                             # + VectorEmbedder interface + HashedBagOfWordsEmbedder
                             # (deterministic local baseline, no deps)
+      dense-embedder.ts   # pluggable real local dense embedder:
+                            # - StubDeterministicDenseEmbedder (default)
+                            # - TransformersJsEmbedder (real ONNX via
+                            #   @xenova/transformers; local-only)
+                            # + EmbedderMetadata + createDenseEmbedder factory
+      dense-vector.ts     # benchmark-only dense vector (cosine) ranker
+                            # (async; uses DenseEmbedder from dense-embedder.ts)
+      hybrid.ts           # benchmark-only hybrid (RRF) ranker
+                            # over lexical / FTS5 / vector(-dense)
   config/
     env.ts                # env reading, no secrets in repo
 tests/

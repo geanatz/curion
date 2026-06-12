@@ -29,7 +29,15 @@
     "benchmark:retrieval:calibrate": "tsx src/benchmark/retrieval-runner.ts --variant all --calibrate",
     "benchmark:retrieval:calibrate:lexical": "tsx src/benchmark/retrieval-runner.ts --variant lexical --calibrate",
     "benchmark:retrieval:calibrate:fts5": "tsx src/benchmark/retrieval-runner.ts --variant fts5 --calibrate",
-    "benchmark:retrieval:calibrate:vector": "tsx src/benchmark/retrieval-runner.ts --variant vector --calibrate"
+    "benchmark:retrieval:calibrate:vector": "tsx src/benchmark/retrieval-runner.ts --variant vector --calibrate",
+    "benchmark:retrieval:vector-dense": "tsx src/benchmark/retrieval-runner.ts --variant vector-dense --embedder stub-dense",
+    "benchmark:retrieval:vector-dense:real": "tsx src/benchmark/retrieval-runner.ts --variant vector-dense --embedder transformersjs",
+    "benchmark:retrieval:vector-dense:skip": "tsx src/benchmark/retrieval-runner.ts --variant vector-dense --dense-skip",
+    "benchmark:retrieval:hybrid-dense": "tsx src/benchmark/retrieval-runner.ts --variant hybrid-dense --embedder stub-dense",
+    "benchmark:retrieval:hybrid-dense:real": "tsx src/benchmark/retrieval-runner.ts --variant hybrid-dense --embedder transformersjs",
+    "benchmark:retrieval:all-dense": "tsx src/benchmark/retrieval-runner.ts --variant all-dense --embedder stub-dense",
+    "benchmark:retrieval:all-dense:real": "tsx src/benchmark/retrieval-runner.ts --variant all-dense --embedder transformersjs",
+    "test:dense-live": "node --import tsx --test tests/_helpers/retrieval-dense-vector-live.test.ts"
   },
   "engines": {
     "node": ">=20"
@@ -42,6 +50,7 @@
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.10.0",
+    "@xenova/transformers": "^2.17.2",
     "tsx": "^4.20.0",
     "typescript": "^5.7.2"
   }
