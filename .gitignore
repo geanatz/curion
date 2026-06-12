@@ -1,0 +1,37 @@
+# Build output
+dist/
+*.tsbuildinfo
+
+# Dependencies
+node_modules/
+
+# Project-local Cortex storage (per-project, not source-controlled)
+.cortex/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor
+.vscode/
+.idea/
+
+# Archived/exploratory work, kept locally but not source-controlled
+.archive/
+
+# Test coverage output
+coverage/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env files. .env.example is intentionally NOT ignored so it can be
+# committed as a placeholder template. All other .env variants are
+# gitignored because they may contain real secrets.
+.env
+.env.*
+!.env.example
+.env.local
+.env.*.local
+

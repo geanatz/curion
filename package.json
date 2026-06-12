@@ -1,0 +1,48 @@
+{
+  "name": "cortex-mcp-v2",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cortex MCP v2 Phase 1 prototype infrastructure (project-local memory layer for AI agents)",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "cortex-mcp-v2": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "test:contracts": "node --import tsx --test tests/contracts.test.ts",
+    "start": "node dist/index.js",
+    "clean": "rm -rf dist",
+    "prototype": "tsx src/prototype/runner.ts",
+    "prototype:dry": "tsx src/prototype/runner.ts --dry-run",
+    "prototype:live": "tsx src/prototype/runner.ts --live",
+    "benchmark:retrieval": "tsx src/benchmark/retrieval-runner.ts",
+    "benchmark:retrieval:fts5": "tsx src/benchmark/retrieval-runner.ts --variant fts5",
+    "benchmark:retrieval:vector": "tsx src/benchmark/retrieval-runner.ts --variant vector",
+    "benchmark:retrieval:hybrid": "tsx src/benchmark/retrieval-runner.ts --variant hybrid",
+    "benchmark:retrieval:hybrid:k20": "tsx src/benchmark/retrieval-runner.ts --variant hybrid --hybrid-k 20",
+    "benchmark:retrieval:hybrid:k60": "tsx src/benchmark/retrieval-runner.ts --variant hybrid --hybrid-k 60",
+    "benchmark:retrieval:hybrid:k100": "tsx src/benchmark/retrieval-runner.ts --variant hybrid --hybrid-k 100",
+    "benchmark:retrieval:rrf": "npm run benchmark:retrieval:hybrid --silent",
+    "benchmark:retrieval:all": "tsx src/benchmark/retrieval-runner.ts --variant all",
+    "benchmark:retrieval:calibrate": "tsx src/benchmark/retrieval-runner.ts --variant all --calibrate",
+    "benchmark:retrieval:calibrate:lexical": "tsx src/benchmark/retrieval-runner.ts --variant lexical --calibrate",
+    "benchmark:retrieval:calibrate:fts5": "tsx src/benchmark/retrieval-runner.ts --variant fts5 --calibrate",
+    "benchmark:retrieval:calibrate:vector": "tsx src/benchmark/retrieval-runner.ts --variant vector --calibrate"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "better-sqlite3": "^12.10.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.10.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.7.2"
+  }
+}
