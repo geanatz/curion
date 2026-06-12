@@ -90,17 +90,32 @@ import {
 } from "./variants/vector.js";
 import {
   rankHybrid,
+  rankHybridAsync,
   DEFAULT_RRF_K,
   DEFAULT_HYBRID_THRESHOLD,
   DEFAULT_HYBRID_TOP_K,
   type HybridRankingOptions,
   type HybridScoredCandidate,
   type RrfContributor,
+  type HybridAsyncRankResult,
 } from "./variants/hybrid.js";
 import {
+  rankDenseVectorWithMetadataAsync,
+  DEFAULT_DENSE_VECTOR_THRESHOLD,
+  type DenseVectorRankingOptions,
+} from "./variants/dense-vector.js";
+import {
+  createDenseEmbedder,
+  type DenseEmbedder,
+  type EmbedderMetadata,
+} from "./variants/dense-embedder.js";
+import {
   DEFAULT_CALIBRATION_SWEEP,
+  DEFAULT_DENSE_CALIBRATION_SWEEP,
+  DEFAULT_HYBRID_DENSE_CALIBRATION_SWEEP,
   buildSweepForVariant,
   pickBestRow,
+  computeContributorSupport,
   type CalibrationConfig,
   type CalibrationReport,
   type CalibrationVariantResult,
@@ -130,26 +145,44 @@ export interface RetrievalBenchmarkOptions {
   onlyFamilies?: string[];
   /**
    * Retrieval variant to run. Default: `"lexical"`.
-   *   - `"lexical"` — the production `rankLexical` baseline.
-   *   - `"fts5"`    — the benchmark-only `rankFts5` variant
-   *                   (in-memory SQLite FTS5 with BM25).
-   *   - `"vector"`  — the benchmark-only `rankVector` variant
-   *                   (cosine similarity over a deterministic
-   *                   local hashed-bag-of-words embedding).
-   *   - `"hybrid"`  — the benchmark-only `rankHybrid` variant
-   *                   (Reciprocal Rank Fusion over lexical /
-   *                   FTS5 / vector). The fusion k defaults to
-   *                   60 (the conventional RRF value) and can
-   *                   be overridden via `hybridK` / `--hybrid-k`.
-   *   - `"all"`     — run ALL four variants back-to-back. The
-   *                   `runRetrievalBenchmark` function returns
-   *                   a single comparison report; the CLI entry
-   *                   point additionally writes a separate
-   *                   per-variant report file for each variant.
+   *   - `"lexical"`      — the production `rankLexical` baseline.
+   *   - `"fts5"`         — the benchmark-only `rankFts5` variant
+   *                        (in-memory SQLite FTS5 with BM25).
+   *   - `"vector"`       — the benchmark-only `rankVector` variant
+   *                        (cosine similarity over a deterministic
+   *                        local hashed-bag-of-words embedding).
+   *                        The `vector` variant is preserved as
+   *                        the hashed-BoW control; do not remove it
+   *                        in favor of `vector-dense`.
+   *   - `"hybrid"`       — the benchmark-only `rankHybrid` variant
+   *                        (Reciprocal Rank Fusion over lexical /
+   *                        FTS5 / vector). The fusion k defaults
+   *                        to 60 and can be overridden via
+   *                        `hybridK` / `--hybrid-k`.
+   *   - `"vector-dense"` — the async benchmark-only
+   *                        `rankDenseVectorAsync` variant (cosine
+   *                        similarity over a real local dense
+   *                        embedder, or a deterministic stub when
+   *                        no embedder is configured). Use
+   *                        `runDenseRetrievalBenchmark` (async) or
+   *                        the `--variant vector-dense` CLI flag.
+   *   - `"hybrid-dense"` — the async benchmark-only
+   *                        `rankHybridAsync` variant with the
+   *                        real dense vector contributor (RRF over
+   *                        lexical / FTS5 / vector-dense). Same
+   *                        async entry point.
+   *   - `"all"`          — run the four sync variants
+   *                        (lexical / fts5 / vector / hybrid)
+   *                        back-to-back. `runRetrievalBenchmark`
+   *                        returns a single comparison report.
+   *   - `"all-dense"`    — run the two async dense variants
+   *                        (vector-dense / hybrid-dense)
+   *                        back-to-back. Async entry point only.
    *
-   * The FTS5, vector, and hybrid variants are benchmark-only.
-   * They are NOT wired into the production `recall(text)`
-   * controller and do not change the public MCP API.
+   * The FTS5, vector, hybrid, vector-dense, and hybrid-dense
+   * variants are benchmark-only. They are NOT wired into the
+   * production `recall(text)` controller and do not change
+   * the public MCP API.
    */
   variant?: BenchmarkVariant;
   /**
@@ -188,15 +221,54 @@ export interface RetrievalBenchmarkOptions {
    * `calibration: true`.
    */
   calibrationConfig?: CalibrationConfig;
+  /**
+   * CLI-friendly spec for the dense embedder used by the
+   * `vector-dense` and `hybrid-dense` variants. See
+   * `createDenseEmbedder` in `./variants/dense-embedder.ts`
+   * for the accepted shapes. Default: `"stub-dense"`
+   * (dependency-free deterministic projection; CI-friendly
+   * and reproducible).
+   *
+   * The runner is async (`runDenseRetrievalBenchmark`)
+   * when the spec is a transformersjs model. For
+   * `runRetrievalBenchmark` (sync) this option is ignored
+   * unless `variant` is `vector-dense` or `hybrid-dense`,
+   * in which case the runner throws because those
+   * variants are async-only.
+   */
+  denseEmbedderSpec?: import("./variants/dense-embedder.js").DenseEmbedderSpec;
+  /**
+   * Pre-built dense embedder to use for the
+   * `vector-dense` and `hybrid-dense` variants. Mutually
+   * exclusive with `denseEmbedderSpec`: the embedder takes
+   * precedence when both are provided. The benchmark
+   * runner does NOT take ownership of the embedder's
+   * lifecycle; the caller initializes and disposes it.
+   */
+  denseEmbedder?: DenseEmbedder;
 }
 
 /**
  * Retrieval variant selector. The lexical variant is the
  * production baseline; the FTS5, vector, and hybrid
- * variants are benchmark-only comparison points. `"all"`
- * runs all four and emits a comparison report.
+ * variants are benchmark-only comparison points. The
+ * `vector-dense` and `hybrid-dense` variants are also
+ * benchmark-only; they require an async entry point
+ * (`runDenseRetrievalBenchmark`) and a real local dense
+ * embedder. `"all"` runs the four sync variants and emits
+ * a comparison report; `"all-dense"` runs the two dense
+ * variants (vector-dense + hybrid-dense) and emits a
+ * dense-only comparison report.
  */
-export type BenchmarkVariant = "lexical" | "fts5" | "vector" | "hybrid" | "all";
+export type BenchmarkVariant =
+  | "lexical"
+  | "fts5"
+  | "vector"
+  | "hybrid"
+  | "vector-dense"
+  | "hybrid-dense"
+  | "all"
+  | "all-dense";
 
 export interface FailureEntry {
   queryId: string;
@@ -295,6 +367,109 @@ export interface RetrievalBenchmarkReport {
 }
 
 /**
+ * Dense retrieval benchmark report. Produced by
+ * `runDenseRetrievalBenchmark` (the async entry point)
+ * for the `vector-dense` and `hybrid-dense` variants.
+ *
+ * The shape is a SUPERSET of `RetrievalBenchmarkReport`:
+ * same per-query evaluations, same aggregate metrics,
+ * same orientation / answerQuality / failures blocks;
+ * plus an `embeddingBackend` block on `config` that
+ * captures exactly which embedder produced the numbers
+ * (backend, model, dim, runtime, status, timing).
+ *
+ * The dense report uses distinct `variant` labels
+ * (`vector-dense-benchmark`, `hybrid-dense-benchmark`)
+ * so the existing test assertions on the four sync
+ * labels are byte-stable. The on-disk artifact file
+ * prefix is `retrieval-vector-dense-` /
+ * `retrieval-hybrid-dense-`, distinct from the
+ * `retrieval-vector-` / `retrieval-hybrid-` prefixes
+ * the sync variants use.
+ */
+export interface DenseRetrievalBenchmarkReport {
+  generatedAt: string;
+  variant:
+    | "vector-dense-benchmark"
+    | "hybrid-dense-benchmark";
+  config: {
+    threshold: number;
+    topK: number;
+    recordCount: number;
+    queryCount: number;
+    /** Hybrid RRF smoothing constant (hybrid-dense only). */
+    hybridK?: number;
+    /**
+     * Embedder metadata. Captured at rank time. Reports
+     * exactly which dense embedder produced the numbers,
+     * including a `status` field that distinguishes
+     * "ready" (the model actually ran) from "skipped" /
+     * "error" (the benchmark fell back to the
+     * deterministic stub).
+     */
+    embeddingBackend: EmbedderMetadata;
+  };
+  evals: QueryEval[];
+  metrics: BenchmarkMetrics;
+  orientation: import("./metrics.js").OrientationMetrics;
+  answerQuality: import("./answer-quality.js").AnswerQualityScaffold;
+  failures: FailureEntry[];
+  /**
+   * Hybrid per-family delta table. Present only on
+   * `hybrid-dense-benchmark` reports. Compares the
+   * dense hybrid against the best of
+   * `lexical / fts5 / vector-hash` per family so a
+   * reviewer can see the real-vs-hash trade-off.
+   */
+  hybridPerFamilyDelta?: HybridPerFamilyDeltaRow[];
+}
+
+/**
+ * Dense multi-variant comparison report. Produced by
+ * `runDenseRetrievalBenchmark` with
+ * `variant: "all-dense"`. Contains the two dense
+ * single-variant reports plus a side-by-side
+ * `comparison` block.
+ */
+export interface DenseComparisonBenchmarkReport {
+  generatedAt: string;
+  variant: "all-dense";
+  config: {
+    recordCount: number;
+    queryCount: number;
+    /** Hybrid RRF smoothing constant used for the comparison. */
+    hybridK?: number;
+    /** Embedder metadata captured at rank time. */
+    embeddingBackend: EmbedderMetadata;
+  };
+  vectorDense: DenseRetrievalBenchmarkReport;
+  hybridDense: DenseRetrievalBenchmarkReport;
+  /** Headline metric side-by-side, computed from the same
+   * corpus + query set. The `delta` is the
+   * `hybridDense - vectorDense` difference for that metric. */
+  comparison: DenseComparisonRow[];
+  /**
+   * Per-family "hybrid-dense vs best baseline" delta
+   * table. Compares the dense hybrid against the best of
+   * `lexical / fts5 / vector-hash` per family so a
+   * reviewer can see the real-vs-hash trade-off.
+   */
+  hybridPerFamilyDelta: HybridPerFamilyDeltaRow[];
+}
+
+/** One row in a dense comparison report. */
+export interface DenseComparisonRow {
+  metric: string;
+  vectorDense: number;
+  hybridDense: number;
+  /**
+   * Positive number = hybridDense better. Negative =
+   * vectorDense better. Zero = tie.
+   */
+  delta: number;
+}
+
+/**
  * A multi-variant comparison report. Produced when
  * `runRetrievalBenchmark` is called with `variant: "all"`.
  * Contains the per-variant reports plus a side-by-side
@@ -387,13 +562,35 @@ export function parseRetrievalCli(argv: string[]): RetrievalBenchmarkOptions {
         v !== "fts5" &&
         v !== "vector" &&
         v !== "hybrid" &&
-        v !== "all"
+        v !== "all" &&
+        v !== "vector-dense" &&
+        v !== "hybrid-dense" &&
+        v !== "all-dense"
       ) {
         throw new Error(
-          `--variant must be one of lexical|fts5|vector|hybrid|all (got "${v}")`,
+          `--variant must be one of lexical|fts5|vector|hybrid|all|vector-dense|hybrid-dense|all-dense (got "${v}")`,
         );
       }
       opts.variant = v;
+    } else if (a === "--embedder" && argv[i + 1]) {
+      // Accept a string spec OR a comma-separated
+      // key=value list (e.g. `stub-dense:dim=128`).
+      // The dense runner normalizes both shapes.
+      opts.denseEmbedderSpec = argv[++i];
+    } else if (a === "--dense-cache-dir" && argv[i + 1]) {
+      // The cache dir is composed into the spec as an
+      // object so `createDenseEmbedder` can read it. We
+      // also support `--dense-skip` below.
+      const cacheDir = argv[++i];
+      const prev = opts.denseEmbedderSpec;
+      const baseObj =
+        typeof prev === "object" && prev !== null ? prev : {};
+      opts.denseEmbedderSpec = { ...baseObj, cacheDir };
+    } else if (a === "--dense-skip") {
+      const prev = opts.denseEmbedderSpec;
+      const baseObj =
+        typeof prev === "object" && prev !== null ? prev : {};
+      opts.denseEmbedderSpec = { ...baseObj, skip: true };
     } else if (a === "--hybrid-k" && argv[i + 1]) {
       const n = Number.parseFloat(argv[++i]);
       if (!Number.isFinite(n) || n <= 0) {
@@ -447,7 +644,28 @@ export function parseRetrievalCli(argv: string[]): RetrievalBenchmarkOptions {
     opts.hybridK !== undefined &&
     opts.variant !== undefined &&
     opts.variant !== "hybrid" &&
-    opts.variant !== "all"
+    opts.variant !== "all" &&
+    opts.variant !== "hybrid-dense" &&
+    opts.variant !== "all-dense"
+  ) {
+    process.stderr.write(
+      `[cortex-benchmark] note: --hybrid-k ${opts.hybridK} is ignored for --variant ${opts.variant} (RRF k is only used by hybrid / all runs)\n`,
+    );
+  }
+  // The dense variants (vector-dense / hybrid-dense /
+  // all-dense) are async-only. The sync `runRetrievalBenchmark`
+  // throws on them so a CLI invocation that picks one
+  // without the async entry point fails loud. The dense
+  // variant sub-commands route to the async path.
+  // (No-op block: we do not throw here; the dispatch
+  // happens in the CLI's `main` after this parser returns.)
+  if (
+    opts.hybridK !== undefined &&
+    opts.variant !== undefined &&
+    opts.variant !== "hybrid" &&
+    opts.variant !== "all" &&
+    opts.variant !== "hybrid-dense" &&
+    opts.variant !== "all-dense"
   ) {
     process.stderr.write(
       `[cortex-benchmark] note: --hybrid-k ${opts.hybridK} is ignored for --variant ${opts.variant} (RRF k is only used by hybrid / all runs)\n`,
@@ -469,16 +687,26 @@ function printRetrievalHelp(): void {
       "  --threshold <n>         Relevance threshold in [0, 1] (default 0.2).",
       "  --top-k <n>            Top-K candidates to return (default 5).",
       "  --only-family <list>   Comma-separated family filter, e.g. exact,paraphrase",
-      "  --variant <name>       Retrieval variant: lexical|fts5|vector|hybrid|all (default lexical).",
-      "                         fts5, vector, and hybrid are benchmark-only and do not change the public API.",
-      "  --hybrid-k <n>         RRF smoothing constant for the hybrid variant (default 60).",
+      "  --variant <name>       Retrieval variant. Default: lexical.",
+      "                         Sync variants: lexical|fts5|vector|hybrid|all.",
+      "                         Async dense variants: vector-dense|hybrid-dense|all-dense.",
+      "                         All variants are benchmark-only and do not change the public API.",
+      "  --hybrid-k <n>         RRF smoothing constant for the hybrid variants (default 60).",
+      "  --embedder <spec>      Dense embedder spec for the dense variants.",
+      "                         'stub-dense' (default; deterministic, no deps, CI-friendly)",
+      "                         'stub-dense:dim=N' (custom dim)",
+      "                         'transformersjs' (real local ONNX; default model:",
+      "                            Xenova/all-MiniLM-L6-v2 quantized)",
+      "                         'transformersjs:model=<id>,quantized=true|false'",
+      "  --dense-cache-dir <p>  Local cache dir for the transformersjs model artifacts.",
+      "                         Default: <cwd>/.cortex/transformers-cache/",
+      "  --dense-skip           Skip live model execution; use the stub embedder only.",
+      "                         Useful for CI without network access.",
       "  --artifacts <path>     Override the JSON report directory.",
       "  --calibrate            Run the abstention / calibration experiment after the regular",
       "                         benchmark. Benchmark-only: no production path or API change.",
       "  --calibrate-direction <dir>  Score direction for the calibration gate comparison.",
-      "                         higher-is-better (default) | lower-is-better. All three variants",
-      "                         return \"higher is better\" in their public score; lower-is-better",
-      "                         is supported for experiments against the raw FTS5 bm25 value.",
+      "                         higher-is-better (default) | lower-is-better.",
       "  -h, --help             Show this help.",
       "",
       "Default artifacts directory: <cwd>/.cortex/benchmark/",
@@ -495,7 +723,10 @@ const ARTIFACT_FILE_PREFIX_LEXICAL = "retrieval-baseline";
 const ARTIFACT_FILE_PREFIX_FTS5 = "retrieval-fts5";
 const ARTIFACT_FILE_PREFIX_VECTOR = "retrieval-vector";
 const ARTIFACT_FILE_PREFIX_HYBRID = "retrieval-hybrid";
+const ARTIFACT_FILE_PREFIX_VECTOR_DENSE = "retrieval-vector-dense";
+const ARTIFACT_FILE_PREFIX_HYBRID_DENSE = "retrieval-hybrid-dense";
 const ARTIFACT_FILE_PREFIX_COMPARE = "retrieval-compare";
+const ARTIFACT_FILE_PREFIX_COMPARE_DENSE = "retrieval-compare-dense";
 const ARTIFACT_FILE_PREFIX_CALIBRATION = "retrieval-calibration";
 
 export function resolveBenchmarkArtifactsDir(
@@ -560,6 +791,45 @@ export function writeCalibrationReport(
 ): string {
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const filename = `${ARTIFACT_FILE_PREFIX_CALIBRATION}-${stamp}.json`;
+  const full = path.join(dir, filename);
+  fs.writeFileSync(full, JSON.stringify(report, null, 2), "utf8");
+  return full;
+}
+
+/**
+ * Write a dense single-variant report. The file prefix
+ * is `retrieval-vector-dense-` / `retrieval-hybrid-dense-`
+ * (distinct from the sync `retrieval-vector-` /
+ * `retrieval-hybrid-` prefixes) so the existing
+ * per-variant report consumers do not pick the dense
+ * artifacts up accidentally.
+ */
+export function writeDenseBenchmarkReport(
+  report: DenseRetrievalBenchmarkReport,
+  dir: string,
+): string {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const prefix =
+    report.variant === "vector-dense-benchmark"
+      ? ARTIFACT_FILE_PREFIX_VECTOR_DENSE
+      : ARTIFACT_FILE_PREFIX_HYBRID_DENSE;
+  const filename = `${prefix}-${stamp}.json`;
+  const full = path.join(dir, filename);
+  fs.writeFileSync(full, JSON.stringify(report, null, 2), "utf8");
+  return full;
+}
+
+/**
+ * Write a dense comparison report. The file prefix is
+ * `retrieval-compare-dense-` (distinct from the sync
+ * `retrieval-compare-` prefix).
+ */
+export function writeDenseComparisonReport(
+  report: DenseComparisonBenchmarkReport,
+  dir: string,
+): string {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const filename = `${ARTIFACT_FILE_PREFIX_COMPARE_DENSE}-${stamp}.json`;
   const full = path.join(dir, filename);
   fs.writeFileSync(full, JSON.stringify(report, null, 2), "utf8");
   return full;
@@ -648,6 +918,11 @@ export function runRetrievalBenchmark(
   options: RetrievalBenchmarkOptions = {},
 ): RetrievalBenchmarkReport | ComparisonBenchmarkReport {
   const variant: BenchmarkVariant = options.variant ?? "lexical";
+  if (variant === "vector-dense" || variant === "hybrid-dense" || variant === "all-dense") {
+    throw new Error(
+      `runRetrievalBenchmark: variant "${variant}" is async-only; use runDenseRetrievalBenchmark`,
+    );
+  }
   if (variant === "all") {
     const lexical = runSingleVariant("lexical", options);
     const fts5 = runSingleVariant("fts5", options);
@@ -656,6 +931,799 @@ export function runRetrievalBenchmark(
     return buildComparisonReport(lexical, fts5, vector, hybrid, options);
   }
   return runSingleVariant(variant, options);
+}
+
+// ---------------------------------------------------------------------------
+// Dense async runner
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve the dense embedder to use for an async dense
+ * run. The function:
+ *   1. Returns `options.denseEmbedder` verbatim if the
+ *      caller supplied a pre-built instance.
+ *   2. Otherwise builds an embedder from
+ *      `options.denseEmbedderSpec` (default: `"stub-dense"`)
+ *      via `createDenseEmbedder`. The `cacheDir` /
+ *      `skip` flags on the spec are honored.
+ *
+ * The function is the single source of truth for the
+ * embedder lifecycle in the dense runner.
+ */
+async function resolveDenseEmbedder(
+  options: RetrievalBenchmarkOptions,
+): Promise<{ embedder: DenseEmbedder; spec: string }> {
+  if (options.denseEmbedder) {
+    return { embedder: options.denseEmbedder, spec: "caller-supplied" };
+  }
+  const spec = options.denseEmbedderSpec ?? "stub-dense";
+  // If the spec is a string and the user also passed
+  // --dense-cache-dir / --dense-skip, the parser
+  // composed the spec into an object. The factory
+  // accepts both shapes.
+  const result = await createDenseEmbedder(spec);
+  return { embedder: result.embedder, spec: result.spec };
+}
+
+/**
+ * Run a single dense variant (`vector-dense` or
+ * `hybrid-dense`) against the corpus + query set.
+ * Async counterpart of `runSingleVariant`. The
+ * per-query evals, metrics, failures, orientation,
+ * answer-quality scaffold, and (for hybrid-dense) the
+ * per-family delta table mirror the sync runner's
+ * shape. The dense report is typed as
+ * `DenseRetrievalBenchmarkReport`; its `config`
+ * carries the embedder metadata.
+ */
+async function runSingleDenseVariant(
+  variant: "vector-dense" | "hybrid-dense",
+  options: RetrievalBenchmarkOptions,
+  embedder: DenseEmbedder,
+): Promise<DenseRetrievalBenchmarkReport> {
+  const queries = selectQueries(options);
+  const candidates = buildCandidates(BENCHMARK_RECORDS);
+  const topK = options.topK ?? DEFAULT_TOP_K;
+  // Per-variant default thresholds. We do NOT use
+  // `options.threshold` as the dense default because the
+  // real embedder's natural score distribution differs
+  // from the lexical default of 0.2; the dense default
+  // is 0 to mirror the FTS5 / vector-hash convention.
+  const threshold =
+    options.threshold ??
+    (variant === "vector-dense"
+      ? DEFAULT_DENSE_VECTOR_THRESHOLD
+      : DEFAULT_HYBRID_THRESHOLD);
+  const evals: QueryEval[] = [];
+  for (const q of queries) {
+    let ranked: LexicalScoredCandidate[];
+    let contributors: RrfContributor[] | undefined;
+    let topHybridScore: number | null | undefined;
+    if (variant === "vector-dense") {
+      const dense = await rankDenseVectorWithMetadataAsync(q.query, candidates, {
+        threshold,
+        topK,
+        embedder,
+      } satisfies DenseVectorRankingOptions);
+      ranked = dense.hits;
+    } else {
+      // hybrid-dense
+      const hybridRes: HybridAsyncRankResult = await rankHybridAsync(
+        q.query,
+        candidates,
+        {
+          k: options.hybridK ?? DEFAULT_RRF_K,
+          threshold,
+          topK,
+          useDenseVector: true,
+          denseVectorEmbedder: embedder,
+        } satisfies HybridRankingOptions,
+      );
+      ranked = hybridRes.hits.map((c) => ({ id: c.id, score: c.score }));
+      topHybridScore = ranked.length > 0 ? ranked[0]!.score : null;
+      if (hybridRes.hits.length > 0) {
+        const top0 = hybridRes.hits[0]!;
+        contributors = top0.contributors.map((c) => ({
+          source: c.source,
+          rank: c.rank,
+          score: c.score,
+          contribution: c.contribution,
+          weight: c.weight,
+        }));
+      } else {
+        // No fused result. We still want a well-formed
+        // contributors block; mirror the sync runner's
+        // no-hit shape.
+        const labels: Array<"lexical" | "fts5" | "vector-dense"> = [
+          "lexical",
+          "fts5",
+          "vector-dense",
+        ];
+        contributors = labels.map((src) => ({
+          source: src,
+          rank: null,
+          score: null,
+          contribution: 0,
+          weight: 1,
+        }));
+      }
+    }
+    const topIds = ranked.map((r) => r.id);
+    const topScores = ranked.map((r) => r.score);
+    const eval_ = evaluateQuery(
+      q.id,
+      q.family,
+      q.query,
+      q.expectedIds,
+      q.currentTruthIds,
+      topIds,
+      topScores,
+    );
+    if (variant === "hybrid-dense") {
+      if (contributors) eval_.hybridContributors = contributors;
+      eval_.hybridTopScore = topHybridScore ?? null;
+    }
+    evals.push(eval_);
+  }
+  const metrics = aggregateMetrics(evals);
+  const orientation = aggregateOrientationMetrics(evals);
+  const answerQuality = buildAnswerQualityScaffold();
+  const failures: FailureEntry[] = evals
+    .filter((e) => !e.passed)
+    .map((e) => ({
+      queryId: e.queryId,
+      family: e.family,
+      expectedIds: [...e.expectedIds],
+      currentTruthIds: [...e.currentTruthIds],
+      topIds: [...e.topIds],
+      topScores: [...e.topScores],
+      rank1: e.rank1,
+      currentTruthAt1: e.currentTruthAt1,
+      reason: e.reason,
+    }));
+  const variantLabel: DenseRetrievalBenchmarkReport["variant"] =
+    variant === "vector-dense"
+      ? "vector-dense-benchmark"
+      : "hybrid-dense-benchmark";
+  const config: DenseRetrievalBenchmarkReport["config"] = {
+    threshold,
+    topK,
+    recordCount: BENCHMARK_RECORDS.length,
+    queryCount: queries.length,
+    embeddingBackend: embedder.metadata,
+  };
+  if (variant === "hybrid-dense") {
+    config.hybridK = options.hybridK ?? DEFAULT_RRF_K;
+  }
+  const report: DenseRetrievalBenchmarkReport = {
+    generatedAt: new Date().toISOString(),
+    variant: variantLabel,
+    config,
+    evals,
+    metrics,
+    orientation,
+    answerQuality,
+    failures,
+  };
+  // The hybrid-dense single-variant report carries the
+  // per-family delta table the same way the sync hybrid
+  // report does. We compute the lexical / FTS5 /
+  // vector-hash baselines inline (same query set, same
+  // per-variant default thresholds) and call the same
+  // `buildHybridPerFamilyDelta` helper. The cost is the
+  // same three lightweight baseline evals.
+  if (variant === "hybrid-dense" && !report.hybridPerFamilyDelta) {
+    const baselines = runBaselineMetricsForHybridDelta(queries, options);
+    report.hybridPerFamilyDelta = buildHybridPerFamilyDelta(
+      metrics,
+      baselines.lexical,
+      baselines.fts5,
+      baselines.vector,
+    );
+  }
+  return report;
+}
+
+/**
+ * Run the dense retrieval benchmark.
+ *
+ * The async counterpart of `runRetrievalBenchmark`. It
+ * runs the `vector-dense` and / or `hybrid-dense`
+ * variants back-to-back, returning a single
+ * `DenseRetrievalBenchmarkReport` for a single-variant
+ * request or a `DenseComparisonBenchmarkReport` for
+ * `variant: "all-dense"`.
+ *
+ * Determinism: the function is deterministic for a
+ * given (corpus, query set, embedder, threshold,
+ * top-K, hybridK). The transformers.js embedder is
+ * deterministic for a fixed model + ONNX runtime.
+ *
+ * Limitations:
+ *   - The CLI flag `--calibrate` is not supported for
+ *     the dense variants. The calibration experiment
+ *     studies abstention gates on the single-variant
+ *     rankers; a dense-only calibration is a future
+ *     phase.
+ *   - The function does NOT add a new column to the
+ *     existing sync comparison report. The dense
+ *     comparison report (`all-dense`) is a separate
+ *     artifact so the existing four-variant report
+ *     shape is byte-stable.
+ */
+export async function runDenseRetrievalBenchmark(
+  options: RetrievalBenchmarkOptions = {},
+): Promise<
+  | DenseRetrievalBenchmarkReport
+  | DenseComparisonBenchmarkReport
+  | CalibrationReport
+> {
+  const variant: BenchmarkVariant = options.variant ?? "vector-dense";
+  if (
+    variant !== "vector-dense" &&
+    variant !== "hybrid-dense" &&
+    variant !== "all-dense"
+  ) {
+    throw new Error(
+      `runDenseRetrievalBenchmark: variant must be one of vector-dense|hybrid-dense|all-dense (got "${variant}")`,
+    );
+  }
+  // The dense calibration experiment is supported for
+  // `vector-dense`, `hybrid-dense`, and `all-dense` (which
+  // runs both dense variants back-to-back). It is a
+  // benchmark-only sweep over abstention gates; the
+  // regular dense benchmark report is NOT produced when
+  // calibration is requested. The behavior is documented
+  // in the README and asserted in the dense calibration
+  // test file.
+  if (options.calibration) {
+    return runDenseCalibration(options);
+  }
+  const { embedder } = await resolveDenseEmbedder(options);
+  if (variant === "all-dense") {
+    const vectorDense = await runSingleDenseVariant(
+      "vector-dense",
+      options,
+      embedder,
+    );
+    const hybridDense = await runSingleDenseVariant(
+      "hybrid-dense",
+      options,
+      embedder,
+    );
+    return buildDenseComparisonReport(vectorDense, hybridDense, options);
+  }
+  return runSingleDenseVariant(
+    variant,
+    options,
+    embedder,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Dense async calibration
+// ---------------------------------------------------------------------------
+
+/**
+ * Dense calibration report. The shape is a strict superset
+ * of the existing `CalibrationReport` (additive dense
+ * `bestByVariant.vectorDense` / `bestByVariant.hybridDense`
+ * keys; additive `contributorSupport` /
+ * `contributorAgreementCount` fields on per-query
+ * diagnostics for the hybrid-dense pass). The report is
+ * written under a distinct file prefix
+ * (`retrieval-calibration-dense-*.json`) so the existing
+ * `retrieval-calibration-*.json` artifact is byte-stable.
+ */
+export interface DenseCalibrationReport extends CalibrationReport {
+  /**
+   * Embedder metadata captured at rank time. Mirrors the
+   * `config.embeddingBackend` block on the dense single-
+   * variant reports, so a reviewer can audit which dense
+   * embedder produced the calibration numbers.
+   */
+  embeddingBackend: EmbedderMetadata;
+}
+
+/**
+ * Run the dense abstention / calibration experiment.
+ *
+ * The function is the async counterpart of `runCalibration`
+ * for the two dense variants (`vector-dense` /
+ * `hybrid-dense`). It is benchmark-only and does NOT
+ * modify the production `recall(text)` behavior, the
+ * public MCP API, or the existing single-variant /
+ * comparison / sync-calibration report shapes. The
+ * resulting `DenseCalibrationReport` is a strict
+ * superset of the existing `CalibrationReport`; the
+ * additive fields are:
+ *   - `embeddingBackend` — the dense embedder metadata
+ *   - `bestByVariant.vectorDense` / `bestByVariant.hybridDense`
+ *   - per-query `contributorSupport` /
+ *     `contributorAgreementCount` on the hybrid-dense rows
+ *
+ * The function is async because the dense forward pass
+ * is async. The `variant` selector narrows the set:
+ *   - `"vector-dense"` runs the dense cosine sweep only.
+ *   - `"hybrid-dense"` runs the dense RRF sweep only.
+ *   - `"all-dense"` runs both dense sweeps back-to-back
+ *     (the `vectorDense` and `hybridDense` baseline /
+ *     sweep / best rows all live in the same report).
+ *
+ * Algorithm:
+ *   1. For each requested dense variant, run the
+ *      corresponding ranker with `threshold: 0` and
+ *      `topK: <options.topK ?? 5>` so the full score
+ *      distribution is captured. The calibration gates
+ *      are applied in the JS calibration layer (not in
+ *      the ranker), so a single per-query score trace
+ *      can be evaluated under every candidate gate.
+ *   2. For the `hybrid-dense` variant, capture the
+ *      per-source RRF rank/score/contribution for the
+ *      top-1 candidate. This is the
+ *      `contributorSupport` block.
+ *   3. Build the `CalibrationVariantResult` baseline row
+ *      (no extra gate) and one row per (gate kind, sweep
+ *      value) using `buildSweepForVariant`.
+ *   4. Pick the "best" row per variant using
+ *      `pickBestRow` (same rule as the sync calibration
+ *      pass: maximize TNR delta, tie-break on smallest
+ *      positive-regression count, then on largest hit@5,
+ *      then on smallest gate value).
+ *   5. Return a `DenseCalibrationReport` artifact. The
+ *      CLI entry point writes it to disk under the same
+ *      `.cortex/benchmark/` directory.
+ */
+export async function runDenseCalibration(
+  options: RetrievalBenchmarkOptions = {},
+): Promise<DenseCalibrationReport> {
+  const variant: BenchmarkVariant = options.variant ?? "all-dense";
+  if (
+    variant !== "vector-dense" &&
+    variant !== "hybrid-dense" &&
+    variant !== "all-dense"
+  ) {
+    throw new Error(
+      `runDenseCalibration: variant must be one of vector-dense|hybrid-dense|all-dense (got "${variant}")`,
+    );
+  }
+  // The default sweep grid is per-variant on the dense
+  // path. The cosine scale (vector-dense) and the RRF
+  // scale (hybrid-dense) are not comparable: cosine
+  // similarity is in [0, 1], RRF is in
+  // (0, N/(k+1)]. We apply the per-variant grid
+  // (vector-dense: `DEFAULT_DENSE_CALIBRATION_SWEEP`;
+  // hybrid-dense: `DEFAULT_HYBRID_DENSE_CALIBRATION_SWEEP`)
+  // so the sweep explores each variant's natural score
+  // range.
+  //
+  // When the caller passes an explicit `calibrationConfig`
+  // with a `sweep` grid that matches the sync default
+  // (i.e. the CLI default, or a programmatic caller
+  // that wants the sync grid semantics), we substitute
+  // the per-variant dense defaults. When the caller
+  // passes a `sweep` grid that is NOT the sync default,
+  // we honor the caller's grid (they explicitly chose
+  // a custom sweep).
+  const callerSweep = options.calibrationConfig?.sweep;
+  const useCustomSweep =
+    callerSweep !== undefined && callerSweep !== DEFAULT_CALIBRATION_SWEEP;
+  const denseSweep = useCustomSweep
+    ? callerSweep!
+    : DEFAULT_DENSE_CALIBRATION_SWEEP;
+  const hybridDenseSweep = useCustomSweep
+    ? callerSweep!
+    : DEFAULT_HYBRID_DENSE_CALIBRATION_SWEEP;
+  // Build the effective config the calibration layer
+  // sees. The `direction` and `gatesByVariant` come from
+  // the caller's config (or the default); the `sweep`
+  // grid is the per-variant dense default unless the
+  // caller explicitly provided a non-sync grid. This is
+  // consistent: a programmatic caller who did not pass
+  // `calibrationConfig` is asking for the dense default;
+  // a programmatic caller who passed a custom
+  // `calibrationConfig.sweep` is opting in to their
+  // custom grid; a programmatic caller who passed the
+  // sync default's `sweep` is asking for the dense
+  // per-variant grid.
+  const config: CalibrationConfig = options.calibrationConfig ?? {
+    gatesByVariant: {},
+    sweep: DEFAULT_DENSE_CALIBRATION_SWEEP,
+  };
+  const direction = config.direction ?? "higher-is-better";
+  const queries = selectQueries(options);
+  const candidates = buildCandidates(BENCHMARK_RECORDS);
+  const topK = options.topK ?? DEFAULT_TOP_K;
+  const { embedder } = await resolveDenseEmbedder(options);
+  const baselineRows: CalibrationVariantResult[] = [];
+  const sweepRows: CalibrationVariantResult[] = [];
+  const bestByVariant: DenseCalibrationReport["bestByVariant"] = {
+    lexical: null,
+    fts5: null,
+    vector: null,
+    vectorDense: null,
+    hybridDense: null,
+  };
+  // Decide which dense variants to run. `all-dense` runs
+  // both; a specific `--variant vector-dense` /
+  // `hybrid-dense` runs one.
+  const runVectorDense = variant === "vector-dense" || variant === "all-dense";
+  const runHybridDense = variant === "hybrid-dense" || variant === "all-dense";
+
+  if (runVectorDense) {
+    const denseConfig: CalibrationConfig = {
+      ...config,
+      sweep: denseSweep,
+    };
+    const result = await buildDenseSingleVariantSweep({
+      variant: "vector-dense",
+      queries,
+      candidates,
+      topK,
+      embedder,
+      config: denseConfig,
+      direction,
+      options,
+    });
+    baselineRows.push(result.baseline);
+    for (const r of result.sweep) sweepRows.push(r);
+    bestByVariant.vectorDense = pickBestRow(result.baseline, result.sweep);
+  }
+  if (runHybridDense) {
+    const denseConfig: CalibrationConfig = {
+      ...config,
+      sweep: hybridDenseSweep,
+    };
+    const result = await buildDenseSingleVariantSweep({
+      variant: "hybrid-dense",
+      queries,
+      candidates,
+      topK,
+      embedder,
+      config: denseConfig,
+      direction,
+      options,
+    });
+    baselineRows.push(result.baseline);
+    for (const r of result.sweep) sweepRows.push(r);
+    bestByVariant.hybridDense = pickBestRow(result.baseline, result.sweep);
+  }
+  return {
+    generatedAt: new Date().toISOString(),
+    config: {
+      recordCount: BENCHMARK_RECORDS.length,
+      queryCount: queries.length,
+      direction,
+    },
+    baseline: baselineRows,
+    sweep: sweepRows,
+    bestByVariant,
+    embeddingBackend: embedder.metadata,
+  };
+}
+
+/**
+ * Build the per-query "no threshold" score trace + the
+ * per-query `QueryEval[]` for one dense variant, then
+ * build the calibration sweep rows.
+ *
+ * The function is the dense counterpart of the inline
+ * `perVariantTrace` loop in `runCalibration`. The trace
+ * is captured with `threshold: 0` so the calibration
+ * layer can apply abstention gates independently of the
+ * ranker's own threshold. The `hybrid-dense` variant
+ * also captures the per-source RRF rank/score/contribution
+ * for the top-1 candidate (the `contributorSupport`
+ * block) so the per-query diagnostic carries the hybrid-
+ * aware abstention signal.
+ */
+async function buildDenseSingleVariantSweep(args: {
+  variant: "vector-dense" | "hybrid-dense";
+  queries: ReadonlyArray<BenchmarkQuery>;
+  candidates: ReadonlyArray<LexicalCandidate>;
+  topK: number;
+  embedder: DenseEmbedder;
+  config: CalibrationConfig;
+  direction: "higher-is-better" | "lower-is-better";
+  options: RetrievalBenchmarkOptions;
+}): Promise<{
+  baseline: CalibrationVariantResult;
+  sweep: CalibrationVariantResult[];
+}> {
+  const { variant, queries, candidates, topK, embedder, config, direction, options } = args;
+  // Per-query "no threshold" score trace. We capture
+  // both the top-K ids/scores (for the per-query
+  // diagnostic) and the per-source RRF trace (for
+  // hybrid-dense only).
+  const perQueryScores: Array<{
+    queryId: string;
+    family: string;
+    isPositive: boolean;
+    scored: LexicalScoredCandidate[];
+    hybridSupport?: {
+      contributors: ReadonlyArray<{
+        source: "lexical" | "fts5" | "vector-dense";
+        rank: number | null;
+        score: number | null;
+        contribution: number;
+      }>;
+      agreementCount: number;
+    };
+  }> = [];
+  // The hybrid-aware `QueryEval[]` we feed to
+  // `computeTradeoff`. The trade-off metrics need a
+  // per-query eval keyed by `queryId` to re-derive hit@5
+  // / rank1 / currentTruthAt1 / multi-hop / orientation
+  // against the "after abstain" top-K.
+  const evals: QueryEval[] = [];
+  // Per-query top-K ids / scores for the after-abstain
+  // diagnostic. We capture the no-threshold result first
+  // (so the per-query diagnostic has the full trace),
+  // then the baseline row is built with no gate (passing
+  // the full result through `evaluateQuery`).
+  for (const q of queries) {
+    let ranked: LexicalScoredCandidate[];
+    let hybridSupport: {
+      contributors: ReadonlyArray<{
+        source: "lexical" | "fts5" | "vector-dense";
+        rank: number | null;
+        score: number | null;
+        contribution: number;
+      }>;
+      agreementCount: number;
+    } | undefined;
+    if (variant === "vector-dense") {
+      const dense = await rankDenseVectorWithMetadataAsync(q.query, candidates, {
+        threshold: 0,
+        topK,
+        embedder,
+      } satisfies DenseVectorRankingOptions);
+      ranked = dense.hits;
+    } else {
+      // hybrid-dense
+      const hybridRes: HybridAsyncRankResult = await rankHybridAsync(
+        q.query,
+        candidates,
+        {
+          k: options.hybridK ?? DEFAULT_RRF_K,
+          threshold: 0,
+          topK,
+          useDenseVector: true,
+          denseVectorEmbedder: embedder,
+        } satisfies HybridRankingOptions,
+      );
+      ranked = hybridRes.hits.map((c) => ({ id: c.id, score: c.score }));
+      // The contributor trace for the top-1 candidate. If
+      // the fusion returned no hits, build a "all absent"
+      // trace so the per-query diagnostic is well-formed.
+      if (hybridRes.hits.length > 0) {
+        const top0 = hybridRes.hits[0]!;
+        hybridSupport = computeContributorSupport(
+          top0.contributors.map((c) => ({
+            source:
+              c.source === "vector"
+                ? ("vector-dense" as const)
+                : (c.source as "lexical" | "fts5" | "vector-dense"),
+            rank: c.rank,
+            score: c.score,
+            contribution: c.contribution,
+          })),
+        );
+      } else {
+        hybridSupport = computeContributorSupport([
+          { source: "lexical", rank: null, score: null, contribution: 0 },
+          { source: "fts5", rank: null, score: null, contribution: 0 },
+          { source: "vector-dense", rank: null, score: null, contribution: 0 },
+        ]);
+      }
+    }
+    perQueryScores.push({
+      queryId: q.id,
+      family: q.family,
+      isPositive: q.family !== "no-answer",
+      scored: ranked,
+      ...(hybridSupport !== undefined ? { hybridSupport } : {}),
+    });
+    // Build the QueryEval for the after-abstain
+    // trade-off metrics. With no extra gate the
+    // after-abstain top-K is the full no-threshold
+    // result, so the baseline `computeTradeoff` matches
+    // the regular benchmark's numbers exactly.
+    const topIds = ranked.map((r) => r.id);
+    const topScores = ranked.map((r) => r.score);
+    evals.push(
+      evaluateQuery(
+        q.id,
+        q.family,
+        q.query,
+        q.expectedIds,
+        q.currentTruthIds,
+        topIds,
+        topScores,
+      ),
+    );
+  }
+  // The shadow report's metrics give us the
+  // `BenchmarkMetrics` block to pass to
+  // `buildSweepForVariant` so the baseline sanity-check
+  // matches the regular benchmark's no-answer TNR
+  // exactly. We do not store the shadow on the report
+  // (the calibration report's own `metrics` block is
+  // the source of truth for trade-off numbers).
+  const shadowMetrics = aggregateMetrics(evals);
+  return buildSweepForVariant(
+    variant,
+    shadowMetrics,
+    evals,
+    perQueryScores,
+    config.sweep,
+    direction,
+  );
+}
+
+/**
+ * Write a dense calibration report. The file prefix is
+ * `retrieval-calibration-dense-*.json` (distinct from the
+ * sync `retrieval-calibration-*.json` prefix) so the
+ * existing sync calibration report consumers do not pick
+ * up the dense artifact.
+ */
+export function writeDenseCalibrationReport(
+  report: DenseCalibrationReport,
+  dir: string,
+): string {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const filename = `retrieval-calibration-dense-${stamp}.json`;
+  const full = path.join(dir, filename);
+  fs.writeFileSync(full, JSON.stringify(report, null, 2), "utf8");
+  return full;
+}
+
+/**
+ * Internal: build a dense comparison report from the
+ * two dense single-variant reports. The `comparison`
+ * block is a small set of headline metric rows:
+ * rank1, currentTruthAt1, hit@1, hit@3, hit@5,
+ * no-answer TNR, precision@5, recall@5, F1@5, MRR@5.
+ * The `delta` is the `hybridDense - vectorDense`
+ * difference for that metric.
+ */
+function buildDenseComparisonReport(
+  vectorDense: DenseRetrievalBenchmarkReport,
+  hybridDense: DenseRetrievalBenchmarkReport,
+  options: RetrievalBenchmarkOptions,
+): DenseComparisonBenchmarkReport {
+  const V = vectorDense.metrics;
+  const H = hybridDense.metrics;
+  const Vd = V.derived;
+  const Hd = H.derived;
+  const countRow = (
+    metric: string,
+    v: number,
+    h: number,
+  ): DenseComparisonRow => ({
+    metric,
+    vectorDense: v,
+    hybridDense: h,
+    delta: h - v,
+  });
+  const rows: DenseComparisonRow[] = [
+    countRow("rank1 (positive)", V.rank1, H.rank1),
+    countRow(
+      "currentTruth@1 (positive)",
+      V.currentTruthAt1,
+      H.currentTruthAt1,
+    ),
+    countRow("hit@1 (positive)", V.hitAt1, H.hitAt1),
+    countRow("hit@3 (positive)", V.hitAt3, H.hitAt3),
+    countRow("hit@5 (positive)", V.hitAt5, H.hitAt5),
+    countRow("no-answer TNR", V.noAnswerCorrect, H.noAnswerCorrect),
+    countRow(
+      "precision@5 (%)",
+      Vd.precisionAtK * 100,
+      Hd.precisionAtK * 100,
+    ),
+    countRow(
+      "recall@5 (%)",
+      Vd.recallAtK * 100,
+      Hd.recallAtK * 100,
+    ),
+    countRow("F1@5 (%)", Vd.f1At5 * 100, Hd.f1At5 * 100),
+    countRow("MRR@5 (%)", Vd.mrrAtK * 100, Hd.mrrAtK * 100),
+    countRow(
+      "currentTruth@5 (%)",
+      Vd.currentTruthRecallAt5 * 100,
+      Hd.currentTruthRecallAt5 * 100,
+    ),
+    countRow(
+      "answer coverage (%)",
+      Vd.answerCoverage * 100,
+      Hd.answerCoverage * 100,
+    ),
+    countRow(
+      "abstention precision (%)",
+      Vd.abstentionPrecision * 100,
+      Hd.abstentionPrecision * 100,
+    ),
+    countRow(
+      "specificity (no-answer, %)",
+      Vd.noAnswerSpecificity * 100,
+      Hd.noAnswerSpecificity * 100,
+    ),
+    countRow(
+      "confabulation FPR (%)",
+      Vd.noAnswerFpr * 100,
+      Hd.noAnswerFpr * 100,
+    ),
+    countRow(
+      "multi-hop partial (%)",
+      Vd.multiHopAnyRate * 100,
+      Hd.multiHopAnyRate * 100,
+    ),
+    countRow(
+      "multi-hop complete (%)",
+      Vd.multiHopCompleteRate * 100,
+      Hd.multiHopCompleteRate * 100,
+    ),
+    countRow(
+      "orientation recall@5 (%)",
+      vectorDense.orientation.total > 0
+        ? (vectorDense.orientation.recallAt5 * 100) /
+          vectorDense.orientation.total
+        : 0,
+      hybridDense.orientation.total > 0
+        ? (hybridDense.orientation.recallAt5 * 100) /
+          hybridDense.orientation.total
+        : 0,
+    ),
+    countRow(
+      "orientation slotCoverage@5 (%)",
+      vectorDense.orientation.slotCoverageAt5 * 100,
+      hybridDense.orientation.slotCoverageAt5 * 100,
+    ),
+    countRow(
+      "orientation noisyReturnRate (%)",
+      vectorDense.orientation.noisyReturnRate * 100,
+      hybridDense.orientation.noisyReturnRate * 100,
+    ),
+  ];
+  // The per-family "hybrid-dense vs best baseline" delta
+  // table. We reuse the lexical / FTS5 / vector-hash
+  // baselines (computed once in
+  // `runSingleDenseVariant` for the hybrid-dense
+  // report) and re-call `buildHybridPerFamilyDelta` so
+  // the comparison report carries the same table the
+  // single-variant hybrid-dense report does.
+  const baselines = runBaselineMetricsForHybridDelta(
+    selectQueries(options),
+    options,
+  );
+  const hybridPerFamilyDelta = buildHybridPerFamilyDelta(
+    H,
+    baselines.lexical,
+    baselines.fts5,
+    baselines.vector,
+  );
+  // Attach the table to the single-variant hybrid-dense
+  // report so the JSON file is self-describing.
+  hybridDense.hybridPerFamilyDelta = hybridPerFamilyDelta;
+  const config: DenseComparisonBenchmarkReport["config"] = {
+    recordCount: vectorDense.config.recordCount,
+    queryCount: vectorDense.config.queryCount,
+    embeddingBackend: vectorDense.config.embeddingBackend,
+  };
+  if (options.hybridK !== undefined) {
+    config.hybridK = options.hybridK;
+  }
+  return {
+    generatedAt: new Date().toISOString(),
+    variant: "all-dense",
+    config,
+    vectorDense,
+    hybridDense,
+    comparison: rows,
+    hybridPerFamilyDelta,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -724,7 +1792,10 @@ export function runCalibration(
   const variants: Array<"lexical" | "fts5" | "vector"> =
     requested === "all"
       ? ["lexical", "fts5", "vector"]
-      : requested === "hybrid"
+      : requested === "hybrid" ||
+          requested === "vector-dense" ||
+          requested === "hybrid-dense" ||
+          requested === "all-dense"
         ? [] // no calibratable single-variant selected
         : [requested];
 
@@ -1698,6 +2769,42 @@ export function formatCalibrationReport(
         `noAnsRemaining=${b.noAnswerRemainingFp}`,
     );
   }
+  // Dense best rows. Rendered only when the report
+  // carries them (the dense calibration report does;
+  // the sync report does not — the `vectorDense` /
+  // `hybridDense` keys are `null` / `undefined` in
+  // the sync report's `bestByVariant`). The block is
+  // ADDITIVE: the sync block above is unchanged.
+  for (const v of ["vectorDense", "hybridDense"] as const) {
+    const b = report.bestByVariant[v];
+    if (b === undefined) continue;
+    if (b === null) {
+      lines.push(`  ${displayLabel(v).padEnd(14)} (no sweep rows)`);
+      continue;
+    }
+    // The `bestByVariant` key is camelCase (`vectorDense`)
+    // but the variant label on the row itself is kebab-case
+    // (`vector-dense`) — the same label used by the rest of
+    // the report. Map between the two for the baseline TNR
+    // helper.
+    const baseTnr = baselineTnrForVariant(
+      report,
+      v === "vectorDense" ? "vector-dense" : "hybrid-dense",
+    );
+    const tnr = b.metrics.noAnswerTotal > 0
+      ? (b.metrics.noAnswerCorrect / b.metrics.noAnswerTotal) * 100
+      : 0;
+    const deltaTnr = tnr - baseTnr;
+    lines.push(
+      `  ${displayLabel(v).padEnd(14)} gate=${b.gateLabel.padEnd(20)} ` +
+        `TNR=${tnr.toFixed(1)}% (Δ${deltaTnr >= 0 ? "+" : ""}${deltaTnr.toFixed(1)}pp) ` +
+        `regressions=${b.positiveRegressions} ` +
+        `hit@5=${b.metrics.hitAt5} ` +
+        `rank1=${b.metrics.rank1} ` +
+        `noAnsFixed=${b.noAnswerFixed} ` +
+        `noAnsRemaining=${b.noAnswerRemainingFp}`,
+    );
+  }
   lines.push("");
   // Sweep tables grouped by variant then by gate kind.
   const byVariant: Record<"lexical" | "fts5" | "vector", CalibrationVariantResult[]> = {
@@ -1705,7 +2812,22 @@ export function formatCalibrationReport(
     fts5: [],
     vector: [],
   };
-  for (const r of report.sweep) byVariant[r.variant].push(r);
+  // The dense variants are optional in the report
+  // (the sync report's `sweep` is byte-stable and never
+  // carries dense rows; the dense calibration report's
+  // `sweep` does). We use a defensive `??` so the
+  // sync report's sweep is unaffected.
+  const denseByVariant: Partial<Record<"vector-dense" | "hybrid-dense", CalibrationVariantResult[]>> = {
+    "vector-dense": [],
+    "hybrid-dense": [],
+  };
+  for (const r of report.sweep) {
+    if (r.variant === "vector-dense" || r.variant === "hybrid-dense") {
+      (denseByVariant[r.variant] ??= []).push(r);
+    } else {
+      byVariant[r.variant].push(r);
+    }
+  }
   const kinds: CalibrationVariantResult["gateKind"][] = [
     "threshold",
     "margin",
@@ -1716,6 +2838,46 @@ export function formatCalibrationReport(
     if (rows.length === 0) continue;
     lines.push(`### ${v} sweep ###`);
     // Baseline row first.
+    const base = report.baseline.find((b) => b.variant === v);
+    if (base) {
+      lines.push(
+        `  ${"no-extra-gate".padEnd(20)} ` +
+          `TNR=${tnrPct(base)} ` +
+          `hit@5=${base.metrics.hitAt5} ` +
+          `rank1=${base.metrics.rank1} ` +
+          `regressions=${base.positiveRegressions} ` +
+          `noAnsFixed=${base.noAnswerFixed} ` +
+          `noAnsRemain=${base.noAnswerRemainingFp}`,
+      );
+    }
+    for (const k of kinds) {
+      const sub = rows.filter((r) => r.gateKind === k);
+      if (sub.length === 0) continue;
+      lines.push(`  -- ${k} --`);
+      for (const r of sub) {
+        lines.push(
+          `  ${r.gateLabel.padEnd(20)} ` +
+            `TNR=${tnrPct(r)} ` +
+            `hit@5=${r.metrics.hitAt5} ` +
+            `rank1=${r.metrics.rank1} ` +
+            `regressions=${r.positiveRegressions} ` +
+            `noAnsFixed=${r.noAnswerFixed} ` +
+            `noAnsRemain=${r.noAnswerRemainingFp}`,
+        );
+      }
+    }
+    lines.push("");
+  }
+  // Dense variant sweeps. Rendered only when the report
+  // carries dense rows (the dense calibration report does;
+  // the sync report does not). The dense section mirrors
+  // the sync section's shape so a reviewer can compare
+  // dense and sync side-by-side. The "best" block at the
+  // top already lists the dense best rows when present.
+  for (const v of ["vector-dense", "hybrid-dense"] as const) {
+    const rows = denseByVariant[v] ?? [];
+    if (rows.length === 0) continue;
+    lines.push(`### ${v} sweep ###`);
     const base = report.baseline.find((b) => b.variant === v);
     if (base) {
       lines.push(
@@ -1820,6 +2982,84 @@ export function formatCalibrationReport(
       );
     }
   }
+  // Dense variant per-query diagnostics. Rendered only
+  // when the report carries a dense best row. The block
+  // mirrors the sync section's shape and adds an extra
+  // "contributor agreement" sub-block for hybrid-dense,
+  // listing the per-source RRF rank and the agreement
+  // count for the no-answer queries still confabulating
+  // — the diagnostic a reviewer most needs when
+  // interpreting a hybrid-dense abstention.
+  for (const v of ["vectorDense", "hybridDense"] as const) {
+    const b = report.bestByVariant[v];
+    if (b === undefined) continue;
+    if (b === null) continue;
+    lines.push(`  variant=${displayLabel(v)} gate=${b.gateLabel}`);
+    const regressionsAll = b.diagnostics.filter(
+      (d) => d.isPositive && d.abstained,
+    );
+    const regressions = regressionsAll.slice(0, perQueryLimit);
+    lines.push(
+      `    positive queries forced to abstain: ${regressionsAll.length}` +
+        (regressionsAll.length > perQueryLimit
+          ? ` (showing first ${perQueryLimit})`
+          : ""),
+    );
+    for (const d of regressions) {
+      lines.push(
+        `      [${d.family}] ${d.queryId}  topScore=${d.topScore.toFixed(3)} ` +
+          `gap=${d.scoreGap.toFixed(3)} ratio=${formatRatio(d.scoreRatio)} ` +
+          `gate=${d.abstainedByGate.join("|") || "(none)"}`,
+      );
+    }
+    const fixedAll = b.diagnostics.filter(
+      (d) => !d.isPositive && d.abstained && !d.naturallyAbstained,
+    );
+    const fixed = fixedAll.slice(0, perQueryLimit);
+    lines.push(
+      `    no-answer queries fixed by abstention: ${fixedAll.length}` +
+        (fixedAll.length > perQueryLimit
+          ? ` (showing first ${perQueryLimit})`
+          : ""),
+    );
+    for (const d of fixed) {
+      lines.push(
+        `      [${d.family}] ${d.queryId}  topScore=${d.topScore.toFixed(3)} ` +
+          `gap=${d.scoreGap.toFixed(3)} ratio=${formatRatio(d.scoreRatio)} ` +
+          `gate=${d.abstainedByGate.join("|") || "(none)"}`,
+      );
+    }
+    const remainAll = b.diagnostics.filter(
+      (d) => !d.isPositive && !d.abstained,
+    );
+    const remain = remainAll.slice(0, perQueryLimit);
+    lines.push(
+      `    no-answer queries still confabulating: ${remainAll.length}` +
+        (remainAll.length > perQueryLimit
+          ? ` (showing first ${perQueryLimit})`
+          : ""),
+    );
+    for (const d of remain) {
+      const support =
+        d.contributorSupport !== undefined
+          ? `  agreement=${d.contributorAgreementCount ?? 0}/${
+              d.contributorSupport.length
+            } contributors=[${d.contributorSupport
+              .map((c) =>
+                c.rank === null
+                  ? `${c.source}=absent`
+                  : `${c.source}=rank${c.rank}(${c.contribution.toFixed(3)})`,
+              )
+              .join(" ")}]`
+          : "";
+      lines.push(
+        `      [${d.family}] ${d.queryId}  topScore=${d.topScore.toFixed(3)} ` +
+          `gap=${d.scoreGap.toFixed(3)} ratio=${formatRatio(d.scoreRatio)} ` +
+          `before=${d.originalTopIds.join(",") || "(empty)"}` +
+          support,
+      );
+    }
+  }
   lines.push("");
   return lines.join("\n");
 }
@@ -1831,7 +3071,7 @@ function tnrPct(r: CalibrationVariantResult): string {
 
 function baselineTnrForVariant(
   report: CalibrationReport,
-  v: "lexical" | "fts5" | "vector",
+  v: "lexical" | "fts5" | "vector" | "vector-dense" | "hybrid-dense",
 ): number {
   const b = report.baseline.find((x) => x.variant === v);
   if (!b || b.metrics.noAnswerTotal === 0) return 0;
@@ -1846,6 +3086,318 @@ function formatRatio(r: number): string {
   return r.toFixed(2);
 }
 
+/**
+ * Map a `bestByVariant` key (camelCase) to its display
+ * label (kebab-case). The keys are camelCase because
+ * JSON object keys follow the camelCase convention; the
+ * labels are kebab-case because the variant's own
+ * `variant` field on the row is kebab-case (and the rest
+ * of the report is kebab-case for consistency with the
+ * CLI flag naming).
+ */
+function displayLabel(v: "vectorDense" | "hybridDense"): string {
+  return v === "vectorDense" ? "vector-dense" : "hybrid-dense";
+}
+
+// ---------------------------------------------------------------------------
+// Dense calibration human report
+// ---------------------------------------------------------------------------
+
+/**
+ * Format a dense calibration report for the human
+ * summary. Mirrors `formatCalibrationReport` and adds a
+ * leading "embedding backend" block so a reviewer can
+ * audit the dense embedder before reading the
+ * calibration numbers.
+ *
+ * The dense report's `bestByVariant` is a strict superset
+ * of the sync shape: the sync keys (`lexical` / `fts5` /
+ * `vector`) are `null` and the dense keys
+ * (`vectorDense` / `hybridDense`) carry the dense best
+ * rows. The human report focuses on the dense keys —
+ * the sync keys are `null` by construction on a dense
+ * calibration report, so printing "(no sweep rows)" for
+ * them is honest.
+ */
+export function formatDenseCalibrationReport(
+  report: DenseCalibrationReport,
+  options: { perQueryLimit?: number } = {},
+): string {
+  // The dense calibration report is structurally a
+  // `CalibrationReport`; we render it via the existing
+  // `formatCalibrationReport` (which already understands
+  // the optional `vectorDense` / `hybridDense` best keys
+  // and the dense sweep + per-query sections) and then
+  // prepend the embedder-metadata block. The prepended
+  // block is the only dense-specific human detail; the
+  // body is byte-aligned with the sync calibration
+  // report so a reviewer can compare side-by-side.
+  const body = formatCalibrationReport(report, options);
+  const lines: string[] = [];
+  lines.push("=== cortex-mcp-v2 retrieval calibration (dense) ===");
+  lines.push(`generated at: ${report.generatedAt}`);
+  lines.push(`  records:    ${report.config.recordCount}`);
+  lines.push(`  queries:    ${report.config.queryCount}`);
+  lines.push(`  direction:  ${report.config.direction}`);
+  lines.push("");
+  lines.push("--- embedding backend ---");
+  const e = report.embeddingBackend;
+  lines.push(`  backend:    ${e.backend}`);
+  lines.push(`  model:      ${e.modelId}`);
+  lines.push(`  dim:        ${e.dim}`);
+  if (e.quantized !== undefined) {
+    lines.push(`  quantized:  ${e.quantized}`);
+  }
+  if (e.runtimeVersion) {
+    lines.push(`  runtime:    ${e.runtimeVersion}`);
+  }
+  lines.push(`  status:     ${e.status}`);
+  if (e.status === "error" && e.errorMessage) {
+    lines.push(`  error:      ${e.errorMessage}`);
+  }
+  if (e.loadMs !== undefined) {
+    lines.push(`  loadMs:     ${e.loadMs}`);
+  }
+  if (e.embedMs !== undefined) {
+    lines.push(`  embedMs:    ${e.embedMs}`);
+  }
+  if (e.embedCount !== undefined) {
+    lines.push(`  embedCount: ${e.embedCount}`);
+  }
+  if (e.cacheDir) {
+    lines.push(`  cacheDir:   ${e.cacheDir}`);
+  }
+  lines.push("");
+  // Skip the original `formatCalibrationReport` header
+  // AND its metadata block (generated-at / records /
+  // queries / direction) so the dense report prints the
+  // dense header (with embedder block) once and the
+  // calibration body once. The body still carries its
+  // own internal section breaks.
+  const bodyLines = body.split("\n");
+  // The body is laid out as:
+  //   line 0: `=== cortex-mcp-v2 retrieval calibration ===`
+  //   line 1: `generated at: <iso>`
+  //   line 2: `  records:    <n>`
+  //   line 3: `  queries:    <n>`
+  //   line 4: `  direction:  <dir>`
+  //   line 5: ``
+  //   line 6: `--- best per variant ---`        <-- anchor
+  //   ...
+  // We start the slice at the `--- best per variant ---`
+  // line so the calibration body keeps its existing
+  // shape (and a reviewer can compare dense vs. sync
+  // side-by-side starting at the best-per-variant
+  // section).
+  let bodyStart = -1;
+  for (let i = 0; i < bodyLines.length; i++) {
+    if (bodyLines[i] === "--- best per variant ---") {
+      bodyStart = i;
+      break;
+    }
+  }
+  if (bodyStart >= 0) {
+    lines.push(...bodyLines.slice(bodyStart));
+  } else {
+    // Defensive fallback: include the full body if the
+    // expected anchor is missing (it should always be
+    // present in the sync calibration report).
+    lines.push(body);
+  }
+  return lines.join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Dense human reports
+// ---------------------------------------------------------------------------
+
+/**
+ * Format a dense single-variant human report. Mirrors
+ * `formatHumanReport` for the four sync variants but
+ * adds a leading "embedding backend" block so a
+ * reviewer can audit the embedder before reading the
+ * metrics.
+ */
+export function formatDenseHumanReport(
+  report: DenseRetrievalBenchmarkReport,
+): string {
+  const lines: string[] = [];
+  lines.push("=== cortex-mcp-v2 retrieval benchmark (dense) ===");
+  lines.push(`variant:      ${report.variant}`);
+  lines.push(`generated at: ${report.generatedAt}`);
+  lines.push("");
+  lines.push("--- embedding backend ---");
+  const e = report.config.embeddingBackend;
+  lines.push(`  backend:        ${e.backend}`);
+  lines.push(`  model:          ${e.modelId}`);
+  lines.push(`  dim:            ${e.dim}`);
+  if (e.quantized !== undefined) {
+    lines.push(`  quantized:      ${e.quantized}`);
+  }
+  if (e.runtimeVersion) {
+    lines.push(`  runtime:        ${e.runtimeVersion}`);
+  }
+  lines.push(`  status:         ${e.status}`);
+  if (e.status === "error" && e.errorMessage) {
+    lines.push(`  error:          ${e.errorMessage}`);
+  }
+  if (e.loadMs !== undefined) {
+    lines.push(`  loadMs:         ${e.loadMs}`);
+  }
+  if (e.embedMs !== undefined) {
+    lines.push(`  embedMs:        ${e.embedMs}`);
+  }
+  if (e.embedCount !== undefined) {
+    lines.push(`  embedCount:     ${e.embedCount}`);
+  }
+  if (e.cacheDir) {
+    lines.push(`  cacheDir:       ${e.cacheDir}`);
+  }
+  lines.push("");
+  lines.push("--- config ---");
+  lines.push(`  threshold:   ${report.config.threshold}`);
+  lines.push(`  top-k:       ${report.config.topK}`);
+  if (report.config.hybridK !== undefined) {
+    lines.push(`  hybrid-k:    ${report.config.hybridK}`);
+  }
+  lines.push(`  records:     ${report.config.recordCount}`);
+  lines.push(`  queries:     ${report.config.queryCount}`);
+  lines.push("");
+  // Reuse the sync human report. We rebuild a synthetic
+  // sync `RetrievalBenchmarkReport` shape (just the
+  // fields `formatHumanReport` reads) so the headline
+  // block is byte-aligned with the existing report.
+  // The dense report's `evals` / `metrics` /
+  // `orientation` / `answerQuality` / `failures` are
+  // already in the same shape as the sync report, so
+  // the projection is a clean cast.
+  const syncShape = {
+    generatedAt: report.generatedAt,
+    variant: "lexical-baseline" as const, // unused by formatHumanReport but required
+    config: {
+      threshold: report.config.threshold,
+      topK: report.config.topK,
+      recordCount: report.config.recordCount,
+      queryCount: report.config.queryCount,
+      ...(report.config.hybridK !== undefined
+        ? { hybridK: report.config.hybridK }
+        : {}),
+    },
+    evals: report.evals,
+    metrics: report.metrics,
+    orientation: report.orientation,
+    answerQuality: report.answerQuality,
+    failures: report.failures,
+    ...(report.hybridPerFamilyDelta
+      ? { hybridPerFamilyDelta: report.hybridPerFamilyDelta }
+      : {}),
+  };
+  // `formatHumanReport` reads many fields; we cast and
+  // call. The dense report fields are structurally
+  // identical so the cast is safe.
+  lines.push(
+    formatHumanReport(syncShape as unknown as RetrievalBenchmarkReport),
+  );
+  return lines.join("\n");
+}
+
+/**
+ * Format a dense comparison human report. Mirrors
+ * `formatComparisonReport` for the four sync variants
+ * but prints `vector-dense` / `hybrid-dense` columns
+ * and a leading "embedding backend" block.
+ */
+export function formatDenseComparisonReport(
+  report: DenseComparisonBenchmarkReport,
+): string {
+  const lines: string[] = [];
+  lines.push("=== cortex-mcp-v2 retrieval benchmark (dense all) ===");
+  lines.push(`generated at: ${report.generatedAt}`);
+  lines.push(`  records:     ${report.config.recordCount}`);
+  lines.push(`  queries:     ${report.config.queryCount}`);
+  if (report.config.hybridK !== undefined) {
+    lines.push(`  hybrid-k:    ${report.config.hybridK}`);
+  }
+  lines.push("");
+  lines.push("--- embedding backend ---");
+  const e = report.config.embeddingBackend;
+  lines.push(`  backend:    ${e.backend}`);
+  lines.push(`  model:      ${e.modelId}`);
+  lines.push(`  dim:        ${e.dim}`);
+  if (e.quantized !== undefined) {
+    lines.push(`  quantized:  ${e.quantized}`);
+  }
+  if (e.runtimeVersion) {
+    lines.push(`  runtime:    ${e.runtimeVersion}`);
+  }
+  lines.push(`  status:     ${e.status}`);
+  if (e.status === "error" && e.errorMessage) {
+    lines.push(`  error:      ${e.errorMessage}`);
+  }
+  if (e.loadMs !== undefined) {
+    lines.push(`  loadMs:     ${e.loadMs}`);
+  }
+  if (e.embedMs !== undefined) {
+    lines.push(`  embedMs:    ${e.embedMs}`);
+  }
+  if (e.embedCount !== undefined) {
+    lines.push(`  embedCount: ${e.embedCount}`);
+  }
+  if (e.cacheDir) {
+    lines.push(`  cacheDir:   ${e.cacheDir}`);
+  }
+  lines.push("");
+  // Headline comparison table.
+  lines.push("--- comparison (vector-dense vs hybrid-dense) ---");
+  for (const r of report.comparison) {
+    const isPct = r.metric.includes("(%)");
+    const fmt = (n: number): string => {
+      if (isPct) return n.toFixed(1).padStart(5);
+      return n.toString().padStart(3);
+    };
+    const arrow = r.delta > 0 ? "+" : r.delta < 0 ? "" : "=";
+    const deltaStr = isPct ? r.delta.toFixed(1) : r.delta.toString();
+    lines.push(
+      `  ${r.metric.padEnd(30)}  vectorDense=${fmt(r.vectorDense)}  hybridDense=${fmt(r.hybridDense)}  delta(hybridDense-vectorDense)=${arrow}${deltaStr}`,
+    );
+  }
+  if (
+    report.hybridPerFamilyDelta &&
+    report.hybridPerFamilyDelta.length > 0
+  ) {
+    lines.push("");
+    lines.push("--- hybrid-dense per-family (vs best baseline) ---");
+    lines.push(
+      "  family         total  hybridDense(rank1)  best(rank1)  Δhybrid  " +
+        "hybridDense(hit5)  ΔvsLexical  bestSources",
+    );
+    for (const row of report.hybridPerFamilyDelta) {
+      const sources =
+        row.bestBaselineSources.length === 0
+          ? "-"
+          : row.bestBaselineSources.join("/");
+      const delta = row.deltaHybridVsBest;
+      const sign = delta > 0 ? "+" : delta < 0 ? "" : "=";
+      lines.push(
+        `  ${row.family.padEnd(14)} ${String(row.total).padStart(3)}  ` +
+          `${String(row.hybridRank1).padStart(18)}  ` +
+          `${String(row.bestBaselineRank1).padStart(12)}  ` +
+          `${(sign + String(delta)).padStart(7)}  ` +
+          `${String(row.hybridHit5).padStart(17)}  ` +
+          `${String(row.deltaHybridVsLexical).padStart(11)}  ` +
+          `${sources}`,
+      );
+    }
+  }
+  lines.push("");
+  lines.push("### vector-dense ###");
+  lines.push(formatDenseHumanReport(report.vectorDense));
+  lines.push("");
+  lines.push("### hybrid-dense ###");
+  lines.push(formatDenseHumanReport(report.hybridDense));
+  return lines.join("\n");
+}
+
 // ---------------------------------------------------------------------------
 // CLI entry point
 // ---------------------------------------------------------------------------
@@ -1853,9 +3405,57 @@ function formatRatio(r: number): string {
 async function main(): Promise<void> {
   const opts = parseRetrievalCli(process.argv.slice(2));
   const variant: BenchmarkVariant = opts.variant ?? "lexical";
-  const report = runRetrievalBenchmark(opts);
   const dir = resolveBenchmarkArtifactsDir(opts);
   const written: string[] = [];
+  // Dense variants dispatch to the async path. The
+  // sync `runRetrievalBenchmark` would throw on these
+  // variants, so we route them before the sync call.
+  if (
+    variant === "vector-dense" ||
+    variant === "hybrid-dense" ||
+    variant === "all-dense"
+  ) {
+    // `--calibrate` short-circuits the dense benchmark
+    // and runs the dense calibration experiment instead.
+    // The dispatch happens here (CLI only) so callers of
+    // `runDenseRetrievalBenchmark` programmatically still
+    // get the union return type that includes the
+    // calibration report (see `runDenseRetrievalBenchmark`
+    // for the contract).
+    if (opts.calibration) {
+      const calReport = await runDenseCalibration(opts);
+      const calFile = writeDenseCalibrationReport(calReport, dir);
+      written.push(calFile);
+      process.stdout.write(
+        "\n" + formatDenseCalibrationReport(calReport) + "\n",
+      );
+      process.stdout.write(`\nartifact written: ${calFile}\n`);
+      return;
+    }
+    const denseReport = await runDenseRetrievalBenchmark(opts);
+    if (variant === "all-dense") {
+      // Type narrowing: `all-dense` returns a
+      // `DenseComparisonBenchmarkReport`. We use a
+      // structural check (the `vectorDense` field)
+      // because `instanceof` is not practical on a
+      // discriminated union.
+      const r = denseReport as DenseComparisonBenchmarkReport;
+      written.push(writeDenseBenchmarkReport(r.vectorDense, dir));
+      written.push(writeDenseBenchmarkReport(r.hybridDense, dir));
+      written.push(writeDenseComparisonReport(r, dir));
+      process.stdout.write(formatDenseComparisonReport(r) + "\n");
+    } else {
+      const r = denseReport as DenseRetrievalBenchmarkReport;
+      const file = writeDenseBenchmarkReport(r, dir);
+      written.push(file);
+      process.stdout.write(formatDenseHumanReport(r) + "\n");
+    }
+    for (const f of written) {
+      process.stdout.write(`\nartifact written: ${f}\n`);
+    }
+    return;
+  }
+  const report = runRetrievalBenchmark(opts);
   if (variant === "all") {
     // The CLI writes four artifacts for a comparison run:
     //   - one lexical single-variant file

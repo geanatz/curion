@@ -96,39 +96,48 @@ contains only sanitized memory summaries (no raw input, no
 credentials); corpus hygiene is regression-checked by
 `tests/retrieval-benchmark.test.ts`.
 
-### Corpus + query set (intermediate checkpoint)
+### Corpus + query set (expanded checkpoint)
 
-The fixture corpus and query set are the **intermediate**
-checkpoint of 60 records and 54 queries, with the 6 documented
-query families. The intermediate expansion is a deliberate step
-between the original 24-record / 24-query starter set and a
-future 132-record / 108-query adversarial set. The per-family
-distribution is:
+The fixture corpus and query set are the **expanded**
+checkpoint of 100 records and 96 queries, with the 6 documented
+query families. The expanded expansion is a deliberate step
+between the original 24-record / 24-query starter set, the
+60-record / 54-query intermediate set, and a future 132-record /
+108-query adversarial set. The per-family distribution is:
 
-| Family        | Records (corpus) | Queries | Notes                                                |
-|---------------|------------------|---------|------------------------------------------------------|
-| `exact`       | 25 (across all topical clusters) | 10 | Direct technical-term recall.                        |
-| `paraphrase`  | same             | 8       | Paraphrased vocabulary.                              |
-| `temporal`    | 8 historical records in cluster 6 + cluster 15 | 6 | Current vs old; one labeled divergent case.         |
-| `multi-hop`   | same             | 10      | Multi-slot / list queries.                           |
-| `no-answer`   | same             | 10      | No relevant memory in the corpus.                    |
-| `orientation` | same             | 10      | Project-status; multi-slot coverage + noise metric.  |
-| **total**     | **60**           | **54**  | 15 topical clusters of 4 records each.               |
+| Family        | Queries | Notes                                                              |
+|---------------|---------|--------------------------------------------------------------------|
+| `exact`       | 14      | Direct technical-term recall; 4 added in the expanded set.        |
+| `paraphrase`  | 12      | Paraphrased vocabulary; 4 added in the expanded set.               |
+| `temporal`    | 12      | Current vs old; 6 added, 2 of them labeled divergent.            |
+| `multi-hop`   | 16      | Multi-slot / list queries; 6 added in the expanded set.            |
+| `no-answer`   | 24      | No relevant memory; 14 added, including 1 labeled hard-negative.  |
+| `orientation` | 18      | Project-status; 8 added in the expanded set.                      |
+| **total**     | **96**  | 100 records across 25 topical clusters of 4 records each.         |
 
-Tests in `tests/retrieval-benchmark.test.ts` pin the
-intermediate minimums (≥ 60 records, ≥ 54 queries, ≥ 6 queries
-per family) and the per-family distribution. The 6 families are
-documented and stable; adding a new family requires a
-schema-level review.
+Tests in `tests/retrieval-benchmark.test.ts` pin the expanded
+minimums (≥ 100 records, ≥ 96 queries, ≥ 6 queries per family)
+and the per-family distribution. The 6 families are documented
+and stable; adding a new family requires a schema-level review.
 
-The 60 records span 15 topical clusters of 4 records each:
-stack, deploy, people, office, docs, temporal-old, testing,
-security, dependencies, monitoring, team-process, entity-domain,
-stack-extensions, testing-extensions, and historical-extensions.
-The office cluster (13..16) and the original historical cluster
-(21..24) are the orientation distractor set; the new
-historical-extensions cluster (57..60) is the legacy cluster
-used for the temporal current-truth divergence case.
+The 100 records span 25 topical clusters of 4 records each:
+the original 12 clusters (stack, deploy, people, office, docs,
+temporal-old, testing, security, dependencies, monitoring,
+team-process, entity-domain), the 3 intermediate clusters
+(stack-extensions, testing-extensions, historical-extensions),
+and 10 new clusters (ci-extensions, observability-extensions,
+security-extensions, agent-runtime, data-pipeline, client-sdk,
+feature-flags, provider-routing, legacy-extensions,
+testing-extensions-2). The orientation distractor set stays
+`{13..16, 21..24}`; the new historical-extensions and
+legacy-extensions clusters (57..60 and 93..96) are the legacy
+record sets used for the temporal current-truth divergence
+cases and as token-overlap distractors for the new temporal
+queries. The no-answer family is exercised by 14 new queries,
+including the labeled hard-negative `nonexistent-load-balancer`
+which shares strong tokens ('MCP', 'server', 'port') with the
+agent runtime and stack records so the no-answer TNR gets
+confabulation pressure at the production default threshold.
 
 ### What it measures
 
@@ -156,12 +165,13 @@ the ranker's failure modes are visible in the headline number:
   still rank above the current fact (so current-truth@1
   fails). The gap between hit@K and current-truth@1 is the
   temporal failure mode, surfaced in the headline number.
-  A small labeled set of `temporal` queries (one in the
-  intermediate set: `temp-storage-raw-text`) deliberately has
-  `expectedIds` containing both the old and the new fact, with
-  `currentTruthIds` containing only the new fact; this makes
-  the divergence between hit@K and current-truth@1 explicit
-  in the data, not implicit in the family name.
+  A small labeled set of `temporal` queries (two in the
+  expanded set: `temp-storage-raw-text` and
+  `temp-controller-validation`) deliberately has
+  `expectedIds` containing both the old and the new fact,
+  with `currentTruthIds` containing only the new fact; this
+  makes the divergence between hit@K and current-truth@1
+  explicit in the data, not implicit in the family name.
 - **no-answer TNR** — for queries with no relevant memory in
   the corpus, did the ranker return zero hits?
 - **per-family breakdown** — the queries are split into six
@@ -480,31 +490,57 @@ edge case.
 ### Limitations of the new foundation
 
 - **The new metrics are not adversarial.** The
-  intermediate-checkpoint fixture corpus and
-  query set (60 records / 54 queries) expand
-  the family distribution and add a labeled
-  temporal current-truth divergence case, but
-  the broader 132-record / 108-query
-  adversarial expansion is intentionally a
-  later phase. The intermediate expansion
-  reduces single-query volatility and adds
-  more family coverage; it does not yet
-  exercise near-miss / adversarial shapes.
+  expanded-checkpoint fixture corpus and
+  query set (100 records / 96 queries) add
+  more topical coverage (CI extensions,
+  observability extensions, security
+  extensions, agent runtime, data pipeline,
+  client SDK, feature flags, provider
+  routing, legacy extensions, testing
+  extensions-2) and add a second labeled
+  temporal current-truth divergence case
+  (`temp-controller-validation`), but the
+  broader 132-record / 108-query adversarial
+  expansion is intentionally a later phase.
+  The expanded expansion reduces single-
+  query volatility and adds more family
+  coverage; it does not yet exercise
+  near-miss / adversarial shapes.
 - **The new metrics do not change the
   headline contract.** Existing report
-  consumers and test assertions that reference
-  `hit@1 / hit@3 / hit@5 / rank1 /
+  consumers and test assertions that
+  reference `hit@1 / hit@3 / hit@5 / rank1 /
   currentTruth@1 / no-answer TNR` still work
-  unchanged. The new blocks are additive. The
-  one contract update is the divergent
+  unchanged. The new blocks are additive.
+  The one contract update is the divergent
   `currentTruthIds` for the labeled temporal
-  case: the strict-mirror test in
+  cases: the strict-mirror test in
   `tests/retrieval-benchmark.test.ts` was
   updated to a subset invariant (every
   `currentTruthId` is also an `expectedId`)
-  and a labeled divergent-queries set.
+  and a labeled divergent-queries set
+  containing both `temp-storage-raw-text` and
+  `temp-controller-validation`.
+- **No-answer family exercises
+  confabulation pressure.** The expanded
+  set adds 14 no-answer queries, including
+  the labeled hard-negative
+  `nonexistent-load-balancer` (shares
+  strong 'MCP' / 'server' / 'port' tokens
+  with the agent runtime and stack
+  records). The lexical baseline is
+  expected to confabulate on at least one
+  no-answer query at the production default
+  threshold of 0.2, so the no-answer TNR
+  is exercised against confabulation
+  pressure, not only against zero-overlap
+  queries. The current 100-record /
+  96-query baseline produces no-answer TNR
+  ≈ 21% on the lexical variant; this is
+  the calibration experiment's input, not
+  a regression.
 - **Bootstrap CIs are available but not
-  reported.** With ~50 queries per run the
+  reported.** With ~96 queries per run the
   resampled intervals are still wide for
   per-family percentages; surfacing them
   in the headline number would invite
@@ -520,11 +556,12 @@ edge case.
 
 ## Retrieval benchmarks (current state)
 
-The benchmark harness supports four retrieval variants. The
-lexical variant is the production baseline; the FTS5, vector,
-and hybrid (RRF) variants are **benchmark-only comparison
-points** — they are not wired into the production `recall(text)`
-controller and the public MCP API is unchanged.
+The benchmark harness supports six retrieval variants. The
+lexical variant is the production baseline; the FTS5,
+vector, hybrid (RRF), vector-dense, and hybrid-dense
+variants are **benchmark-only comparison points** — they
+are not wired into the production `recall(text)` controller
+and the public MCP API is unchanged.
 
 Implemented variants:
 
@@ -539,7 +576,9 @@ Implemented variants:
   embedder (ONNX, sentence-transformers, etc.) can be
   plugged in by passing a custom `embedder` to
   `rankVector` or the runner; the default embedder is
-  dependency-free and CI-stable.
+  dependency-free and CI-stable. The `vector` variant is
+  preserved as a deterministic control for the
+  `vector-dense` variant below.
 - `hybrid` — benchmark-only `rankHybrid` (Reciprocal Rank
   Fusion over lexical / FTS5 / vector). See
   `src/benchmark/variants/hybrid.ts`. RRF fuses the three
@@ -549,6 +588,22 @@ Implemented variants:
   `k ∈ {20, 60, 100}`. The variant is **rank-only** and does
   not introduce an abstention gate of its own; calibration
   of the fusion is a future phase.
+- `vector-dense` — benchmark-only `rankDenseVectorAsync`
+  (cosine similarity over a real local dense embedding
+  via a pluggable `DenseEmbedder`). The default
+  embedder is a deterministic stub
+  (`StubDeterministicDenseEmbedder`); the
+  `transformersjs` backend runs a real local ONNX model
+  (`Xenova/all-MiniLM-L6-v2`, quantized, 384-dim) via
+  `@xenova/transformers`. See
+  `src/benchmark/variants/dense-embedder.ts` and
+  `src/benchmark/variants/dense-vector.ts`.
+- `hybrid-dense` — benchmark-only `rankHybridAsync`
+  (RRF over lexical / FTS5 / `vector-dense`).
+  Asynchronous, async-only entry point. The
+  contributor's source label on the diagnostic is
+  `vector-dense` so a reviewer can see which embedder
+  produced each rank-1 hit.
 
 Not yet implemented (placeholders):
 
@@ -583,8 +638,8 @@ Not yet implemented (placeholders):
   <n>` (e.g. `0.99` for the strictest filter) or extend
   the runner with a relative-threshold helper in a later
   phase.
-- **What the default config produces.** On the 60-record
-  sanitized intermediate-checkpoint fixture corpus + 54
+- **What the default config produces.** On the 100-record
+  sanitized expanded-checkpoint fixture corpus + 96
   queries the vector variant reaches the headline numbers
   reported by the `benchmark:retrieval:all` run (the
   artifact under `.cortex/benchmark/` is the source of
@@ -594,6 +649,428 @@ Not yet implemented (placeholders):
   the default threshold of 0 is a known limitation of the
   default; callers that need abstention should pass a
   positive threshold or extend the runner.
+
+### Dense embedding variant (`vector-dense` / `hybrid-dense`)
+
+The dense phase adds a **pluggable real local
+semantic-embedding backend** behind the existing
+`VectorEmbedder` seam. The architecture is the same as
+the existing four sync variants: a benchmark-only
+comparison point, no production path or MCP API change,
+source-tree guards pin the whitelist, and the existing
+`vector` (hashed-BoW) variant is preserved as a control.
+
+#### Why a real local embedder
+
+The hashed-BoW control is a useful, CI-stable baseline
+but it is fundamentally a token-overlap ranker in dense
+disguise: two texts that share tokens share vector
+components, two texts that don't share tokens
+decorrelate. A real semantic embedder captures
+paraphrase / synonym / topic-level similarity that
+token overlap misses. The benchmark uses
+[`@xenova/transformers`](https://github.com/xenova/transformers.js)
+(v2.17+) for the local ONNX forward pass:
+
+- The library runs ONNX models entirely on the local
+  machine (CPU; no GPU required). The model is
+  downloaded once from the Hugging Face CDN and cached
+  on disk.
+- The default pinned model is
+  `Xenova/all-MiniLM-L6-v2` (quantized, 384-dim,
+  ~25MB cached, ~700ms first-load on a modern CPU).
+  The model is a sentence-transformers MiniLM; the
+  quantized form is bit-deterministic for a fixed
+  input and a fixed runtime.
+- The architecture is **local-only**: no external API,
+  no key, no remote inference. The first-run model
+  download is the only network call and it is to the
+  Hugging Face CDN, the same fetch any first-run user
+  of the library would do.
+
+#### Embedder interface and metadata
+
+The `DenseEmbedder` interface in
+`src/benchmark/variants/dense-embedder.ts` is the
+stable contract. Every embedder carries a
+`metadata` block on the report:
+
+```json
+"config": {
+  "embeddingBackend": {
+    "backend":   "transformersjs",
+    "modelId":   "Xenova/all-MiniLM-L6-v2",
+    "dim":       384,
+    "quantized": true,
+    "runtimeVersion": "2.17.2",
+    "status":    "ready",
+    "loadMs":    898,
+    "embedMs":   20702,
+    "embedCount": 3294,
+    "cacheDir":  "<cwd>/.cortex/transformers-cache"
+  }
+}
+```
+
+`status` distinguishes:
+- `"ready"` — the embedder actually executed the
+  queries / corpus during the benchmark.
+- `"skipped"` — the runner was configured with
+  `--dense-skip` and the embedder was not invoked.
+- `"error"` — the embedder failed at construction or
+  first use; the runner falls back to the deterministic
+  stub so the report shape is preserved. The error
+  message is captured on `errorMessage`.
+
+The same metadata is on the `--variant all-dense`
+comparison report and on each per-variant artifact
+(`retrieval-vector-dense-*.json` /
+`retrieval-hybrid-dense-*.json` /
+`retrieval-compare-dense-*.json`).
+
+#### Implementations
+
+- `StubDeterministicDenseEmbedder` — dependency-free
+  deterministic projection (feature hashing + L2
+  normalization). Default. CI-friendly, no model
+  download. Dim is configurable (`stub-dense:dim=128`).
+- `TransformersJsEmbedder` — the real local ONNX
+  embedder. Async `init()` builds the pipeline once;
+  sync `embed()` / async `embedBatch()` calls are
+  the hot path. Falls back to the stub when
+  `init()` fails or `--dense-skip` is set, so a
+  transient network failure does not break the
+  benchmark.
+- A custom embedder can be plugged in by implementing
+  the `DenseEmbedder` interface and passing it to
+  `runDenseRetrievalBenchmark({ denseEmbedder })`.
+  The benchmark does NOT take ownership of the
+  embedder's lifecycle.
+
+#### CLI flags
+
+| Flag | Default | Notes |
+|---|---|---|
+| `--variant vector-dense` / `hybrid-dense` / `all-dense` | `lexical` | Async dense variants. The sync `runRetrievalBenchmark` throws on them. |
+| `--embedder stub-dense` | `stub-dense` | Deterministic, no model download. |
+| `--embedder stub-dense:dim=N` | `dim=64` | Stub with a custom dim. |
+| `--embedder transformersjs` | `Xenova/all-MiniLM-L6-v2` (quantized) | Real local ONNX embedder. |
+| `--embedder transformersjs:model=<id>,quantized=true\|false` | — | Custom model id / quantization. |
+| `--dense-cache-dir <path>` | `<cwd>/.cortex/transformers-cache/` | Local model cache directory. |
+| `--dense-skip` | off | Skip live model execution; use the stub. Useful for CI without network. |
+
+#### How to run
+
+```sh
+# Deterministic stub (default; no model download; CI-friendly)
+npm run benchmark:retrieval:vector-dense
+npm run benchmark:retrieval:hybrid-dense
+npm run benchmark:retrieval:all-dense
+
+# Real local model (first run downloads ~25MB to .cortex/transformers-cache)
+npm run benchmark:retrieval:vector-dense:real
+npm run benchmark:retrieval:hybrid-dense:real
+npm run benchmark:retrieval:all-dense:real
+
+# Skip the model execution explicitly (deterministic-only)
+npm run benchmark:retrieval:vector-dense:skip
+```
+
+The first real run downloads the ONNX model to
+`<cwd>/.cortex/transformers-cache/` (override via
+`--dense-cache-dir <path>`). Subsequent runs use the
+local cache. No external API is called; the model is
+100% on-device.
+
+#### Measured results (100-record corpus, 96 queries)
+
+The expanded-checkpoint fixture corpus and query set is
+the second step between the 60-record / 54-query
+intermediate set and a future 132-record / 108-query
+adversarial set. The benchmark harness is unchanged
+(the real `transformersjs` MiniLM embedder is the same
+`Xenova/all-MiniLM-L6-v2` model, the stub is the same
+deterministic projection); only the fixture data grew.
+Headline numbers from a real `benchmark:retrieval:all-dense:real`
+run on the expanded set (the artifact under
+`.cortex/benchmark/` is the source of truth; the prior
+60-record / 54-query numbers are listed for comparison):
+
+| Metric | vector-dense (real, 100rec) | hybrid-dense (RRF, real, 100rec) |
+|---|---|---|
+| rank1 (positive) | **52 / 72 = 72.2%** | 48 / 72 = 66.7% |
+| hit@5 (positive) | 69 / 72 = 95.8% | **70 / 72 = 97.2%** |
+| no-answer TNR | 0 / 24 = 0.0% | 0 / 24 = 0.0% |
+
+For comparison, the prior 60-record / 54-query
+intermediate set on the real `transformersjs` MiniLM
+embedder (the source of truth is the prior
+`.cortex/benchmark/` artifact):
+
+| Metric | vector (hashed-BoW) | vector-dense (real) | hybrid (RRF, hashed) | hybrid-dense (RRF, real) |
+|---|---|---|---|---|
+| rank1 (positive) | 26 / 44 = 59.1% | **32 / 44 = 72.7%** | 28 / 44 = 63.6% | **32 / 44 = 72.7%** |
+| hit@5 (positive) | 39 / 44 = 88.6% | **43 / 44 = 97.7%** | 39 / 44 = 88.6% | 41 / 44 = 93.2% |
+| no-answer TNR | 0 / 10 = 0.0% | 0 / 10 = 0.0% | 0 / 10 = 0.0% | 0 / 10 = 0.0% |
+
+The expanded-corpus reading: the real dense vector holds
+rank-1 at **72.2%** and `hit@5` at **95.8%**; the
+real hybrid-dense hits **`97.2%` hit@5** but loses 4
+rank-1 to the lexical / FTS5 contributor noise. The
+expanded corpus *tighter* no-answer TNR (0% across all
+four variants) is the calibration experiment's input,
+not a regression: the labeled hard-negative
+`nonexistent-load-balancer` and the broader no-answer
+set (24 queries, up from 10) make the no-answer TNR a
+harder contract to clear at the default threshold.
+The "no-answer TNR = 0%" is also the same limitation
+the hashed-BoW control has: cosine similarity of a unit
+vector to a random unrelated unit vector is near 0, and
+the default threshold passes every candidate with a
+non-zero overlap. A future calibration pass against
+the dense vector (or a positive `--threshold`) is the
+path to a meaningful TNR.
+
+The dense stub numbers are intentionally weaker than
+the real MiniLM (rank-1 30.6% / 58.3% on the stub vs
+72.2% / 66.7% on the real). The stub is a deterministic
+projection; the real MiniLM is the source of truth for
+the dense numbers above.
+
+#### Limitations
+
+- The dense variant is **retrieval-only**. No
+  answer-quality / LLM judging is performed. The
+  scaffold stays at `enabled: false`.
+- No production `sqlite-vec` migration or
+  persistent dense embedding storage. The dense
+  index is built in-memory for the lifetime of a
+  single benchmark run.
+- No external API embedding providers. The
+  transformers.js backend is local-only; the
+  first-run model download is the only network
+  call and it is to the Hugging Face CDN.
+- The CLI is opt-in: existing benchmark commands
+  (`benchmark:retrieval:fts5`, `vector`, `hybrid`,
+  `all`, `calibrate*`) keep working unchanged. The
+  dense variants are reached only via the
+  `vector-dense` / `hybrid-dense` / `all-dense`
+  variant names.
+- The CLI flag `--calibrate` DOES support the
+  dense variants. See the
+  [Dense abstention calibration](#dense-abstention-calibration-benchmark-only)
+  section below for the trade-off curves and
+  commands.
+- The `vector-dense` (and `hybrid-dense`) variants
+  are **async-only**; the sync `runRetrievalBenchmark`
+  throws on them. The async entry point is
+  `runDenseRetrievalBenchmark`.
+- The transformers.js model is bit-deterministic
+  for a fixed input and a fixed runtime, so the
+  benchmark artifact is reproducible across runs
+  on the same machine. Different ONNX Runtime
+  thread counts or different quantization
+  variants will produce different (but still
+  semantically meaningful) vectors.
+
+#### Dense abstention calibration (benchmark-only)
+
+A separate opt-in calibration experiment studies how
+to set abstention gates on the **dense** variants
+(`vector-dense` / `hybrid-dense`). The motivation is
+the empirical observation above: the dense embedder
+has strong positive recall and a natural `0%` no-answer
+TNR at the default threshold of 0, so the calibration
+question for the dense variants is **how to recover
+TNR while keeping positive regressions in check**.
+
+The dense calibration experiment reuses the existing
+`threshold / margin / ratio` gate families
+(documented in the
+[Calibration experiment](#calibration-experiment-benchmark-only-abstention-gates)
+section above) and adds:
+
+- A **per-variant default sweep grid** that spans the
+  dense variant's natural score range. The cosine
+  scale (`vector-dense`) is in [0, 1] and uses a
+  `threshold` grid of `[0.1, 0.2, 0.3, 0.4, 0.5, 0.6,
+  0.7]`. The RRF scale (`hybrid-dense`) is in
+  `(0, N/(k+1)]` and uses a `threshold` grid of
+  `[0.01, 0.02, 0.025, 0.03, 0.04]` so the sweep
+  explores the natural match / confabulation gap on
+  the dense RRF scale.
+- A **hybrid-aware abstention diagnostic** on the
+  `hybrid-dense` per-query trace: the per-source RRF
+  rank/score/contribution for the top-1 candidate
+  (`contributorSupport`) and the contributor-agreement
+  count (`contributorAgreementCount`). The agreement
+  count is the number of contributors that surfaced
+  the candidate; a "1 of 3" agreement is a stronger
+  abstention signal than a "3 of 3" agreement.
+
+The dense calibration report is a **strict superset**
+of the existing `CalibrationReport` shape. The additive
+fields are:
+
+- `embeddingBackend` — the dense embedder metadata.
+- `bestByVariant.vectorDense` / `bestByVariant.hybridDense`
+  — the dense best rows.
+- Per-query `contributorSupport` /
+  `contributorAgreementCount` on the `hybrid-dense`
+  rows (single-variant dense rows do NOT carry these
+  fields, so a reviewer can distinguish the
+  single-variant from hybrid-aware traces).
+
+The artifact is written under the file prefix
+`retrieval-calibration-dense-*.json` (distinct from
+the sync `retrieval-calibration-*.json` prefix) so the
+existing sync calibration consumers do not pick the
+dense artifact up accidentally. The sync calibration
+report is unchanged.
+
+```sh
+# All dense variants, default sweep grid (stub embedder).
+npm run benchmark:retrieval:calibrate:dense
+
+# One dense variant at a time.
+npm run benchmark:retrieval:calibrate:vector-dense
+npm run benchmark:retrieval:calibrate:hybrid-dense
+
+# Real local model (first run downloads ~25MB).
+npm run benchmark:retrieval:calibrate:dense:real
+```
+
+##### Measured trade-offs (100-record corpus, 96 queries, stub-dense)
+
+The dense calibration experiment was run against the
+100-record fixture corpus with the deterministic stub
+embedder (`stub-dense:dim=64`). Headline numbers from
+the artifact (the on-disk JSON is the source of truth):
+
+| Variant | Gate (best row) | TNR | ΔTNR | positive regressions | hit@5 (positive) | no-answer FPs fixed / remaining |
+|---|---|---|---|---|---|---|
+| `vector-dense` | `threshold@0.7` | 100.0% | +100.0pp | 71 / 72 (98.6%) | 1 / 72 (1.4%) | 24 / 0 |
+| `vector-dense` | `margin@0.3` | 100.0% | +100.0pp | 70 / 72 (97.2%) | 1 / 72 (1.4%) | 24 / 0 |
+| `vector-dense` | `ratio@2` | 100.0% | +100.0pp | 70 / 72 (97.2%) | 1 / 72 (1.4%) | 24 / 0 |
+| `vector-dense` | `threshold@0.4` | 50.0% | +50.0pp | 33 / 72 (45.8%) | 32 / 72 (44.4%) | 12 / 12 |
+| `vector-dense` | `ratio@1.25` | 70.8% | +70.8pp | 47 / 72 (65.3%) | 17 / 72 (23.6%) | 17 / 7 |
+| `hybrid-dense` | `ratio@2` | 95.8% | +95.8pp | 71 / 72 (98.6%) | 0 / 72 (0.0%) | 23 / 1 |
+| `hybrid-dense` | `threshold@0.04` | 45.8% | +45.8pp | 15 / 72 (20.8%) | 52 / 72 (72.2%) | 11 / 13 |
+| `hybrid-dense` | `ratio@1.5` | 79.2% | +79.2pp | 55 / 72 (76.4%) | 14 / 72 (19.4%) | 19 / 5 |
+
+The headline reading: **the dense vector exhibits a
+sharp threshold gap** at `threshold@0.4` (TNR +50pp
+with 33 regressions and `hit@5` dropping from
+`68.1%` to `44.4%`) and **the dense hybrid exhibits
+a sharp RRF ratio gap** at `ratio@1.5` (TNR +79.2pp
+with 55 regressions). The "all TNR at any cost"
+configurations (`vector-dense threshold@0.7` and
+`hybrid-dense ratio@2`) are not honest trade-offs:
+the `hit@5` of `1.4%` / `0.0%` and the
+`>97%` regression rate mean the ranker is now
+mostly refusing to answer.
+
+The most honest trade-off points on the new corpus are:
+
+- `vector-dense` `threshold@0.4` — TNR 50.0% with
+  hit@5 44.4% (a 23.7pp hit@5 regression). A
+  reviewer who weights TNR heavily could pick this.
+- `vector-dense` `ratio@1.25` — TNR 70.8% with
+  hit@5 23.6% (a 44.5pp hit@5 regression). A
+  heavier TNR bet.
+- `hybrid-dense` `threshold@0.04` — TNR 45.8% with
+  hit@5 72.2% (a 9.7pp hit@5 regression). The
+  balanced point on the dense hybrid; preserves
+  most of the strong-double rank-1=42/72=58.3%
+  baseline at the cost of 11 no-answer FPs fixed.
+
+A reviewer who wants a Pareto frontier of TNR vs.
+hit@5 vs. regressions can extend
+`pickBestRow` to a multi-objective rule; the v1
+calibration experiment is intentionally a
+single-rule, auditable pick. The default
+"best" rows surfaced in the human report follow
+the same rule as the sync calibration: maximize TNR
+delta, tie-break on smallest positive-regression
+count, then on largest hit@5.
+
+##### How to interpret a dense calibration report
+
+Each dense sweep row reports the same numbers as the
+sync calibration report (TNR, hit@5, rank1, currentTruth@1,
+regressions, noAnsFixed, noAnsRemain). The two
+dense-specific additions are:
+
+- The **contributor agreement** sub-block on the
+  `hybrid-dense` per-query diagnostics. For every
+  no-answer query the ranker still confabulates on
+  (i.e. the abstention gate did not trigger), the
+  report lists:
+  - `agreement=N/3` — how many of the three
+    contributors surfaced the candidate.
+  - `contributors=[lexical=rankK(contribution)
+    fts5=rankK(contribution) vector-dense=rankK(contribution)]`
+    — the per-source RRF rank and contribution for
+    the top-1 candidate.
+  The sub-block is the diagnostic a reviewer most
+  needs to interpret a hybrid-dense abstention
+  decision. A high agreement count on a no-answer
+  query means the fusion was confident, so the
+  abstention is harder; a low agreement count means
+  the fusion was already uncertain, so the abstention
+  is more defensible.
+- The **embedding backend** block at the top of the
+  human report (and as `embeddingBackend` on the JSON
+  artifact) so a reviewer can audit which dense
+  embedder produced the calibration numbers. The
+  block is the same `EmbedderMetadata` shape the
+  dense benchmark reports carry.
+
+##### Limitations
+
+- The dense calibration default sweep grid is small
+  (5..7 values per gate family). A reviewer who wants
+  a finer grid can call
+  `runDenseCalibration({ variant: "vector-dense",
+  calibrationConfig: { gatesByVariant: {}, sweep: {
+  threshold: [...], margin: [...], ratio: [...] } } })`
+  directly from a Node script.
+- The dense calibration experiment is **benchmark-only**.
+  The abstention gates it computes are a research
+  artifact, not a deployment policy. They are NOT
+  wired into the production `recall(text)` controller.
+  Wiring the gates in is a separate, later phase that
+  would require a production-impact analysis the
+  benchmark-only pass intentionally does not perform.
+- The "best" pick is a single rule, not a Pareto
+  frontier. A future phase can add a multi-objective
+  report (Pareto frontier of TNR vs. regressions vs.
+  hit@5 vs. F1@5).
+- The dense calibration report carries **only the
+  dense variants** — `vector-dense` and / or
+  `hybrid-dense`. The sync `lexical / fts5 / vector`
+  calibration experiment is unchanged and is run by
+  `npm run benchmark:retrieval:calibrate` /
+  `calibrate:lexical` / `calibrate:fts5` /
+  `calibrate:vector`.
+- The dense hybrid RRF uses three contributors
+  (lexical, FTS5, vector-dense). The contributor
+  support diagnostic therefore reports `agreement=N/3`,
+  not `N/4` or `N/2`. A future dense fusion with a
+  different contributor set would need to update the
+  cap accordingly.
+- The `vector-dense` and `hybrid-dense` calibration
+  report's per-query hybrid-aware fields
+  (`contributorSupport` / `contributorAgreementCount`)
+  are populated only on the `hybrid-dense` rows. A
+  reviewer who wants the same diagnostic on a
+  single-variant dense row would need to extend the
+  runner; the v1 contract is "hybrid-aware only on
+  hybrid runs".
+- Answer-quality evaluation is still disabled. The
+  dense calibration report does not score generated
+  answers; the abstention decision is purely a
+  retrieval signal.
 
 ### Hybrid / RRF variant: scope, formula, and limitations
 
@@ -628,7 +1105,7 @@ Not yet implemented (placeholders):
   - `k = 100` — mid-list hits contribute more; rank-1's
     advantage is smaller.
   A reviewer can pin a specific k via `--hybrid-k <n>`.
-  On the current 60-record fixture corpus the hybrid
+  On the current 100-record fixture corpus the hybrid
   ranking is invariant under `k ∈ {20, 60, 100}` for
   every query — the candidate ordering, the per-family
   rank-1 counts, and the comparison table's `hybrid`
@@ -691,7 +1168,7 @@ npm run benchmark:retrieval
 # Benchmark-only FTS5 variant.
 npm run benchmark:retrieval:fts5
 
-# Benchmark-only vector variant.
+# Benchmark-only vector variant (hashed-BoW control).
 npm run benchmark:retrieval:vector
 
 # Benchmark-only hybrid / RRF variant (default k = 60).
@@ -702,12 +1179,25 @@ npm run benchmark:retrieval:hybrid:k20
 npm run benchmark:retrieval:hybrid:k60
 npm run benchmark:retrieval:hybrid:k100
 
-# Side-by-side comparison across all four variants.
+# Side-by-side comparison across the four sync variants.
 # Writes one lexical, one fts5, one vector, one hybrid,
 # and one combined comparison artifact under
 # .cortex/benchmark/. The combined file includes a
 # per-family "hybrid vs best baseline" delta table.
 npm run benchmark:retrieval:all
+
+# Dense (real local semantic embedding) variants.
+# All three use the deterministic stub by default; the
+# `:real` variants download + run the local ONNX model.
+npm run benchmark:retrieval:vector-dense
+npm run benchmark:retrieval:vector-dense:real
+npm run benchmark:retrieval:hybrid-dense
+npm run benchmark:retrieval:hybrid-dense:real
+npm run benchmark:retrieval:all-dense
+npm run benchmark:retrieval:all-dense:real
+
+# Skip live model execution (deterministic-only CI path).
+npm run benchmark:retrieval:vector-dense:skip
 ```
 
 All four variants write their JSON reports under
@@ -881,7 +1371,11 @@ the actual `classifyInput` behavior.
 ```sh
 npm install
 npm run build
-npm test
+npm test              # default suite (485 tests); no network required
+npm run test:contracts # contracts-only suite (15 tests)
+npm run test:dense-live # opt-in real-model integration test
+                        # (downloads the model on first run;
+                        # ~25MB; ~700ms first-load)
 ```
 
 ## Provider prototype runner
@@ -1019,11 +1513,21 @@ src/
     queries.ts            # retrieval benchmark query set
     metrics.ts            # pure metric functions (hit@K, TNR, per-family)
     retrieval-runner.ts   # retrieval benchmark CLI (no DB, no network)
+                            # + async dense entry point
     variants/
       fts5.ts             # benchmark-only FTS5 (BM25) ranker
       vector.ts           # benchmark-only vector (cosine) ranker
                             # + VectorEmbedder interface + HashedBagOfWordsEmbedder
                             # (deterministic local baseline, no deps)
+      dense-embedder.ts   # pluggable real local dense embedder:
+                            # - StubDeterministicDenseEmbedder (default)
+                            # - TransformersJsEmbedder (real ONNX via
+                            #   @xenova/transformers; local-only)
+                            # + EmbedderMetadata + createDenseEmbedder factory
+      dense-vector.ts     # benchmark-only dense vector (cosine) ranker
+                            # (async; uses DenseEmbedder from dense-embedder.ts)
+      hybrid.ts           # benchmark-only hybrid (RRF) ranker
+                            # over lexical / FTS5 / vector(-dense)
   config/
     env.ts                # env reading, no secrets in repo
 tests/

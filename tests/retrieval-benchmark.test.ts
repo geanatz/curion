@@ -184,8 +184,11 @@ test("benchmark queries: every query has a currentTruthIds field consistent with
     // `currentTruthIds` keeps only the current fact. Adding
     // more divergence cases is a deliberate, visible change
     // and must be reflected here AND in the divergence test
-    // below.
+    // below. The expanded checkpoint adds a second divergent
+    // query (`temp-controller-validation`); the labeled set
+    // is a strict subset of the temporal family.
     "temp-storage-raw-text",
+    "temp-controller-validation",
   ]);
   for (const q of BENCHMARK_QUERIES) {
     if (q.family === "no-answer") {
@@ -315,27 +318,34 @@ test("benchmark queries: every family is one of the documented families", () => 
 });
 
 // ---------------------------------------------------------------------------
-// 2b. Intermediate-checkpoint size + family distribution
+// 2b. Expanded-checkpoint size + family distribution
 // ---------------------------------------------------------------------------
 //
-// The intermediate benchmark expansion pins the size and
+// The expanded benchmark checkpoint pins the size and
 // per-family distribution of the corpus + query set so the
-// headline numbers stay comparable across runs. The 24-record
-// starter corpus / 24-query set were the prior checkpoint;
-// the intermediate checkpoint is 60 records / 54 queries. The
-// tests below pin the new minimums. Raising the minimums
-// later (e.g. for the 132-record adversarial phase) is a
-// deliberate, visible change.
+// headline numbers stay comparable across runs. The
+// checkpoints so far:
+//   - 24-record / 24-query starter set
+//   - 60-record / 54-query intermediate set
+//   - 100-record / 96-query expanded set (this phase)
+//   - 132-record / 108-query adversarial set (future)
+//
+// The tests below pin the expanded minimums. Raising the
+// minimums later (e.g. for the 132-record adversarial phase)
+// is a deliberate, visible change. The per-family minimum
+// is pinned to the smaller of the historical per-family
+// count and a 6-query floor so a 1-query swing on a small
+// family stays in the same order of magnitude.
 
-test("benchmark corpus: intermediate checkpoint has at least 60 records and is dense 1..N", () => {
-  // The intermediate-checkpoint floor is 60 records. The
+test("benchmark corpus: expanded checkpoint has at least 100 records and is dense 1..N", () => {
+  // The expanded-checkpoint floor is 100 records. The
   // tests above also pin the "1..N" dense-id invariant. The
   // exact record count is exposed in the report
   // (`config.recordCount`) and pinned by the runner-shape
   // test below.
   assert.ok(
-    BENCHMARK_RECORDS.length >= 60,
-    `intermediate corpus should have at least 60 records, got ${BENCHMARK_RECORDS.length}`,
+    BENCHMARK_RECORDS.length >= 100,
+    `expanded corpus should have at least 100 records, got ${BENCHMARK_RECORDS.length}`,
   );
   const ids = BENCHMARK_RECORDS.map((r) => r.id).sort((a, b) => a - b);
   for (let i = 0; i < ids.length; i++) {
@@ -343,14 +353,14 @@ test("benchmark corpus: intermediate checkpoint has at least 60 records and is d
   }
 });
 
-test("benchmark queries: intermediate checkpoint has at least 54 queries covering all 6 families", () => {
+test("benchmark queries: expanded checkpoint has at least 96 queries covering all 6 families", () => {
   assert.ok(
-    BENCHMARK_QUERIES.length >= 54,
-    `intermediate query set should have at least 54 queries, got ${BENCHMARK_QUERIES.length}`,
+    BENCHMARK_QUERIES.length >= 96,
+    `expanded query set should have at least 96 queries, got ${BENCHMARK_QUERIES.length}`,
   );
   // Each of the 6 documented families must be present in
-  // the intermediate set. The prior 24-query set was missing
-  // nothing (it had all 6), but a future query-set
+  // the expanded set. The prior query sets were missing
+  // nothing (they all had all 6), but a future query-set
   // contraction is a deliberate, visible change.
   const families = new Set(BENCHMARK_QUERIES.map((q) => q.family));
   for (const required of [
@@ -363,7 +373,7 @@ test("benchmark queries: intermediate checkpoint has at least 54 queries coverin
   ]) {
     assert.ok(
       families.has(required),
-      `intermediate query set is missing the "${required}" family`,
+      `expanded query set is missing the "${required}" family`,
     );
   }
 });
@@ -371,10 +381,8 @@ test("benchmark queries: intermediate checkpoint has at least 54 queries coverin
 test("benchmark queries: per-family distribution has a reasonable mix and at least 6 of each", () => {
   // Pin a per-family minimum so the headline numbers don't
   // drift to a single-family-dominated distribution. The
-  // exact and orientation families had 5 and 4 queries in
-  // the prior 24-query set; the intermediate expansion lifts
-  // both to 10. The other families also get a minimum so
-  // the family breakdown stays informative. A future
+  // floor is 6 per family, which keeps a 1-query swing on
+  // a small family in the same order of magnitude. A future
   // expansion is free to grow any of these; a contraction
   // below 6 of any family is a deliberate, visible change.
   const familyCounts: Record<string, number> = {};
@@ -391,7 +399,7 @@ test("benchmark queries: per-family distribution has a reasonable mix and at lea
   ]) {
     assert.ok(
       (familyCounts[f] ?? 0) >= 6,
-      `family "${f}" has ${familyCounts[f] ?? 0} queries, expected at least 6 in the intermediate set`,
+      `family "${f}" has ${familyCounts[f] ?? 0} queries, expected at least 6 in the expanded set`,
     );
   }
 });
@@ -407,10 +415,10 @@ test("benchmark queries: every temporal query is a supersession-style query with
   // same tokens. We use a softer check: every temporal
   // query has at least one expected id AND has at least one
   // expected id that is NOT in the historical cluster
-  // (records 21..24 or 57..60). If every temporal expected
-  // id lived in the historical cluster, the temporal family
-  // would be testing the wrong thing.
-  const historicalCluster = new Set([21, 22, 23, 24, 57, 58, 59, 60]);
+  // (records 21..24, 57..60, or the new 93..96). If every
+  // temporal expected id lived in the historical cluster,
+  // the temporal family would be testing the wrong thing.
+  const historicalCluster = new Set([21, 22, 23, 24, 57, 58, 59, 60, 93, 94, 95, 96]);
   for (const q of BENCHMARK_QUERIES) {
     if (q.family !== "temporal") continue;
     assert.ok(
@@ -711,22 +719,26 @@ test("runner: temporal wrong-rank1 gap is visible in the headline metrics", () =
 });
 
 test("runner: labeled temporal current-truth divergence query exercises the gap", () => {
-  // The intermediate expansion introduces a labeled "divergent
-  // current-truth" temporal query: `temp-storage-raw-text`,
-  // whose `expectedIds` contains both the legacy fact (57)
-  // and the current fact (50), and whose `currentTruthIds`
-  // contains only the current fact (50). The contract this
-  // test pins: for the divergent query, `currentTruthAt1` is
-  // a STRICTER signal than `rank1` — the ranker can return an
-  // expected (legacy) id at the top, satisfy `rank1` for
-  // hit@K, and still fail `currentTruthAt1` because the
-  // current fact is not the top-1. We don't pin the exact
-  // outcome (the lexical ranker may sometimes return 50 at
-  // rank-1, especially if the future variant tweaks boost
-  // ordering), but we pin the strict subset relationship:
-  // the count of temporal queries that fail `currentTruthAt1`
-  // is at least the count that fail `rank1`, and at least
-  // one temporal query is divergent.
+  // The intermediate expansion introduced a labeled
+  // "divergent current-truth" temporal query:
+  // `temp-storage-raw-text`, whose `expectedIds` contains
+  // both the legacy fact (57) and the current fact (50),
+  // and whose `currentTruthIds` contains only the current
+  // fact (50). The expanded checkpoint adds a second
+  // divergent query: `temp-controller-validation` (legacy
+  // 96 + current 69, currentTruth 69). The contract this
+  // test pins: for the divergent queries,
+  // `currentTruthAt1` is a STRICTER signal than `rank1` —
+  // the ranker can return an expected (legacy) id at the
+  // top, satisfy `rank1` for hit@K, and still fail
+  // `currentTruthAt1` because the current fact is not the
+  // top-1. We don't pin the exact outcome (the lexical
+  // ranker may sometimes return the current id at rank-1,
+  // especially if a future variant tweaks boost ordering),
+  // but we pin the strict subset relationship: the count
+  // of temporal queries that fail `currentTruthAt1` is at
+  // least the count that fail `rank1`, and at least one
+  // temporal query is divergent.
   const report = runRetrievalBenchmark();
   const temporal = report.evals.filter((e) => e.family === "temporal");
   const divergentIds = new Set(
@@ -741,6 +753,28 @@ test("runner: labeled temporal current-truth divergence query exercises the gap"
     divergentEvals.length >= 1,
     "expected at least one labeled divergent temporal eval in the runner output",
   );
+  // The expanded checkpoint has two labeled divergent
+  // queries (`temp-storage-raw-text` and
+  // `temp-controller-validation`). The runner must surface
+  // BOTH of them, not just one. This pins the
+  // "at least two divergent cases" floor so a future
+  // expansion can grow the set without losing coverage of
+  // either pair.
+  assert.ok(
+    divergentEvals.length >= 2,
+    `expected at least two labeled divergent temporal evals, got ${divergentEvals.length}`,
+  );
+  for (const id of ["temp-storage-raw-text", "temp-controller-validation"]) {
+    assert.ok(
+      divergentIds.has(id),
+      `expected the labeled divergent query "${id}" to be present in the divergent set`,
+    );
+    const evalForQuery = report.evals.find((e) => e.queryId === id);
+    assert.ok(
+      evalForQuery,
+      `expected eval for the labeled divergent query "${id}" to be present in the runner output`,
+    );
+  }
   // The aggregate must show the divergence: temporal
   // currentTruthAt1 <= temporal rank1, and the divergent
   // eval must contribute to that gap (it cannot make
@@ -754,9 +788,10 @@ test("runner: labeled temporal current-truth divergence query exercises the gap"
   // currentTruthAt1 < rank1 signal — that is, the rank-1
   // candidate was an expected id (legacy) but not a
   // currentTruthId. We don't pin the rank1 value (the ranker
-  // could surface 50 at the top on a different build), but we
-  // pin the per-eval invariant: for at least one divergent
-  // eval, `rank1 === true && currentTruthAt1 === false`.
+  // could surface the current id at the top on a different
+  // build), but we pin the per-eval invariant: for at least
+  // one divergent eval, `rank1 === true && currentTruthAt1
+  // === false`.
   const divergentStricterGap = divergentEvals.filter(
     (e) => e.rank1 && !e.currentTruthAt1,
   );
@@ -776,6 +811,70 @@ test("runner: labeled temporal current-truth divergence query exercises the gap"
   // Touch the local var to keep it referenced in case the
   // future expansion tightens this assertion.
   void divergentStricterGap;
+});
+
+test("runner: expanded checkpoint includes a labeled no-answer hard-negative query that confabulates", () => {
+  // The expanded checkpoint adds a labeled no-answer
+  // "hard-negative" query — `nonexistent-load-balancer` —
+  // that shares strong tokens ('MCP', 'server', 'port')
+  // with the agent runtime and stack records (2, 51, 73,
+  // 75). The lexical baseline is expected to confabulate on
+  // it: the ranker returns at least one candidate with
+  // non-zero overlap, but the query has no relevant memory
+  // in the corpus. The contract this test pins: the
+  // labeled query is present in the runner output, it is
+  // categorized as a no-answer family query, and the ranker
+  // returns at least one hit for it. Whether the hit is
+  // above or below the production default threshold is a
+  // separate concern; the test pins the lexical ranker's
+  // *candidate* behavior, not the threshold-filtered
+  // behavior. The expanded-checkpoint also exercises the
+  // ranked-K rather than threshold-filtered K so the
+  // confabulation is visible in the report.
+  const report = runRetrievalBenchmark();
+  const labeledId = "nonexistent-load-balancer";
+  const evalForQuery = report.evals.find((e) => e.queryId === labeledId);
+  assert.ok(
+    evalForQuery,
+    `expected the labeled hard-negative query "${labeledId}" to be present in the runner output`,
+  );
+  assert.equal(
+    evalForQuery.family,
+    "no-answer",
+    `the labeled hard-negative query "${labeledId}" must be in the no-answer family`,
+  );
+  // The query has no relevant memory, so the expected
+  // contract is `passed === false` (the ranker returned
+  // hits) and `topIds.length >= 1` (the lexical baseline
+  // confabulated). The strictest form would also assert a
+  // specific expected confabulation id; we use a softer
+  // "at least one confabulation" check so the test stays
+  // robust to future ranker tweaks that change the
+  // exact rank-1.
+  assert.equal(
+    evalForQuery.passed,
+    false,
+    `the labeled hard-negative query "${labeledId}" must fail (no-answer TNR violation) at the default threshold`,
+  );
+  assert.ok(
+    evalForQuery.topIds.length >= 1,
+    `the labeled hard-negative query "${labeledId}" must have at least one confabulated candidate in topIds; got ${evalForQuery.topIds.length}`,
+  );
+  // The no-answer failure category must include this
+  // query's contribution. The categoriser labels
+  // no-answer-with-hits as `no-answer-fp:ranker-returned-hits`
+  // and the aggregate count must be at least 1.
+  assert.ok(
+    (report.metrics.failureCategories["no-answer-fp:ranker-returned-hits"] ?? 0) >= 1,
+    "expected at least one no-answer-fp:ranker-returned-hits failure category entry",
+  );
+  // The no-answer TNR must be less than 1.0 because at
+  // least one no-answer query (this one) confabulated.
+  const naMetrics = report.metrics.perFamily["no-answer"]!;
+  assert.ok(
+    naMetrics.noAnswerCorrect < naMetrics.total,
+    `no-answer TNR must be < 1.0 when a hard-negative query confabulates (got ${naMetrics.noAnswerCorrect}/${naMetrics.total})`,
+  );
 });
 
 test("runner: --only-family restricts the query set", () => {

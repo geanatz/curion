@@ -193,7 +193,7 @@ export interface QueryEval {
    * block the Architect's brief asks for.
    */
   hybridContributors?: ReadonlyArray<{
-    source: "lexical" | "fts5" | "vector";
+    source: "lexical" | "fts5" | "vector" | "vector-dense";
     rank: number | null;
     score: number | null;
     contribution: number;
