@@ -324,6 +324,135 @@ export function insertMemoryRecord(
 }
 
 /**
+ * Update only the `metadata` JSON column on a single memory
+ * row, identified by its autoincrement `id`. Returns the
+ * refreshed `MemoryRecord` re-read from the row.
+ *
+ * This is the narrow, typed seam the controller uses to
+ * append the derived `relationship` block onto the existing
+ * metadata of a row that was just inserted (the candidate's
+ * real `id` is not known at insert time, so a
+ * `relationship.olderVariantsOf` derivation must happen
+ * post-insert). It updates a single column on a single row
+ * and does NOT touch `state`, `summary`, or any other field.
+ *
+ * Constraints (Phase B invariant):
+ *   - It never reads or writes raw text. The metadata column
+ *     is the existing JSON blob; the function only stores the
+ *     `patch` argument verbatim (after `JSON.stringify`).
+ *   - It never transitions `state`. `state` stays whatever it
+ *     was when the row was inserted (always `active` for
+ *     controller writes).
+ *   - It never reads from `metadata`; it overwrites. The
+ *     caller is responsible for re-injecting any preserved
+ *     keys via the `buildPersistedMetadata` helper (which is
+ *     non-mutating and never overwrites a pre-existing
+ *     `relationship` key).
+ *   - It does not enforce "row exists" semantics defensively.
+ *     The UPDATE simply affects zero rows when the id is
+ *     unknown; the function then throws because the post-
+ *     update re-read finds no row. The controller always
+ *     passes the id it just received from `insertMemoryRecord`,
+ *     so this is a safe contract — a throw is unreachable in
+ *     production. Tests that bypass the controller and call
+ *     this with a non-existent id will see a clear error.
+ *   - It does not introduce a new column. The `metadata TEXT`
+ *     column already exists (Phase 1 schema).
+ */
+export function updateMemoryMetadata(
+  handle: StorageHandle,
+  id: number,
+  patch: Record<string, unknown>,
+): MemoryRecord {
+  if (typeof id !== "number" || !Number.isFinite(id)) {
+    throw new Error("updateMemoryMetadata: id must be a finite number");
+  }
+  const now = Date.now();
+  const stmt = handle.db.prepare(
+    `UPDATE memories
+        SET metadata = @metadata, updated_at = @updated_at
+      WHERE id = @id`,
+  );
+  stmt.run({
+    id,
+    metadata: JSON.stringify(patch),
+    updated_at: now,
+  });
+  // Re-read the row so the caller sees the post-update shape.
+  // We project every column we wrote (the row exists because
+  // the controller just inserted it) and re-parse the metadata
+  // JSON the same way `listActiveMemorySummaries` does, with a
+  // defensive fallback to `{}` on malformed JSON.
+  const row = handle.db
+    .prepare(
+      `SELECT id, kind, state, summary, provider_id, model_id,
+              confidence, safety_flags, metadata, created_at, updated_at
+         FROM memories
+        WHERE id = ?`,
+    )
+    .get(id) as
+    | {
+        id: number;
+        kind: string;
+        state: string;
+        summary: string | null;
+        provider_id: string | null;
+        model_id: string | null;
+        confidence: number | null;
+        safety_flags: string | null;
+        metadata: string | null;
+        created_at: number;
+        updated_at: number | null;
+      }
+    | undefined;
+  if (!row) {
+    throw new Error(
+      `updateMemoryMetadata: no row found for id ${id} after update`,
+    );
+  }
+  let parsedMetadata: Record<string, unknown> = {};
+  if (typeof row.metadata === "string" && row.metadata.length > 0) {
+    try {
+      const v = JSON.parse(row.metadata) as unknown;
+      if (v !== null && typeof v === "object" && !Array.isArray(v)) {
+        parsedMetadata = v as Record<string, unknown>;
+      }
+    } catch {
+      // Malformed metadata is treated as `{}`; matches the
+      // read-side fallback in `listActiveMemorySummaries`.
+    }
+  }
+  let safetyFlags: string[] = [];
+  if (typeof row.safety_flags === "string" && row.safety_flags.length > 0) {
+    try {
+      const v = JSON.parse(row.safety_flags) as unknown;
+      if (Array.isArray(v)) {
+        safetyFlags = v.filter((s): s is string => typeof s === "string");
+      }
+    } catch {
+      // Malformed safety_flags: fall back to empty list.
+    }
+  }
+  return {
+    id: row.id,
+    kind: (MEMORY_KINDS.includes(row.kind as MemoryKind)
+      ? (row.kind as MemoryKind)
+      : "finding"),
+    state: (MEMORY_STATES.includes(row.state as MemoryState)
+      ? (row.state as MemoryState)
+      : "active"),
+    summary: row.summary ?? "",
+    providerId: row.provider_id,
+    modelId: row.model_id,
+    confidence: row.confidence,
+    safetyFlags,
+    metadata: parsedMetadata,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+/**
  * Close the storage handle. Safe to call multiple times.
  */
 export function closeStorage(handle: StorageHandle): void {
@@ -417,4 +546,203 @@ export function listActiveMemorySummaries(
     });
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Parallel relationship-block lookup (Phase C read side)
+// ---------------------------------------------------------------------------
+
+/**
+ * A row in the parallel `relationship`-block lookup.
+ *
+ * The shape is intentionally narrow: it carries the stored
+ * `relationship` block on a `memories` row, with safe defaults
+ * (empty id arrays, `detectionConfidence: 0`, `resolvedAt: 0`)
+ * when the block is missing or malformed. The detector
+ * consumes this projection; the public recall pipeline does
+ * not.
+ *
+ * The `id` here is the `memories` row id, NOT a relationship
+ * target id. Each row is independent.
+ *
+ * **Phase I additive extension.** The block shape is extended
+ * with three optional forward-looking keys (`supersedes`,
+ * `supersededBy`, `resolvedAt`). The reader always projects a
+ * complete object — the optional Phase I fields are present
+ * with their safe-empty defaults (`[]` for the id lists, `0`
+ * for the timestamp) regardless of whether the underlying row
+ * actually carries them. This means a legacy `"ccm-draft-1"`
+ * row projects the same forward-compatible shape as a Phase I
+ * `"ccm-draft-2"` row. Callers that want to distinguish the
+ * two should read `derivedSchemaVersion`.
+ */
+export interface MemoryRelationshipBlockRow {
+  /** The `memories.id` of the row the block belongs to. */
+  id: number;
+  /** Parsed `relationship` block, or the safe-empty default. */
+  block: {
+    derivedSchemaVersion: string;
+    derivedAt: number;
+    conflictsWith: number[];
+    olderVariantsOf: number[];
+    detectionConfidence: number;
+    /** Optional Phase I field. Safe default: `[]`. */
+    supersedes: number[];
+    /** Optional Phase I field. Safe default: `[]`. */
+    supersededBy: number[];
+    /** Optional Phase I field. Safe default: `0`. */
+    resolvedAt: number;
+  };
+}
+
+/**
+ * List the stored `relationship` blocks for active memory
+ * rows, in deterministic order (ascending `id`).
+ *
+ * This is a Phase C internal-only read side that runs in
+ * parallel to `listActiveMemorySummaries`. The recall
+ * controller can use the two projections together (same id
+ * order, same `limit`) to feed the ambiguity detector
+ * without expanding the public `SafeMemorySummary` shape.
+ *
+ * Properties:
+ *   - Returns at most `limit` rows; default `200`.
+ *   - Every returned `id` corresponds to an active memory
+ *     row (same `state = 'active'` filter as
+ *     `listActiveMemorySummaries`).
+ *   - A row with no `relationship` key in `metadata` (the
+ *     MVP default, and the pre-Phase-B state) is included
+ *     with the safe-empty block (empty id arrays,
+ *     `detectionConfidence: 0`, `resolvedAt: 0`).
+ *   - A row whose `metadata` JSON is malformed, or whose
+ *     `relationship` block is not an object, is included
+ *     with the safe-empty block (defensive forward-compat
+ *     with old rows).
+ *   - `id` arrays in the block are bounded to 16 entries
+ *     and de-duplicated while preserving first-seen order;
+ *     non-finite ids are dropped. This mirrors the
+ *     `buildPersistedMetadata` writer-side bounds.
+ *   - `detectionConfidence` is clamped to `[0, 1]`.
+ *   - `resolvedAt` is clamped to a non-negative integer;
+ *     non-finite or negative values fall back to `0`.
+ *   - The function never reads raw text. The `metadata`
+ *     column is the existing JSON blob; only its parsed
+ *     shape is consumed.
+ *   - The function never mutates the database and never
+ *     touches `state` (every row stays `active`).
+ *
+ * **Phase I forward-compat.** The reader always projects a
+ * block with `supersedes: []`, `supersededBy: []`, and
+ * `resolvedAt: 0`, regardless of whether the underlying row
+ * actually carries those keys. A legacy `"ccm-draft-1"` row
+ * therefore projects the same shape as a Phase I
+ * `"ccm-draft-2"` row; the difference is captured in
+ * `derivedSchemaVersion` (the literal string the row stored).
+ */
+export function listActiveMemoryRelationshipBlocks(
+  handle: StorageHandle,
+  options: { limit?: number } = {},
+): MemoryRelationshipBlockRow[] {
+  const limit = options.limit ?? 200;
+  const rows = handle.db
+    .prepare(
+      `SELECT id, metadata
+         FROM memories
+         WHERE state = 'active'
+         ORDER BY id ASC
+         LIMIT ?`,
+    )
+    .all(limit) as Array<{
+      id: number;
+      metadata: string | null;
+    }>;
+  const out: MemoryRelationshipBlockRow[] = [];
+  for (const r of rows) {
+    let block: MemoryRelationshipBlockRow["block"] = {
+      derivedSchemaVersion: "ccm-draft-1",
+      derivedAt: 0,
+      conflictsWith: [],
+      olderVariantsOf: [],
+      detectionConfidence: 0,
+      supersedes: [],
+      supersededBy: [],
+      resolvedAt: 0,
+    };
+    if (typeof r.metadata === "string" && r.metadata.length > 0) {
+      try {
+        const parsed = JSON.parse(r.metadata) as Record<string, unknown>;
+        const rel = parsed.relationship;
+        if (rel !== null && typeof rel === "object" && !Array.isArray(rel)) {
+          const o = rel as Record<string, unknown>;
+          block = {
+            derivedSchemaVersion:
+              typeof o.derivedSchemaVersion === "string"
+                ? o.derivedSchemaVersion
+                : "ccm-draft-1",
+            derivedAt:
+              typeof o.derivedAt === "number" && Number.isFinite(o.derivedAt)
+                ? Math.trunc(o.derivedAt)
+                : 0,
+            conflictsWith: normalizeIdArray(o.conflictsWith),
+            olderVariantsOf: normalizeIdArray(o.olderVariantsOf),
+            detectionConfidence: clampConfidence(o.detectionConfidence),
+            // Phase I pass-through fields. Each is normalized
+            // through the same `normalizeIdArray` /
+            // `clampResolvedAt` helpers the conservative
+            // fields use, so a malformed value (e.g. a
+            // string array, a negative integer, a non-finite
+            // number) is silently dropped to the safe
+            // default. Missing keys project the safe default
+            // directly. This matches the safe-default
+            // behaviour the detector relies on.
+            supersedes: normalizeIdArray(o.supersedes),
+            supersededBy: normalizeIdArray(o.supersededBy),
+            resolvedAt: clampResolvedAt(o.resolvedAt),
+          };
+        }
+      } catch {
+        // Malformed metadata: row carries the safe-empty block.
+      }
+    }
+    out.push({ id: r.id, block });
+  }
+  return out;
+}
+
+function normalizeIdArray(v: unknown): number[] {
+  if (!Array.isArray(v)) return [];
+  const out: number[] = [];
+  const seen = new Set<number>();
+  for (const x of v) {
+    if (typeof x !== "number" || !Number.isFinite(x)) continue;
+    if (!Number.isInteger(x)) continue;
+    if (x <= 0) continue;
+    if (seen.has(x)) continue;
+    seen.add(x);
+    out.push(x);
+    if (out.length >= 16) break;
+  }
+  return out;
+}
+
+function clampConfidence(v: unknown): number {
+  if (typeof v !== "number" || !Number.isFinite(v)) return 0;
+  if (v < 0) return 0;
+  if (v > 1) return 1;
+  return v;
+}
+
+/**
+ * Defensive parser for the Phase I `resolvedAt` field. Returns
+ * a non-negative integer in ms epoch, or `0` when the input is
+ * missing / malformed. Non-finite numbers, NaN, negative
+ * values, and non-number values all fall back to `0`. This
+ * matches the conservative fallback the detector relies on
+ * (a missing or malformed `resolvedAt` is "no resolution
+ * timestamp", not an error).
+ */
+function clampResolvedAt(v: unknown): number {
+  if (typeof v !== "number" || !Number.isFinite(v)) return 0;
+  if (v < 0) return 0;
+  return Math.trunc(v);
 }

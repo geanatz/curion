@@ -589,9 +589,16 @@ test("hybrid variant is benchmark-only: production recall() controller is not mo
   );
   assert.match(serverSrc, /"remember"/);
   assert.match(serverSrc, /"recall"/);
+  // Sanity: the public contract is exactly two tools.
+  // Phase clean-structured-tool-responses: the server now
+  // uses the non-deprecated `server.registerTool(...)` API
+  // so it can attach an `outputSchema` (which the legacy
+  // `server.tool(...)` overloads do not accept). The
+  // public tool surface is still exactly `remember` +
+  // `recall`.
   assert.deepEqual(
-    serverSrc.match(/server\.tool\(\s*"(\w+)"/g),
-    ['server.tool(\n    "remember"', 'server.tool(\n    "recall"'],
+    serverSrc.match(/server\.registerTool\(\s*"(\w+)"/g),
+    ['server.registerTool(\n    "remember"', 'server.registerTool(\n    "recall"'],
     "public MCP tool surface must remain exactly remember + recall",
   );
 });
@@ -605,6 +612,8 @@ test("hybrid variant: only the benchmark runner imports the hybrid module", () =
   const root = path.join(import.meta.dirname, "..", "src");
   const allowedImporters = new Set<string>([
     path.join("benchmark", "retrieval-runner.ts"),
+    path.join("benchmark", "held-out-runner.ts"),
+    path.join("benchmark", "held-out-validation.ts"),
     path.join("benchmark", "variants", "hybrid.ts"),
   ]);
   function walk(dir: string): string[] {
@@ -653,13 +662,17 @@ test("public MCP contract unchanged: exactly two tools, one text param each", ()
   // This pins the public MCP contract: the hybrid
   // benchmark MUST NOT add a third tool, a new parameter,
   // or a debug knob to the existing two tools.
+  // (Phase clean-structured-tool-responses: the server
+  // migrated from the legacy `server.tool(...)` API to
+  // `server.registerTool(...)` so it could attach an
+  // `outputSchema`; the public tool surface is unchanged.)
   assert.deepEqual([...PUBLIC_TOOL_NAMES], ["remember", "recall"]);
   assert.equal(PUBLIC_TOOL_NAMES.length, 2);
   const serverSrc = fs.readFileSync(
     path.join(import.meta.dirname, "..", "src", "server.ts"),
     "utf8",
   );
-  const toolCallCount = (serverSrc.match(/server\.tool\(/g) ?? []).length;
+  const toolCallCount = (serverSrc.match(/server\.registerTool\(/g) ?? []).length;
   assert.equal(
     toolCallCount,
     2,

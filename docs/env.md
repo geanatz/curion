@@ -28,33 +28,53 @@ time by the operator (or a secrets manager).
 | `CORTEX_GROQ_MODEL`              | Groq model id used by the prototype runner.                  | No        | `openai/gpt-oss-120b` |
 | `CORTEX_GROQ_REASONING_EFFORT`   | Reasoning effort hint forwarded to Groq (e.g. `low`, `medium`, `high`). | No        | `high` |
 
-*No key is required to run the Phase 1 skeleton. The provider
-implementations detect missing configuration and return a stub
-result with a `note` field rather than throwing.
+*The provider adapter (the production path the
+`remember` / `recall` controllers drive) and the embedding
+skeletons detect missing configuration and return a typed
+adapter error (the controller surfaces it as
+`provider_error`); the prototype runner is the only path
+that runs in a true dry-run when no key is configured. The
+MCP stdio server requires a working primary (or fallback)
+key to call the chat-completions endpoint. See
+[`docs/architecture.md`](architecture.md) for the module
+boundaries.
 
-## Example: running with no keys (skeleton mode)
+## Example: running with no keys (prototype dry-run)
 
 ```sh
 npm run build
-node dist/index.js
+npm run prototype:dry
 ```
 
-In this mode, `remember` returns a "not yet implemented" message and
-`recall` returns `No relevant memory found.`. The provider registry
-returns stub results explaining that no API key is configured. This
-is the intended Phase 1 behavior.
+`npm run prototype:dry` exercises the provider adapter
+against the P1..P6 memory-analysis fixtures in dry-run
+mode (no key, no HTTP) and writes a sanitized JSON report
+to `.cortex/prototype/`. The MCP stdio server is not
+launched in this mode; `node dist/index.js` without a key
+will surface `provider_error` on the first tool call
+because the adapter cannot reach the chat-completions
+endpoint.
 
 ## Example: running with a primary key
 
 ```sh
 export CORTEX_PROVIDER_PRIMARY_KEY="<your-key-here>"
-export CORTEX_LOG_LEVEL=debug
+export CORTEX_LOG_LEVEL=info
+npm run build
 node dist/index.js
 ```
 
-The skeleton does not yet make real HTTP calls; setting a key only
-flips the `isConfigured()` flag on the provider. When real call
-plumbing is added in a later phase, the same env vars will be used.
+With a primary key configured, the MCP stdio server runs
+the real `remember` and `recall` controllers against the
+memory-analysis adapter (MiniMax primary, NVIDIA NIM
+fallback). A real chat-completion call is made on every
+non-`no_memory` recall and on every `remember` that
+passes the safety pre-check. The same env vars are used
+by the live prototype runner (`npm run prototype:live`).
+For the comparison candidates (NVIDIA NIM, Groq) the
+prototype runner also reads `CORTEX_NIM_*` /
+`CORTEX_GROQ_*` and `GROQ_API_KEY`; these are out of the
+adapter's production path.
 
 ## Security notes
 

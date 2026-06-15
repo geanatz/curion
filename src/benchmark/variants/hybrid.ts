@@ -100,6 +100,12 @@ import {
 } from "../../retrieval/lexical.js";
 import { rankFts5, type Fts5RankingOptions } from "./fts5.js";
 import { rankVector, type VectorRankingOptions } from "./vector.js";
+import {
+  rankDenseVectorWithMetadataAsync,
+  type DenseVectorRankingOptions,
+  type DenseVectorRankResult,
+} from "./dense-vector.js";
+import type { DenseEmbedder } from "./dense-embedder.js";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -118,6 +124,12 @@ export interface HybridWeights {
   lexical?: number;
   fts5?: number;
   vector?: number;
+  /**
+   * Weight for the real dense vector contributor. Ignored
+   * unless `useDenseVector: true` is passed on the
+   * `HybridRankingOptions`. Same semantics as `vector`.
+   */
+  vectorDense?: number;
 }
 
 /**
@@ -158,7 +170,44 @@ export interface HybridRankingOptions extends LexicalRankingOptions {
     lexical?: LexicalRankingOptions;
     fts5?: Fts5RankingOptions;
     vector?: VectorRankingOptions;
+    vectorDense?: DenseVectorRankingOptions;
   };
+  /**
+   * When `true`, the hybrid replaces the hashed-bag-of-words
+   * `vector` contributor with the real local dense vector
+   * contributor (`vector-dense`). The contributor label on
+   * the diagnostic is `vector-dense` so a reviewer can see
+   * which embedder produced the contributor's rank. The
+   * real embedder must be passed via `denseVectorEmbedder`
+   * (or `perVariantOptions.vectorDense.embedder`).
+   *
+   * Default: `false` (the existing hashed-BoW vector
+   * contributor is used). The CLI flag
+   * `--hybrid-use-dense-vector` flips the flag on; the
+   * benchmark runner then constructs the real embedder from
+   * the `--embedder` flag and threads it through.
+   */
+  useDenseVector?: boolean;
+  /**
+   * Real local dense embedder for the
+   * `vector-dense` contributor. Required when
+   * `useDenseVector: true`. Ignored otherwise.
+   */
+  denseVectorEmbedder?: DenseEmbedder;
+  /**
+   * Embedding kind for the `vector-dense`
+   * contributor. Same contract as
+   * `DenseVectorRankingOptions.kind`: the Qwen3
+   * embedder distinguishes queries (which receive
+   * the `Instruct: <task>\nQuery:<query>` prefix)
+   * from documents (verbatim). The hybrid
+   * benchmark runner always passes
+   * `kind: "query"` for the user query string;
+   * the candidate texts are documents. Default:
+   * `"document"`, mirroring the dense vector
+   * ranker.
+   */
+  denseKind?: "query" | "document";
 }
 
 /**
@@ -174,7 +223,7 @@ export interface HybridRankingOptions extends LexicalRankingOptions {
  */
 export interface RrfContributor {
   /** The variant label. */
-  source: "lexical" | "fts5" | "vector";
+  source: "lexical" | "fts5" | "vector" | "vector-dense";
   /**
    * 1-based rank in the contributor's top-K, or null if the
    * candidate was not present in the contributor's ranking.
@@ -333,7 +382,7 @@ export function rrfContribution(
  */
 export function fuseRankings(
   rankings: ReadonlyArray<{
-    label: "lexical" | "fts5" | "vector";
+    label: "lexical" | "fts5" | "vector" | "vector-dense";
     list: ReadonlyArray<LexicalScoredCandidate>;
     weight: number;
   }>,
@@ -352,7 +401,7 @@ export function fuseRankings(
   // contribution is 0.
   const perVariantIndex: Map<
     number,
-    { label: "lexical" | "fts5" | "vector"; rank: number; score: number; weight: number }
+    { label: "lexical" | "fts5" | "vector" | "vector-dense"; rank: number; score: number; weight: number }
   >[] = [];
   for (const r of rankings) {
     if (!Number.isFinite(r.weight) || r.weight < 0) {
@@ -360,7 +409,7 @@ export function fuseRankings(
         `fuseRankings: weight must be a non-negative finite number (got ${r.weight} for ${r.label})`,
       );
     }
-    const idx = new Map<number, { label: "lexical" | "fts5" | "vector"; rank: number; score: number; weight: number }>();
+    const idx = new Map<number, { label: "lexical" | "fts5" | "vector" | "vector-dense"; rank: number; score: number; weight: number }>();
     for (let i = 0; i < r.list.length; i++) {
       const c = r.list[i]!;
       // First-seen wins on duplicates within a single
@@ -461,6 +510,11 @@ export function rankHybrid(
   candidates: ReadonlyArray<LexicalCandidate>,
   options: HybridRankingOptions = {},
 ): HybridScoredCandidate[] {
+  if (options.useDenseVector) {
+    throw new Error(
+      "rankHybrid: useDenseVector=true is async-only; use rankHybridAsync",
+    );
+  }
   const k = options.k ?? DEFAULT_RRF_K;
   if (!Number.isFinite(k) || k <= 0) {
     throw new Error(`rankHybrid: k must be a positive finite number (got ${k})`);
@@ -554,4 +608,165 @@ export function rankHybridAsLexical(
     id: c.id,
     score: c.score,
   }));
+}
+
+// ---------------------------------------------------------------------------
+// Async entry point: hybrid with real dense vector contributor
+// ---------------------------------------------------------------------------
+
+/**
+ * The async result of a hybrid rank. Same as
+ * `HybridScoredCandidate[]` plus an `embeddingBackend`
+ * block for the dense contributor (when used) and a
+ * `contributors` block describing which contributors
+ * were active in this run.
+ */
+export interface HybridAsyncRankResult {
+  hits: HybridScoredCandidate[];
+  /**
+   * Embedder metadata for the dense vector contributor,
+   * when `useDenseVector: true`. `undefined` otherwise.
+   */
+  embeddingBackend?: import("./dense-embedder.js").EmbedderMetadata;
+  /**
+   * The list of contributor labels that participated in
+   * this run. Useful for the report's metadata block.
+   */
+  contributors: ReadonlyArray<"lexical" | "fts5" | "vector" | "vector-dense">;
+}
+
+/**
+ * Async hybrid ranker. Mirrors `rankHybrid` exactly,
+ * except:
+ *   - the `vector` slot is replaced with `vector-dense`
+ *     when `options.useDenseVector === true` (the real
+ *     local semantic embedder wired through
+ *     `options.denseVectorEmbedder`).
+ *   - the function is async because the dense vector
+ *     forward pass is async.
+ *   - the result carries the embedder metadata so the
+ *     runner can surface it on the report.
+ *
+ * Determinism: same contract as `rankHybrid`. The
+ * `vector-dense` contributor is deterministic for a
+ * fixed model + ONNX runtime.
+ */
+export async function rankHybridAsync(
+  query: string,
+  candidates: ReadonlyArray<LexicalCandidate>,
+  options: HybridRankingOptions = {},
+): Promise<HybridAsyncRankResult> {
+  const k = options.k ?? DEFAULT_RRF_K;
+  if (!Number.isFinite(k) || k <= 0) {
+    throw new Error(`rankHybridAsync: k must be a positive finite number (got ${k})`);
+  }
+  const topK = options.topK ?? DEFAULT_HYBRID_TOP_K;
+  const threshold = options.threshold ?? DEFAULT_HYBRID_THRESHOLD;
+  const weights = options.weights ?? {};
+  const wLex = weights.lexical ?? 1;
+  const wFts = weights.fts5 ?? 1;
+  const wVec = weights.vector ?? 1;
+  const wVecDense = weights.vectorDense ?? 1;
+  for (const w of [wLex, wFts, wVec, wVecDense]) {
+    if (!Number.isFinite(w) || w < 0) {
+      throw new Error(
+        `rankHybridAsync: weights must be non-negative finite numbers (got ${w})`,
+      );
+    }
+  }
+  if (options.useDenseVector && !options.denseVectorEmbedder) {
+    throw new Error(
+      "rankHybridAsync: useDenseVector=true requires denseVectorEmbedder to be set",
+    );
+  }
+  const lexOpts: LexicalRankingOptions = {
+    threshold: options.perVariantOptions?.lexical?.threshold ?? 0,
+    topK,
+    ...(options.perVariantOptions?.lexical ?? {}),
+  };
+  const ftsOpts: Fts5RankingOptions = {
+    threshold: options.perVariantOptions?.fts5?.threshold ?? 0,
+    topK,
+    ...(options.perVariantOptions?.fts5 ?? {}),
+  };
+  // Zero-token short-circuit: mirror the sync ranker.
+  const lexProbe = rankLexical(query, candidates, lexOpts);
+  const ftsList = rankFts5(query, candidates, {
+    threshold: options.perVariantOptions?.fts5?.threshold ?? 0,
+    topK,
+    ...(options.perVariantOptions?.fts5 ?? {}),
+  });
+  let vecList: LexicalScoredCandidate[] = [];
+  let denseEmbeddingBackend:
+    | import("./dense-embedder.js").EmbedderMetadata
+    | undefined;
+  let activeLabels: Array<"lexical" | "fts5" | "vector" | "vector-dense">;
+  if (options.useDenseVector && options.denseVectorEmbedder) {
+    const denseOpts: DenseVectorRankingOptions = {
+      threshold: options.perVariantOptions?.vectorDense?.threshold ?? 0,
+      topK,
+      ...(options.perVariantOptions?.vectorDense ?? {}),
+      embedder: options.denseVectorEmbedder,
+      // The hybrid benchmark is always called
+      // with the user query string. The dense
+      // vector contributor embeds that query with
+      // the `kind: "query"` flag so the Qwen3
+      // embedder can apply the
+      // `Instruct: <task>\nQuery:<query>`
+      // instruction prefix on the query side and
+      // the unprefixed text on the document
+      // side. The fallback embedders (stub,
+      // MiniLM) ignore the flag.
+      kind: options.denseKind ?? "query",
+    };
+    const denseRes: DenseVectorRankResult =
+      await rankDenseVectorWithMetadataAsync(query, candidates, denseOpts);
+    vecList = denseRes.hits;
+    denseEmbeddingBackend = denseRes.embeddingBackend;
+    activeLabels = ["lexical", "fts5", "vector-dense"];
+  } else {
+    const vecOpts: VectorRankingOptions = {
+      threshold: options.perVariantOptions?.vector?.threshold ?? 0,
+      topK,
+      ...(options.perVariantOptions?.vector ?? {}),
+    };
+    vecList = rankVector(query, candidates, vecOpts);
+    activeLabels = ["lexical", "fts5", "vector"];
+  }
+  if (
+    lexProbe.length === 0 &&
+    ftsList.length === 0 &&
+    vecList.length === 0
+  ) {
+    return {
+      hits: [],
+      contributors: activeLabels,
+      ...(denseEmbeddingBackend !== undefined
+        ? { embeddingBackend: denseEmbeddingBackend }
+        : {}),
+    };
+  }
+  const rankings: Array<{
+    label: "lexical" | "fts5" | "vector" | "vector-dense";
+    list: ReadonlyArray<LexicalScoredCandidate>;
+    weight: number;
+  }> = [
+    { label: "lexical", list: lexProbe, weight: wLex },
+    { label: "fts5", list: ftsList, weight: wFts },
+  ];
+  if (options.useDenseVector) {
+    rankings.push({ label: "vector-dense", list: vecList, weight: wVecDense });
+  } else {
+    rankings.push({ label: "vector", list: vecList, weight: wVec });
+  }
+  const fused = fuseRankings(rankings, k, topK);
+  const filtered =
+    threshold > 0 ? fused.filter((c) => c.score >= threshold) : fused;
+  return {
+    hits: filtered,
+    contributors: activeLabels,
+    ...(denseEmbeddingBackend !== undefined
+      ? { embeddingBackend: denseEmbeddingBackend }
+      : {}),
+  };
 }

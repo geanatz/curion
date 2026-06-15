@@ -32,10 +32,17 @@ import type { MemoryAnalysis } from "../prototype/structured-output.js";
 import { classifyInput, redactSummary } from "../safety/precheck.js";
 import { findRelatedMemories } from "../retrieval/seam.js";
 import {
+  buildPersistedMetadata,
+  deriveRelationshipMetadata,
+  type RelationshipMetadataFields,
+} from "../retrieval/relationship.js";
+import {
   insertMemoryRecord,
+  updateMemoryMetadata,
   MEMORY_KINDS,
   type MemoryKind,
   type MemoryRecord,
+  type SafeMemorySummary,
   type StorageHandle,
 } from "../storage/storage.js";
 import { logger } from "../logging/logger.js";
@@ -98,6 +105,15 @@ export interface RememberControllerOptions {
    * Optional model id override for the fallback provider (test-only).
    */
   providerFallbackModel?: string;
+  /**
+   * Optional clock override for tests. When set, the controller
+   * uses this function to obtain the `derivedAt` timestamp
+   * written into the `relationship` metadata block (spec §6).
+   * Production code does not set this; the controller defaults
+   * to `Date.now` at the seam. Tests can pin a deterministic
+   * timestamp to make the persisted JSON byte-stable.
+   */
+  now?: () => number;
 }
 
 // ---------------------------------------------------------------------------
@@ -295,6 +311,37 @@ export async function runRememberController(
   }
 
   // -- 6. Persist sanitized summary + metadata -----------------------
+  // The write path is two SQL statements, by design (Phase B of
+  // `docs/conflict-currentness-metadata.md`):
+  //
+  //   1. INSERT the row with the controller-normalized metadata
+  //      (tags / entities / classification / providerFallbackUsed
+  //      / llmRepairAttempts / parseStrategy) and NO `relationship`
+  //      block. The candidate's real autoincrement `id` is unknown
+  //      at this point, so the detector would have to guess it,
+  //      and a guessed id would make the `olderVariantsOf` rule
+  //      structurally always-empty (every real row has id > 0).
+  //   2. With the real id, re-derive `relationship` metadata
+  //      against the same related-memories set the seam returned
+  //      and UPDATE only the `metadata` column on the just-
+  //      inserted row. The pure helper is non-mutating and never
+  //      overwrites a pre-existing `relationship` key, so the
+  //      second write is a safe, append-only patch.
+  //
+  // The `metadata` column is the only thing the second statement
+  // touches. `state` is unchanged (`active`), `summary` is
+  // unchanged, the autoincrement id is unchanged. No schema
+  // change, no raw-text storage, no public-message change.
+  // The clock for `derivedAt` is controller-supplied via
+  // `options.now`; the pure helper itself never reads it.
+  const existingMetadata: Record<string, unknown> = {
+    tags,
+    entities,
+    classification: classification ?? null,
+    providerFallbackUsed: result.fallbackUsed,
+    llmRepairAttempts: result.llmRepairAttempts,
+    ...(result.parseStrategy ? { parseStrategy: result.parseStrategy } : {}),
+  };
   const record = insertMemoryRecord(storage, {
     kind,
     state: "active",
@@ -303,20 +350,79 @@ export async function runRememberController(
     modelId: result.modelUsed,
     confidence,
     safetyFlags: ["controller-normalized"],
-    metadata: {
-      tags,
-      entities,
-      classification: classification ?? null,
-      providerFallbackUsed: result.fallbackUsed,
-      llmRepairAttempts: result.llmRepairAttempts,
-      ...(result.parseStrategy ? { parseStrategy: result.parseStrategy } : {}),
-    },
+    metadata: existingMetadata,
   });
+
+  // -- 6b. Post-insert relationship-derivation ----------------------
+  // The related-memories list the seam returned is the candidate
+  // set the controller already feeds to the provider prompt
+  // (spec §3.3). We re-use it here to derive the conservative
+  // `relationship` block with the candidate's REAL id, then
+  // append the block onto the row's existing metadata via a
+  // typed, narrow `metadata` patch. Rows with malformed related
+  // ids are skipped before derivation so a -1 or NaN can never
+  // reach the detector or be persisted.
+  const relatedSummaries: SafeMemorySummary[] = related
+    .map(toSafeMemorySummary)
+    .filter((s): s is SafeMemorySummary => s !== null);
+  const candidateSummary: SafeMemorySummary = {
+    // The candidate's real id is the autoincrement value
+    // `insertMemoryRecord` just returned. The detector's
+    // `olderVariantsOf` rule requires `other.id <
+    // candidate.id`; using the real id here is what makes
+    // that rule meaningful in the controller path.
+    id: record.id,
+    kind,
+    state: "active",
+    summary,
+    tags,
+    classification: classification ?? null,
+    confidence,
+  };
+  const derived: RelationshipMetadataFields = deriveRelationshipMetadata({
+    candidate: candidateSummary,
+    others: relatedSummaries,
+    asOf: (options.now ?? Date.now)(),
+  });
+  // The helper is append-only: it preserves the existing
+  // metadata keys (tags / entities / classification / ...) and
+  // only adds a `relationship` block when the derived block
+  // carries at least one non-empty id list. A row whose
+  // derived block is empty (the MVP default) gets NO update
+  // at all, keeping the persisted JSON byte-equal to pre-
+  // Phase-B for the no-related-memories case.
+  const patched = buildPersistedMetadata(
+    record.metadata as Record<string, unknown>,
+    derived,
+  );
+  const hasRelationshipKey =
+    Object.prototype.hasOwnProperty.call(patched, "relationship") &&
+    patched.relationship !== undefined;
+  if (hasRelationshipKey) {
+    // Update ONLY the metadata column on the row we just
+    // inserted. `updateMemoryMetadata` is a typed, narrow
+    // patch; it does not touch state, summary, or any other
+    // column.
+    const updated = updateMemoryMetadata(storage, record.id, patched);
+    return {
+      status: "saved",
+      record: updated,
+      // Public message omits the saved memory id. The id is
+      // an internal storage handle and is preserved on the
+      // returned `record.id` for tests, structured transport,
+      // and any future agent-facing API that needs it. The
+      // on-the-wire MCP `text` content block carries calm
+      // prose only — the kind and the confidence. The tool
+      // layer in `src/tools/remember.ts` uses the same
+      // no-id wording for the user-facing message.
+      message: `saved (${updated.kind}, confidence ${(updated.confidence ?? 0).toFixed(2)})`,
+    };
+  }
 
   return {
     status: "saved",
     record,
-    message: `saved as #${record.id} (${record.kind}, confidence ${(record.confidence ?? 0).toFixed(2)})`,
+    message: `saved (${record.kind}, confidence ${(record.confidence ?? 0).toFixed(2)})`,
   };
 }
 
@@ -457,4 +563,45 @@ function containsRawDumpShape(summary: string): boolean {
     if (/^\s*\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}/.test(l)) dumpLines += 1;
   }
   return dumpLines / lines.length > 0.6;
+}
+
+// ---------------------------------------------------------------------------
+// Relationship wiring helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a minimal `SafeMemorySummary` from a `RelatedMemory`.
+ *
+ * The seam's MVP returns only `{ id, summary, kind? }`. The
+ * relationship detector consumes a `SafeMemorySummary`, which
+ * also carries `state`, `tags`, `classification`, `confidence`.
+ * For seam rows that omit those, we fill conservative defaults
+ * (`state: "active"` because the seam only returns active
+ * candidates, `tags: []`, `classification: null`,
+ * `confidence: null`).
+ *
+ * A non-finite / non-number `id` is REJECTED (returns `null`)
+ * rather than coerced to a sentinel. Coercing a malformed id
+ * to `-1` would persist a row whose `olderVariantsOf` /
+ * `conflictsWith` lists carry `[-1]`, which is wrong on
+ * every read: there is no memory with id `-1`. Skipping the
+ * row entirely is the safe behavior; the controller still
+ * continues for the other related memories.
+ */
+function toSafeMemorySummary(r: RelatedMemory): SafeMemorySummary | null {
+  if (typeof r.id !== "number" || !Number.isFinite(r.id)) {
+    return null;
+  }
+  if (typeof r.summary !== "string") {
+    return null;
+  }
+  return {
+    id: r.id,
+    kind: "finding",
+    state: "active",
+    summary: r.summary,
+    tags: [],
+    classification: null,
+    confidence: null,
+  };
 }

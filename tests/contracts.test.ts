@@ -58,6 +58,27 @@ test("McpServer registration reflects the two-tool contract", () => {
   assert.ok("recall" in registered);
 });
 
+test("McpServer: both public tools expose an outputSchema (Phase clean-structured-tool-responses)", () => {
+  // The Phase clean-structured-tool-responses contract is
+  // that the server emits `structuredContent` on every
+  // tool response, in addition to the on-the-wire `text`
+  // content block. The MCP SDK only emits
+  // `structuredContent` on the wire when the tool has an
+  // `outputSchema` registered; assert both tools have one.
+  const server = buildServer();
+  const registered = (server as unknown as {
+    _registeredTools: Record<string, { outputSchema: unknown }>;
+  })._registeredTools;
+  for (const name of ["remember", "recall"] as const) {
+    const tool = registered[name];
+    assert.ok(tool, `${name} must be registered`);
+    assert.ok(
+      tool.outputSchema,
+      `${name} must have an outputSchema (required for structuredContent on the wire)`,
+    );
+  }
+});
+
 test("remember handler enforces the single text parameter", async () => {
   // In the MVP slice, the default storageProvider opens a fresh
   // .cortex/ under cwd for every call. We override it with a temp

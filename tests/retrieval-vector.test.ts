@@ -543,9 +543,15 @@ test("vector variant is benchmark-only: production recall() controller is not mo
   assert.match(serverSrc, /"remember"/);
   assert.match(serverSrc, /"recall"/);
   // Sanity: the public contract is exactly two tools.
+  // Phase clean-structured-tool-responses: the server now
+  // uses the non-deprecated `server.registerTool(...)` API
+  // so it can attach an `outputSchema` (which the legacy
+  // `server.tool(...)` overloads do not accept). The
+  // public tool surface is still exactly `remember` +
+  // `recall`.
   assert.deepEqual(
-    serverSrc.match(/server\.tool\(\s*"(\w+)"/g),
-    ['server.tool(\n    "remember"', 'server.tool(\n    "recall"'],
+    serverSrc.match(/server\.registerTool\(\s*"(\w+)"/g),
+    ['server.registerTool(\n    "remember"', 'server.registerTool(\n    "recall"'],
     "public MCP tool surface must remain exactly remember + recall",
   );
 });
@@ -562,6 +568,15 @@ test("vector variant: only the benchmark runner imports the vector module", () =
     path.join("benchmark", "retrieval-runner.ts"),
     path.join("benchmark", "variants", "vector.ts"),
     path.join("benchmark", "variants", "hybrid.ts"),
+    // The dense vector module composes the existing
+    // cosine similarity helper from the vector module.
+    // It is a benchmark-only consumer, in the same
+    // variants directory. The whitelist is for the
+    // "no production import" contract; the dense
+    // variant lives next to the hashed-BoW control and
+    // shares its math.
+    path.join("benchmark", "variants", "dense-vector.ts"),
+    path.join("benchmark", "variants", "dense-embedder.ts"),
   ]);
   function walk(dir: string): string[] {
     const out: string[] = [];
@@ -610,14 +625,18 @@ test("public MCP contract unchanged: exactly two tools, one text param each", ()
   assert.deepEqual([...PUBLIC_TOOL_NAMES], ["remember", "recall"]);
   assert.equal(PUBLIC_TOOL_NAMES.length, 2);
   // Belt-and-braces: read the server source and assert there
-  // are exactly two `server.tool(` calls. A future refactor
-  // that adds a third tool (e.g. a "benchmark" tool) would
-  // break this assertion, which is the point.
+  // are exactly two `server.registerTool(` calls. A future
+  // refactor that adds a third tool (e.g. a "benchmark" tool)
+  // would break this assertion, which is the point.
+  // (Phase clean-structured-tool-responses: the server
+  // migrated from the legacy `server.tool(...)` API to
+  // `server.registerTool(...)` so it could attach an
+  // `outputSchema`; the public tool surface is unchanged.)
   const serverSrc = fs.readFileSync(
     path.join(import.meta.dirname, "..", "src", "server.ts"),
     "utf8",
   );
-  const toolCallCount = (serverSrc.match(/server\.tool\(/g) ?? []).length;
+  const toolCallCount = (serverSrc.match(/server\.registerTool\(/g) ?? []).length;
   assert.equal(
     toolCallCount,
     2,

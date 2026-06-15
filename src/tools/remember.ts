@@ -38,6 +38,7 @@ import {
   type StorageHandle,
 } from "../storage/storage.js";
 import { logger } from "../logging/logger.js";
+import { z } from "zod";
 
 export const REMEMBER_TOOL_NAME = "remember" as const;
 export const REMEMBER_TOOL_DESCRIPTION =
@@ -47,22 +48,42 @@ export interface RememberInput {
   text: string;
 }
 
-export const REMEMBER_INPUT_SCHEMA = {
-  type: "object" as const,
-  properties: {
-    text: {
-      type: "string" as const,
-      description: "The memory text to store.",
-    },
-  },
-  required: ["text"] as const,
-  additionalProperties: false as const,
-};
+/**
+ * Strict Zod v3 object schema for the public `remember` tool
+ * input. `.strict()` makes the MCP SDK's `validateToolInput`
+ * reject any unknown top-level key — the only acceptable key
+ * is `text`. The SDK wires this through to the on-the-wire
+ * `tools/list` JSON schema (with `additionalProperties: false`
+ * via the strict-Union projection), so the public input
+ * contract is pinned at the schema level, not just at the
+ * handler level.
+ *
+ * Schema surface (preserved):
+ *   - one `text` property (string, required, min 1)
+ *   - no kinds, states, filters, providers, debug, or storage
+ *     knobs
+ */
+export const REMEMBER_INPUT_SCHEMA = z
+  .object({
+    text: z
+      .string()
+      .min(1, "text must not be empty")
+      .describe("The memory text to store."),
+  })
+  .strict();
 
 /**
  * Public tool-layer result. The `message` field is the only field the
  * MCP `text` content block carries. Structured fields are exposed via
  * `outcome` for tests and any future structured-content transport.
+ *
+ * The public `message` deliberately omits the saved memory id. The id
+ * is an internal storage handle and is not part of the user-facing
+ * surface; it is preserved on the `memoryId` structured field for
+ * tests, future structured-content transport, and any future
+ * agent-facing API that needs it. The on-the-wire MCP `text` content
+ * block is calm prose: the kind, the confidence, and the persisted
+ * summary — never the id.
  */
 export interface RememberResult {
   status: RememberOutcome["status"];
@@ -169,9 +190,14 @@ export async function handleRemember(input: unknown): Promise<RememberResult> {
 function formatOutcome(outcome: RememberOutcome): RememberResult {
   switch (outcome.status) {
     case "saved":
+      // Public message omits the saved memory id. The id is
+      // an internal storage handle and is preserved on the
+      // `memoryId` structured field for tests and any future
+      // structured-content transport; the on-the-wire MCP
+      // `text` content block carries calm prose only.
       return {
         status: "saved",
-        message: `Saved memory #${outcome.record.id} (${outcome.record.kind}, confidence ${(outcome.record.confidence ?? 0).toFixed(2)}): ${outcome.record.summary}`,
+        message: `Saved memory (${outcome.record.kind}, confidence ${(outcome.record.confidence ?? 0).toFixed(2)}): ${outcome.record.summary}`,
         memoryId: outcome.record.id,
         memoryKind: outcome.record.kind,
         modelId: outcome.record.modelId,
