@@ -93,7 +93,7 @@ interface FreshStorage {
 }
 
 function mkStorage(): FreshStorage {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-amb-e-"));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-amb-e-"));
   const handle = initStorage({ projectRoot: tmp });
   return { tmp, handle };
 }

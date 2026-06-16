@@ -15,7 +15,7 @@
  *   - fallback:   NVIDIA NIM `openai/gpt-oss-120b` at `https://integrate.api.nvidia.com/v1`
  *
  * The third NIM candidate `meta/llama-3.3-70b-instruct` is intentionally
- * NOT the default fallback. It is exposed via `CORTEX_NIM_FALLBACK_MODEL`
+ * NOT the default fallback. It is exposed via `CURION_NIM_FALLBACK_MODEL`
  * only as a comparison/optional override.
  *
  * Fallback policy:
@@ -120,44 +120,44 @@ export interface MemoryAnalysisInput {
  */
 export interface MemoryAnalysisAdapterOptions {
   /**
-   * Per-request timeout in ms. Defaults to `CORTEX_ADAPTER_TIMEOUT_MS`
+   * Per-request timeout in ms. Defaults to `CURION_ADAPTER_TIMEOUT_MS`
    * (or `DEFAULT_ADAPTER_TIMEOUT_MS` if unset).
    */
   timeoutMs?: number;
   /**
    * Per-request max output tokens. Defaults to
-   * `CORTEX_ADAPTER_MAX_TOKENS` (or `DEFAULT_ADAPTER_MAX_TOKENS`).
+   * `CURION_ADAPTER_MAX_TOKENS` (or `DEFAULT_ADAPTER_MAX_TOKENS`).
    */
   maxTokens?: number;
   /**
    * Override the primary provider key. When unset, the adapter
-   * reads `CORTEX_PROVIDER_PRIMARY_KEY` / `MINIMAX_API_KEY` from
+   * reads `CURION_PROVIDER_PRIMARY_KEY` / `MINIMAX_API_KEY` from
    * `process.env`.
    */
   primaryApiKey?: string;
   /**
    * Override the fallback provider key. When unset, the adapter
-   * reads `CORTEX_PROVIDER_FALLBACK_KEY` / `NVIDIA_NIM_API_KEY`.
+   * reads `CURION_PROVIDER_FALLBACK_KEY` / `NVIDIA_NIM_API_KEY`.
    */
   fallbackApiKey?: string;
   /**
    * Override the primary base URL. Defaults to
-   * `CORTEX_MINIMAX_BASE_URL` (or `DEFAULT_MINIMAX_BASE_URL`).
+   * `CURION_MINIMAX_BASE_URL` (or `DEFAULT_MINIMAX_BASE_URL`).
    */
   primaryBaseUrl?: string;
   /**
    * Override the fallback base URL. Defaults to
-   * `CORTEX_NIM_BASE_URL` (or `DEFAULT_NIM_BASE_URL`).
+   * `CURION_NIM_BASE_URL` (or `DEFAULT_NIM_BASE_URL`).
    */
   fallbackBaseUrl?: string;
   /**
    * Override the primary model id. Defaults to
-   * `CORTEX_MINIMAX_MODEL` (or `DEFAULT_MINIMAX_MODEL`).
+   * `CURION_MINIMAX_MODEL` (or `DEFAULT_MINIMAX_MODEL`).
    */
   primaryModel?: string;
   /**
    * Override the fallback model id. Defaults to
-   * `CORTEX_NIM_FALLBACK_MODEL` (or `DEFAULT_NIM_FALLBACK_MODEL`).
+   * `CURION_NIM_FALLBACK_MODEL` (or `DEFAULT_NIM_FALLBACK_MODEL`).
    * Setting this to `COMPARISON_NIM_MODEL` is allowed for
    * comparison runs, but the production fallback is the
    * default value.
@@ -344,40 +344,40 @@ export function loadAdapterConfig(
   const cfg: AdapterConfig = {
     primaryBaseUrl: pickTrimmedString(
       overrides.primaryBaseUrl ?? "",
-      readTrimmedString("CORTEX_MINIMAX_BASE_URL"),
+      readTrimmedString("CURION_MINIMAX_BASE_URL"),
       DEFAULT_MINIMAX_BASE_URL,
     ),
     primaryModel: pickTrimmedString(
       overrides.primaryModel ?? "",
-      readTrimmedString("CORTEX_MINIMAX_MODEL"),
+      readTrimmedString("CURION_MINIMAX_MODEL"),
       DEFAULT_MINIMAX_MODEL,
     ),
     fallbackBaseUrl: pickTrimmedString(
       overrides.fallbackBaseUrl ?? "",
-      readTrimmedString("CORTEX_NIM_BASE_URL"),
+      readTrimmedString("CURION_NIM_BASE_URL"),
       DEFAULT_NIM_BASE_URL,
     ),
     fallbackModel: pickTrimmedString(
       overrides.fallbackModel ?? "",
-      readTrimmedString("CORTEX_NIM_FALLBACK_MODEL"),
+      readTrimmedString("CURION_NIM_FALLBACK_MODEL"),
       DEFAULT_NIM_FALLBACK_MODEL,
     ),
     primaryApiKey: pickTrimmedString(
       overrides.primaryApiKey ?? "",
-      readTrimmedString("CORTEX_PROVIDER_PRIMARY_KEY"),
+      readTrimmedString("CURION_PROVIDER_PRIMARY_KEY"),
       readTrimmedString("MINIMAX_API_KEY"),
     ),
     fallbackApiKey: pickTrimmedString(
       overrides.fallbackApiKey ?? "",
-      readTrimmedString("CORTEX_PROVIDER_FALLBACK_KEY"),
+      readTrimmedString("CURION_PROVIDER_FALLBACK_KEY"),
       readTrimmedString("NVIDIA_NIM_API_KEY"),
     ),
     timeoutMs: overrides.timeoutMs ?? readNumber(
-      "CORTEX_ADAPTER_TIMEOUT_MS",
+      "CURION_ADAPTER_TIMEOUT_MS",
       DEFAULT_ADAPTER_TIMEOUT_MS,
     ),
     maxTokens: overrides.maxTokens ?? readNumber(
-      "CORTEX_ADAPTER_MAX_TOKENS",
+      "CURION_ADAPTER_MAX_TOKENS",
       DEFAULT_ADAPTER_MAX_TOKENS,
     ),
   };
@@ -535,7 +535,7 @@ export async function analyzeMemoryWithFallback(
       ok: false,
       kind: "missing-config",
       message:
-        "analyzeMemoryWithFallback: no provider api key configured (set CORTEX_PROVIDER_PRIMARY_KEY or CORTEX_PROVIDER_FALLBACK_KEY)",
+        "analyzeMemoryWithFallback: no provider api key configured (set CURION_PROVIDER_PRIMARY_KEY or CURION_PROVIDER_FALLBACK_KEY)",
       httpCalls: 0,
     };
   }

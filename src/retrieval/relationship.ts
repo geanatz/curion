@@ -1,8 +1,8 @@
 /**
  * Conservative relationship-derivation helper.
  *
- * Phase A of the conflict / currentness metadata design
- * (see `docs/conflict-currentness-metadata.md`). This module is
+ * Phase A of the conflict / currentness metadata design.
+ * This module is
  * intentionally a pure, deterministic, offline helper:
  *
  *   - No I/O. No storage reads or writes.

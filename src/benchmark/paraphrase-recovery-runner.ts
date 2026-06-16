@@ -5,7 +5,7 @@
  * The runner is a thin orchestrator that:
  *   1. Loads the most recent lexical-baseline
  *      no-answer abstention artifact under
- *      `.cortex/benchmark/`.
+ *      `.curion/benchmark/`.
  *   2. (Optionally) loads a pre-computed
  *      semantic-evidence map from a JSON file.
  *      The map is a `{queryId -> "hit"|"miss"}`
@@ -44,7 +44,7 @@
  *     artifact the prior experiment
  *     produced. Default: the most recent
  *     lexical-baseline artifact under
- *     `.cortex/benchmark/`.
+ *     `.curion/benchmark/`.
  *   --semantic-evidence <path>    — OPTIONAL
  *     JSON file with shape
  *     `{source: string, byQueryId: {[qid]:
@@ -52,7 +52,7 @@
  *     report has no semantic annotation;
  *     the honest-reading block is unchanged.
  *   --out-dir <path>              — output
- *     dir. Default: `.cortex/benchmark/`.
+ *     dir. Default: `.curion/benchmark/`.
  *   --no-write                    — do not
  *     write the JSON artifact. Useful for
  *     CI / smoke tests that just want the
@@ -268,7 +268,7 @@ export function writeParaphraseRecoveryReport(
  * CLI argument shape. The CLI is small:
  * each field is OPTIONAL; the defaults pick
  * the most recent lexical-baseline artifacts
- * under `.cortex/benchmark/`.
+ * under `.curion/benchmark/`.
  */
 export interface ParaphraseRecoveryCliArgs {
   noAnswerArtifact?: string;
@@ -320,7 +320,7 @@ export async function runParaphraseRecoveryCli(
   report: ParaphraseRecoveryReport;
   written?: string;
 }> {
-  const outDir = args.outDir ?? ".cortex/benchmark";
+  const outDir = args.outDir ?? ".curion/benchmark";
   const defaultNoAnswer =
     args.noAnswerArtifact ??
     findParaphraseRecoveryMostRecentArtifact(

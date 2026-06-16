@@ -93,7 +93,7 @@
  *     calibration / benchmark / diagnostic / policy
  *     report shapes. The on-disk artifact is a new,
  *     additive shape that lives next to the other
- *     artifacts under `.cortex/benchmark/`.
+ *     artifacts under `.curion/benchmark/`.
  *
  * Determinism:
  *   Every function in this module is pure. The
@@ -1534,7 +1534,7 @@ export function formatNoAnswerPolicyReport(
   report: NoAnswerPolicyReport,
 ): string {
   const lines: string[] = [];
-  lines.push("=== cortex-mcp-v2 no-answer abstention / calibration experiment ===");
+  lines.push("=== curion no-answer abstention / calibration experiment ===");
   lines.push(`generated at: ${report.generatedAt}`);
   lines.push("");
   lines.push("--- config ---");

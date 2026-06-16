@@ -51,7 +51,7 @@ import { classifyInput } from "../src/safety/precheck.ts";
 // ---------------------------------------------------------------------------
 
 function mkStorage(): { tmp: string; handle: StorageHandle } {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-safety-"));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-safety-"));
   const handle = initStorage({ projectRoot: tmp });
   return { tmp, handle };
 }
@@ -713,16 +713,16 @@ test("logging: unsafe input (secret + mixed) does not echo raw text or secret fr
 // ---------------------------------------------------------------------------
 // 13b. Logging — debug-level is honored in a fresh subprocess. The
 //     controller emits its safety pre-check decision via
-//     `logger.debug`, but the logger reads CORTEX_LOG_LEVEL at
+//     `logger.debug`, but the logger reads CURION_LOG_LEVEL at
 //     module-load time. To actually exercise the debug path, we
-//     spawn a tiny in-tree script with CORTEX_LOG_LEVEL=debug set
+//     spawn a tiny in-tree script with CURION_LOG_LEVEL=debug set
 //     in its env and assert that the debug line reaches stderr.
 //     This is a low-cost subprocess test: no live network, no
 //     provider call, and the script uses the same scripted fetch
 //     pattern as the rest of the suite.
 // ---------------------------------------------------------------------------
 
-test("logging: controller debug line is emitted at CORTEX_LOG_LEVEL=debug (subprocess)", async () => {
+test("logging: controller debug line is emitted at CURION_LOG_LEVEL=debug (subprocess)", async () => {
   const scriptPath = path.join(
     path.dirname(fileURLToPath(import.meta.url)),
     "_helpers",
@@ -733,7 +733,7 @@ test("logging: controller debug line is emitted at CORTEX_LOG_LEVEL=debug (subpr
     process.execPath,
     ["--import", "tsx", scriptPath],
     {
-      env: { ...process.env, CORTEX_LOG_LEVEL: "debug" },
+      env: { ...process.env, CURION_LOG_LEVEL: "debug" },
       encoding: "utf8",
       timeout: 30_000,
     },
@@ -741,7 +741,7 @@ test("logging: controller debug line is emitted at CORTEX_LOG_LEVEL=debug (subpr
   assert.equal(result.status, 0, `subprocess failed: ${result.stderr}`);
   const stderr = result.stderr;
   // The controller emits a single debug line per remember call of
-  // the shape: "[cortex] <ts> DEBUG remember: pre-check class=<X> reason=<Y>".
+  // the shape: "[curion] <ts> DEBUG remember: pre-check class=<X> reason=<Y>".
   // We assert that the debug line is actually present (proving the
   // logger honored the env var) and that it does NOT contain the
   // raw input or any secret fragment.

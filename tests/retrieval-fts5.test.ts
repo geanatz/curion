@@ -8,7 +8,7 @@
  * Contract under test:
  *   1. The FTS5 variant runs in a fully in-memory SQLite
  *      database. It must NOT open, read, or write the
- *      project `.cortex/cortex.sqlite` file.
+ *      project `.curion/curion.sqlite` file.
  *   2. The FTS5 variant's top-K shape is identical to the
  *      lexical baseline's: `{id, score}[]`. This is what the
  *      benchmark metrics rely on.
@@ -68,11 +68,11 @@ test("FTS5 index: uses an in-memory database and does not write to the project s
   // Build the FTS5 index in a brand-new in-memory database.
   // The function MUST not write to disk. We verify by
   // asserting that the returned handle is backed by a
-  // `:memory:` connection and that no `.cortex/cortex.sqlite`
+  // `:memory:` connection and that no `.curion/curion.sqlite`
   // file is created or modified in the test cwd. The test
   // runs in a temp cwd, so any accidental file write would
   // be visible here.
-  const tmpCwd = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-fts5-cwd-"));
+  const tmpCwd = fs.mkdtempSync(path.join(os.tmpdir(), "curion-fts5-cwd-"));
   const prevCwd = process.cwd();
   process.chdir(tmpCwd);
   try {
@@ -82,10 +82,10 @@ test("FTS5 index: uses an in-memory database and does not write to the project s
       // better-sqlite3's `:memory:` connection is not
       // backed by a file. The simplest invariant we can
       // assert without reaching into the private handle is
-      // "the `.cortex/` directory was NOT created".
+      // "the `.curion/` directory was NOT created".
       assert.ok(
-        !fs.existsSync(path.join(tmpCwd, ".cortex")),
-        "FTS5 index must not create a .cortex directory in cwd",
+        !fs.existsSync(path.join(tmpCwd, ".curion")),
+        "FTS5 index must not create a .curion directory in cwd",
       );
       // A query against the in-memory index returns rows
       // for a known record.
@@ -552,7 +552,7 @@ test("FTS5 variant: only the benchmark runner imports the FTS5 module", () => {
 // ---------------------------------------------------------------------------
 
 test("runner: FTS5 single-variant artifacts are written with the `fts5-` prefix and carry the right variant label", () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-fts5-art-"));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-fts5-art-"));
   try {
     const dir = resolveBenchmarkArtifactsDir({ artifactsDir: tmp });
     const report = runRetrievalBenchmark({ variant: "fts5" });
@@ -574,7 +574,7 @@ test("runner: FTS5 single-variant artifacts are written with the `fts5-` prefix 
 });
 
 test("runner: comparison artifacts are written with the `retrieval-compare-` prefix and contain both per-variant reports", () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-fts5-compare-"));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-fts5-compare-"));
   try {
     const dir = resolveBenchmarkArtifactsDir({ artifactsDir: tmp });
     const report = runRetrievalBenchmark({ variant: "all" });

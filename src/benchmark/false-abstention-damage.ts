@@ -1139,7 +1139,7 @@ export function formatFalseAbstentionDamageReport(
 ): string {
   const lines: string[] = [];
   lines.push(
-    "=== cortex-mcp-v2 false-abstention damage analysis (benchmark-only) ===",
+    "=== curion false-abstention damage analysis (benchmark-only) ===",
   );
   lines.push(`generated at: ${report.generatedAt}`);
   lines.push("");

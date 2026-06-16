@@ -4,7 +4,7 @@
  * The runner is a thin orchestrator that:
  *   1. Loads the most recent lexical-baseline
  *      no-answer abstention artifact under
- *      `.cortex/benchmark/`.
+ *      `.curion/benchmark/`.
  *   2. Loads the matching abstention-audit
  *      artifact (the per-query `AbstentionSignals`
  *      block the prior experiments record) so the
@@ -44,12 +44,12 @@
  *     `retrieval-no-answer-abstention-*.json`
  *     artifact the prior experiment produced.
  *     Default: the most recent lexical-baseline
- *     artifact under `.cortex/benchmark/`.
+ *     artifact under `.curion/benchmark/`.
  *   --audit-artifact <path>       — the
  *     `retrieval-abstention-audit-*.json`
  *     artifact. Default: the most recent
  *     lexical-baseline artifact under
- *     `.cortex/benchmark/`.
+ *     `.curion/benchmark/`.
  *   --semantic-evidence <path>    — OPTIONAL JSON
  *     file with shape
  *     `{source: string, byQueryId: {[qid]:
@@ -57,7 +57,7 @@
  *     has no semantic annotation; the honest-
  *     reading block is unchanged.
  *   --out-dir <path>              — output dir.
- *     Default: `.cortex/benchmark/`.
+ *     Default: `.curion/benchmark/`.
  *   --no-write                    — do not write
  *     the JSON artifact. Useful for CI / smoke
  *     tests that just want the human report on
@@ -393,7 +393,7 @@ export function writeFalseAbstentionDamageReport(
  * CLI argument shape. The CLI is small: each
  * field is OPTIONAL; the defaults pick the
  * most recent lexical-baseline artifacts under
- * `.cortex/benchmark/`.
+ * `.curion/benchmark/`.
  */
 export interface FalseAbstentionDamageCliArgs {
   noAnswerArtifact?: string;
@@ -415,7 +415,7 @@ export interface FalseAbstentionDamageCliArgs {
 export async function runFalseAbstentionDamageCli(
   args: FalseAbstentionDamageCliArgs,
 ): Promise<{ report: FalseAbstentionDamageReport; written?: string }> {
-  const outDir = args.outDir ?? ".cortex/benchmark";
+  const outDir = args.outDir ?? ".curion/benchmark";
   const defaultNoAnswer =
     args.noAnswerArtifact ??
     findMostRecentArtifact(outDir, "retrieval-no-answer-abstention-");

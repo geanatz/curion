@@ -157,7 +157,7 @@ export type Qwen3TextKind = "query" | "document";
  * Configuration for the Qwen3 embedder. All fields are
  * optional; the defaults are the pinned model +
  * the on-disk cache directory under
- * `.cortex/transformers-cache/`.
+ * `.curion/transformers-cache/`.
  *
  * The defaults match the Architect's brief:
  *   - modelId   : `onnx-community/Qwen3-Embedding-0.6B-ONNX`
@@ -215,7 +215,7 @@ export interface Qwen3EmbedderOptions {
   /**
    * Local cache directory for downloaded model
    * artifacts. Default:
-   * `<cwd>/.cortex/transformers-cache/`. The directory
+   * `<cwd>/.curion/transformers-cache/`. The directory
    * is created on first use; the benchmark runner does
    * not clean it up.
    */
@@ -367,7 +367,7 @@ export class Qwen3Embedder {
     this.pooling = options.pooling ?? "last_token";
     this.normalize = options.normalize ?? true;
     this.cacheDir =
-      options.cacheDir ?? `${process.cwd()}/.cortex/transformers-cache`;
+      options.cacheDir ?? `${process.cwd()}/.curion/transformers-cache`;
     this.task =
       options.task ??
       "Given a web search query, retrieve relevant passages that best answer the query";

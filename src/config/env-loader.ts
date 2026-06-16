@@ -20,12 +20,12 @@ import path from "node:path";
 
 /** Names of env vars whose values MUST never be logged. */
 export const SECRET_ENV_VARS: readonly string[] = [
-  "CORTEX_PROVIDER_PRIMARY_KEY",
+  "CURION_PROVIDER_PRIMARY_KEY",
   "MINIMAX_API_KEY",
-  "CORTEX_PROVIDER_FALLBACK_KEY",
+  "CURION_PROVIDER_FALLBACK_KEY",
   "NVIDIA_NIM_API_KEY",
-  "CORTEX_PROTOTYPE_PRIMARY_KEY",
-  "CORTEX_PROTOTYPE_FALLBACK_KEY",
+  "CURION_PROTOTYPE_PRIMARY_KEY",
+  "CURION_PROTOTYPE_FALLBACK_KEY",
   "GROQ_API_KEY",
 ];
 
@@ -235,30 +235,30 @@ export function loadPrototypeConfig(
   const loaded = loadDotEnv(options);
   return {
     hasPrimaryKey:
-      Boolean(process.env.CORTEX_PROVIDER_PRIMARY_KEY) ||
+      Boolean(process.env.CURION_PROVIDER_PRIMARY_KEY) ||
       Boolean(process.env.MINIMAX_API_KEY),
     hasFallbackKey:
-      Boolean(process.env.CORTEX_PROVIDER_FALLBACK_KEY) ||
+      Boolean(process.env.CURION_PROVIDER_FALLBACK_KEY) ||
       Boolean(process.env.NVIDIA_NIM_API_KEY),
     minimaxBaseUrl:
-      process.env.CORTEX_MINIMAX_BASE_URL ?? DEFAULT_MINIMAX_BASE_URL,
-    minimaxModel: process.env.CORTEX_MINIMAX_MODEL ?? DEFAULT_MINIMAX_MODEL,
-    nimBaseUrl: process.env.CORTEX_NIM_BASE_URL ?? DEFAULT_NIM_BASE_URL,
+      process.env.CURION_MINIMAX_BASE_URL ?? DEFAULT_MINIMAX_BASE_URL,
+    minimaxModel: process.env.CURION_MINIMAX_MODEL ?? DEFAULT_MINIMAX_MODEL,
+    nimBaseUrl: process.env.CURION_NIM_BASE_URL ?? DEFAULT_NIM_BASE_URL,
     nimModels:
-      process.env.CORTEX_NIM_MODELS
+      process.env.CURION_NIM_MODELS
         ?.split(",")
         .map((m) => m.trim())
         .filter(Boolean) ?? [...DEFAULT_NIM_MODELS],
-    timeoutMs: readNumber("CORTEX_PROTOTYPE_TIMEOUT_MS", DEFAULT_TIMEOUT_MS),
-    maxTokens: readNumber("CORTEX_PROTOTYPE_MAX_TOKENS", DEFAULT_MAX_TOKENS),
+    timeoutMs: readNumber("CURION_PROTOTYPE_TIMEOUT_MS", DEFAULT_TIMEOUT_MS),
+    maxTokens: readNumber("CURION_PROTOTYPE_MAX_TOKENS", DEFAULT_MAX_TOKENS),
     hasGroqKey: Boolean(process.env.GROQ_API_KEY),
     groqBaseUrl: readTrimmedString(
-      "CORTEX_GROQ_BASE_URL",
+      "CURION_GROQ_BASE_URL",
       DEFAULT_GROQ_BASE_URL,
     ),
-    groqModel: readTrimmedString("CORTEX_GROQ_MODEL", DEFAULT_GROQ_MODEL),
+    groqModel: readTrimmedString("CURION_GROQ_MODEL", DEFAULT_GROQ_MODEL),
     groqReasoningEffort: readTrimmedString(
-      "CORTEX_GROQ_REASONING_EFFORT",
+      "CURION_GROQ_REASONING_EFFORT",
       DEFAULT_GROQ_REASONING_EFFORT,
     ),
     dotenvPath: loaded.path,

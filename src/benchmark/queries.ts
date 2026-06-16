@@ -346,7 +346,7 @@ export const BENCHMARK_QUERIES: BenchmarkQuery[] = [
     expectedIds: [4],
     currentTruthIds: [4],
     note:
-      "Paraphrase of the .cortex storage location. Expected to miss because the record says 'hidden .cortex directory' / 'SQLite file', not 'filesystem' / 'saved notes'.",
+      "Paraphrase of the .curion storage location. Expected to miss because the record says 'hidden .curion directory' / 'SQLite file', not 'filesystem' / 'saved notes'.",
   },
   {
     id: "para-architecture-decisions",
@@ -927,7 +927,7 @@ export const BENCHMARK_QUERIES: BenchmarkQuery[] = [
     expectedIds: [70],
     currentTruthIds: [70],
     note:
-      "Paraphrase of the rate-limit policy. Record 70 says 'CORTEX_PROVIDER_RATE_LIMIT' / 'sixty requests per minute'; the query says 'throttled' / 'AI provider'.",
+      "Paraphrase of the rate-limit policy. Record 70 says 'CURION_PROVIDER_RATE_LIMIT' / 'sixty requests per minute'; the query says 'throttled' / 'AI provider'.",
   },
   {
     id: "para-cache-strategy",
@@ -985,7 +985,7 @@ export const BENCHMARK_QUERIES: BenchmarkQuery[] = [
     expectedIds: [70],
     currentTruthIds: [70],
     note:
-      "Asks for the CURRENT rate-limit policy. Record 70 (CORTEX_PROVIDER_RATE_LIMIT, default sixty) is current. Legacy record 59 (single primary endpoint) is a distractor that shares 'provider' tokens.",
+      "Asks for the CURRENT rate-limit policy. Record 70 (CURION_PROVIDER_RATE_LIMIT, default sixty) is current. Legacy record 59 (single primary endpoint) is a distractor that shares 'provider' tokens.",
   },
   {
     id: "temp-tls-requirement",
@@ -1044,7 +1044,7 @@ export const BENCHMARK_QUERIES: BenchmarkQuery[] = [
     expectedIds: [85, 86, 87, 88],
     currentTruthIds: [85, 86, 87, 88],
     note:
-      "Needs CORTEX_FEATURE_FLAGS source (85) + default empty (86) + per-process evaluation (87) + verbose-summary mode gate (88). Four-slot query.",
+      "Needs CURION_FEATURE_FLAGS source (85) + default empty (86) + per-process evaluation (87) + verbose-summary mode gate (88). Four-slot query.",
   },
   {
     id: "multi-provider-failover",
@@ -1053,7 +1053,7 @@ export const BENCHMARK_QUERIES: BenchmarkQuery[] = [
     expectedIds: [89, 90, 91, 92],
     currentTruthIds: [89, 90, 91, 92],
     note:
-      "Needs primary/fallback routing (89) + CORTEX_PROVIDER_FALLBACK_KEY (90) + exponential backoff on 429 (91) + typed result union (92). Four-slot query.",
+      "Needs primary/fallback routing (89) + CURION_PROVIDER_FALLBACK_KEY (90) + exponential backoff on 429 (91) + typed result union (92). Four-slot query.",
   },
   {
     id: "multi-data-pipeline",
@@ -1277,7 +1277,7 @@ export const BENCHMARK_QUERIES: BenchmarkQuery[] = [
     expectedIds: [89, 90, 91, 92],
     currentTruthIds: [89, 90, 91, 92],
     note:
-      "Status: primary/fallback routing (89) + CORTEX_PROVIDER_FALLBACK_KEY (90) + exponential backoff on 429 (91) + typed result union (92). Four-slot query.",
+      "Status: primary/fallback routing (89) + CURION_PROVIDER_FALLBACK_KEY (90) + exponential backoff on 429 (91) + typed result union (92). Four-slot query.",
   },
   {
     id: "orient-data-pipeline-status",
@@ -1322,7 +1322,7 @@ export const BENCHMARK_QUERIES: BenchmarkQuery[] = [
     expectedIds: [81, 82, 83, 84],
     currentTruthIds: [81, 82, 83, 84],
     note:
-      "Status: @cortex-mcp/sdk package (81) + stdio-only transport (82) + lockstep versioning (83) + no-client-cache (84). Four-slot query.",
+      "Status: @curion/sdk package (81) + stdio-only transport (82) + lockstep versioning (83) + no-client-cache (84). Four-slot query.",
   },
 
   // -------------------------------------------------------------------------
@@ -1443,7 +1443,7 @@ export const BENCHMARK_QUERIES: BenchmarkQuery[] = [
     currentTruthIds: [113],
     labels: ["adversarialParaphrase"],
     note:
-      "Adversarial positive paraphrase. Targets the paraphrase-twin record 113 (low lexical overlap with the original 'cortex' / 'sqlite' vocabulary; uses 'saved notes' / 'on disk' instead).",
+      "Adversarial positive paraphrase. Targets the paraphrase-twin record 113 (low lexical overlap with the original 'curion' / 'sqlite' vocabulary; uses 'saved notes' / 'on disk' instead).",
   },
   {
     id: "para-review-twin",
@@ -1768,11 +1768,11 @@ export const BENCHMARK_QUERIES: BenchmarkQuery[] = [
   {
     id: "temp-superseded-conflict-secrets",
     family: "temporal",
-    query: "Is the API key material stored in .cortex/secrets.json at runtime?",
+    query: "Is the API key material stored in .curion/secrets.json at runtime?",
     expectedIds: [29],
     currentTruthIds: [29],
     note:
-      "Conflict record test: the conflict record 101 ('API keys stored in .cortex/secrets.json') is in the corpus; the current record 29 ('API keys read from environment variables only') is the current truth. The query asks about the current state.",
+      "Conflict record test: the conflict record 101 ('API keys stored in .curion/secrets.json') is in the corpus; the current record 29 ('API keys read from environment variables only') is the current truth. The query asks about the current state.",
   },
 
   // -------------------------------------------------------------------------

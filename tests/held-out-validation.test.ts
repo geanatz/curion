@@ -430,7 +430,7 @@ test("held-out runner: transfer block is present for the four primary policies o
 
 test("held-out runner: writeHeldOutReport writes a well-formed artifact", () => {
   return (async () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-held-out-"));
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-held-out-"));
     try {
       const evalsResult = await runHeldOutEvals({
         variant: "lexical",
@@ -479,7 +479,7 @@ test("held-out runner: formatHeldOutReport produces a non-empty report with the 
     const human = formatHeldOutReport(report);
     assert.ok(typeof human === "string" && human.length > 0, "human report must be a non-empty string");
     for (const section of [
-      "=== cortex-mcp-v2 retrieval held-out validation ===",
+      "=== curion retrieval held-out validation ===",
       "--- meta ---",
       "--- headline transfer (primary policies) ---",
       "--- per-family positive abstention",

@@ -5,8 +5,8 @@ dist/
 # Dependencies
 node_modules/
 
-# Project-local Cortex storage (per-project, not source-controlled)
-.cortex/
+# Project-local Curion storage (per-project, not source-controlled)
+.curion/
 
 # Logs
 *.log

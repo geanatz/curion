@@ -82,7 +82,7 @@ const VALID_JSON = JSON.stringify({
   summary: "A short summary of the input.",
   confidence: 0.82,
   tags: ["project", "memory"],
-  entities: [{ name: "Cortex", kind: "project" }],
+  entities: [{ name: "Curion", kind: "project" }],
   classification: "project-context",
 });
 
@@ -107,16 +107,16 @@ function withCleanEnv<T>(
 }
 
 const ENV_KEYS = [
-  "CORTEX_PROVIDER_PRIMARY_KEY",
+  "CURION_PROVIDER_PRIMARY_KEY",
   "MINIMAX_API_KEY",
-  "CORTEX_PROVIDER_FALLBACK_KEY",
+  "CURION_PROVIDER_FALLBACK_KEY",
   "NVIDIA_NIM_API_KEY",
-  "CORTEX_MINIMAX_BASE_URL",
-  "CORTEX_MINIMAX_MODEL",
-  "CORTEX_NIM_BASE_URL",
-  "CORTEX_NIM_FALLBACK_MODEL",
-  "CORTEX_ADAPTER_TIMEOUT_MS",
-  "CORTEX_ADAPTER_MAX_TOKENS",
+  "CURION_MINIMAX_BASE_URL",
+  "CURION_MINIMAX_MODEL",
+  "CURION_NIM_BASE_URL",
+  "CURION_NIM_FALLBACK_MODEL",
+  "CURION_ADAPTER_TIMEOUT_MS",
+  "CURION_ADAPTER_MAX_TOKENS",
 ];
 
 // ---------------------------------------------------------------------------
@@ -148,14 +148,14 @@ test("adapter: loadAdapterConfig treats whitespace-only env values as missing", 
   return withCleanEnv(ENV_KEYS, () => {
     // Set every env var to a whitespace-only placeholder. None of
     // these should be treated as configured values.
-    process.env.CORTEX_PROVIDER_PRIMARY_KEY = "   ";
+    process.env.CURION_PROVIDER_PRIMARY_KEY = "   ";
     process.env.MINIMAX_API_KEY = "\t\n  ";
-    process.env.CORTEX_PROVIDER_FALLBACK_KEY = "  \n";
+    process.env.CURION_PROVIDER_FALLBACK_KEY = "  \n";
     process.env.NVIDIA_NIM_API_KEY = " ";
-    process.env.CORTEX_MINIMAX_BASE_URL = "  ";
-    process.env.CORTEX_MINIMAX_MODEL = "   ";
-    process.env.CORTEX_NIM_BASE_URL = " \t ";
-    process.env.CORTEX_NIM_FALLBACK_MODEL = "   ";
+    process.env.CURION_MINIMAX_BASE_URL = "  ";
+    process.env.CURION_MINIMAX_MODEL = "   ";
+    process.env.CURION_NIM_BASE_URL = " \t ";
+    process.env.CURION_NIM_FALLBACK_MODEL = "   ";
     const cfg = loadAdapterConfig();
     // Built-in defaults must still be used for URLs/models.
     assert.equal(cfg.primaryBaseUrl, DEFAULT_MINIMAX_BASE_URL);
@@ -170,8 +170,8 @@ test("adapter: loadAdapterConfig treats whitespace-only env values as missing", 
 
 test("adapter: loadAdapterConfig trims surrounding whitespace from env values", () => {
   return withCleanEnv(ENV_KEYS, () => {
-    process.env.CORTEX_PROVIDER_PRIMARY_KEY = `  ${PRIMARY_KEY}\n`;
-    process.env.CORTEX_MINIMAX_BASE_URL = ` ${DEFAULT_MINIMAX_BASE_URL} `;
+    process.env.CURION_PROVIDER_PRIMARY_KEY = `  ${PRIMARY_KEY}\n`;
+    process.env.CURION_MINIMAX_BASE_URL = ` ${DEFAULT_MINIMAX_BASE_URL} `;
     const cfg = loadAdapterConfig();
     assert.equal(cfg.primaryApiKey, PRIMARY_KEY);
     assert.equal(cfg.primaryBaseUrl, DEFAULT_MINIMAX_BASE_URL);
@@ -193,8 +193,8 @@ test("adapter: loadAdapterConfig treats whitespace-only overrides as missing", (
 
 test("adapter: whitespace-only primary key in env -> typed missing-config (no http calls)", async () => {
   return withCleanEnv(ENV_KEYS, async () => {
-    process.env.CORTEX_PROVIDER_PRIMARY_KEY = "   ";
-    process.env.CORTEX_PROVIDER_FALLBACK_KEY = "  \t  ";
+    process.env.CURION_PROVIDER_PRIMARY_KEY = "   ";
+    process.env.CURION_PROVIDER_FALLBACK_KEY = "  \t  ";
     const log: Array<{ url: string; body: string }> = [];
     const fetchImpl = scriptedFetch(
       [() => okChatResponse(VALID_JSON)],
@@ -752,9 +752,9 @@ test("adapter: default fallback model is openai/gpt-oss-120b, not the comparison
   });
 });
 
-test("adapter: env override CORTEX_NIM_FALLBACK_MODEL switches fallback model", async () => {
+test("adapter: env override CURION_NIM_FALLBACK_MODEL switches fallback model", async () => {
   return withCleanEnv(ENV_KEYS, async () => {
-    process.env.CORTEX_NIM_FALLBACK_MODEL = COMPARISON_NIM_MODEL;
+    process.env.CURION_NIM_FALLBACK_MODEL = COMPARISON_NIM_MODEL;
     const log: Array<{ url: string; body: string }> = [];
     const fetchImpl = scriptedFetch(
       [

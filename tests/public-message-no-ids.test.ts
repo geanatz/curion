@@ -70,7 +70,7 @@ import {
 // ---------------------------------------------------------------------------
 
 function mkStorage(): { tmp: string; handle: StorageHandle } {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-pub-no-id-"));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-pub-no-id-"));
   const handle = initStorage({ projectRoot: tmp });
   return { tmp, handle };
 }

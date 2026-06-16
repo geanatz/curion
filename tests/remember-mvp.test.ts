@@ -56,7 +56,7 @@ import { SAFETY_FIXTURES } from "../src/safety/fixtures.ts";
 
 /** Create a temp project dir + storage handle. Caller closes handle + cleans dir. */
 function mkStorage(): { tmp: string; handle: StorageHandle } {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-mvp-rm-"));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-mvp-rm-"));
   const handle = initStorage({ projectRoot: tmp });
   return { tmp, handle };
 }

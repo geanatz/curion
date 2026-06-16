@@ -3,8 +3,7 @@
  * note formatter.
  *
  * Phase H + Phase J of the resolved-history semantics
- * design (see `docs/resolved-history-semantics-phase-f.md`,
- * spec §8.2 / §8.4). This module is intentionally a pure,
+ * design. This module is intentionally a pure,
  * deterministic, offline helper:
  *
  *   - No I/O. No storage reads or writes.

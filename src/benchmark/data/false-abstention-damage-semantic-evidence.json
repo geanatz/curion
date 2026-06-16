@@ -5,7 +5,7 @@
   "corpus": "132-record / 176-query adversarial-expansion checkpoint",
   "variant": "hybrid-dense (lexical + fts5 + vector-dense RRF, k=60)",
   "metric": "rank-1 outcome on positive queries (rank1=false -> 'miss')",
-  "logSource": ".cortex/verify-logs/embeddinggemma-hybrid-dense.log",
+  "logSource": ".curion/verify-logs/embeddinggemma-hybrid-dense.log",
   "byQueryId": {
     "exact-typescript-runtime": "miss",
     "para-storage-detail": "miss",

@@ -13,7 +13,7 @@
  * Scope (benchmark-only):
  *   - Loads the fixture corpus into an in-memory representation.
  *     It does NOT open, read, or write the project
- *     `.cortex/cortex.sqlite` file.
+ *     `.curion/curion.sqlite` file.
  *   - Exposes `rankVector(query, candidates, options)` that takes
  *     the same `LexicalCandidate` shape the lexical baseline uses
  *     and returns the same top-K shape (`{id, score}[]`).

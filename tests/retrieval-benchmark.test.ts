@@ -1156,7 +1156,7 @@ test("runner: formatHumanReport includes key sections", () => {
   const report = runRetrievalBenchmark();
   const out = formatHumanReport(report);
   for (const section of [
-    "cortex-mcp-v2 retrieval benchmark",
+    "curion retrieval benchmark",
     "variant:",
     "config",
     "metrics",
@@ -1182,7 +1182,7 @@ test("runner: formatHumanReport shows rank1 separately from hit@K", () => {
 });
 
 test("runner: resolveBenchmarkArtifactsDir creates the directory and writeBenchmarkReport writes a file", () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-bench-"));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-bench-"));
   try {
     const dir = resolveBenchmarkArtifactsDir({ artifactsDir: tmp });
     assert.equal(path.resolve(dir), path.resolve(tmp));

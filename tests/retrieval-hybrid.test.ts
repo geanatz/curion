@@ -35,7 +35,7 @@
  *   9. CLI / report shape: the runner supports a new
  *      `--variant hybrid` flag, the new variant writes
  *      `retrieval-hybrid-*.json` artifacts under
- *      `.cortex/benchmark/`, and `--variant all` includes
+ *      `.curion/benchmark/`, and `--variant all` includes
  *      the hybrid report in the comparison shape.
  *
  * The tests do not require a real provider, a network, or a
@@ -819,7 +819,7 @@ test("runner: --variant all --hybrid-k 20 threads the k through every hybrid rep
 });
 
 test("runner: comparison artifacts include the hybrid section and the hybrid column in the comparison table", () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-hybrid-compare-"));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-hybrid-compare-"));
   try {
     const dir = resolveBenchmarkArtifactsDir({ artifactsDir: tmp });
     const report = runRetrievalBenchmark({ variant: "all" });
@@ -847,7 +847,7 @@ test("runner: comparison artifacts include the hybrid section and the hybrid col
 });
 
 test("runner: hybrid single-variant artifacts are written with the `hybrid-` prefix", () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-hybrid-art-"));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-hybrid-art-"));
   try {
     const dir = resolveBenchmarkArtifactsDir({ artifactsDir: tmp });
     const report = runRetrievalBenchmark({ variant: "hybrid" });

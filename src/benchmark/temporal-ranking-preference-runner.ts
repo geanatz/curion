@@ -5,7 +5,7 @@
  * The runner is a thin orchestrator that:
  *   1. Loads the most recent lexical-baseline
  *      benchmark artifact under
- *      `.cortex/benchmark/`. The artifact's
+ *      `.curion/benchmark/`. The artifact's
  *      `evals` array is the source the
  *      re-ranker consumes (the `evals` carry
  *      `topIds` / `topScores` / `currentTruthIds` /
@@ -45,7 +45,7 @@
  *     `retrieval-baseline-*.json` artifact the
  *     re-ranker consumes. Default: the most
  *     recent `retrieval-baseline-*.json` under
- *     `.cortex/benchmark/`.
+ *     `.curion/benchmark/`.
  *   --semantic-evidence <path>    — OPTIONAL
  *     JSON file with shape
  *     `{source: string, byQueryId: {[qid]:
@@ -53,7 +53,7 @@
  *     report has no semantic cross-reference;
  *     the honest-reading block is unchanged.
  *   --out-dir <path>              — output
- *     dir. Default: `.cortex/benchmark/`.
+ *     dir. Default: `.curion/benchmark/`.
  *   --no-write                    — do not
  *     write the JSON artifact. Useful for
  *     CI / smoke tests that just want the
@@ -161,7 +161,7 @@ export function writeTemporalRerankReport(
  * CLI argument shape. The CLI is small: each
  * field is OPTIONAL; the defaults pick the most
  * recent lexical-baseline artifacts under
- * `.cortex/benchmark/`.
+ * `.curion/benchmark/`.
  */
 export interface TemporalRerankCliArgs {
   benchmarkArtifact?: string;
@@ -184,7 +184,7 @@ export async function runTemporalRerankCli(
   report: TemporalRerankReport;
   written?: string;
 }> {
-  const outDir = args.outDir ?? ".cortex/benchmark";
+  const outDir = args.outDir ?? ".curion/benchmark";
   const defaultBenchmark =
     args.benchmarkArtifact ??
     findMostRecentArtifact(outDir, "retrieval-baseline-");

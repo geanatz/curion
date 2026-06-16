@@ -1,8 +1,8 @@
 /**
  * Project-local storage skeleton.
  *
- * - Project-local hidden directory `.cortex/` at the project root.
- * - Local SQLite database inside `.cortex/`.
+ * - Project-local hidden directory `.curion/` at the project root.
+ * - Local SQLite database inside `.curion/`.
  * - Gitignored (see repo `.gitignore`).
  *
  * Phase 1 contract:
@@ -25,11 +25,11 @@ import fs from "node:fs";
 import Database from "better-sqlite3";
 import { logger } from "../logging/logger.js";
 
-export const CORTEX_DIRNAME = ".cortex";
-export const CORTEX_DB_FILENAME = "cortex.sqlite";
+export const CURION_DIRNAME = ".curion";
+export const CURION_DB_FILENAME = "curion.sqlite";
 
 export interface StorageHandle {
-  /** Absolute path to the .cortex directory. */
+  /** Absolute path to the .curion directory. */
   dir: string;
   /** Absolute path to the SQLite database file. */
   dbPath: string;
@@ -38,35 +38,35 @@ export interface StorageHandle {
 }
 
 export interface StorageConfig {
-  /** Project root. .cortex/ will be created here. Defaults to cwd. */
+  /** Project root. .curion/ will be created here. Defaults to cwd. */
   projectRoot?: string;
 }
 
 /**
- * Resolve the project-local .cortex path. Does not create anything.
+ * Resolve the project-local .curion path. Does not create anything.
  */
-export function resolveCortexDir(config: StorageConfig = {}): string {
+export function resolveCurionDir(config: StorageConfig = {}): string {
   const root = config.projectRoot ?? process.cwd();
-  return path.join(root, CORTEX_DIRNAME);
+  return path.join(root, CURION_DIRNAME);
 }
 
 /**
  * Initialize the project-local storage skeleton.
  *
- * Creates the .cortex directory if missing and applies the schema. The
+ * Creates the .curion directory if missing and applies the schema. The
  * schema is intentionally minimal in Phase 1: an empty `memories` table
  * with a `created_at` column, and a `_meta` key/value table. No raw
  * text columns are defined.
  */
 export function initStorage(config: StorageConfig = {}): StorageHandle {
-  const dir = resolveCortexDir(config);
+  const dir = resolveCurionDir(config);
 
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     logger.info(`created project storage at ${dir}`);
   }
 
-  const dbPath = path.join(dir, CORTEX_DB_FILENAME);
+  const dbPath = path.join(dir, CURION_DB_FILENAME);
   const db = new Database(dbPath);
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");

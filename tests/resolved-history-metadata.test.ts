@@ -91,7 +91,7 @@ import type { SafeMemorySummary } from "../src/storage/storage.ts";
 // ---------------------------------------------------------------------------
 
 function mkStorage(): { tmp: string; handle: StorageHandle } {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-mcp-pi-"));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-mcp-pi-"));
   const handle = initStorage({ projectRoot: tmp });
   return { tmp, handle };
 }

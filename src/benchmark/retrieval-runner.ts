@@ -15,7 +15,7 @@
  *   - Computes per-query results and aggregate metrics
  *     (hit@1, hit@3, hit@5, no-answer TNR, per-family
  *     breakdown, failure list).
- *   - Writes a JSON report under `.cortex/benchmark/` (or
+ *   - Writes a JSON report under `.curion/benchmark/` (or
  *     `--artifacts <path>`) and prints a human summary to
  *     stdout. The benchmark runner is NOT the MCP stdio server,
  *     so writing to stdout is fine here.
@@ -36,7 +36,7 @@
  * Design notes:
  *   - The runner is intentionally read-only. It does not write
  *     to the database. The only on-disk effect is the JSON
- *     report under `.cortex/benchmark/`.
+ *     report under `.curion/benchmark/`.
  *   - The runner does not call the provider. The lexical
  *     baseline is a candidate retriever; provider synthesis is
  *     out of scope for this measurement harness. Per-query
@@ -223,7 +223,7 @@ export interface RetrievalBenchmarkOptions {
    *     baseline row.
    *   - Additionally runs the calibration sweep for the
    *     same variant(s) and emits a `CalibrationReport`
-   *     under `--artifacts` (or `.cortex/benchmark/`).
+   *     under `--artifacts` (or `.curion/benchmark/`).
    *
    * The calibration experiment is benchmark-only. It does
    * NOT change the production `recall(text)` behavior, the
@@ -278,7 +278,7 @@ export interface RetrievalBenchmarkOptions {
    * regular benchmark + calibration report is written
    * first; the abstention-audit report is written
    * second. Both artifacts live next to each other
-   * under `.cortex/benchmark/`.
+   * under `.curion/benchmark/`.
    */
   abstentionAudit?: boolean | AbstentionAuditConfig;
   /**
@@ -812,7 +812,7 @@ export function parseRetrievalCli(argv: string[]): RetrievalBenchmarkOptions {
     opts.variant !== "all-dense"
   ) {
     process.stderr.write(
-      `[cortex-benchmark] note: --hybrid-k ${opts.hybridK} is ignored for --variant ${opts.variant} (RRF k is only used by hybrid / all runs)\n`,
+      `[curion-benchmark] note: --hybrid-k ${opts.hybridK} is ignored for --variant ${opts.variant} (RRF k is only used by hybrid / all runs)\n`,
     );
   }
   // The dense variants (vector-dense / hybrid-dense /
@@ -831,7 +831,7 @@ export function parseRetrievalCli(argv: string[]): RetrievalBenchmarkOptions {
     opts.variant !== "all-dense"
   ) {
     process.stderr.write(
-      `[cortex-benchmark] note: --hybrid-k ${opts.hybridK} is ignored for --variant ${opts.variant} (RRF k is only used by hybrid / all runs)\n`,
+      `[curion-benchmark] note: --hybrid-k ${opts.hybridK} is ignored for --variant ${opts.variant} (RRF k is only used by hybrid / all runs)\n`,
     );
   }
   return opts;
@@ -840,7 +840,7 @@ export function parseRetrievalCli(argv: string[]): RetrievalBenchmarkOptions {
 function printRetrievalHelp(): void {
   process.stdout.write(
     [
-      "cortex-mcp-v2 retrieval benchmark runner",
+      "curion retrieval benchmark runner",
       "",
       "Usage:",
       "  tsx src/benchmark/retrieval-runner.ts [options]",
@@ -881,7 +881,7 @@ function printRetrievalHelp(): void {
       "                         'bge-m3:model=<id>,dtype=<q8|q4|fp16|fp32>,pooling=<cls|last_token|mean|none>'",
       "                         'bgem3' is an alias for 'bge-m3'",
       "  --dense-cache-dir <p>  Local cache dir for the transformersjs / qwen3 / embeddinggemma / bge-m3 model artifacts.",
-      "                         Default: <cwd>/.cortex/transformers-cache/",
+      "                         Default: <cwd>/.curion/transformers-cache/",
       "  --dense-skip           Skip live model execution. The factory still dispatches",
       "                         by --embedder spec (so 'qwen3' routes to Qwen3Embedder,",
       "                         'embeddinggemma' routes to EmbeddingGemmaEmbedder, and",
@@ -904,7 +904,7 @@ function printRetrievalHelp(): void {
       "                         the per-query signal block is populated.",
       "  -h, --help             Show this help.",
       "",
-      "Default artifacts directory: <cwd>/.cortex/benchmark/",
+      "Default artifacts directory: <cwd>/.curion/benchmark/",
     ].join("\n") + "\n",
   );
 }
@@ -929,7 +929,7 @@ export function resolveBenchmarkArtifactsDir(
 ): string {
   const root = options.artifactsDir
     ? path.resolve(options.artifactsDir)
-    : path.join(process.cwd(), ".cortex", ARTIFACT_DIRNAME);
+    : path.join(process.cwd(), ".curion", ARTIFACT_DIRNAME);
   if (!fs.existsSync(root)) {
     fs.mkdirSync(root, { recursive: true, mode: 0o700 });
   }
@@ -973,7 +973,7 @@ export function writeComparisonReport(
 /**
  * Write a calibration report. The calibration experiment is
  * benchmark-only; the artifact is intentionally written under
- * the same `.cortex/benchmark/` directory as the regular
+ * the same `.curion/benchmark/` directory as the regular
  * benchmark reports so a reviewer can find them next to each
  * other, but the file prefix is distinct
  * (`retrieval-calibration-*.json`) so the existing
@@ -1107,7 +1107,7 @@ export function isComparisonReport(
  * The function is deterministic for a given corpus + query set
  * + threshold + top-K + variant. The FTS5 variant builds an
  * IN-MEMORY SQLite database for the duration of the run; the
- * project `.cortex/cortex.sqlite` is NOT touched.
+ * project `.curion/curion.sqlite` is NOT touched.
  */
 export function runRetrievalBenchmark(
   options: RetrievalBenchmarkOptions = {},
@@ -1477,7 +1477,7 @@ export interface DenseCalibrationReport extends CalibrationReport {
  *      then on smallest gate value).
  *   5. Return a `DenseCalibrationReport` artifact. The
  *      CLI entry point writes it to disk under the same
- *      `.cortex/benchmark/` directory.
+ *      `.curion/benchmark/` directory.
  */
 export async function runDenseCalibration(
   options: RetrievalBenchmarkOptions = {},
@@ -1977,7 +1977,7 @@ function buildDenseComparisonReport(
  *      value).
  *   4. Return a `CalibrationReport` artifact. The CLI
  *      entry point writes it to disk under the same
- *      `.cortex/benchmark/` directory.
+ *      `.curion/benchmark/` directory.
  *
  * The function is pure: no I/O, no provider calls, no
  * network. It is safe to call from tests.
@@ -2546,7 +2546,7 @@ function pct(n: number, d: number): string {
 
 export function formatHumanReport(report: RetrievalBenchmarkReport): string {
   const lines: string[] = [];
-  lines.push("=== cortex-mcp-v2 retrieval benchmark ===");
+  lines.push("=== curion retrieval benchmark ===");
   lines.push(`variant:      ${report.variant}`);
   lines.push(`generated at: ${report.generatedAt}`);
   lines.push("");
@@ -2857,7 +2857,7 @@ export function formatComparisonReport(
   report: ComparisonBenchmarkReport,
 ): string {
   const lines: string[] = [];
-  lines.push("=== cortex-mcp-v2 retrieval benchmark (variant=all) ===");
+  lines.push("=== curion retrieval benchmark (variant=all) ===");
   lines.push(`generated at: ${report.generatedAt}`);
   lines.push(
     `  records:     ${report.config.recordCount}`,
@@ -2957,7 +2957,7 @@ export function formatCalibrationReport(
 ): string {
   const perQueryLimit = options.perQueryLimit ?? 20;
   const lines: string[] = [];
-  lines.push("=== cortex-mcp-v2 retrieval calibration ===");
+  lines.push("=== curion retrieval calibration ===");
   lines.push(`generated at: ${report.generatedAt}`);
   lines.push(`  records:    ${report.config.recordCount}`);
   lines.push(`  queries:    ${report.config.queryCount}`);
@@ -3351,7 +3351,7 @@ export function formatDenseCalibrationReport(
   // report so a reviewer can compare side-by-side.
   const body = formatCalibrationReport(report, options);
   const lines: string[] = [];
-  lines.push("=== cortex-mcp-v2 retrieval calibration (dense) ===");
+  lines.push("=== curion retrieval calibration (dense) ===");
   lines.push(`generated at: ${report.generatedAt}`);
   lines.push(`  records:    ${report.config.recordCount}`);
   lines.push(`  queries:    ${report.config.queryCount}`);
@@ -3393,7 +3393,7 @@ export function formatDenseCalibrationReport(
   // own internal section breaks.
   const bodyLines = body.split("\n");
   // The body is laid out as:
-  //   line 0: `=== cortex-mcp-v2 retrieval calibration ===`
+  //   line 0: `=== curion retrieval calibration ===`
   //   line 1: `generated at: <iso>`
   //   line 2: `  records:    <n>`
   //   line 3: `  queries:    <n>`
@@ -3439,7 +3439,7 @@ export function formatDenseHumanReport(
   report: DenseRetrievalBenchmarkReport,
 ): string {
   const lines: string[] = [];
-  lines.push("=== cortex-mcp-v2 retrieval benchmark (dense) ===");
+  lines.push("=== curion retrieval benchmark (dense) ===");
   lines.push(`variant:      ${report.variant}`);
   lines.push(`generated at: ${report.generatedAt}`);
   lines.push("");
@@ -3528,7 +3528,7 @@ export function formatDenseComparisonReport(
   report: DenseComparisonBenchmarkReport,
 ): string {
   const lines: string[] = [];
-  lines.push("=== cortex-mcp-v2 retrieval benchmark (dense all) ===");
+  lines.push("=== curion retrieval benchmark (dense all) ===");
   lines.push(`generated at: ${report.generatedAt}`);
   lines.push(`  records:     ${report.config.recordCount}`);
   lines.push(`  queries:     ${report.config.queryCount}`);
@@ -4065,7 +4065,7 @@ const isMain = (() => {
 if (isMain) {
   main().catch((err: unknown) => {
     const msg = err instanceof Error ? err.message : String(err);
-    process.stderr.write(`[cortex-benchmark] FATAL ${msg}\n`);
+    process.stderr.write(`[curion-benchmark] FATAL ${msg}\n`);
     process.exit(1);
   });
 }

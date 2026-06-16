@@ -419,7 +419,7 @@ async function loadTransformers(): Promise<TransformersJsModule> {
  * Configuration for the real local transformers.js
  * embedder. All fields are optional; the defaults are
  * the pinned model + the on-disk cache directory under
- * `.cortex/transformers-cache/`.
+ * `.curion/transformers-cache/`.
  */
 export interface TransformersJsEmbedderOptions {
   /** Pinned HF model id. Default: `Xenova/all-MiniLM-L6-v2`. */
@@ -432,7 +432,7 @@ export interface TransformersJsEmbedderOptions {
   quantized?: boolean;
   /**
    * Local cache directory for downloaded model artifacts.
-   * Default: `<cwd>/.cortex/transformers-cache/`. The
+   * Default: `<cwd>/.curion/transformers-cache/`. The
    * directory is created on first use; the benchmark
    * runner does not clean it up.
    */
@@ -475,7 +475,7 @@ export class TransformersJsEmbedder implements DenseEmbedder {
     this.quantized = options.quantized ?? true;
     this.cacheDir =
       options.cacheDir ??
-      `${process.cwd()}/.cortex/transformers-cache`;
+      `${process.cwd()}/.curion/transformers-cache`;
     // Placeholder metadata; the real status / dim are
     // populated in `init()` after the pipeline is built
     // (we cannot know the dim until the model loads).
@@ -659,7 +659,7 @@ export interface DenseEmbedderSpecOptions {
   /**
    * Local cache directory for downloaded model artifacts.
    * Forwarded to the embedder constructor. Default:
-   * `<cwd>/.cortex/transformers-cache/`. Used by both
+   * `<cwd>/.curion/transformers-cache/`. Used by both
    * `TransformersJsEmbedder` and the new Qwen3 embedder.
    */
   cacheDir?: string;

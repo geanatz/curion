@@ -41,7 +41,7 @@
  * The tests split between synthetic unit tests
  * (pure functions, no corpus) and end-to-end
  * tests (real no-answer artifact under
- * `.cortex/benchmark/`).
+ * `.curion/benchmark/`).
  */
 
 import { test } from "node:test";

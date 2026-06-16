@@ -188,40 +188,40 @@ export function loadRecallAdapterConfig(
   return {
     primaryBaseUrl: pickTrimmedString(
       overrides.primaryBaseUrl ?? "",
-      readTrimmedString("CORTEX_MINIMAX_BASE_URL"),
+      readTrimmedString("CURION_MINIMAX_BASE_URL"),
       RECALL_DEFAULT_MINIMAX_BASE_URL,
     ),
     primaryModel: pickTrimmedString(
       overrides.primaryModel ?? "",
-      readTrimmedString("CORTEX_MINIMAX_MODEL"),
+      readTrimmedString("CURION_MINIMAX_MODEL"),
       RECALL_DEFAULT_MINIMAX_MODEL,
     ),
     fallbackBaseUrl: pickTrimmedString(
       overrides.fallbackBaseUrl ?? "",
-      readTrimmedString("CORTEX_NIM_BASE_URL"),
+      readTrimmedString("CURION_NIM_BASE_URL"),
       RECALL_DEFAULT_NIM_BASE_URL,
     ),
     fallbackModel: pickTrimmedString(
       overrides.fallbackModel ?? "",
-      readTrimmedString("CORTEX_NIM_FALLBACK_MODEL"),
+      readTrimmedString("CURION_NIM_FALLBACK_MODEL"),
       RECALL_DEFAULT_NIM_FALLBACK_MODEL,
     ),
     primaryApiKey: pickTrimmedString(
       overrides.primaryApiKey ?? "",
-      readTrimmedString("CORTEX_PROVIDER_PRIMARY_KEY"),
+      readTrimmedString("CURION_PROVIDER_PRIMARY_KEY"),
       readTrimmedString("MINIMAX_API_KEY"),
     ),
     fallbackApiKey: pickTrimmedString(
       overrides.fallbackApiKey ?? "",
-      readTrimmedString("CORTEX_PROVIDER_FALLBACK_KEY"),
+      readTrimmedString("CURION_PROVIDER_FALLBACK_KEY"),
       readTrimmedString("NVIDIA_NIM_API_KEY"),
     ),
     timeoutMs: overrides.timeoutMs ?? readNumber(
-      "CORTEX_ADAPTER_TIMEOUT_MS",
+      "CURION_ADAPTER_TIMEOUT_MS",
       RECALL_DEFAULT_TIMEOUT_MS,
     ),
     maxTokens: overrides.maxTokens ?? readNumber(
-      "CORTEX_ADAPTER_MAX_TOKENS",
+      "CURION_ADAPTER_MAX_TOKENS",
       RECALL_DEFAULT_MAX_TOKENS,
     ),
   };
@@ -327,7 +327,7 @@ export async function synthesizeRecallWithFallback(
       ok: false,
       kind: "missing-config",
       message:
-        "synthesizeRecallWithFallback: no provider api key configured (set CORTEX_PROVIDER_PRIMARY_KEY or CORTEX_PROVIDER_FALLBACK_KEY)",
+        "synthesizeRecallWithFallback: no provider api key configured (set CURION_PROVIDER_PRIMARY_KEY or CURION_PROVIDER_FALLBACK_KEY)",
       httpCalls: 0,
     };
   }

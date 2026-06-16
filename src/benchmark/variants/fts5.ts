@@ -14,7 +14,7 @@
  * Scope (benchmark-only):
  *   - Loads the fixture corpus into an IN-MEMORY SQLite database
  *     (`":memory:"`). It does NOT open, read, or write the project
- *     `.cortex/cortex.sqlite` file.
+ *     `.curion/curion.sqlite` file.
  *   - Exposes a `rankFts5(query, candidates, options)` function
  *     that takes the same `LexicalCandidate` shape the lexical
  *     baseline uses and returns the same top-K shape

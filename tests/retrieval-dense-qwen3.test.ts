@@ -135,7 +135,7 @@ test("Qwen3Embedder: construction exposes the documented metadata", () => {
   // The cache dir is the documented default.
   assert.equal(
     m.cacheDir,
-    `${process.cwd()}/.cortex/transformers-cache`,
+    `${process.cwd()}/.curion/transformers-cache`,
   );
 });
 
@@ -145,14 +145,14 @@ test("Qwen3Embedder: custom modelId, dtype, task, pooling, cacheDir are honored"
     dtype: "fp16",
     task: "Custom retrieval task",
     pooling: "mean",
-    cacheDir: "/tmp/cortex-qwen3-test-cache",
+    cacheDir: "/tmp/curion-qwen3-test-cache",
   });
   const m = embedder.metadata;
   assert.equal(m.modelId, "custom-org/custom-qwen3-onnx");
   // `quantized` is `true` only when the dtype
   // starts with `q`. `fp16` is not quantized.
   assert.equal(m.quantized, false);
-  assert.equal(m.cacheDir, "/tmp/cortex-qwen3-test-cache");
+  assert.equal(m.cacheDir, "/tmp/curion-qwen3-test-cache");
   // The description surfaces the custom values.
   assert.ok(m.description.includes("fp16"));
   assert.ok(m.description.includes("mean"));
@@ -384,7 +384,7 @@ test("Qwen3Embedder: init() without a real library reports `error` metadata", as
     return;
   }
   const embedder = new Qwen3Embedder({
-    cacheDir: "/tmp/cortex-qwen3-test-cache-fail",
+    cacheDir: "/tmp/curion-qwen3-test-cache-fail",
   });
   // The pre-init metadata is `status: "skipped"`.
   assert.equal(embedder.metadata.status, "skipped");
@@ -495,12 +495,12 @@ test("createDenseEmbedder: 'qwen3:pooling=<unknown>' falls back to the default",
 
 test("createDenseEmbedder: object spec with backend=qwen3 dispatches to Qwen3", async () => {
   const { embedder } = await createDenseEmbedder(
-    { backend: "qwen3", cacheDir: "/tmp/cortex-qwen3-obj-spec-cache" },
+    { backend: "qwen3", cacheDir: "/tmp/curion-qwen3-obj-spec-cache" },
   );
   assert.equal(embedder.metadata.backend, "qwen3");
   assert.equal(
     embedder.metadata.cacheDir,
-    "/tmp/cortex-qwen3-obj-spec-cache",
+    "/tmp/curion-qwen3-obj-spec-cache",
   );
 });
 
@@ -737,11 +737,11 @@ test("parseRetrievalCli: --embedder qwen3 --dense-cache-dir composes backend=qwe
     "--embedder",
     "qwen3",
     "--dense-cache-dir",
-    "/tmp/cortex-qwen3-cli-cache",
+    "/tmp/curion-qwen3-cli-cache",
   ]);
   const spec = opts.denseEmbedderSpec as { backend: string; cacheDir: string };
   assert.equal(spec.backend, "qwen3");
-  assert.equal(spec.cacheDir, "/tmp/cortex-qwen3-cli-cache");
+  assert.equal(spec.cacheDir, "/tmp/curion-qwen3-cli-cache");
 });
 
 test("parseRetrievalCli: --embedder qwen3 --dense-skip composes backend=qwen3 + skip=true", () => {
@@ -801,11 +801,11 @@ test("parseRetrievalCli: --embedder transformersjs --dense-cache-dir composes ba
     "--embedder",
     "transformersjs",
     "--dense-cache-dir",
-    "/tmp/cortex-xjs-cli-cache",
+    "/tmp/curion-xjs-cli-cache",
   ]);
   const spec = opts.denseEmbedderSpec as { backend: string; cacheDir: string };
   assert.equal(spec.backend, "transformersjs");
-  assert.equal(spec.cacheDir, "/tmp/cortex-xjs-cli-cache");
+  assert.equal(spec.cacheDir, "/tmp/curion-xjs-cli-cache");
 });
 
 // ---------------------------------------------------------------------------

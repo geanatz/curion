@@ -137,7 +137,7 @@ async function callToolThroughServer(
 }
 
 function mkStorage(): { tmp: string; handle: StorageHandle } {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-strict-"));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-strict-"));
   const handle = initStorage({ projectRoot: tmp });
   return { tmp, handle };
 }
@@ -220,7 +220,7 @@ test("remember: REMEMBER_INPUT_SCHEMA rejects any unknown top-level key", () => 
     { text: "hi", provider: "minimax" },
     { text: "hi", filter: "all" },
     { text: "hi", debug: true },
-    { text: "hi", storage: ".cortex" },
+    { text: "hi", storage: ".curion" },
     { text: "hi", rawText: "echo" },
     { text: "hi", ids: [1, 2] },
     { text: "hi", modelId: "MiniMax-M3" },
@@ -246,7 +246,7 @@ test("recall: RECALL_INPUT_SCHEMA rejects any unknown top-level key", () => {
     { text: "hi", provider: "minimax" },
     { text: "hi", filter: "all" },
     { text: "hi", debug: true },
-    { text: "hi", storage: ".cortex" },
+    { text: "hi", storage: ".curion" },
     { text: "hi", rawQuery: "echo" },
     { text: "hi", ids: [1, 2] },
     { text: "hi", modelId: "MiniMax-M3" },
@@ -300,7 +300,7 @@ test("remember: SDK input validation rejects extra keys and surfaces isError: tr
         modelId: "MiniMax-M3",
         filter: "all",
         debug: true,
-        storage: ".cortex",
+        storage: ".curion",
         rawText: "echo",
         ids: [1, 2],
       });
@@ -339,7 +339,7 @@ test("recall: SDK input validation rejects extra keys and surfaces isError: true
         modelId: "MiniMax-M3",
         filter: "all",
         debug: true,
-        storage: ".cortex",
+        storage: ".curion",
         rawQuery: "echo",
         ids: [1, 2],
       });

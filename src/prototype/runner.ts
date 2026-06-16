@@ -24,11 +24,11 @@
  * Groq specifics (prototype-only):
  *   - The OpenAI-compatible base URL defaults to
  *     `https://api.groq.com/openai/v1` and is overridable via
- *     `CORTEX_GROQ_BASE_URL`.
+ *     `CURION_GROQ_BASE_URL`.
  *   - The default model is `openai/gpt-oss-120b`, overridable via
- *     `CORTEX_GROQ_MODEL`.
+ *     `CURION_GROQ_MODEL`.
  *   - The default reasoning effort is `high`, overridable via
- *     `CORTEX_GROQ_REASONING_EFFORT`.
+ *     `CURION_GROQ_REASONING_EFFORT`.
  *   - Groq attempts use a strict `response_format: { type:
  *     "json_schema", json_schema: { schema, strict: true, name } }`
  *     payload built from `MEMORY_ANALYSIS_JSON_SCHEMA`. The schema
@@ -43,7 +43,7 @@
  *   - A human-readable summary is printed to stdout (the runner is
  *     NOT the MCP stdio server; the stdio runtime in src/index.ts
  *     is untouched).
- *   - A sanitized JSON report is written under `.cortex/prototype/`
+ *   - A sanitized JSON report is written under `.curion/prototype/`
  *     (or another path given by --artifacts). The report contains
  *     only the structured fields listed below; raw prompts and raw
  *     responses are truncated to a short redacted snippet.
@@ -219,7 +219,7 @@ export function parseCli(argv: string[]): RunnerOptions {
 function printHelp(): void {
   process.stdout.write(
     [
-      "cortex-mcp-v2 provider prototype runner",
+      "curion provider prototype runner",
       "",
       "Usage:",
       "  node --import tsx src/prototype/runner.ts [options]",
@@ -233,7 +233,7 @@ function printHelp(): void {
       "  --only-nim-model               Comma list of NIM model ids",
       "  --artifacts <path>             Override artifacts directory",
       "  --max-tokens <n>               Per-request max output tokens (default 1024)",
-      "  --groq-reasoning-effort <val>  Override CORTEX_GROQ_REASONING_EFFORT (Groq only).",
+      "  --groq-reasoning-effort <val>  Override CURION_GROQ_REASONING_EFFORT (Groq only).",
       "                                 Pass an empty string to disable sending the param.",
       "  --no-groq-strict-schema        Use prompt-delimited JSON for Groq (skip strict json_schema).",
       "  -h, --help                     Show this help",
@@ -251,7 +251,7 @@ export function resolveArtifactsDir(
 ): string {
   const root = options.artifactsDir
     ? path.resolve(options.artifactsDir)
-    : path.join(process.cwd(), ".cortex", ARTIFACT_DIRNAME);
+    : path.join(process.cwd(), ".curion", ARTIFACT_DIRNAME);
   if (!fs.existsSync(root)) fs.mkdirSync(root, { recursive: true, mode: 0o700 });
   return root;
 }
@@ -459,13 +459,13 @@ function providerBaseUrl(provider: ProviderId, cfg: PrototypeConfig): string {
 function readKey(provider: ProviderId): string | undefined {
   if (provider === "minimax") {
     return (
-      process.env.CORTEX_PROVIDER_PRIMARY_KEY ??
+      process.env.CURION_PROVIDER_PRIMARY_KEY ??
       process.env.MINIMAX_API_KEY
     );
   }
   if (provider === "nvidia-nim") {
     return (
-      process.env.CORTEX_PROVIDER_FALLBACK_KEY ??
+      process.env.CURION_PROVIDER_FALLBACK_KEY ??
       process.env.NVIDIA_NIM_API_KEY
     );
   }
@@ -582,7 +582,7 @@ export function formatHumanReport(
   cfg: PrototypeConfig,
 ): string {
   const lines: string[] = [];
-  lines.push("=== cortex-mcp-v2 provider prototype runner ===");
+  lines.push("=== curion provider prototype runner ===");
   lines.push(`mode:         ${report.mode}`);
   lines.push(`generated at: ${report.generatedAt}`);
   lines.push("");
@@ -650,17 +650,17 @@ export async function runExperiments(
   if (options.live && !cfg.hasPrimaryKey && providers.includes("minimax")) {
     // Make the missing config visible early.
     process.stderr.write(
-      "[cortex-prototype] minimax key missing; live calls to minimax will be skipped\n",
+      "[curion-prototype] minimax key missing; live calls to minimax will be skipped\n",
     );
   }
   if (options.live && !cfg.hasFallbackKey && providers.includes("nvidia-nim")) {
     process.stderr.write(
-      "[cortex-prototype] nvidia-nim key missing; live calls to nvidia-nim will be skipped\n",
+      "[curion-prototype] nvidia-nim key missing; live calls to nvidia-nim will be skipped\n",
     );
   }
   if (options.live && !cfg.hasGroqKey && providers.includes("groq")) {
     process.stderr.write(
-      "[cortex-prototype] groq key missing; live calls to groq will be skipped\n",
+      "[curion-prototype] groq key missing; live calls to groq will be skipped\n",
     );
   }
 
@@ -723,7 +723,7 @@ const isMain = (() => {
 if (isMain) {
   main().catch((err: unknown) => {
     const msg = err instanceof Error ? err.message : String(err);
-    process.stderr.write(`[cortex-prototype] FATAL ${msg}\n`);
+    process.stderr.write(`[curion-prototype] FATAL ${msg}\n`);
     process.exit(1);
   });
 }

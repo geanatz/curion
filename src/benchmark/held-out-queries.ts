@@ -154,7 +154,7 @@ export const HELD_OUT_QUERIES: BenchmarkQuery[] = [
     expectedIds: [85],
     currentTruthIds: [85],
     note:
-      "Held-out exact. Targets record 85 (feature-flags env var CORTEX_FEATURE_FLAGS). The env-var name is the verbatim answer; the dev set has no exact query for the feature-flags cluster.",
+      "Held-out exact. Targets record 85 (feature-flags env var CURION_FEATURE_FLAGS). The env-var name is the verbatim answer; the dev set has no exact query for the feature-flags cluster.",
   },
 
   // -------------------------------------------------------------------------
@@ -207,7 +207,7 @@ export const HELD_OUT_QUERIES: BenchmarkQuery[] = [
     expectedIds: [129],
     currentTruthIds: [129],
     note:
-      "Held-out adversarial paraphrase. Targets record 129 (audit retention + on-call digest bridge). The query uses 'connection' / 'weekly on-call note' instead of 'CORTEX_AUDIT_RETENTION_DAYS' / 'Monday morning at 9:00 local time'. This is the multi-hop-bridge cluster; the query deliberately avoids both anchor words to test the ranker's bridge-finding on a paraphrase surface.",
+      "Held-out adversarial paraphrase. Targets record 129 (audit retention + on-call digest bridge). The query uses 'connection' / 'weekly on-call note' instead of 'CURION_AUDIT_RETENTION_DAYS' / 'Monday morning at 9:00 local time'. This is the multi-hop-bridge cluster; the query deliberately avoids both anchor words to test the ranker's bridge-finding on a paraphrase surface.",
   },
   {
     id: "held-para-fs-cipher-vocab",

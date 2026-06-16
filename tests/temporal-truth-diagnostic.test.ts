@@ -27,7 +27,7 @@
  *      flags.
  *  11. Artifact reader + writer round-trip.
  *  12. End-to-end CLI run on the real lexical baseline
- *      artifact under `.cortex/benchmark/`.
+ *      artifact under `.curion/benchmark/`.
  *  13. Honest fixture-label framing: the
  *      `divergentTemporal` label takes priority over
  *      the top-1-is-current check.
@@ -840,7 +840,7 @@ test("temporal-truth-diagnostic: alignQueriesToEvals throws on a query not in th
 
 test("temporal-truth-diagnostic: end-to-end CLI on the real lexical baseline artifact", async () => {
   const baselinePath = findMostRecentArtifact(
-    ".cortex/benchmark",
+    ".curion/benchmark",
     "retrieval-baseline-",
   );
   if (!baselinePath) return; // skip if no artifact on disk
@@ -891,7 +891,7 @@ test("temporal-truth-diagnostic: divergentTemporal queries surface in the per-ca
   // smoke test that pins the per-category count on
   // the real corpus.
   const baselinePath = findMostRecentArtifact(
-    ".cortex/benchmark",
+    ".curion/benchmark",
     "retrieval-baseline-",
   );
   if (!baselinePath) return;

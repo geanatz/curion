@@ -4,8 +4,7 @@
  *
  * Validation-only. Test-local. NOT wired into production.
  *
- * The Phase F spec
- * (`docs/resolved-history-semantics-phase-f.md`) is a
+ * The Phase F spec is a
  * design proposal that would close the Phase E S6
  * capability gap behind a series of follow-on phases
  * (G, H, I, J). Phase G is the **first** of those

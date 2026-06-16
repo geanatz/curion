@@ -32,7 +32,7 @@
  *      built-in table.
  *   9. End-to-end on the real lexical
  *      baseline artifact under
- *      `.cortex/benchmark/`.
+ *      `.curion/benchmark/`.
  *  10. CLI argument parsing: default modes
  *      + override flags.
  *  11. Per-category change rollup: the
@@ -681,7 +681,7 @@ test("temporal-ranking-preference: the module imports STALE_TEMPORAL_IDS from th
 
 test("temporal-ranking-preference: end-to-end CLI on the real lexical baseline artifact", async () => {
   const baselinePath = findMostRecentArtifact(
-    ".cortex/benchmark",
+    ".curion/benchmark",
     "retrieval-baseline-",
   );
   if (!baselinePath) return; // skip if no artifact on disk
@@ -1241,7 +1241,7 @@ test("temporal-ranking-preference: per-query alignment with prior diagnostic on 
   // the prior diagnostic's `currentTruthAt1`
   // count (12) and the per-category counts.
   const baselinePath = findMostRecentArtifact(
-    ".cortex/benchmark",
+    ".curion/benchmark",
     "retrieval-baseline-",
   );
   if (!baselinePath) return;

@@ -120,7 +120,7 @@ interface FreshStorage {
 }
 
 function mkStorage(): FreshStorage {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-resg-"));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-resg-"));
   const handle = initStorage({ projectRoot: tmp });
   return { tmp, handle };
 }
@@ -1036,7 +1036,7 @@ async function runSG9SubStatus(
       // call -- we do not want a future regression to
       // turn this sub-record into a live network test
       // even if the host environment exposes
-      // `MINIMAX_API_KEY` / `CORTEX_PROVIDER_PRIMARY_KEY`
+      // `MINIMAX_API_KEY` / `CURION_PROVIDER_PRIMARY_KEY`
       // / `NVIDIA_NIM_API_KEY`. The fetch override makes
       // any such regression loud: a call to the fetch
       // throws and the runner records the failure.

@@ -18,7 +18,7 @@
  *     fixed `BENCHMARK_RECORDS` corpus.
  *   - Builds the held-out validation report
  *     via `buildHeldOutReport` and writes the
- *     JSON artifact under `.cortex/benchmark/`
+ *     JSON artifact under `.curion/benchmark/`
  *     (or `--artifacts <path>`).
  *   - Prints the human summary to stdout.
  *
@@ -44,7 +44,7 @@
  *                          Default: 5.
  *   --artifacts <path>     Override the JSON report
  *                          directory. Default:
- *                          `.cortex/benchmark/` under
+ *                          `.curion/benchmark/` under
  *                          cwd.
  *
  * Security:
@@ -59,7 +59,7 @@
  * Scope (benchmark-only):
  *   The CLI is read-only. It does not write to the
  *   production storage; the only on-disk effect is
- *   the JSON report under `.cortex/benchmark/`. It
+ *   the JSON report under `.curion/benchmark/`. It
  *   does NOT modify the production `recall(text)`
  *   behavior, the public MCP API, or the existing
  *   dev-set / audit / calibration / policy report
@@ -119,7 +119,7 @@ export function parseHeldOutCli(argv: ReadonlyArray<string>): HeldOutCliOptions 
     variant: "hybrid-dense",
     topK: 5,
     hybridK: 60,
-    artifactsDir: path.join(process.cwd(), ".cortex", "benchmark"),
+    artifactsDir: path.join(process.cwd(), ".curion", "benchmark"),
     embedderSpec: "stub-dense",
   };
   for (let i = 0; i < argv.length; i++) {
@@ -177,7 +177,7 @@ const isMain = (() => {
 if (isMain) {
   main().catch((err: unknown) => {
     const msg = err instanceof Error ? err.message : String(err);
-    process.stderr.write(`[cortex-held-out] FATAL ${msg}\n`);
+    process.stderr.write(`[curion-held-out] FATAL ${msg}\n`);
     process.exit(1);
   });
 }

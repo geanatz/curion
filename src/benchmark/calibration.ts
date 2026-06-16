@@ -90,7 +90,7 @@
  * controller, the public MCP API, or the existing single-
  * variant benchmark report shape. The output is a
  * `CalibrationReport` artifact that lives next to the
- * existing JSON reports under `.cortex/benchmark/`.
+ * existing JSON reports under `.curion/benchmark/`.
  */
 
 import type { QueryEval, BenchmarkMetrics } from "./metrics.js";

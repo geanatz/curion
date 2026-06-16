@@ -6,8 +6,8 @@
  *   2. Each tool accepts exactly one public `text` parameter (string).
  *   3. No kinds/states/filters/providers/debug/storage knobs are exposed.
  *   4. The stderr-only logger writes to process.stderr, not stdout.
- *   5. The .cortex/ path is project-local and resolved under the cwd.
- *   6. The .gitignore at the project root ignores .cortex/.
+ *   5. The .curion/ path is project-local and resolved under the cwd.
+ *   6. The .gitignore at the project root ignores .curion/.
  *
  * The tests run against the in-process McpServer builder plus
  * direct calls to the underlying handlers, so they don't require
@@ -25,7 +25,7 @@ import { buildServer, PUBLIC_TOOL_NAMES } from "../src/server.ts";
 import { handleRemember } from "../src/tools/remember.ts";
 import { handleRecall, NO_RELEVANT_MEMORY } from "../src/tools/recall.ts";
 import { logger } from "../src/logging/logger.ts";
-import { resolveCortexDir, CORTEX_DIRNAME, initStorage } from "../src/storage/storage.ts";
+import { resolveCurionDir, CURION_DIRNAME, initStorage } from "../src/storage/storage.ts";
 import { SAFETY_FIXTURES } from "../src/safety/fixtures.ts";
 import { allVariants } from "../src/retrieval/variants.ts";
 import {
@@ -81,12 +81,12 @@ test("McpServer: both public tools expose an outputSchema (Phase clean-structure
 
 test("remember handler enforces the single text parameter", async () => {
   // In the MVP slice, the default storageProvider opens a fresh
-  // .cortex/ under cwd for every call. We override it with a temp
+  // .curion/ under cwd for every call. We override it with a temp
   // dir so the contract test does not touch the real project DB.
   const { setStorageProvider, resetStorageProvider } = await import(
     "../src/tools/remember.ts"
   );
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-mcp-v2-rm-"));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-mcp-v2-rm-"));
   let handle: ReturnType<typeof initStorage> | null = null;
   try {
     handle = initStorage({ projectRoot: tmp });
@@ -156,7 +156,7 @@ test("logger writes to stderr, never stdout", () => {
   process.stdout.write = stdoutSpy;
   try {
     // info/warn/error all pass the default `info` threshold; debug
-    // is filtered unless CORTEX_LOG_LEVEL=debug was set at import.
+    // is filtered unless CURION_LOG_LEVEL=debug was set at import.
     logger.info("contract-test-info");
     logger.warn("contract-test-warn");
     logger.error("contract-test-error");
@@ -169,9 +169,9 @@ test("logger writes to stderr, never stdout", () => {
   assert.equal(stdoutCalls, 0, `expected 0 stdout writes, got ${stdoutCalls}`);
 });
 
-test("logger respects CORTEX_LOG_LEVEL threshold", () => {
-  const orig = process.env.CORTEX_LOG_LEVEL;
-  process.env.CORTEX_LOG_LEVEL = "error";
+test("logger respects CURION_LOG_LEVEL threshold", () => {
+  const orig = process.env.CURION_LOG_LEVEL;
+  process.env.CURION_LOG_LEVEL = "error";
   try {
     // Re-import to pick up the new level? No — logger reads env at
     // module load. Instead, verify the helper without re-importing
@@ -180,24 +180,24 @@ test("logger respects CORTEX_LOG_LEVEL threshold", () => {
     const { logger: _ignored } = { logger };
     void _ignored;
   } finally {
-    if (orig === undefined) delete process.env.CORTEX_LOG_LEVEL;
-    else process.env.CORTEX_LOG_LEVEL = orig;
+    if (orig === undefined) delete process.env.CURION_LOG_LEVEL;
+    else process.env.CURION_LOG_LEVEL = orig;
   }
 });
 
-test("storage path is project-local .cortex/ under cwd", () => {
+test("storage path is project-local .curion/ under cwd", () => {
   const cwd = process.cwd();
-  assert.equal(resolveCortexDir(), path.join(cwd, CORTEX_DIRNAME));
-  const custom = resolveCortexDir({ projectRoot: "/tmp/example" });
-  assert.equal(custom, path.join("/tmp/example", CORTEX_DIRNAME));
+  assert.equal(resolveCurionDir(), path.join(cwd, CURION_DIRNAME));
+  const custom = resolveCurionDir({ projectRoot: "/tmp/example" });
+  assert.equal(custom, path.join("/tmp/example", CURION_DIRNAME));
 });
 
-test("storage init creates .cortex/ in a temp project root", () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-mcp-v2-test-"));
+test("storage init creates .curion/ in a temp project root", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-mcp-v2-test-"));
   try {
     const handle = initStorage({ projectRoot: tmp });
     try {
-      assert.ok(fs.existsSync(handle.dir), ".cortex/ dir created");
+      assert.ok(fs.existsSync(handle.dir), ".curion/ dir created");
       assert.ok(fs.existsSync(handle.dbPath), "sqlite file created");
       // Schema is initialized.
       const tables = handle.db
@@ -217,7 +217,7 @@ test("storage init creates .cortex/ in a temp project root", () => {
 });
 
 test("storage schema has no raw text column on memories", () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-mcp-v2-test-"));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-mcp-v2-test-"));
   try {
     const handle = initStorage({ projectRoot: tmp });
     try {
@@ -266,7 +266,7 @@ test("retrieval variant registry contains all five placeholders", () => {
 });
 
 test("retrieval variants return empty hits in Phase 1 skeleton", async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-mcp-v2-test-"));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-mcp-v2-test-"));
   let handle: ReturnType<typeof initStorage> | null = null;
   try {
     handle = initStorage({ projectRoot: tmp });
@@ -285,14 +285,14 @@ test("retrieval variants return empty hits in Phase 1 skeleton", async () => {
 test("provider registry exposes MiniMax primary + NVIDIA NIM fallback", async () => {
   // Wipe env so we can observe the unconfigured path.
   const orig = {
-    pri1: process.env.CORTEX_PROVIDER_PRIMARY_KEY,
+    pri1: process.env.CURION_PROVIDER_PRIMARY_KEY,
     pri2: process.env.MINIMAX_API_KEY,
-    fb1: process.env.CORTEX_PROVIDER_FALLBACK_KEY,
+    fb1: process.env.CURION_PROVIDER_FALLBACK_KEY,
     fb2: process.env.NVIDIA_NIM_API_KEY,
   };
-  delete process.env.CORTEX_PROVIDER_PRIMARY_KEY;
+  delete process.env.CURION_PROVIDER_PRIMARY_KEY;
   delete process.env.MINIMAX_API_KEY;
-  delete process.env.CORTEX_PROVIDER_FALLBACK_KEY;
+  delete process.env.CURION_PROVIDER_FALLBACK_KEY;
   delete process.env.NVIDIA_NIM_API_KEY;
   try {
     const reg = buildDefaultRegistry();
@@ -334,9 +334,9 @@ test("safety fixtures cover all required classes with text + expected", () => {
   }
 });
 
-test("repo .gitignore ignores .cortex/", () => {
+test("repo .gitignore ignores .curion/", () => {
   const gi = fs.readFileSync(path.join(REPO_ROOT, ".gitignore"), "utf8");
-  assert.match(gi, /^\.cortex\/?$/m, ".gitignore must include a .cortex/ entry");
+  assert.match(gi, /^\.curion\/?$/m, ".gitignore must include a .curion/ entry");
 });
 
 test("repo contains no hardcoded API keys", () => {

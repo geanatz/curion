@@ -88,7 +88,7 @@ import { runRecallController } from "../src/controller/recall-controller.ts";
 // ---------------------------------------------------------------------------
 
 function mkStorage(): { tmp: string; handle: StorageHandle } {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-sc-"));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-sc-"));
   const handle = initStorage({ projectRoot: tmp });
   return { tmp, handle };
 }

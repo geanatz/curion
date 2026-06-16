@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Stdio entrypoint for cortex-mcp-v2.
+ * Stdio entrypoint for curion.
  *
  * Attaches the MCP server to a stdio transport. All logging must
  * travel on stderr; this file is the single place where stdio is
@@ -16,12 +16,12 @@ import { setStorageProvider } from "./tools/remember.js";
 import { setStorageProvider as setRecallStorageProvider } from "./tools/recall.js";
 
 async function main(): Promise<void> {
-  // Initialize project-local storage. Side effect: creates .cortex/ if
+  // Initialize project-local storage. Side effect: creates .curion/ if
   // missing. Failures here are fatal — the server cannot run without
   // its data directory.
   const storage = initStorage();
   logger.info(
-    `cortex-mcp-v2 starting (storage: ${storage.dir}, tools: ${PUBLIC_TOOL_NAMES.join(", ")})`,
+    `curion starting (storage: ${storage.dir}, tools: ${PUBLIC_TOOL_NAMES.join(", ")})`,
   );
 
   // Inject the long-lived storage handle into both tool layers so
@@ -59,6 +59,6 @@ async function main(): Promise<void> {
 main().catch((err: unknown) => {
   const msg = err instanceof Error ? err.message : String(err);
   // Use the logger (stderr) here too — no console.log.
-  process.stderr.write(`[cortex] FATAL ${msg}\n`);
+  process.stderr.write(`[curion] FATAL ${msg}\n`);
   process.exit(1);
 });

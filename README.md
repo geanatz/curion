@@ -1,4 +1,4 @@
-# Cortex MCP v2
+# Curion
 
 Project-local memory layer for AI agents, exposed as a Model Context Protocol
 (MCP) stdio server. v0.1 candidate: local MCP memory server nearing merge to
@@ -130,7 +130,7 @@ transport).
 
 ## Storage
 
-Project-local hidden directory `.cortex/` at the project root. Contents are
+Project-local hidden directory `.curion/` at the project root. Contents are
 gitignored. The skeleton initializes a local SQLite database. The `memories`
 table stores controller-normalized summaries and metadata (id, kind, state,
 summary, provider_id, model_id, confidence, safety_flags, metadata,
@@ -156,7 +156,7 @@ The provider layer is split into two parts:
   memory-analysis path does not go through them.
 
 Provider configuration is read from environment variables. No API keys are
-hardcoded. See `docs/env.md`.
+hardcoded.
 
 ## Retrieval benchmark (current baseline)
 
@@ -164,7 +164,7 @@ A small, self-contained measurement harness for the current
 lexical baseline lives in `src/benchmark/`. It loads a hand-curated
 fixture corpus and a hand-curated query set into memory, runs the
 production `rankLexical` function against every query, and emits a
-sanitized JSON report under `.cortex/benchmark/` (gitignored).
+sanitized JSON report under `.curion/benchmark/` (gitignored).
 The harness does NOT open the database, does NOT call any
 provider, and does NOT touch the network. The fixture corpus
 contains only sanitized memory summaries (no raw input, no
@@ -377,7 +377,7 @@ npm run benchmark:retrieval -- --threshold 0.5 --top-k 10
 npm run benchmark:retrieval -- --artifacts /tmp/my-bench
 ```
 
-A JSON report is written under `.cortex/benchmark/`. Each report
+A JSON report is written under `.curion/benchmark/`. Each report
 contains: generated timestamp, variant, config, per-query evals
 (top ids, top scores, pass/fail, reason), aggregate metrics,
 and a failures list. No API keys, no Authorization headers, no
@@ -851,7 +851,7 @@ Not yet implemented (placeholders):
 
 - **Scope.** The vector variant is benchmark-only. It runs
   entirely in memory, never opens the project
-  `.cortex/cortex.sqlite`, and does not change the public
+  `.curion/curion.sqlite`, and does not change the public
   `recall(text)` API. Source-tree guards in
   `tests/retrieval-vector.test.ts` enforce this with the
   same shape as the FTS5 guards.
@@ -879,7 +879,7 @@ Not yet implemented (placeholders):
   sanitized expanded-checkpoint fixture corpus + 96
   queries the vector variant reaches the headline numbers
   reported by the `benchmark:retrieval:all` run (the
-  artifact under `.cortex/benchmark/` is the source of
+  artifact under `.curion/benchmark/` is the source of
   truth; the README does not pin specific percentages so a
   corpus / query set change does not require a doc
   update). The vector variant's `no-answer TNR = 0%` at
@@ -944,7 +944,7 @@ stable contract. Every embedder carries a
     "loadMs":    898,
     "embedMs":   20702,
     "embedCount": 3294,
-    "cacheDir":  "<cwd>/.cortex/transformers-cache"
+    "cacheDir":  "<cwd>/.curion/transformers-cache"
   }
 }
 ```
@@ -1031,7 +1031,7 @@ comparison report and on each per-variant artifact
 | `--embedder bge-m3` | `Xenova/bge-m3` (q8) | Real local BGE-M3 ONNX. License: MIT. |
 | `--embedder bge-m3:model=<id>,dtype=<q8\|q4\|fp16\|fp32>,pooling=<cls\|last_token\|mean\|none>` | — | Custom BGE-M3 model id / dtype / pooling. |
 | `--embedder bgem3` | — | Alias for `--embedder bge-m3`. |
-| `--dense-cache-dir <path>` | `<cwd>/.cortex/transformers-cache/` | Local model cache directory. |
+| `--dense-cache-dir <path>` | `<cwd>/.curion/transformers-cache/` | Local model cache directory. |
 | `--dense-skip` | off | Skip live model execution. The factory still dispatches by `--embedder` spec (so `qwen3` spec routes to `Qwen3Embedder`, `embeddinggemma` spec routes to `EmbeddingGemmaEmbedder`, and `bge-m3` spec routes to `BgeM3Embedder`, not the stub); it just short-circuits `init()`. The embedder falls back to the deterministic stub at embed time and reports `status: "skipped"` on the metadata. Useful for CI without network. |
 
 #### How to run
@@ -1042,7 +1042,7 @@ npm run benchmark:retrieval:vector-dense
 npm run benchmark:retrieval:hybrid-dense
 npm run benchmark:retrieval:all-dense
 
-# Real local model (first run downloads ~25MB to .cortex/transformers-cache)
+# Real local model (first run downloads ~25MB to .curion/transformers-cache)
 npm run benchmark:retrieval:vector-dense:real
 npm run benchmark:retrieval:hybrid-dense:real
 npm run benchmark:retrieval:all-dense:real
@@ -1096,7 +1096,7 @@ npm run benchmark:retrieval:hybrid-dense:bge-m3:skip
 ```
 
 The first real run downloads the ONNX model to
-`<cwd>/.cortex/transformers-cache/` (override via
+`<cwd>/.curion/transformers-cache/` (override via
 `--dense-cache-dir <path>`). Subsequent runs use the
 local cache. No external API is called; the model is
 100% on-device.
@@ -1113,7 +1113,7 @@ the stub is the same deterministic projection); only
 the fixture data grew. Headline numbers from a real
 `benchmark:retrieval:all-dense:real` run on the
 adversarial-expansion set (the artifact under
-`.cortex/benchmark/` is the source of truth; the prior
+`.curion/benchmark/` is the source of truth; the prior
 100-record / 96-query numbers are listed for comparison):
 
 | Metric | vector-dense (real, 132rec) | hybrid-dense (RRF, real, 132rec) |
@@ -1128,7 +1128,7 @@ adversarial-expansion set (the artifact under
 For comparison, the prior 100-record / 96-query
 expanded set on the real `transformersjs` MiniLM
 embedder (the source of truth is the prior
-`.cortex/benchmark/` artifact):
+`.curion/benchmark/` artifact):
 
 | Metric | vector-dense (real, 100rec) | hybrid-dense (RRF, real, 100rec) |
 |---|---|---|
@@ -1292,7 +1292,7 @@ path, which is the historical contract.
 ```sh
 # Qwen3 on the vector-dense variant (first run
 # downloads ~600MB q8 ONNX to
-# .cortex/transformers-cache/).
+# .curion/transformers-cache/).
 npm run benchmark:retrieval:vector-dense:qwen3
 
 # Qwen3 on the hybrid-dense variant (RRF over
@@ -1348,7 +1348,7 @@ both forms are equivalent).
 
 The `--dense-cache-dir <path>` flag is honored
 on the Qwen3 path; the default is
-`<cwd>/.cortex/transformers-cache/`. The Qwen3
+`<cwd>/.curion/transformers-cache/`. The Qwen3
 runner does NOT touch the database, providers,
 or the network beyond the one-time model
 download from the Hugging Face CDN.
@@ -1388,7 +1388,7 @@ discriminator:
     "loadMs":        ...,
     "embedMs":       ...,
     "embedCount":    ...,
-    "cacheDir":      "<cwd>/.cortex/transformers-cache"
+    "cacheDir":      "<cwd>/.curion/transformers-cache"
   }
 }
 ```
@@ -1552,7 +1552,7 @@ production decision.
   q8 ONNX artifact is ~600MB. The first run
   downloads the artifact from the Hugging Face
   CDN; subsequent runs use the local cache
-  under `<cwd>/.cortex/transformers-cache/`
+  under `<cwd>/.curion/transformers-cache/`
   (override via `--dense-cache-dir <path>`).
   No external API is called; the model is
   100% on-device.
@@ -1689,7 +1689,7 @@ same kind-dispatch path in the ranker.
 ```sh
 # EmbeddingGemma on the vector-dense variant
 # (first run downloads ~309MB q8 ONNX to
-# .cortex/transformers-cache/).
+# .curion/transformers-cache/).
 npm run benchmark:retrieval:vector-dense:embeddinggemma
 
 # EmbeddingGemma on the hybrid-dense variant
@@ -1751,7 +1751,7 @@ forms for reviewer ergonomics.
 The `--dense-cache-dir <path>` flag is
 honored on the EmbeddingGemma path; the
 default is
-`<cwd>/.cortex/transformers-cache/`. The
+`<cwd>/.curion/transformers-cache/`. The
 EmbeddingGemma runner does NOT touch the
 database, providers, or the network beyond
 the one-time model download from the
@@ -1796,7 +1796,7 @@ discriminator:
     "loadMs":        ...,
     "embedMs":       ...,
     "embedCount":    ...,
-    "cacheDir":      "<cwd>/.cortex/transformers-cache"
+    "cacheDir":      "<cwd>/.curion/transformers-cache"
   }
 }
 ```
@@ -1863,13 +1863,13 @@ other candidate is also benchmarked on the same
 harness.
 
 **Provenance (the artifacts under
-`.cortex/benchmark/` are the source of truth).**
+`.curion/benchmark/` are the source of truth).**
 
 | Variant | Artifact | Log | Wall-clock start |
 |---|---|---|---|
-| `vector-dense` (EmbeddingGemma, real) | `.cortex/benchmark/retrieval-vector-dense-2026-06-13T10-17-45-607Z.json` | `.cortex/verify-logs/embeddinggemma-vector-dense.log` | 2026-06-13T10:17:45Z |
-| `hybrid-dense` (EmbeddingGemma, real) | `.cortex/benchmark/retrieval-hybrid-dense-2026-06-13T10-41-47-516Z.json` | `.cortex/verify-logs/embeddinggemma-hybrid-dense.log` | 2026-06-13T10:41:46Z |
-| held-out `hybrid-dense` (EmbeddingGemma, real) | `.cortex/benchmark/retrieval-held-out-validation-2026-06-13T10-54-01-932Z.json` | `.cortex/verify-logs/embeddinggemma-held-out.log` | 2026-06-13T10:54:01Z |
+| `vector-dense` (EmbeddingGemma, real) | `.curion/benchmark/retrieval-vector-dense-2026-06-13T10-17-45-607Z.json` | `.curion/verify-logs/embeddinggemma-vector-dense.log` | 2026-06-13T10:17:45Z |
+| `hybrid-dense` (EmbeddingGemma, real) | `.curion/benchmark/retrieval-hybrid-dense-2026-06-13T10-41-47-516Z.json` | `.curion/verify-logs/embeddinggemma-hybrid-dense.log` | 2026-06-13T10:41:46Z |
+| held-out `hybrid-dense` (EmbeddingGemma, real) | `.curion/benchmark/retrieval-held-out-validation-2026-06-13T10-54-01-932Z.json` | `.curion/verify-logs/embeddinggemma-held-out.log` | 2026-06-13T10:54:01Z |
 
 Branch / commit: `experiment/embeddinggemma-
 candidate` @ `321ebc9` (the
@@ -1880,7 +1880,7 @@ normalize=true, dim=768,
 queryTask=`"search result"`). Backend:
 `embeddinggemma` via
 `@huggingface/transformers` 3.8.1. Cache:
-`/home/geanatz/Repos/cortex-mcp-v2/.cortex/
+`/home/geanatz/Repos/curion/.curion/
 transformers-cache/onnx-community/
 embeddinggemma-300m-ONNX` (~316 MB on disk;
 the local cache directory grew to ~935 MB
@@ -2098,7 +2098,7 @@ decision.
   artifact from the Hugging Face CDN;
   subsequent runs use the local cache
   under
-  `<cwd>/.cortex/transformers-cache/`
+  `<cwd>/.curion/transformers-cache/`
   (override via
   `--dense-cache-dir <path>`). No external
   API is called; the model is 100%
@@ -2262,7 +2262,7 @@ the same kind-dispatch path in the ranker.
 ```sh
 # BGE-M3 on the vector-dense variant
 # (first run downloads ~568MB q8 ONNX to
-# .cortex/transformers-cache/).
+# .curion/transformers-cache/).
 npm run benchmark:retrieval:vector-dense:bge-m3
 
 # BGE-M3 on the hybrid-dense variant
@@ -2317,7 +2317,7 @@ reviewer ergonomics.
 
 The `--dense-cache-dir <path>` flag is
 honored on the BGE-M3 path; the default is
-`<cwd>/.cortex/transformers-cache/`. The
+`<cwd>/.curion/transformers-cache/`. The
 BGE-M3 runner does NOT touch the database,
 providers, or the network beyond the
 one-time model download from the Hugging
@@ -2360,7 +2360,7 @@ additional `backend: "bge-m3"` discriminator:
     "loadMs":        ...,
     "embedMs":       ...,
     "embedCount":    ...,
-    "cacheDir":      "<cwd>/.cortex/transformers-cache"
+    "cacheDir":      "<cwd>/.curion/transformers-cache"
   }
 }
 ```
@@ -2467,7 +2467,7 @@ unchanged; the BGE-M3 path is additive.
   artifact from the Hugging Face CDN;
   subsequent runs use the local cache
   under
-  `<cwd>/.cortex/transformers-cache/`
+  `<cwd>/.curion/transformers-cache/`
   (override via
   `--dense-cache-dir <path>`). No external
   API is called; the model is 100%
@@ -3454,7 +3454,7 @@ The headline numbers below are from the
 end-to-end run on the lexical baseline against
 the 132-record / 176-query fixture corpus. The
 artifact lives at
-`.cortex/benchmark/retrieval-no-answer-abstention-<timestamp>.json`.
+`.curion/benchmark/retrieval-no-answer-abstention-<timestamp>.json`.
 
 The strongest fixture-shaped reading on the
 current corpus is **`family=no-answer`**:
@@ -3663,12 +3663,12 @@ const report = runNoAnswerAbstentionExperiment({
 });
 console.log(formatNoAnswerPolicyReport(report));
 writeNoAnswerAbstentionReport(
-  report, ".cortex/benchmark/",
+  report, ".curion/benchmark/",
 );
 ```
 
 The artifact lives at
-`.cortex/benchmark/retrieval-no-answer-abstention-<timestamp>.json`.
+`.curion/benchmark/retrieval-no-answer-abstention-<timestamp>.json`.
 The on-disk shape is byte-stable for a
 fixed experiment config; the
 `generatedAt` field is the only non-deterministic
@@ -3752,7 +3752,7 @@ would have prevented this false abstention?".
   evidence map is a pre-computed
   `{queryId -> "miss"}` set derived from
   the existing EmbeddingGemma hybrid-dense
-  log under `.cortex/verify-logs/`. The
+  log under `.curion/verify-logs/`. The
   map is committed as a static data file
   (`src/benchmark/data/false-abstention-damage-semantic-evidence.json`).
   A reviewer who wants to re-derive the
@@ -3867,7 +3867,7 @@ The diagnostic is a CLI entry point:
 ```bash
 # Default: pick the most recent
 # retrieval-no-answer-abstention-*.json
-# artifact under .cortex/benchmark/.
+# artifact under .curion/benchmark/.
 npm run benchmark:retrieval:false-abstention-damage
 
 # With the pre-computed semantic evidence.
@@ -3888,7 +3888,7 @@ npm run benchmark:retrieval:false-abstention-damage:no-write
 ```
 
 The artifact lives at
-`.cortex/benchmark/retrieval-false-abstention-damage-<timestamp>.json`.
+`.curion/benchmark/retrieval-false-abstention-damage-<timestamp>.json`.
 The on-disk shape is byte-stable for a fixed
 experiment config; the `generatedAt` field
 is the only non-deterministic field.
@@ -3903,7 +3903,7 @@ end-to-end run on the recommended
 on the lexical baseline (24 FPs, 18.5%
 positive abstention). The artifact lives
 at
-`.cortex/benchmark/retrieval-false-abstention-damage-<timestamp>.json`.
+`.curion/benchmark/retrieval-false-abstention-damage-<timestamp>.json`.
 
 The **per-category summary** is the action
 surface:
@@ -4489,7 +4489,7 @@ npm run benchmark:retrieval:hybrid:k100
 # Side-by-side comparison across the four sync variants.
 # Writes one lexical, one fts5, one vector, one hybrid,
 # and one combined comparison artifact under
-# .cortex/benchmark/. The combined file includes a
+# .curion/benchmark/. The combined file includes a
 # per-family "hybrid vs best baseline" delta table.
 npm run benchmark:retrieval:all
 
@@ -4508,7 +4508,7 @@ npm run benchmark:retrieval:vector-dense:skip
 ```
 
 All four variants write their JSON reports under
-`.cortex/benchmark/` (gitignored). The combined
+`.curion/benchmark/` (gitignored). The combined
 `retrieval-compare-*.json` file nests the per-variant
 reports plus a side-by-side metric table and the hybrid
 per-family delta table.
@@ -4573,7 +4573,7 @@ npx tsx src/benchmark/retrieval-runner.ts --variant hybrid --abstention-audit
 
 The audit writes a single
 `retrieval-abstention-audit-*.json` artifact under
-`.cortex/benchmark/`. See the
+`.curion/benchmark/`. See the
 [Abstention-signal audit (benchmark-only)](#abstention-signal-audit-benchmark-only)
 section above for the interpretation guide.
 
@@ -4581,7 +4581,7 @@ section above for the interpretation guide.
 
 The calibration report writes a single
 `retrieval-calibration-*.json` artifact under
-`.cortex/benchmark/`. The report contains:
+`.curion/benchmark/`. The report contains:
 
 - **Baseline row** per variant — the ranker's natural
   TNR / hit@5 / rank1 numbers at `threshold: 0` (no
@@ -4735,7 +4735,7 @@ The prototype runner is a small CLI in `src/prototype/runner.ts` that
 exercises the two approved providers against the P1..P6 structured-output
 fixtures. It is **not** the MCP stdio server (which remains exactly two
 tools, unchanged). The runner writes sanitized JSON reports under
-`.cortex/prototype/`. Artifacts never contain raw API keys.
+`.curion/prototype/`. Artifacts never contain raw API keys.
 
 ### One-time setup
 
@@ -4760,18 +4760,18 @@ tools, unchanged). The runner writes sanitized JSON reports under
 
    | Variable | Default | Notes |
    |---|---|---|
-   | `CORTEX_PROVIDER_PRIMARY_KEY` / `MINIMAX_API_KEY` | unset | Primary provider key. |
-   | `CORTEX_PROVIDER_FALLBACK_KEY` / `NVIDIA_NIM_API_KEY` | unset | Fallback provider key. |
-   | `CORTEX_MINIMAX_BASE_URL` | `https://api.minimax.io/v1` | Override only if proxying. |
-   | `CORTEX_MINIMAX_MODEL` | `MiniMax-M3` | Primary model id. |
-   | `CORTEX_NIM_BASE_URL` | `https://integrate.api.nvidia.com/v1` | Override only if proxying. |
-   | `CORTEX_NIM_MODELS` | `openai/gpt-oss-120b,meta/llama-3.3-70b-instruct` | Comma-separated NIM candidates. Both are compared equally; the runner does not assume either wins. |
-   | `CORTEX_PROTOTYPE_TIMEOUT_MS` | `30000` | Per-request timeout. |
-   | `CORTEX_PROTOTYPE_MAX_TOKENS` | `1024` | Per-request max output tokens. Raise for models that hit `finish_reason=length` on the structured-output fixtures. CLI override: `--max-tokens <n>`. |
+   | `CURION_PROVIDER_PRIMARY_KEY` / `MINIMAX_API_KEY` | unset | Primary provider key. |
+   | `CURION_PROVIDER_FALLBACK_KEY` / `NVIDIA_NIM_API_KEY` | unset | Fallback provider key. |
+   | `CURION_MINIMAX_BASE_URL` | `https://api.minimax.io/v1` | Override only if proxying. |
+   | `CURION_MINIMAX_MODEL` | `MiniMax-M3` | Primary model id. |
+   | `CURION_NIM_BASE_URL` | `https://integrate.api.nvidia.com/v1` | Override only if proxying. |
+   | `CURION_NIM_MODELS` | `openai/gpt-oss-120b,meta/llama-3.3-70b-instruct` | Comma-separated NIM candidates. Both are compared equally; the runner does not assume either wins. |
+   | `CURION_PROTOTYPE_TIMEOUT_MS` | `30000` | Per-request timeout. |
+   | `CURION_PROTOTYPE_MAX_TOKENS` | `1024` | Per-request max output tokens. Raise for models that hit `finish_reason=length` on the structured-output fixtures. CLI override: `--max-tokens <n>`. |
    | `GROQ_API_KEY` | unset | Groq prototype candidate key. **Prototype-only**; the production provider adapter does not read this. |
-   | `CORTEX_GROQ_BASE_URL` | `https://api.groq.com/openai/v1` | Groq OpenAI-compatible base URL. Prototype runner only. |
-   | `CORTEX_GROQ_MODEL` | `openai/gpt-oss-120b` | Groq model id used by the prototype runner. |
-   | `CORTEX_GROQ_REASONING_EFFORT` | `high` | Reasoning effort hint forwarded to Groq (e.g. `low`, `medium`, `high`). Prototype runner only. CLI override: `--groq-reasoning-effort <val>`. |
+   | `CURION_GROQ_BASE_URL` | `https://api.groq.com/openai/v1` | Groq OpenAI-compatible base URL. Prototype runner only. |
+   | `CURION_GROQ_MODEL` | `openai/gpt-oss-120b` | Groq model id used by the prototype runner. |
+   | `CURION_GROQ_REASONING_EFFORT` | `high` | Reasoning effort hint forwarded to Groq (e.g. `low`, `medium`, `high`). Prototype runner only. CLI override: `--groq-reasoning-effort <val>`. |
 
 ### Dry-run (no keys, no network)
 
@@ -4815,7 +4815,7 @@ The runner will:
   for Groq (the schema is then not sent).
 - Parse each model response against the structured-output schema.
 - Apply one repair attempt if the JSON is malformed.
-- Write a sanitized report under `.cortex/prototype/` containing parse
+- Write a sanitized report under `.curion/prototype/` containing parse
   success, schema errors, latency, model, provider, response format
   type, and (for Groq) the reasoning effort sent. **No API key values
   are written to the report.** For each attempt the human report
@@ -4844,7 +4844,7 @@ src/
   logging/
     logger.ts             # stderr-only logger
   storage/
-    storage.ts            # .cortex/ + SQLite skeleton + memories table + insert
+    storage.ts            # .curion/ + SQLite skeleton + memories table + insert
   providers/
     types.ts              # embedding provider interface (skeleton)
     http-client.ts        # OpenAI-compatible chat-completions HTTP client
@@ -4911,9 +4911,6 @@ tests/
   safety-fixtures.test.ts   # safety fixture placeholders
   retrieval-variants.test.ts
   remember-mvp.test.ts      # narrow MVP remember pipeline (saved/rejected/clarification/provider_error)
-docs/
-  env.md                  # config/env documentation
-  architecture.md
 ```
 
 ## License

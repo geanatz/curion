@@ -5,7 +5,7 @@
  * The runner is a thin orchestrator that:
  *   1. Loads the most recent lexical-baseline
  *      benchmark artifact under
- *      `.cortex/benchmark/`. The artifact's
+ *      `.curion/benchmark/`. The artifact's
  *      `evals` array is the source the
  *      candidate-expansion consumes (the
  *      `evals` carry `topIds` / `topScores` /
@@ -47,14 +47,14 @@
  *     the candidate-expansion consumes.
  *     Default: the most recent
  *     `retrieval-baseline-*.json` under
- *     `.cortex/benchmark/`.
+ *     `.curion/benchmark/`.
  *   --semantic-evidence <path>    — OPTIONAL
  *     JSON file with shape
  *     `{source: string, byQueryId: {[qid]:
  *     "hit"|"miss"}}`. When omitted, the
  *     report has no semantic cross-reference.
  *   --out-dir <path>              — output
- *     dir. Default: `.cortex/benchmark/`.
+ *     dir. Default: `.curion/benchmark/`.
  *   --no-write                    — do not
  *     write the JSON artifact. Useful for
  *     CI / smoke tests that just want the
@@ -179,7 +179,7 @@ export async function runCandidateGenerationCli(
   report: CandidateGenerationReport;
   written?: string;
 }> {
-  const outDir = args.outDir ?? ".cortex/benchmark";
+  const outDir = args.outDir ?? ".curion/benchmark";
   const defaultBenchmark =
     args.benchmarkArtifact ??
     findMostRecentArtifact(outDir, "retrieval-baseline-");

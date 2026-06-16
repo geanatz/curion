@@ -55,9 +55,9 @@ import {
 
 test("env-loader: SECRET_ENV_VARS contains both aliases for each provider", () => {
   for (const v of [
-    "CORTEX_PROVIDER_PRIMARY_KEY",
+    "CURION_PROVIDER_PRIMARY_KEY",
     "MINIMAX_API_KEY",
-    "CORTEX_PROVIDER_FALLBACK_KEY",
+    "CURION_PROVIDER_FALLBACK_KEY",
     "NVIDIA_NIM_API_KEY",
   ]) {
     assert.ok(SECRET_ENV_VARS.includes(v), `expected ${v} in SECRET_ENV_VARS`);
@@ -66,7 +66,7 @@ test("env-loader: SECRET_ENV_VARS contains both aliases for each provider", () =
 
 test("env-loader: isSecretEnvVar flags secrets and ignores other names", () => {
   assert.equal(isSecretEnvVar("MINIMAX_API_KEY"), true);
-  assert.equal(isSecretEnvVar("CORTEX_LOG_LEVEL"), false);
+  assert.equal(isSecretEnvVar("CURION_LOG_LEVEL"), false);
   assert.equal(isSecretEnvVar(""), false);
 });
 
@@ -80,20 +80,20 @@ test("env-loader: redactValue preserves length-class and never echoes secret", (
   // The middle is masked.
   assert.match(r, /\*{4,}/);
   // Non-secrets pass through.
-  assert.equal(redactValue("CORTEX_LOG_LEVEL", "debug"), "debug");
+  assert.equal(redactValue("CURION_LOG_LEVEL", "debug"), "debug");
 });
 
 test("env-loader: describeEnv redacts secrets and labels missing", () => {
   const out = describeEnv({
-    CORTEX_LOG_LEVEL: "info",
+    CURION_LOG_LEVEL: "info",
     MINIMAX_API_KEY: "sk-abcdefghijklmnopqrstuvwxyz1234567890",
     NVIDIA_NIM_API_KEY: undefined,
-    CORTEX_PROVIDER_FALLBACK_KEY: "nvapi-something-secret",
+    CURION_PROVIDER_FALLBACK_KEY: "nvapi-something-secret",
   });
-  assert.equal(out.CORTEX_LOG_LEVEL, "info");
+  assert.equal(out.CURION_LOG_LEVEL, "info");
   assert.notEqual(out.MINIMAX_API_KEY, "sk-abcdefghijklmnopqrstuvwxyz1234567890");
   assert.equal(out.NVIDIA_NIM_API_KEY, "<unset>");
-  assert.notEqual(out.CORTEX_PROVIDER_FALLBACK_KEY, "nvapi-something-secret");
+  assert.notEqual(out.CURION_PROVIDER_FALLBACK_KEY, "nvapi-something-secret");
   // No echoed secret should appear in the keys/values.
   for (const k of Object.keys(out)) {
     assert.ok(
@@ -104,34 +104,34 @@ test("env-loader: describeEnv redacts secrets and labels missing", () => {
 });
 
 test("env-loader: loadDotEnv parses simple KEY=value lines", () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-env-"));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-env-"));
   const file = path.join(tmp, ".env");
   fs.writeFileSync(
     file,
     [
       "# comment line",
       "",
-      "CORTEX_LOG_LEVEL=debug",
-      "export CORTEX_FOO=bar",
-      "CORTEX_QUOTED=\"hello world\"",
-      "CORTEX_SQ='single quoted'",
+      "CURION_LOG_LEVEL=debug",
+      "export CURION_FOO=bar",
+      "CURION_QUOTED=\"hello world\"",
+      "CURION_SQ='single quoted'",
       "NOT_A_VALID_LINE",
     ].join("\n"),
   );
   const before = { ...process.env };
   try {
-    delete process.env.CORTEX_LOG_LEVEL;
-    delete process.env.CORTEX_FOO;
-    delete process.env.CORTEX_QUOTED;
-    delete process.env.CORTEX_SQ;
+    delete process.env.CURION_LOG_LEVEL;
+    delete process.env.CURION_FOO;
+    delete process.env.CURION_QUOTED;
+    delete process.env.CURION_SQ;
     const r = loadDotEnv({ path: file });
     assert.equal(r.loaded, true);
-    assert.ok(r.keys.includes("CORTEX_LOG_LEVEL"));
-    assert.ok(r.keys.includes("CORTEX_FOO"));
-    assert.equal(process.env.CORTEX_LOG_LEVEL, "debug");
-    assert.equal(process.env.CORTEX_FOO, "bar");
-    assert.equal(process.env.CORTEX_QUOTED, "hello world");
-    assert.equal(process.env.CORTEX_SQ, "single quoted");
+    assert.ok(r.keys.includes("CURION_LOG_LEVEL"));
+    assert.ok(r.keys.includes("CURION_FOO"));
+    assert.equal(process.env.CURION_LOG_LEVEL, "debug");
+    assert.equal(process.env.CURION_FOO, "bar");
+    assert.equal(process.env.CURION_QUOTED, "hello world");
+    assert.equal(process.env.CURION_SQ, "single quoted");
   } finally {
     for (const k of Object.keys(process.env)) {
       if (!(k in before)) delete process.env[k];
@@ -142,19 +142,19 @@ test("env-loader: loadDotEnv parses simple KEY=value lines", () => {
 });
 
 test("env-loader: loadDotEnv does not overwrite existing values by default", () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-env-"));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-env-"));
   const file = path.join(tmp, ".env");
-  fs.writeFileSync(file, "CORTEX_LOG_LEVEL=debug\n");
-  const before = process.env.CORTEX_LOG_LEVEL;
-  process.env.CORTEX_LOG_LEVEL = "warn";
+  fs.writeFileSync(file, "CURION_LOG_LEVEL=debug\n");
+  const before = process.env.CURION_LOG_LEVEL;
+  process.env.CURION_LOG_LEVEL = "warn";
   try {
     const r = loadDotEnv({ path: file });
-    assert.equal(process.env.CORTEX_LOG_LEVEL, "warn", "must not override");
-    assert.ok(r.skipped.includes("CORTEX_LOG_LEVEL"));
-    assert.ok(!r.keys.includes("CORTEX_LOG_LEVEL"));
+    assert.equal(process.env.CURION_LOG_LEVEL, "warn", "must not override");
+    assert.ok(r.skipped.includes("CURION_LOG_LEVEL"));
+    assert.ok(!r.keys.includes("CURION_LOG_LEVEL"));
   } finally {
-    if (before === undefined) delete process.env.CORTEX_LOG_LEVEL;
-    else process.env.CORTEX_LOG_LEVEL = before;
+    if (before === undefined) delete process.env.CURION_LOG_LEVEL;
+    else process.env.CURION_LOG_LEVEL = before;
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
@@ -176,11 +176,11 @@ test("env-loader: loadDotEnv skip:true leaves process.env untouched", () => {
 test("env-loader: loadPrototypeConfig reports presence not values", () => {
   const before = { ...process.env };
   try {
-    delete process.env.CORTEX_PROVIDER_PRIMARY_KEY;
+    delete process.env.CURION_PROVIDER_PRIMARY_KEY;
     delete process.env.MINIMAX_API_KEY;
-    delete process.env.CORTEX_PROVIDER_FALLBACK_KEY;
+    delete process.env.CURION_PROVIDER_FALLBACK_KEY;
     delete process.env.NVIDIA_NIM_API_KEY;
-    delete process.env.CORTEX_NIM_MODELS;
+    delete process.env.CURION_NIM_MODELS;
     // `skip: true` keeps the test independent of any `.env` in the
     // current working directory.
     const cfg = loadPrototypeConfig({ skip: true });
@@ -550,9 +550,9 @@ test("runner: dry-run makes no network calls and reports a plan", async () => {
   // independent of any `.env` in the current working directory.
   const before = { ...process.env };
   try {
-    delete process.env.CORTEX_PROVIDER_PRIMARY_KEY;
+    delete process.env.CURION_PROVIDER_PRIMARY_KEY;
     delete process.env.MINIMAX_API_KEY;
-    delete process.env.CORTEX_PROVIDER_FALLBACK_KEY;
+    delete process.env.CURION_PROVIDER_FALLBACK_KEY;
     delete process.env.NVIDIA_NIM_API_KEY;
     delete process.env.GROQ_API_KEY;
     const report = await runExperiments({
@@ -586,9 +586,9 @@ test("runner: dry-run makes no network calls and reports a plan", async () => {
 test("runner: live mode without keys yields missing-config errors (no network)", async () => {
   const before = { ...process.env };
   try {
-    delete process.env.CORTEX_PROVIDER_PRIMARY_KEY;
+    delete process.env.CURION_PROVIDER_PRIMARY_KEY;
     delete process.env.MINIMAX_API_KEY;
-    delete process.env.CORTEX_PROVIDER_FALLBACK_KEY;
+    delete process.env.CURION_PROVIDER_FALLBACK_KEY;
     delete process.env.NVIDIA_NIM_API_KEY;
     delete process.env.GROQ_API_KEY;
     const report = await runExperiments({
@@ -615,8 +615,8 @@ test("runner: live mode without keys yields missing-config errors (no network)",
 test("runner: live mode with stubbed fetch parses a model response", async () => {
   const before = { ...process.env };
   try {
-    process.env.CORTEX_PROVIDER_PRIMARY_KEY = "sk-test-not-real";
-    process.env.CORTEX_PROVIDER_FALLBACK_KEY = "nvapi-test-not-real";
+    process.env.CURION_PROVIDER_PRIMARY_KEY = "sk-test-not-real";
+    process.env.CURION_PROVIDER_FALLBACK_KEY = "nvapi-test-not-real";
     const valid = JSON.stringify({
       summary: "stubbed",
       confidence: 0.9,
@@ -659,7 +659,7 @@ test("runner: live mode with stubbed fetch parses a model response", async () =>
 test("runner: live mode with stubbed fetch that returns fenced-but-broken JSON applies one repair", async () => {
   const before = { ...process.env };
   try {
-    process.env.CORTEX_PROVIDER_FALLBACK_KEY = "nvapi-test-not-real";
+    process.env.CURION_PROVIDER_FALLBACK_KEY = "nvapi-test-not-real";
     // Trailing comma and stray fence: should be repaired.
     const broken = "```json\n{ \"summary\": \"rep\", \"confidence\": 0.4, \"tags\": [], }\n```";
     const fetchImpl: typeof fetch = async () =>
@@ -694,7 +694,7 @@ test("runner: live mode with stubbed fetch that returns fenced-but-broken JSON a
 test("runner: report records maxTokens per attempt and in config", async () => {
   const before = { ...process.env };
   try {
-    process.env.CORTEX_PROVIDER_PRIMARY_KEY = "sk-test-not-real";
+    process.env.CURION_PROVIDER_PRIMARY_KEY = "sk-test-not-real";
     const valid = JSON.stringify({
       summary: "mt",
       confidence: 0.5,
@@ -732,7 +732,7 @@ test("runner: report is sanitized — no API key value is present", async () => 
   const before = { ...process.env };
   try {
     const fakeKey = "sk-test-not-real-very-specific-value-12345";
-    process.env.CORTEX_PROVIDER_PRIMARY_KEY = fakeKey;
+    process.env.CURION_PROVIDER_PRIMARY_KEY = fakeKey;
     const fetchImpl: typeof fetch = async () =>
       new Response(
         JSON.stringify({
@@ -771,7 +771,7 @@ test("runner: report is sanitized — no API key value is present", async () => 
 });
 
 test("runner: resolveArtifactsDir creates the directory if missing", () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-art-"));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-art-"));
   const target = path.join(tmp, "deep", "nested", "artifacts");
   try {
     const cfg = loadPrototypeConfig({ skip: true });
@@ -786,9 +786,9 @@ test("runner: resolveArtifactsDir creates the directory if missing", () => {
 test("runner: formatHumanReport mentions every provider and fixture in dry-run", async () => {
   const before = { ...process.env };
   try {
-    delete process.env.CORTEX_PROVIDER_PRIMARY_KEY;
+    delete process.env.CURION_PROVIDER_PRIMARY_KEY;
     delete process.env.MINIMAX_API_KEY;
-    delete process.env.CORTEX_PROVIDER_FALLBACK_KEY;
+    delete process.env.CURION_PROVIDER_FALLBACK_KEY;
     delete process.env.NVIDIA_NIM_API_KEY;
     delete process.env.GROQ_API_KEY;
     const report = await runExperiments({ live: false, dotenvSkip: true });
@@ -814,7 +814,7 @@ test("runner: formatHumanReport mentions every provider and fixture in dry-run",
 });
 
 test("runner: dry-run default also works when dotenv is present and loaded", async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-cwd-"));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-cwd-"));
   const before = { ...process.env };
   const beforeCwd = process.cwd();
   try {
@@ -822,10 +822,10 @@ test("runner: dry-run default also works when dotenv is present and loaded", asy
       path.join(tmp, ".env"),
       [
         "# placeholder env, no real keys",
-        "CORTEX_LOG_LEVEL=info",
+        "CURION_LOG_LEVEL=info",
         "MINIMAX_API_KEY=sk-test-not-real-very-specific-value-12345",
         "NVIDIA_NIM_API_KEY=nvapi-test-not-real-very-specific-value-12345",
-        "CORTEX_NIM_MODELS=openai/gpt-oss-120b,meta/llama-3.3-70b-instruct",
+        "CURION_NIM_MODELS=openai/gpt-oss-120b,meta/llama-3.3-70b-instruct",
       ].join("\n"),
     );
     process.chdir(tmp);
@@ -854,9 +854,9 @@ test("runner: dry-run default also works when dotenv is present and loaded", asy
 
 const GROQ_ENV_KEYS = [
   "GROQ_API_KEY",
-  "CORTEX_GROQ_BASE_URL",
-  "CORTEX_GROQ_MODEL",
-  "CORTEX_GROQ_REASONING_EFFORT",
+  "CURION_GROQ_BASE_URL",
+  "CURION_GROQ_MODEL",
+  "CURION_GROQ_REASONING_EFFORT",
 ];
 
 function withCleanGroqEnv<T>(fn: () => Promise<T> | T): Promise<T> | T {
@@ -910,9 +910,9 @@ test("env-loader: loadPrototypeConfig exposes Groq presence and config with docu
 test("env-loader: Groq env overrides are respected and trimmed", () => {
   return withCleanGroqEnv(() => {
     process.env.GROQ_API_KEY = "  gsk_test  \n";
-    process.env.CORTEX_GROQ_BASE_URL = "  https://proxy.test/v1  ";
-    process.env.CORTEX_GROQ_MODEL = "  openai/gpt-oss-20b  ";
-    process.env.CORTEX_GROQ_REASONING_EFFORT = "  low  ";
+    process.env.CURION_GROQ_BASE_URL = "  https://proxy.test/v1  ";
+    process.env.CURION_GROQ_MODEL = "  openai/gpt-oss-20b  ";
+    process.env.CURION_GROQ_REASONING_EFFORT = "  low  ";
     const cfg = loadPrototypeConfig({ skip: true });
     assert.equal(cfg.hasGroqKey, true);
     assert.equal(cfg.groqBaseUrl, "https://proxy.test/v1");
@@ -923,9 +923,9 @@ test("env-loader: Groq env overrides are respected and trimmed", () => {
 
 test("env-loader: whitespace-only Groq env values fall back to defaults", () => {
   return withCleanGroqEnv(() => {
-    process.env.CORTEX_GROQ_BASE_URL = "   ";
-    process.env.CORTEX_GROQ_MODEL = "\t";
-    process.env.CORTEX_GROQ_REASONING_EFFORT = "  \n  ";
+    process.env.CURION_GROQ_BASE_URL = "   ";
+    process.env.CURION_GROQ_MODEL = "\t";
+    process.env.CURION_GROQ_REASONING_EFFORT = "  \n  ";
     const cfg = loadPrototypeConfig({ skip: true });
     assert.equal(cfg.groqBaseUrl, "https://api.groq.com/openai/v1");
     assert.equal(cfg.groqModel, "openai/gpt-oss-120b");
@@ -1000,9 +1000,9 @@ test("http-client: buildResponseFormat defaults the schema name when not provide
 test("runner: --only-provider groq restricts the matrix to one provider per fixture", async () => {
   const before = { ...process.env };
   try {
-    delete process.env.CORTEX_PROVIDER_PRIMARY_KEY;
+    delete process.env.CURION_PROVIDER_PRIMARY_KEY;
     delete process.env.MINIMAX_API_KEY;
-    delete process.env.CORTEX_PROVIDER_FALLBACK_KEY;
+    delete process.env.CURION_PROVIDER_FALLBACK_KEY;
     delete process.env.NVIDIA_NIM_API_KEY;
     delete process.env.GROQ_API_KEY;
     const report = await runExperiments({
@@ -1157,7 +1157,7 @@ test("runner: Groq attempt reports responseFormatType=json_schema and reasoning_
   const before = { ...process.env };
   try {
     process.env.GROQ_API_KEY = "gsk-test-not-real-1234567890";
-    process.env.CORTEX_GROQ_REASONING_EFFORT = "medium";
+    process.env.CURION_GROQ_REASONING_EFFORT = "medium";
     const valid = JSON.stringify({
       summary: "ok",
       confidence: 0.5,
@@ -1284,8 +1284,8 @@ test("runner: empty --groq-reasoning-effort omits the param from the request bod
 test("runner: MiniMax and NIM requests do NOT include reasoning_effort", async () => {
   const before = { ...process.env };
   try {
-    process.env.CORTEX_PROVIDER_PRIMARY_KEY = "sk-test-not-real-1234567890";
-    process.env.CORTEX_PROVIDER_FALLBACK_KEY = "nvapi-test-not-real-1234567890";
+    process.env.CURION_PROVIDER_PRIMARY_KEY = "sk-test-not-real-1234567890";
+    process.env.CURION_PROVIDER_FALLBACK_KEY = "nvapi-test-not-real-1234567890";
     const log: Array<{ url: string; body: string }> = [];
     const valid = JSON.stringify({
       summary: "ok",
@@ -1404,7 +1404,7 @@ test("runner: dry-run Groq attempts still carry the planned responseFormatType a
   const before = { ...process.env };
   try {
     delete process.env.GROQ_API_KEY;
-    process.env.CORTEX_GROQ_REASONING_EFFORT = "low";
+    process.env.CURION_GROQ_REASONING_EFFORT = "low";
     const report = await runExperiments({
       live: false,
       onlyProviders: ["groq"],

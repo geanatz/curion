@@ -1,8 +1,8 @@
 /**
  * Helper for the `logging: controller debug line is emitted at
- * CORTEX_LOG_LEVEL=debug` test in `tests/remember-safety.test.ts`.
+ * CURION_LOG_LEVEL=debug` test in `tests/remember-safety.test.ts`.
  *
- * This file is invoked as a child process with CORTEX_LOG_LEVEL=debug
+ * This file is invoked as a child process with CURION_LOG_LEVEL=debug
  * set in the env, so the controller's `logger.debug` call (which is
  * gated at module-load time) actually emits to stderr. The test
  * then asserts on the captured stderr.
@@ -47,7 +47,7 @@ function scriptFetch(): typeof fetch {
 }
 
 async function main(): Promise<void> {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-log-debug-"));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-log-debug-"));
   const handle: StorageHandle = initStorage({ projectRoot: tmp });
   const fetchImpl = scriptFetch();
   const primary = "sk-primary-test-not-real-12345";

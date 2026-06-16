@@ -1,12 +1,12 @@
 {
-  "name": "cortex-mcp-v2",
+  "name": "curion",
   "version": "0.1.0",
   "private": true,
-  "description": "Cortex MCP v2 Phase 1 prototype infrastructure (project-local memory layer for AI agents)",
+  "description": "Curion — project-local memory layer for AI agents",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "cortex-mcp-v2": "dist/index.js"
+    "curion": "dist/index.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

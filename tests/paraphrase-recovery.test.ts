@@ -51,7 +51,7 @@
  * The tests split between synthetic unit tests
  * (pure functions, no corpus) and end-to-end
  * tests (real no-answer artifact under
- * `.cortex/benchmark/`).
+ * `.curion/benchmark/`).
  */
 
 import { test } from "node:test";
@@ -1194,7 +1194,7 @@ test("paraphrase-recovery: end-to-end on the real lexical-baseline no-answer art
   // a small set of invariants a reviewer
   // expects on the production corpus.
   const noAnswerPath = findParaphraseRecoveryMostRecentArtifact(
-    ".cortex/benchmark",
+    ".curion/benchmark",
     "retrieval-no-answer-abstention-",
   );
   if (!noAnswerPath) {
@@ -1287,7 +1287,7 @@ test("paraphrase-recovery: end-to-end on the real lexical-baseline no-answer art
 
 test("paraphrase-recovery: end-to-end with semantic evidence on the production corpus", () => {
   const noAnswerPath = findParaphraseRecoveryMostRecentArtifact(
-    ".cortex/benchmark",
+    ".curion/benchmark",
     "retrieval-no-answer-abstention-",
   );
   const evidencePath = path.join(
@@ -1523,7 +1523,7 @@ test("paraphrase-recovery: invalid baselinePolicyId throws a loud error", () => 
 
 test("paraphrase-recovery: CLI runs end-to-end (no-write mode) and produces a report", async () => {
   const noAnswerPath = findParaphraseRecoveryMostRecentArtifact(
-    ".cortex/benchmark",
+    ".curion/benchmark",
     "retrieval-no-answer-abstention-",
   );
   if (!noAnswerPath) return;
