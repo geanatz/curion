@@ -43,8 +43,14 @@ import {
   setStorageProvider as setRecallStorageProvider,
   resetStorageProvider as resetRecallStorageProvider,
   NO_RELEVANT_MEMORY,
+  WEAK_MATCH_PUBLIC_MESSAGE,
+  type RecallResult,
 } from "../src/tools/recall.ts";
 import { buildServer, PUBLIC_TOOL_NAMES } from "../src/server.ts";
+import {
+  buildRecallPublicText,
+  buildRecallStructuredContent,
+} from "../src/tools/recall-projection.ts";
 import {
   rankLexical,
   tokenize,
@@ -1195,6 +1201,625 @@ test("recall: answer without a reasoning block is returned unchanged (no false-p
       out.answer.includes("reasoning behind that choice"),
       "answer that contains the word 'reasoning' in a normal sentence must be preserved",
     );
+  } finally {
+    rmStorage(tmp, handle);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 15. Provider-refusal reroute (Phase: thin-match honest no_memory)
+// ---------------------------------------------------------------------------
+//
+// When the synthesis LLM is given stored memories it cannot lexically
+// ground on, it may produce a first-person refusal paraphrase (e.g. "I
+// don't have a specific summary for session 2 in the available
+// memories."). The controller must detect that shape and reroute to
+// `no_memory` instead of stamping the misleading `status: "answered"`
+// contract. The tests below pin:
+//   - the live failure phrase (verbatim)
+//   - the original failure paraphrase (regression guard)
+//   - the three article-gap pattern variants (summary, entry, note)
+//   - three false-positive guards (substantive answers must NOT be
+//     rerouted, including the load-bearing "I don't have the answer"
+//     guard that justifies NOT adding `answer` to the noun list)
+//   - the unchanged secret-shaped rejection path
+//
+// All tests share the same storage shape: a single summary that
+// lexically overlaps the query, so the ranker clears the threshold and
+// the controller proceeds to call the synthesis provider. The
+// scripted fetch then returns the phrase under test, and the
+// controller decides what to do with it.
+
+test("recall: live failure phrase 'I don't have a specific summary for session 2 in the available memories.' -> weak_match", async () => {
+  const { tmp, handle } = mkStorage();
+  try {
+    insertSummary(
+      handle,
+      "Session 2 of the project covered the controller and the lexical retrieval boundary.",
+      { kind: "context", tags: ["session", "controller"] },
+    );
+    const livePhrase =
+      "I don't have a specific summary for session 2 in the available memories.";
+    const { fetchImpl, calls } = scriptFetch(() => okChatResponse(livePhrase));
+    const out = await runRecall(handle, {
+      text: "session 2",
+      fetchImpl,
+    });
+    assert.equal(calls.length, 1, "provider must be called exactly once before reroute");
+    assert.equal(out.status, "weak_match");
+    if (out.status !== "weak_match") throw new Error("unreachable");
+    assert.ok(out.summaries.length > 0, "weak_match must surface at least one summary");
+    assert.ok(out.summaries.length <= 3, "weak_match must cap at 3 summaries");
+    assert.ok(out.coverage.topScore > 0, "coverage.topScore must be > 0");
+    assert.ok(out.coverage.supportingCount > 0, "coverage.supportingCount must be > 0");
+  } finally {
+    rmStorage(tmp, handle);
+  }
+});
+
+test("recall: original failure paraphrase 'I don't have specific details about that.' -> weak_match", async () => {
+  const { tmp, handle } = mkStorage();
+  try {
+    insertSummary(
+      handle,
+      "The project uses Postgres 16 for the primary store.",
+      { kind: "fact", tags: ["postgres", "storage"] },
+    );
+    const { fetchImpl, calls } = scriptFetch(() =>
+      okChatResponse("I don't have specific details about that."),
+    );
+    const out = await runRecall(handle, {
+      text: "What database does the project use?",
+      fetchImpl,
+    });
+    assert.equal(calls.length, 1, "provider must be called exactly once before reroute");
+    assert.equal(out.status, "weak_match");
+    if (out.status !== "weak_match") throw new Error("unreachable");
+    assert.ok(out.summaries.length > 0 && out.summaries.length <= 3);
+    assert.ok(out.coverage.topScore > 0);
+    assert.ok(out.coverage.supportingCount > 0);
+  } finally {
+    rmStorage(tmp, handle);
+  }
+});
+
+test("recall: article-gap variant with 'summary' and no qualifier -> weak_match", async () => {
+  const { tmp, handle } = mkStorage();
+  try {
+    insertSummary(
+      handle,
+      "The project uses Postgres 16 for the primary store.",
+      { kind: "fact", tags: ["postgres", "storage"] },
+    );
+    const { fetchImpl, calls } = scriptFetch(() =>
+      okChatResponse("I don't have a summary for that topic."),
+    );
+    const out = await runRecall(handle, {
+      text: "What database does the project use?",
+      fetchImpl,
+    });
+    assert.equal(calls.length, 1);
+    assert.equal(out.status, "weak_match");
+    if (out.status !== "weak_match") throw new Error("unreachable");
+    assert.ok(out.summaries.length > 0);
+  } finally {
+    rmStorage(tmp, handle);
+  }
+});
+
+test("recall: article-gap variant with 'entry' and 'any' qualifier -> weak_match", async () => {
+  const { tmp, handle } = mkStorage();
+  try {
+    insertSummary(
+      handle,
+      "The project uses Postgres 16 for the primary store.",
+      { kind: "fact", tags: ["postgres", "storage"] },
+    );
+    const { fetchImpl, calls } = scriptFetch(() =>
+      okChatResponse(
+        "I don't have any entry for that topic in the stored memories.",
+      ),
+    );
+    const out = await runRecall(handle, {
+      text: "What database does the project use?",
+      fetchImpl,
+    });
+    assert.equal(calls.length, 1);
+    assert.equal(out.status, "weak_match");
+    if (out.status !== "weak_match") throw new Error("unreachable");
+    assert.ok(out.summaries.length > 0);
+  } finally {
+    rmStorage(tmp, handle);
+  }
+});
+
+test("recall: article-gap variant with 'note' and 'specific' qualifier -> weak_match", async () => {
+  const { tmp, handle } = mkStorage();
+  try {
+    insertSummary(
+      handle,
+      "The project uses Postgres 16 for the primary store.",
+      { kind: "fact", tags: ["postgres", "storage"] },
+    );
+    const { fetchImpl, calls } = scriptFetch(() =>
+      okChatResponse(
+        "I don't have a specific note about that in the available memories.",
+      ),
+    );
+    const out = await runRecall(handle, {
+      text: "What database does the project use?",
+      fetchImpl,
+    });
+    assert.equal(calls.length, 1);
+    assert.equal(out.status, "weak_match");
+    if (out.status !== "weak_match") throw new Error("unreachable");
+    assert.ok(out.summaries.length > 0);
+  } finally {
+    rmStorage(tmp, handle);
+  }
+});
+
+test("recall: false-positive guard — 'I don't have the answer' substantive response must NOT be rerouted", async () => {
+  const { tmp, handle } = mkStorage();
+  try {
+    insertSummary(
+      handle,
+      "The project uses Postgres 16 for the primary store.",
+      { kind: "fact", tags: ["postgres", "storage"] },
+    );
+    // The model can decline to answer part of the query and still
+    // provide a substantive, useful response. The phrase contains
+    // "I don't have the answer" but the rest of the sentence
+    // delivers real content. The detector must NOT reroute this
+    // — that is the load-bearing reason `answer` is NOT in the
+    // noun list.
+    const answer =
+      "I don't have the answer to that, but I can tell you that the project uses TypeScript and Node 20.";
+    const { fetchImpl, calls } = scriptFetch(() => okChatResponse(answer));
+    const out = await runRecall(handle, {
+      text: "What database does the project use?",
+      fetchImpl,
+    });
+    assert.equal(calls.length, 1);
+    assert.equal(out.status, "answered");
+    if (out.status !== "answered") throw new Error("unreachable");
+    assert.equal(out.answer, answer);
+  } finally {
+    rmStorage(tmp, handle);
+  }
+});
+
+test("recall: false-positive guard — substantive answer that mentions memories naturally must NOT be rerouted", async () => {
+  const { tmp, handle } = mkStorage();
+  try {
+    insertSummary(
+      handle,
+      "The project uses Postgres 16 for the primary store.",
+      { kind: "fact", tags: ["postgres", "storage"] },
+    );
+    // A substantive answer that happens to mention stored memories.
+    // No first-person refusal shape, no third-person "no X were/are
+    // found" form. The detector must leave this alone.
+    const answer =
+      "The stored memories include references to the project's MCP architecture and the lexical-only production recall boundary.";
+    const { fetchImpl, calls } = scriptFetch(() => okChatResponse(answer));
+    const out = await runRecall(handle, {
+      text: "What database does the project use?",
+      fetchImpl,
+    });
+    assert.equal(calls.length, 1);
+    assert.equal(out.status, "answered");
+    if (out.status !== "answered") throw new Error("unreachable");
+    assert.equal(out.answer, answer);
+  } finally {
+    rmStorage(tmp, handle);
+  }
+});
+
+test("recall: false-positive guard — 'The memory does not contain X' substantive answer must NOT be rerouted", async () => {
+  const { tmp, handle } = mkStorage();
+  try {
+    insertSummary(
+      handle,
+      "The project uses Postgres 16 for the primary store.",
+      { kind: "fact", tags: ["postgres", "storage"] },
+    );
+    // A third-person substantive answer: the model is saying
+    // something the user asked about (whether secrets are stored)
+    // using a sentence that incidentally contains a memory-record
+    // noun. The detector's first-person anchor and lack of a
+    // generic "memory does not contain" pattern means this is
+    // preserved as a substantive answer.
+    const answer = "The memory does not contain secrets.";
+    const { fetchImpl, calls } = scriptFetch(() => okChatResponse(answer));
+    const out = await runRecall(handle, {
+      text: "What database does the project use?",
+      fetchImpl,
+    });
+    assert.equal(calls.length, 1);
+    assert.equal(out.status, "answered");
+    if (out.status !== "answered") throw new Error("unreachable");
+    assert.equal(out.answer, answer);
+  } finally {
+    rmStorage(tmp, handle);
+  }
+});
+
+test("recall: false-positive guard — 'There are no records of X' substantive answer must NOT be rerouted", async () => {
+  const { tmp, handle } = mkStorage();
+  try {
+    insertSummary(
+      handle,
+      "The project uses Postgres 16 for the primary store.",
+      { kind: "fact", tags: ["postgres", "storage"] },
+    );
+    // Third-person "are no records of X" is a substantive answer
+    // about what the store does or does not contain. The detector's
+    // pattern 5 is anchored on a leading "no X" + "found/available/
+    // on file/recorded/stored" verb, so it does NOT match "are no
+    // records of" — that is the test that pins this boundary.
+    const answer = "There are no records of this user.";
+    const { fetchImpl, calls } = scriptFetch(() => okChatResponse(answer));
+    const out = await runRecall(handle, {
+      text: "What database does the project use?",
+      fetchImpl,
+    });
+    assert.equal(calls.length, 1);
+    assert.equal(out.status, "answered");
+    if (out.status !== "answered") throw new Error("unreachable");
+    assert.equal(out.answer, answer);
+  } finally {
+    rmStorage(tmp, handle);
+  }
+});
+
+test("recall: regression guard — secret-shaped provider answer still routes to provider_error (not no_memory)", async () => {
+  const { tmp, handle } = mkStorage();
+  try {
+    insertSummary(
+      handle,
+      "The project uses Postgres 16 for the primary store.",
+      { kind: "fact", tags: ["postgres", "storage"] },
+    );
+    // A bare secret-shaped string. The structural-safety gates
+    // (empty, length, secret-redaction, short-after-redaction,
+    // raw-dump) must catch this BEFORE the refusal-shape gate.
+    // The public reason must not echo the secret.
+    const { fetchImpl, calls } = scriptFetch(() =>
+      okChatResponse("AKIAIOSFODNN7EXAMPLE"),
+    );
+    const out = await runRecall(handle, {
+      text: "What database does the project use?",
+      fetchImpl,
+    });
+    assert.equal(calls.length, 1, "provider must be called once before rejection");
+    assert.equal(out.status, "provider_error");
+    if (out.status !== "provider_error") throw new Error("unreachable");
+    assert.ok(
+      !out.reason.includes("AKIAIOSFODNN7EXAMPLE"),
+      "public provider_error reason must not echo the secret",
+    );
+  } finally {
+    rmStorage(tmp, handle);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 16. Refusal-with-thin-match reroute (Phase: weak_match)
+// ---------------------------------------------------------------------------
+//
+// The synthesis LLM can refuse to answer a query even when the
+// lexical ranker found a relevant stored summary (a "thin
+// match"). The controller now exposes a `weak_match` status
+// in that case, carrying the top-3 curator-voice summaries
+// and a coverage block, instead of routing to a misleading
+// `no_memory` ("no relevant memory was found" would be
+// incorrect — the ranker DID find something) or a fabricated
+// `answered` (which would leak the refusal prose on the
+// wire).
+//
+// The tests below pin:
+//   (a) the live failure phrase -> weak_match with the
+//       documented shape
+//   (b) the original failure paraphrase -> weak_match with
+//       the documented shape (different phrasing, same
+//       trigger)
+//   (c) strong-overlap control -> answered (regression guard:
+//       a substantive answer still passes through as
+//       `answered`, the refusal detector does NOT fire)
+//   (d) zero-overlap query -> no_memory (unchanged: when the
+//       ranker finds nothing, `topSummaries.length === 0` and
+//       the refusal-with-thin-match branch does not fire —
+//       the controller returns `no_memory` directly before
+//       even calling the provider)
+//   (e) `structuredContent.weak_match` shape: at most 3
+//       summaries, coverage block has both `topScore` and
+//       `supportingCount`, NO `message` field on the wire
+//       (the public text is in `content[0].text`)
+//   (f) regression guard: the `weak_match` reroute is
+//       ADDITIVE — the false-positive guards (substantive
+//       answers) and the secret-shaped regression (provider
+//       answer is a bare secret) continue to route as
+//       `answered` and `provider_error` respectively, NOT
+//       `weak_match`.
+
+test("recall: weak_match (a) live failure phrase -> weak_match with coverage and summaries", async () => {
+  const { tmp, handle } = mkStorage();
+  try {
+    insertSummary(
+      handle,
+      "Session 2 of the project covered the controller and the lexical retrieval boundary.",
+      { kind: "context", tags: ["session", "controller"] },
+    );
+    const livePhrase =
+      "I don't have a specific summary for session 2 in the available memories.";
+    const { fetchImpl, calls } = scriptFetch(() => okChatResponse(livePhrase));
+    const out = await runRecall(handle, {
+      text: "session 2",
+      fetchImpl,
+    });
+    assert.equal(calls.length, 1, "provider must be called exactly once before reroute");
+    assert.equal(out.status, "weak_match");
+    if (out.status !== "weak_match") throw new Error("unreachable");
+    assert.ok(
+      out.summaries.length > 0,
+      "weak_match must surface at least one summary",
+    );
+    assert.ok(
+      out.summaries.length <= 3,
+      "weak_match must cap at 3 summaries",
+    );
+    assert.ok(out.coverage.topScore > 0, "coverage.topScore must be > 0");
+    assert.ok(
+      out.coverage.supportingCount > 0,
+      "coverage.supportingCount must be > 0",
+    );
+  } finally {
+    rmStorage(tmp, handle);
+  }
+});
+
+test("recall: weak_match (b) original failure paraphrase -> weak_match with the same shape", async () => {
+  const { tmp, handle } = mkStorage();
+  try {
+    insertSummary(
+      handle,
+      "The project uses Postgres 16 for the primary store.",
+      { kind: "fact", tags: ["postgres", "storage"] },
+    );
+    const { fetchImpl, calls } = scriptFetch(() =>
+      okChatResponse("I don't have specific details about that."),
+    );
+    const out = await runRecall(handle, {
+      text: "What database does the project use?",
+      fetchImpl,
+    });
+    assert.equal(calls.length, 1);
+    assert.equal(out.status, "weak_match");
+    if (out.status !== "weak_match") throw new Error("unreachable");
+    assert.ok(out.summaries.length > 0 && out.summaries.length <= 3);
+    assert.ok(out.coverage.topScore > 0);
+    assert.ok(out.coverage.supportingCount > 0);
+  } finally {
+    rmStorage(tmp, handle);
+  }
+});
+
+test("recall: weak_match (c) strong-overlap control — substantive answer for '5 explorer subagents' must remain answered (regression guard)", async () => {
+  const { tmp, handle } = mkStorage();
+  try {
+    // Store a summary that strongly overlaps the query.
+    // The synthesis LLM is given this summary and returns a
+    // substantive answer (no refusal). The controller must
+    // route this as `answered`, NOT `weak_match`. This pins
+    // that the refusal detector still gates the new
+    // `weak_match` reroute — a substantive answer does not
+    // trigger the new branch.
+    insertSummary(
+      handle,
+      "The project dispatches 5 explorer subagents to scan the local store before answering.",
+      { kind: "fact", tags: ["explorer", "subagents"] },
+    );
+    const answer =
+      "The project dispatches 5 explorer subagents to scan the local store before answering.";
+    const { fetchImpl, calls } = scriptFetch(() => okChatResponse(answer));
+    const out = await runRecall(handle, {
+      text: "5 explorer subagents",
+      fetchImpl,
+    });
+    assert.equal(calls.length, 1);
+    assert.equal(out.status, "answered");
+    if (out.status !== "answered") throw new Error("unreachable");
+    assert.equal(out.answer, answer);
+    // The `weak_match` fields must NOT be present on an
+    // answered outcome.
+    assert.equal(out.summaries, undefined);
+    assert.equal(out.coverage, undefined);
+  } finally {
+    rmStorage(tmp, handle);
+  }
+});
+
+test("recall: weak_match (d) zero-overlap query -> no_memory (unchanged: thin-match branch does not fire when the ranker finds nothing)", async () => {
+  const { tmp, handle } = mkStorage();
+  try {
+    // Insert summaries that share zero content tokens with
+    // the query. The lexical ranker returns zero hits, the
+    // controller short-circuits with `no_memory` BEFORE
+    // calling the provider — so the new `weak_match` reroute
+    // does not fire even if the provider would have
+    // produced a refusal.
+    insertSummary(
+      handle,
+      "The kitchen dishwasher runs nightly at 11pm Eastern.",
+      { kind: "context", tags: ["kitchen", "schedule"] },
+    );
+    insertSummary(
+      handle,
+      "Office plants are watered on a biweekly rotation by the facilities team.",
+      { kind: "context", tags: ["plants", "office"] },
+    );
+    const { fetchImpl, calls } = scriptFetch(() =>
+      // Even with a refusal phrase, the ranker returning
+      // empty means the provider is not called and the
+      // controller returns `no_memory` directly.
+      okChatResponse("I don't have any details about that topic."),
+    );
+    const out = await runRecall(handle, {
+      text: "What database does the project use?",
+      fetchImpl,
+    });
+    assert.equal(calls.length, 0, "provider must not be called when the ranker finds nothing");
+    assert.equal(out.status, "no_memory");
+    if (out.status !== "no_memory") throw new Error("unreachable");
+    assert.equal(out.summaries, undefined);
+    assert.equal(out.coverage, undefined);
+  } finally {
+    rmStorage(tmp, handle);
+  }
+});
+
+test("recall: weak_match (e) structuredContent.weak_match shape — <= 3 summaries, coverage has both fields, no `message` field on the wire", async () => {
+  const { tmp, handle } = mkStorage();
+  try {
+    // Drive the controller to produce a real weak_match
+    // outcome, then route it through the wire-format
+    // projection helpers to assert the `structuredContent`
+    // shape on the wire.
+    insertSummary(
+      handle,
+      "Session 2 of the project covered the controller and the lexical retrieval boundary.",
+      { kind: "context", tags: ["session", "controller"] },
+    );
+    insertSummary(
+      handle,
+      "Session 2 also covered the storage layer and the schema migrations.",
+      { kind: "context", tags: ["session", "storage"] },
+    );
+    insertSummary(
+      handle,
+      "Session 2 included a deep dive on the safety pre-check classifier.",
+      { kind: "context", tags: ["session", "safety"] },
+    );
+    insertSummary(
+      handle,
+      "Session 2 wrapped up with the benchmark corpus expansion.",
+      { kind: "context", tags: ["session", "benchmark"] },
+    );
+    const { fetchImpl, calls } = scriptFetch(() =>
+      okChatResponse(
+        "I don't have a specific summary for session 2 in the available memories.",
+      ),
+    );
+    const outcome = await runRecallController(handle, "session 2", {
+      providerFetchImpl: fetchImpl,
+      providerPrimaryApiKey: PRIMARY_KEY,
+      providerFallbackApiKey: FALLBACK_KEY,
+    });
+    assert.equal(outcome.status, "weak_match");
+    if (outcome.status !== "weak_match") throw new Error("unreachable");
+    // Cap-at-3 invariant on the controller's outcome.
+    assert.ok(
+      outcome.summaries.length <= 3,
+      `weak_match.summaries must be capped at 3 (got ${outcome.summaries.length})`,
+    );
+    // Coverage block has both fields, both numeric.
+    assert.equal(typeof outcome.coverage.topScore, "number");
+    assert.equal(typeof outcome.coverage.supportingCount, "number");
+    assert.ok(outcome.coverage.topScore > 0);
+    assert.ok(outcome.coverage.supportingCount > 0);
+    // Build the wire-format `RecallResult` shape by hand
+    // from the controller outcome (mirroring what
+    // `formatOutcome` does for this status). The projection
+    // helpers below read this `RecallResult` to produce the
+    // public `text` and the `structuredContent`.
+    const toolResult: RecallResult = {
+      status: "weak_match",
+      message: WEAK_MATCH_PUBLIC_MESSAGE,
+      summaries: [...outcome.summaries],
+      coverage: { ...outcome.coverage },
+    };
+    // The public `text` block is the locked public prose.
+    const wireText = buildRecallPublicText(toolResult);
+    assert.equal(wireText, WEAK_MATCH_PUBLIC_MESSAGE);
+    // The structuredContent carries no `message` field.
+    const wireStructured = buildRecallStructuredContent(toolResult);
+    assert.equal(wireStructured.status, "weak_match");
+    if (wireStructured.status !== "weak_match") throw new Error("unreachable");
+    assert.ok(
+      wireStructured.summaries !== undefined,
+      "structuredContent.weak_match.summaries must be present",
+    );
+    assert.ok(
+      wireStructured.summaries.length <= 3,
+      "structuredContent.weak_match.summaries must be <= 3",
+    );
+    assert.ok(
+      wireStructured.coverage !== undefined,
+      "structuredContent.weak_match.coverage must be present",
+    );
+    assert.equal(typeof wireStructured.coverage.topScore, "number");
+    assert.equal(typeof wireStructured.coverage.supportingCount, "number");
+    // The `message` field is explicitly NOT on the wire.
+    assert.equal(
+      (wireStructured as unknown as { message?: unknown }).message,
+      undefined,
+      "structuredContent.weak_match must not include a `message` field",
+    );
+    // No memory-id reference anywhere in the summaries or
+    // the coverage block (the no-IDs rule is enforced at
+    // the schema level, but we still assert the surface is
+    // clean).
+    for (const s of wireStructured.summaries) {
+      assert.ok(
+        !/#[0-9]+/.test(s),
+        "weak_match.summaries must not contain a `#N` memory-id reference",
+      );
+    }
+    assert.equal(
+      (wireStructured.coverage as unknown as { memoryId?: unknown }).memoryId,
+      undefined,
+      "weak_match.coverage must not contain a `memoryId` field",
+    );
+    assert.equal(
+      (wireStructured.coverage as unknown as { id?: unknown }).id,
+      undefined,
+      "weak_match.coverage must not contain an `id` field",
+    );
+  } finally {
+    rmStorage(tmp, handle);
+  }
+});
+
+test("recall: weak_match (f) regression — substantive answer (false-positive guard) still routes to answered, not weak_match", async () => {
+  const { tmp, handle } = mkStorage();
+  try {
+    insertSummary(
+      handle,
+      "The project uses Postgres 16 for the primary store.",
+      { kind: "fact", tags: ["postgres", "storage"] },
+    );
+    // A substantive answer that happens to contain the word
+    // "details" in a normal sentence. The refusal detector
+    // must NOT fire (the sentence is not a refusal shape),
+    // and the controller must NOT reroute this to
+    // `weak_match` — it stays as `answered`. This is the
+    // regression guard for the new `weak_match` branch: a
+    // false positive on `isProviderRefusal` would silently
+    // move substantive answers out of `answered`.
+    const answer =
+      "The project uses Postgres 16. The reasoning behind that choice is its stronger JSON support and detailed schema validation.";
+    const { fetchImpl, calls } = scriptFetch(() => okChatResponse(answer));
+    const out = await runRecall(handle, {
+      text: "What database does the project use?",
+      fetchImpl,
+    });
+    assert.equal(calls.length, 1);
+    assert.equal(out.status, "answered");
+    if (out.status !== "answered") throw new Error("unreachable");
+    assert.equal(out.answer, answer);
+    assert.equal(out.summaries, undefined);
+    assert.equal(out.coverage, undefined);
   } finally {
     rmStorage(tmp, handle);
   }

@@ -99,6 +99,18 @@ export const RECALL_TOOL_DESCRIPTION =
 
 export const NO_RELEVANT_MEMORY = "No relevant memory found.";
 
+/**
+ * Locked public text for the `weak_match` outcome (refusal-
+ * with-thin-match). The synthesis LLM declined to answer but
+ * the lexical ranker surfaced relevant stored memories.
+ * Byte-equal, no LLM involvement. Surfaced verbatim as the
+ * on-the-wire `text` content block for the `weak_match`
+ * status; the top-3 summaries and the coverage block ride
+ * on `structuredContent`.
+ */
+export const WEAK_MATCH_PUBLIC_MESSAGE =
+  "I found relevant memories but could not synthesize a confident answer; the retrieved notes are listed in structuredContent.";
+
 export interface RecallInput {
   text: string;
 }
@@ -174,6 +186,26 @@ export interface RecallResult {
    * `structuredContent` are the only public-facing outputs.
    */
   notes?: string[];
+  /**
+   * Refusal-with-thin-match: top-3 curator-voice summaries
+   * the ranker surfaced before the synthesis LLM refused
+   * to answer. Populated when `status === "weak_match"`.
+   * Plain strings; no memory-id reference (the no-IDs
+   * rule is enforced at the schema level — the
+   * structuredContent entry is a `string[]`, not a list
+   * of objects with id fields). Capped at 3 entries by
+   * the controller.
+   */
+  summaries?: string[];
+  /**
+   * Refusal-with-thin-match: coverage metadata. Populated
+   * when `status === "weak_match"`. `topScore` is the raw
+   * lexical score of the top-ranked candidate (a ranker-
+   * confidence proxy); `supportingCount` is the count of
+   * candidates that passed the ranker threshold, NOT
+   * capped by the top-K=3 slice.
+   */
+  coverage?: { topScore: number; supportingCount: number };
   /** Safety class, when `status === "rejected"`. */
   safetyClass?: string;
 }
@@ -304,6 +336,24 @@ function formatOutcome(outcome: RecallOutcome): RecallResult {
       return {
         status: "no_memory",
         message: NO_RELEVANT_MEMORY,
+      };
+    case "weak_match":
+      // Refusal-with-thin-match: the synthesis LLM declined
+      // to answer but the lexical ranker did surface
+      // relevant stored memories. The public `message` is
+      // the locked public text (byte-equal, no LLM
+      // involvement); the top-3 summaries and the coverage
+      // block ride on the wire-format projection as
+      // `structuredContent` (see `buildRecallStructuredContent`).
+      // No memory ids are exposed — the `summaries` are
+      // plain strings, the `coverage` block has no id
+      // fields, and the public text carries no `#N`
+      // reference.
+      return {
+        status: "weak_match",
+        message: WEAK_MATCH_PUBLIC_MESSAGE,
+        summaries: [...outcome.summaries],
+        coverage: { ...outcome.coverage },
       };
     case "rejected":
       return {

@@ -79,6 +79,7 @@ export function buildRecallPublicText(result: RecallResult): string {
       }
       return `${cleanNotes.join("\n\n")}\n\n${answer}`;
     }
+    case "weak_match":
     case "no_memory":
     case "rejected":
     case "provider_error":
@@ -92,6 +93,7 @@ export function buildRecallPublicText(result: RecallResult): string {
  *
  * User-approved shape (Phase clean-structured-tool-responses):
  *   - `answered`          -> { status, answer, notes? }
+ *   - `weak_match`        -> { status, summaries, coverage }
  *   - `no_memory`         -> { status }
  *   - `rejected`          -> { status, reason }
  *   - `provider_error`    -> { status, reason }
@@ -99,7 +101,11 @@ export function buildRecallPublicText(result: RecallResult): string {
  * The `reason` field is the redacted, non-echoing reason from
  * the controller. The `notes` field is an array of plain
  * strings (no `Note:` prefix, no note `type` / `severity`).
- * No memory ids are included.
+ * The `weak_match.summaries` field is the controller's top-3
+ * curator-voice summaries (plain strings, no memory-id
+ * reference); the `coverage` block carries the raw lexical
+ * top-score and the supporting candidate count. No memory
+ * ids are included in any shape.
  */
 export function buildRecallStructuredContent(
   result: RecallResult,
@@ -117,6 +123,27 @@ export function buildRecallStructuredContent(
         out.notes = notes;
       }
       return out;
+    }
+    case "weak_match": {
+      // `summaries` and `coverage` are guaranteed populated
+      // by `formatOutcome` for this status. We defensively
+      // default to empty arrays / zero coverage so a
+      // malformed input does not leak `undefined` onto the
+      // wire (the Zod schema rejects `undefined` for these
+      // fields).
+      const summaries = result.summaries ?? [];
+      const coverage = result.coverage ?? {
+        topScore: 0,
+        supportingCount: 0,
+      };
+      return {
+        status: "weak_match",
+        summaries: [...summaries],
+        coverage: {
+          topScore: coverage.topScore,
+          supportingCount: coverage.supportingCount,
+        },
+      };
     }
     case "no_memory":
       return { status: "no_memory" };
