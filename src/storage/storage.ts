@@ -119,13 +119,67 @@ export function initStorage(config: StorageConfig = {}): StorageHandle {
   // FTS5 is part of the retrieval variant set. We create the virtual
   // table on top of a stub columns; raw text persistence is gated by
   // the `remember` tool which currently refuses to write.
+  //
+  // The `memories_fts` index is kept in sync with the `memories`
+  // content table by three triggers (insert / update / delete). The
+  // `terms` column is the FTS5-indexed text and stores the
+  // controller-normalized `summary`. The `memory_id` column is
+  // UNINDEXED (stored, not searched) so callers can join back to
+  // the content table.
+  //
+  // The delete and update paths use a plain `DELETE FROM
+  // memories_fts WHERE rowid = ?` rather than the FTS5 `'delete'`
+  // command (SQLite FTS5 docs §4.4.3). The FTS5 `'delete'` command
+  // does not work reliably in this SQLite build for FTS5 tables
+  // that include UNINDEXED columns — it raises a generic "SQL logic
+  // error" — so the plain DELETE is used as the working
+  // equivalent. The FTS5 `rowid` is set explicitly to match
+  // `memories.rowid` for stable joins; `COALESCE(..., '')` coerces
+  // NULL summaries to an empty document (the schema allows NULL
+  // summary; an empty document simply doesn't match any FTS5
+  // query).
   try {
     db.exec(`
       CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
         memory_id UNINDEXED,
         terms
       );
+
+      CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
+        INSERT INTO memories_fts(rowid, memory_id, terms)
+        VALUES (new.rowid, new.id, COALESCE(new.summary, ''));
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
+        DELETE FROM memories_fts WHERE rowid = old.rowid;
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
+        DELETE FROM memories_fts WHERE rowid = old.rowid;
+        INSERT INTO memories_fts(rowid, memory_id, terms)
+        VALUES (new.rowid, new.id, COALESCE(new.summary, ''));
+      END;
     `);
+
+    // One-shot backfill: index any pre-existing rows in `memories`
+    // that are not already represented in `memories_fts`. This
+    // handles the latent bug where the FTS5 table was created but
+    // never populated (no triggers, no writer code path). After the
+    // first run on a given DB, the index is fully populated and the
+    // triggers keep it in sync going forward; subsequent startups
+    // are a no-op because the `INSERT OR IGNORE` skips rows whose
+    // `rowid` already exists in the FTS5 table.
+    //
+    // Note: the FTS5 `'rebuild'` command cannot be used here because
+    // `memories_fts` is not linked to `memories` via the FTS5
+    // `content=` option; the FTS5 table is its own content store.
+    // An explicit `INSERT OR IGNORE ... SELECT` is the correct
+    // backfill for this schema.
+    db.exec(
+      `INSERT OR IGNORE INTO memories_fts(rowid, memory_id, terms)
+         SELECT rowid, id, COALESCE(summary, '')
+           FROM memories;`,
+    );
   } catch (err) {
     // FTS5 is part of SQLite; if missing, retrieval benchmarks will
     // surface the limitation. We log and continue.
