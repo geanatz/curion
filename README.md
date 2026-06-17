@@ -21,10 +21,11 @@ to a real end-to-end pipeline:
   `provider_error`.
 - `recall(text)` runs lexical retrieval over the local store, an ambiguity
   detector and a resolved-history detector on the answered outcome, and
-  synthesis. Outcomes are `answered`, `no_memory`, `rejected`, or
-  `provider_error`. The `no_memory` outcome is the existing
-  `No relevant memory found.` text — it is not the only path the tool
-  takes.
+  synthesis. Outcomes are `answered`, `weak_match`, `no_memory`,
+  `rejected`, or `provider_error`. The `no_memory` outcome is the
+  existing `No relevant memory found.` text — it is not the only path the
+  tool takes. The `weak_match` outcome is the refusal-with-thin-match
+  reroute (see `structuredContent` shapes below).
 
 The **provider adapter** in `src/providers/memory-analysis.ts` is a real,
 tested adapter that performs chat-completion calls against MiniMax
@@ -93,9 +94,30 @@ structured payload.
 Recall (`recall(text)`):
 
 - `answered`            — `{ status: "answered", answer, notes? }`
+- `weak_match`          — `{ status: "weak_match", summaries, coverage }`
 - `no_memory`           — `{ status: "no_memory" }`
 - `rejected`            — `{ status: "rejected", reason }`
 - `provider_error`      — `{ status: "provider_error", reason }`
+
+The `weak_match` status is the refusal-with-thin-match
+reroute. When the synthesis LLM declines to answer (the
+internal `isProviderRefusal` detector fires) but the
+lexical ranker found at least one stored summary above the
+relevance threshold, the controller exposes a
+`weak_match` outcome instead of a misleading
+`no_memory` ("no relevant memory was found" would be
+incorrect — the ranker DID find something) or a
+fabricated `answered` (which would leak the refusal
+prose). The public `text` content block is the locked
+prose string `"I found relevant memories but could not
+synthesize a confident answer; the retrieved notes are
+listed in structuredContent."` (byte-equal, no LLM
+involvement); `structuredContent.summaries` carries
+the top-3 curator-voice summaries (plain strings, no
+memory-id reference), and `structuredContent.coverage`
+carries `{ topScore, supportingCount }` (raw lexical
+top-score and the count of candidates that passed the
+ranker threshold).
 
 When the recall-side ambiguity detector or resolved-history detector
 fires on the answered outcome, the formatted note is included as a

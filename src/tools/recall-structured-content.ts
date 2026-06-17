@@ -3,13 +3,27 @@
  *
  * User-approved shape (Phase clean-structured-tool-responses):
  *   - answered:            { status: "answered", answer: string, notes?: string[] }
- *   - no_memory:          { status: "no_memory" }
- *   - rejected:           { status: "rejected", reason: string }
- *   - provider_error:     { status: "provider_error", reason: string }
+ *   - weak_match:          { status: "weak_match", summaries: string[], coverage: { topScore: number, supportingCount: number } }
+ *   - no_memory:           { status: "no_memory" }
+ *   - rejected:            { status: "rejected", reason: string }
+ *   - provider_error:      { status: "provider_error", reason: string }
  *
  * Rules:
  *   - No `message` field.
  *   - No memory ids (`memoryId`, `sourceIds`, `memoryIds`).
+ *     The no-IDs rule is enforced at the schema level: there
+ *     is no id-bearing field on any status variant. The
+ *     `weak_match.summaries` field is a `string[]` (each
+ *     entry is plain curator-voice prose, no id-bearing
+ *     child objects), and the `weak_match.coverage` block
+ *     has no id fields. A future curator summary that
+ *     contains an id reference in its prose would have the
+ *     same write-path source as the existing `answered.answer`
+ *     field; the schema does not sanitize summary content,
+ *     but the no-IDs rule is consistent across the tool
+ *     surface (a curator that wrote `#N` into a summary
+ *     would surface that text on both the `answered` and
+ *     `weak_match` paths).
  *   - No note `type` / `severity`. `notes` are plain strings only.
  *   - No `Note:` prefix on notes. The recall-side note formatters
  *     return prose with the `Note:` prefix; the wire projection
@@ -35,6 +49,7 @@ import { z } from "zod";
 /** The set of valid `status` values for the `recall` tool. */
 export const RECALL_STATUS_VALUES = [
   "answered",
+  "weak_match",
   "no_memory",
   "rejected",
   "provider_error",
@@ -55,6 +70,14 @@ export const RECALL_STRUCTURED_CONTENT_SCHEMA = z
     // answered
     answer: z.string().optional(),
     notes: z.array(z.string()).optional(),
+    // weak_match
+    summaries: z.array(z.string()).optional(),
+    coverage: z
+      .object({
+        topScore: z.number(),
+        supportingCount: z.number(),
+      })
+      .optional(),
     // rejected / provider_error
     reason: z.string().optional(),
   })

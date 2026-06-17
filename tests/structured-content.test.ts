@@ -372,6 +372,7 @@ test("server: recall tool outputSchema exposes the user-approved discriminated s
     "no_memory",
     "provider_error",
     "rejected",
+    "weak_match",
   ]);
 });
 

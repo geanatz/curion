@@ -694,7 +694,7 @@ test("e2e: both tools expose outputSchema with a strict status enum", async () =
       const values = (status["enum"] as string[]).slice().sort();
       const expected = toolName === "remember"
         ? ["clarification_needed", "provider_error", "rejected", "saved"]
-        : ["answered", "no_memory", "provider_error", "rejected"];
+        : ["answered", "no_memory", "provider_error", "rejected", "weak_match"];
       assert.deepEqual(values, expected);
     }
   } finally {
