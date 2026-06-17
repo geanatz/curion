@@ -67,7 +67,7 @@ export interface RememberControllerOptions {
   confidenceThreshold?: number;
   /**
    * Max accepted summary length. Provider summaries above this are
-   * truncated to the cap before persistence. Default `500`.
+   * truncated to the cap before persistence. Default `1440`.
    */
   maxSummaryLength?: number;
   /**
@@ -121,7 +121,7 @@ export interface RememberControllerOptions {
 // ---------------------------------------------------------------------------
 
 export const DEFAULT_CONFIDENCE_THRESHOLD = 0.5;
-export const DEFAULT_MAX_SUMMARY_LENGTH = 500;
+export const DEFAULT_MAX_SUMMARY_LENGTH = 1440;
 
 /** Internal kind mapping table: provider classification -> internal kind. */
 const CLASSIFICATION_TO_KIND: Record<string, MemoryKind> = {
