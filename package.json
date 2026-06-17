@@ -111,7 +111,8 @@
     "test:dense-live": "node --import tsx --test tests/_helpers/retrieval-dense-vector-live.test.ts",
     "test:dense-qwen3-live": "node --import tsx --test tests/_helpers/retrieval-dense-qwen3-live.test.ts",
     "test:dense-embeddinggemma-live": "node --import tsx --test tests/_helpers/retrieval-dense-embeddinggemma-live.test.ts",
-    "test:dense-bge-m3-live": "node --import tsx --test tests/_helpers/retrieval-dense-bge-m3-live.test.ts"
+    "test:dense-bge-m3-live": "node --import tsx --test tests/_helpers/retrieval-dense-bge-m3-live.test.ts",
+    "probe:recall-synthesis": "tsx scripts/recall-synthesis-budget-probe.ts"
   },
   "engines": {
     "node": ">=20"

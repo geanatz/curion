@@ -17,10 +17,10 @@
  *   5. If relevant memories exist, send the small set of top
  *      summaries to the recall-synthesis provider and ask it to
  *      answer the query from memory only.
- *   6. Validate the synthesized answer: non-empty, bounded length,
- *      no obvious secret-shaped fragments, no obvious raw-dump
- *      shape. If validation fails, return `provider_error` (we
- *      never expose an unsafe or fabricated public answer).
+ *   6. Validate the synthesized answer: non-empty, no obvious
+ *      secret-shaped fragments, no obvious raw-dump shape. If
+ *      validation fails, return `provider_error` (we never expose
+ *      an unsafe or fabricated public answer).
  *   7. Return the synthesized answer to the tool layer.
  *
  * Design notes:
@@ -169,8 +169,6 @@ export interface RecallControllerOptions {
   relevanceThreshold?: number;
   /** Max number of top summaries sent to the provider. Default 5. */
   topK?: number;
-  /** Max accepted synthesis answer length. Default 800. */
-  maxAnswerLength?: number;
   /** Optional fetch override for tests. */
   providerFetchImpl?: typeof fetch;
   /** Optional API key override for the primary provider. */
@@ -192,8 +190,12 @@ export interface RecallControllerOptions {
 // ---------------------------------------------------------------------------
 // Defaults
 // ---------------------------------------------------------------------------
-
-export const DEFAULT_MAX_ANSWER_LENGTH = 800;
+//
+// No length cap on the synthesized answer. The synthesis prompt and
+// the disciplined model choice (gpt-oss-120b as primary) control
+// length on the input side. The hard 800-character cap that lived
+// here was a placeholder; it has been removed entirely so natural-
+// length answers go to the wire unmodified.
 
 // ---------------------------------------------------------------------------
 // Controller
@@ -215,10 +217,9 @@ export const DEFAULT_MAX_ANSWER_LENGTH = 800;
  *     query). The query text is not logged.
  *   - If the provider fails, we return `provider_error` with a
  *     short, redacted reason. We never fabricate an answer.
- *   - If the provider's answer is empty, exceeds the length cap,
- *     or contains a secret-shaped fragment or a raw-dump shape,
- *     we return `provider_error`. We never expose an unsafe
- *     public answer.
+ *   - If the provider's answer is empty or contains a
+ *     secret-shaped fragment or a raw-dump shape, we return
+ *     `provider_error`. We never expose an unsafe public answer.
  */
 export async function runRecallController(
   storage: StorageHandle,
@@ -227,7 +228,6 @@ export async function runRecallController(
 ): Promise<RecallOutcome> {
   const threshold = options.relevanceThreshold ?? DEFAULT_RELEVANCE_THRESHOLD;
   const topK = options.topK ?? DEFAULT_TOP_K;
-  const maxLen = options.maxAnswerLength ?? DEFAULT_MAX_ANSWER_LENGTH;
   const storageLimit = options.storageLimit ?? 200;
 
   // -- 1. Safety pre-check on the query -------------------------------
@@ -381,7 +381,7 @@ export async function runRecallController(
   }
 
   // -- 5. Validate the synthesized answer ----------------------------
-  const validation = validateAnswer(result.answer, maxLen);
+  const validation = validateAnswer(result.answer);
   if (!validation.ok) {
     if (validation.reason === "refusal_detected") {
       // Refusal-with-thin-match reroute. The synthesis LLM
@@ -659,29 +659,33 @@ function isProviderRefusal(text: string): boolean {
  * Order of operations (each gate may short-circuit with `AnswerFail`):
  *
  *   1. Empty-answer gate            (skip empty or whitespace-only input)
- *   2. Reasoning-block strip        (remove `<think>...</think>` etc.)
+ *   2. Reasoning-block strip        (remove `think...` etc.)
  *   3. Empty-after-strip gate       (reject if stripping left nothing)
  *   4. Whitespace normalization     (CRLF/tabs -> single space)
- *   5. Length cap                   (bound to `maxLen`)
- *   6. Secret-redaction step        (`redactSummary` redaction)
- *   7. Empty-after-redaction gate   (reject if redaction ate everything)
- *   8. Short-after-redaction gate   (reject if non-secret content is thin)
- *   9. Memory-id reference strip    (remove `Memory #N`, `entry #N`,
+ *   5. Secret-redaction step        (`redactSummary` redaction)
+ *   6. Empty-after-redaction gate   (reject if redaction ate everything)
+ *   7. Short-after-redaction gate   (reject if non-secret content is thin)
+ *   8. Memory-id reference strip    (remove `Memory #N`, `entry #N`,
  *                                    bare `#N`, etc., enforcing the
  *                                    no-IDs-in-public-text invariant
  *                                    on the content path)
- *  10. Raw-dump check               (reject structural-looking dumps)
- *  11. Refusal-shape check          (reject provider refusal phrasings)
+ *   9. Raw-dump check               (reject structural-looking dumps)
+ *  10. Refusal-shape check          (reject provider refusal phrasings)
  *
- * The memory-id strip (step 9) runs after secret-redaction (so
+ * The memory-id strip (step 8) runs after secret-redaction (so
  * redaction is not perturbed) and before the raw-dump and refusal
  * checks (so those detectors see the stripped text). It enforces the
  * no-IDs-in-public-text invariant on the `answered` content path:
  * the synthesis LLM may echo the id-bearing `- #N kind: summary`
  * format it sees in its prompt, and that echo must not reach the
  * public `text` block.
+ *
+ * Note: there is intentionally NO length cap here. The synthesis
+ * prompt and the disciplined model choice control length on the
+ * input side; on the output side natural-length answers go to the
+ * wire unmodified.
  */
-function validateAnswer(answer: string, maxLen: number): AnswerOk | AnswerFail {
+function validateAnswer(answer: string): AnswerOk | AnswerFail {
   if (typeof answer !== "string" || answer.trim().length === 0) {
     return { ok: false, reason: "provider returned an empty answer" };
   }
@@ -697,11 +701,8 @@ function validateAnswer(answer: string, maxLen: number): AnswerOk | AnswerFail {
       reason: "provider answer was only reasoning; no visible answer to return",
     };
   }
-  // Normalize whitespace and bound length.
-  let text = stripped0.replace(/\r\n?/g, "\n").replace(/[ \t]+/g, " ");
-  if (text.length > maxLen) {
-    text = `${text.slice(0, maxLen).trimEnd()}…`;
-  }
+  // Normalize whitespace. No length cap — see the doc comment above.
+  const text = stripped0.replace(/\r\n?/g, "\n").replace(/[ \t]+/g, " ");
   // Defense in depth: redact any secret-shaped fragment that the
   // provider may have echoed.
   const redacted = redactSummary(text);
@@ -742,7 +743,7 @@ function validateAnswer(answer: string, maxLen: number): AnswerOk | AnswerFail {
     };
   }
   // Refusal-shape check runs last: the structural-safety gates
-  // above (empty, reasoning-strip, length, secret-redaction,
+  // above (empty, reasoning-strip, secret-redaction,
   // short-after-redaction, raw-dump) have already cleared, and
   // this gate only fires on text that has passed them. A refusal
   // text that also contains a secret fragment is still caught by
