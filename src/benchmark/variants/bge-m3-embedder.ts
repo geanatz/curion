@@ -271,7 +271,7 @@ export type BgeM3TextKind = "query" | "document";
  * All fields are optional; the defaults are
  * the pinned model + the on-disk cache
  * directory under
- * `.cortex/transformers-cache/`.
+ * `.curion/transformers-cache/`.
  *
  * The defaults match the user's approved
  * research brief:
@@ -340,7 +340,7 @@ export interface BgeM3EmbedderOptions {
   /**
    * Local cache directory for downloaded
    * model artifacts. Default:
-   * `<cwd>/.cortex/transformers-cache/`.
+   * `<cwd>/.curion/transformers-cache/`.
    * The directory is created on first use;
    * the benchmark runner does not clean it
    * up.
@@ -514,7 +514,7 @@ export class BgeM3Embedder {
     this.pooling = options.pooling ?? "cls";
     this.normalize = options.normalize ?? true;
     this.cacheDir =
-      options.cacheDir ?? `${process.cwd()}/.cortex/transformers-cache`;
+      options.cacheDir ?? `${process.cwd()}/.curion/transformers-cache`;
     this.probedDim = options.dim ?? 1024;
     // Placeholder metadata. The real status /
     // dim / runtimeVersion are populated in

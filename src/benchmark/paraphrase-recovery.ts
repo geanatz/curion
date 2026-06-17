@@ -1679,7 +1679,7 @@ export function formatParaphraseRecoveryReport(
 ): string {
   const lines: string[] = [];
   lines.push(
-    "=== cortex-mcp-v2 paraphrase-specific recovery / refined-threshold experiment ===",
+    "=== curion paraphrase-specific recovery / refined-threshold experiment ===",
   );
   lines.push(`generated at: ${report.generatedAt}`);
   lines.push("");

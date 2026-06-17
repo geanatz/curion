@@ -29,7 +29,7 @@
  *     --log <log-path> --out <json-path> \
  *     --source <source-string> --model <model-id>
  *
- * Default `--log`: `.cortex/verify-logs/embeddinggemma-hybrid-dense.log`.
+ * Default `--log`: `.curion/verify-logs/embeddinggemma-hybrid-dense.log`.
  * Default `--out`: `src/benchmark/data/false-abstention-damage-semantic-evidence.json`.
  * Default `--source`: `embeddinggemma-hybrid-dense-176-queries-v1`.
  * Default `--model`: `onnx-community/embeddinggemma-300m-ONNX`.
@@ -59,7 +59,7 @@ interface CliArgs {
 
 function parseArgs(argv: ReadonlyArray<string>): CliArgs {
   const out: CliArgs = {
-    log: ".cortex/verify-logs/embeddinggemma-hybrid-dense.log",
+    log: ".curion/verify-logs/embeddinggemma-hybrid-dense.log",
     out: "src/benchmark/data/false-abstention-damage-semantic-evidence.json",
     source: "embeddinggemma-hybrid-dense-176-queries-v1",
     model: "onnx-community/embeddinggemma-300m-ONNX",

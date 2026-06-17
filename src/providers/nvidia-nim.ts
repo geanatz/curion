@@ -1,7 +1,7 @@
 /**
  * NVIDIA NIM provider (skeleton, fallback).
  *
- * Reads `CORTEX_PROVIDER_FALLBACK_KEY` (or `NVIDIA_NIM_API_KEY`) from
+ * Reads `CURION_PROVIDER_FALLBACK_KEY` (or `NVIDIA_NIM_API_KEY`) from
  * the environment. When unset, behaves like a stub. No network call
  * is made in Phase 1.
  *
@@ -16,7 +16,7 @@ export class NvidiaNimProvider implements Provider {
   readonly name = PROVIDER_NAME;
 
   isConfigured(): boolean {
-    return Boolean(process.env.CORTEX_PROVIDER_FALLBACK_KEY ?? process.env.NVIDIA_NIM_API_KEY);
+    return Boolean(process.env.CURION_PROVIDER_FALLBACK_KEY ?? process.env.NVIDIA_NIM_API_KEY);
   }
 
   async embed(text: string): Promise<EmbeddingResult> {
@@ -25,7 +25,7 @@ export class NvidiaNimProvider implements Provider {
         provider: PROVIDER_NAME,
         dim: 0,
         vector: [],
-        note: "nvidia-nim: no api key configured (set CORTEX_PROVIDER_FALLBACK_KEY)",
+        note: "nvidia-nim: no api key configured (set CURION_PROVIDER_FALLBACK_KEY)",
       };
     }
     return {

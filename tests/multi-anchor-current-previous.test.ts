@@ -63,7 +63,7 @@
  *      the gap block, the treatment summary
  *      block, and the category-change keys.
  *  10. End-to-end on the real lexical baseline
- *      artifact under `.cortex/benchmark/`.
+ *      artifact under `.curion/benchmark/`.
  *  11. CLI argument parsing: default modes +
  *      override flags.
  *  12. Per-category change rollup: the
@@ -858,7 +858,7 @@ test("multi-anchor-current-previous: per-variant metrics include the documented 
 
 test("multi-anchor-current-previous: end-to-end CLI on the real lexical baseline artifact", async () => {
   const baselinePath = findMostRecentArtifact(
-    ".cortex/benchmark",
+    ".curion/benchmark",
     "retrieval-baseline-",
   );
   if (!baselinePath) return; // skip if no artifact on disk
@@ -1426,7 +1426,7 @@ test("multi-anchor-current-previous: evals/queries id mismatch throws", () => {
 
 test("multi-anchor-current-previous: per-query alignment with prior diagnostic on the real artifact", () => {
   const baselinePath = findMostRecentArtifact(
-    ".cortex/benchmark",
+    ".curion/benchmark",
     "retrieval-baseline-",
   );
   if (!baselinePath) return;

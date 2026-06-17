@@ -47,7 +47,7 @@
  * given embedder); the AUROC / risk-coverage / slice
  * math is pure; the per-query example selection is
  * pure. The CLI entry point writes a timestamped
- * artifact under `.cortex/benchmark/`; the on-disk
+ * artifact under `.curion/benchmark/`; the on-disk
  * shape is byte-stable for a fixed audit config.
  */
 
@@ -610,7 +610,7 @@ export function formatAbstentionAuditReport(
   report: AbstentionAuditReport,
 ): string {
   const lines: string[] = [];
-  lines.push("=== cortex-mcp-v2 retrieval abstention audit ===");
+  lines.push("=== curion retrieval abstention audit ===");
   lines.push(`generated at: ${report.generatedAt}`);
   lines.push("");
   lines.push("--- config ---");

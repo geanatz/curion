@@ -218,8 +218,8 @@ export const BENCHMARK_RECORDS: BenchmarkMemoryRecord[] = [
     id: 4,
     kind: "fact",
     summary:
-      "Project-local storage lives in a hidden .cortex directory at the repository root, backed by a single SQLite file.",
-    tags: ["storage", "sqlite", "cortex"],
+      "Project-local storage lives in a hidden .curion directory at the repository root, backed by a single SQLite file.",
+    tags: ["storage", "sqlite", "curion"],
   },
 
   // -------------------------------------------------------------------------
@@ -332,14 +332,14 @@ export const BENCHMARK_RECORDS: BenchmarkMemoryRecord[] = [
     id: 18,
     kind: "reference",
     summary:
-      "The on-call runbook covers incident triage, common alerts, and the escalation path; the runbook lives at docs/runbook.md.",
+      "The on-call runbook covers incident triage, common alerts, and the escalation path.",
     tags: ["docs", "runbook", "oncall"],
   },
   {
     id: 19,
     kind: "fact",
     summary:
-      "The architecture overview diagram is generated from the source tree at build time and is checked into docs/architecture.md.",
+      "The architecture overview diagram is generated from the source tree at build time.",
     tags: ["docs", "architecture"],
   },
   {
@@ -421,7 +421,7 @@ export const BENCHMARK_RECORDS: BenchmarkMemoryRecord[] = [
     id: 29,
     kind: "decision",
     summary:
-      "API keys are read from environment variables only; no key material is ever written to disk or to the .cortex/ store.",
+      "API keys are read from environment variables only; no key material is ever written to disk or to the .curion/ store.",
     tags: ["security", "secrets", "config"],
   },
   {
@@ -492,7 +492,7 @@ export const BENCHMARK_RECORDS: BenchmarkMemoryRecord[] = [
     id: 38,
     kind: "decision",
     summary:
-      "Log level is controlled by the CORTEX_LOG_LEVEL environment variable and defaults to info; debug logs are filtered out at runtime.",
+      "Log level is controlled by the CURION_LOG_LEVEL environment variable and defaults to info; debug logs are filtered out at runtime.",
     tags: ["monitoring", "logging", "config"],
   },
   {
@@ -506,7 +506,7 @@ export const BENCHMARK_RECORDS: BenchmarkMemoryRecord[] = [
     id: 40,
     kind: "reference",
     summary:
-      "Common alert shapes and the escalation path are documented in the on-call runbook at docs/runbook.md.",
+      "Common alert shapes and the escalation path are documented in the on-call runbook.",
     tags: ["monitoring", "runbook", "oncall"],
   },
 
@@ -624,7 +624,7 @@ export const BENCHMARK_RECORDS: BenchmarkMemoryRecord[] = [
     id: 54,
     kind: "fact",
     summary:
-      "The benchmark runner writes its JSON report under .cortex/benchmark/ and is gitignored; the report is for local inspection only.",
+      "The benchmark runner writes its JSON report under .curion/benchmark/ and is gitignored; the report is for local inspection only.",
     tags: ["testing", "benchmark", "artifacts"],
   },
   {
@@ -766,7 +766,7 @@ export const BENCHMARK_RECORDS: BenchmarkMemoryRecord[] = [
     id: 70,
     kind: "fact",
     summary:
-      "Provider requests are rate-limited per environment; the limit is read from CORTEX_PROVIDER_RATE_LIMIT and defaults to sixty requests per minute.",
+      "Provider requests are rate-limited per environment; the limit is read from CURION_PROVIDER_RATE_LIMIT and defaults to sixty requests per minute.",
     tags: ["security", "rate-limit", "provider"],
   },
   {
@@ -780,7 +780,7 @@ export const BENCHMARK_RECORDS: BenchmarkMemoryRecord[] = [
     id: 72,
     kind: "fact",
     summary:
-      "Audit logs of remember and recall calls are retained for thirty days; the retention window is configured via CORTEX_AUDIT_RETENTION_DAYS.",
+      "Audit logs of remember and recall calls are retained for thirty days; the retention window is configured via CURION_AUDIT_RETENTION_DAYS.",
     tags: ["security", "audit", "retention"],
   },
 
@@ -829,7 +829,7 @@ export const BENCHMARK_RECORDS: BenchmarkMemoryRecord[] = [
     id: 77,
     kind: "fact",
     summary:
-      "Memory persistence uses a single SQLite file under .cortex/; the file is opened with WAL journaling for concurrent reads.",
+      "Memory persistence uses a single SQLite file under .curion/; the file is opened with WAL journaling for concurrent reads.",
     tags: ["data", "persistence", "sqlite"],
   },
   {
@@ -864,7 +864,7 @@ export const BENCHMARK_RECORDS: BenchmarkMemoryRecord[] = [
     id: 81,
     kind: "fact",
     summary:
-      "The TypeScript client SDK is published as @cortex-mcp/sdk; the package is built from src/client/ and is published from CI on every release.",
+      "The TypeScript client SDK is published as @curion/sdk; the package is built from src/client/ and is published from CI on every release.",
     tags: ["client", "sdk", "publish"],
   },
   {
@@ -899,7 +899,7 @@ export const BENCHMARK_RECORDS: BenchmarkMemoryRecord[] = [
     id: 85,
     kind: "fact",
     summary:
-      "Feature flags are read from the CORTEX_FEATURE_FLAGS environment variable; the value is a comma-separated list of flag names.",
+      "Feature flags are read from the CURION_FEATURE_FLAGS environment variable; the value is a comma-separated list of flag names.",
     tags: ["feature-flags", "config", "env"],
   },
   {
@@ -942,7 +942,7 @@ export const BENCHMARK_RECORDS: BenchmarkMemoryRecord[] = [
     id: 90,
     kind: "fact",
     summary:
-      "The fallback provider is configured via CORTEX_PROVIDER_FALLBACK_KEY; an unset key disables fallback and the adapter errors out cleanly.",
+      "The fallback provider is configured via CURION_PROVIDER_FALLBACK_KEY; an unset key disables fallback and the adapter errors out cleanly.",
     tags: ["provider", "routing", "config"],
   },
   {
@@ -1056,7 +1056,7 @@ export const BENCHMARK_RECORDS: BenchmarkMemoryRecord[] = [
     id: 101,
     kind: "fact",
     summary:
-      "API keys are stored in the .cortex/secrets.json file with a chmod 600 permission; the file is gitignored but is the source of truth at runtime.",
+      "API keys are stored in the .curion/secrets.json file with a chmod 600 permission; the file is gitignored but is the source of truth at runtime.",
     tags: ["adversarial", "conflict", "security", "secrets"],
   },
   {
@@ -1350,14 +1350,14 @@ export const BENCHMARK_RECORDS: BenchmarkMemoryRecord[] = [
     id: 129,
     kind: "fact",
     summary:
-      "The audit retention window is configured via CORTEX_AUDIT_RETENTION_DAYS and the audit log is consumed by the weekly on-call digest; the digest is posted to the team channel every Monday morning at 9:00 local time.",
+      "The audit retention window is configured via CURION_AUDIT_RETENTION_DAYS and the audit log is consumed by the weekly on-call digest; the digest is posted to the team channel every Monday morning at 9:00 local time.",
     tags: ["adversarial", "multi-hop-bridge", "security", "monitoring"],
   },
   {
     id: 130,
     kind: "fact",
     summary:
-      "The provider rate-limit is read from CORTEX_PROVIDER_RATE_LIMIT and defaults to sixty requests per minute; the rate-limit interacts with the exponential-backoff retry on 429 that the provider adapter applies before giving up.",
+      "The provider rate-limit is read from CURION_PROVIDER_RATE_LIMIT and defaults to sixty requests per minute; the rate-limit interacts with the exponential-backoff retry on 429 that the provider adapter applies before giving up.",
     tags: ["adversarial", "multi-hop-bridge", "provider", "rate-limit"],
   },
   {

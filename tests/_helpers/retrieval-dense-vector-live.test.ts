@@ -52,11 +52,11 @@ import {
 /**
  * Build a sandboxed cache directory for the live test.
  * The directory is removed on teardown so the test does
- * not leak state into the user's `.cortex/` directory.
+ * not leak state into the user's `.curion/` directory.
  */
 function makeCacheDir(): string {
   return fs.mkdtempSync(
-    path.join(os.tmpdir(), "cortex-dense-live-cache-"),
+    path.join(os.tmpdir(), "curion-dense-live-cache-"),
   );
 }
 

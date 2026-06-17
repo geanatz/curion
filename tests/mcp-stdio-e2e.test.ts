@@ -23,16 +23,16 @@
  *
  * Local / offline / no-network guarantee:
  *   - The server is spawned in an isolated temp cwd so the
- *     project-local `.cortex/` lives under that temp dir and
+ *     project-local `.curion/` lives under that temp dir and
  *     the test does not touch the repo root, the developer's
  *     `.env`, or any real on-disk state.
  *   - The server's env is restricted to a known-safe set
- *     (PATH, HOME, TMPDIR, NODE_*); every CORTEX_* provider
+ *     (PATH, HOME, TMPDIR, NODE_*); every CURION_* provider
  *     key is removed so the provider adapter short-circuits
  *     to `missing-config` and never opens a socket. The
  *     recall pipeline that needs to traverse the provider
  *     path is reached by pre-seeding a single memory row
- *     into the project's `.cortex/cortex.sqlite` *before*
+ *     into the project's `.curion/curion.sqlite` *before*
  *     the server starts, so the controller's relevance
  *     ranking finds a hit and the provider is consulted
  *     — but the adapter's `missing-config` early-return
@@ -74,7 +74,7 @@
  *      this by capturing both streams and asserting that
  *      the only stdout content is parseable JSON-RPC
  *      messages, while stderr contains at least one
- *      `[cortex]` log line.
+ *      `[curion]` log line.
  *  11. Optional: `provider_error` path is reached by
  *      pre-seeding one memory row and querying for a
  *      term that matches the row's summary, in a
@@ -189,7 +189,7 @@ class StdioMcpClient {
 
   /**
    * Spawn the real built server in `cwd`, with `env` exposed
-   * to the child. The default `env` strips every CORTEX_*
+   * to the child. The default `env` strips every CURION_*
    * provider key so the test is hermetic.
    */
   static async start(opts: {
@@ -211,7 +211,7 @@ class StdioMcpClient {
     });
     const client = new StdioMcpClient(child);
     // Wait for the very first stderr line (the
-    // `[cortex] ... starting` info log) so we know the
+    // `[curion] ... starting` info log) so we know the
     // server is up and listening on stdin. This is a
     // signal-only check; we do not block forever — if the
     // server never logs, the subsequent request will time
@@ -221,7 +221,7 @@ class StdioMcpClient {
   }
 
   /**
-   * Build a hermetic env for the child: every CORTEX_*
+   * Build a hermetic env for the child: every CURION_*
    * provider key is removed so the provider adapter
    * short-circuits to `missing-config` and never opens
    * a socket. PATH / HOME / TMPDIR / NODE_* are kept so
@@ -231,17 +231,17 @@ class StdioMcpClient {
     const env: NodeJS.ProcessEnv = {};
     for (const [k, v] of Object.entries(process.env)) {
       if (v === undefined) continue;
-      // Strip every CORTEX_* key (project config), the
+      // Strip every CURION_* key (project config), the
       // provider-specific aliases, and any key that
       // could enable a real network call.
       if (
-        k === "CORTEX_PROVIDER_PRIMARY_KEY" ||
-        k === "CORTEX_PROVIDER_FALLBACK_KEY" ||
+        k === "CURION_PROVIDER_PRIMARY_KEY" ||
+        k === "CURION_PROVIDER_FALLBACK_KEY" ||
         k === "MINIMAX_API_KEY" ||
         k === "NVIDIA_NIM_API_KEY" ||
         k === "GROQ_API_KEY" ||
-        k === "CORTEX_PROJECT_ROOT" ||
-        k === "CORTEX_LOG_LEVEL"
+        k === "CURION_PROJECT_ROOT" ||
+        k === "CURION_LOG_LEVEL"
       ) {
         continue;
       }
@@ -250,7 +250,7 @@ class StdioMcpClient {
     // Force a deterministic log level: `info` so the
     // cold-start `starting` line is emitted on stderr
     // (the test asserts stderr is non-empty).
-    env.CORTEX_LOG_LEVEL = "info";
+    env.CURION_LOG_LEVEL = "info";
     return env;
   }
 
@@ -473,18 +473,18 @@ class StdioMcpClient {
 
 /**
  * Create a fresh isolated project dir under os.tmpdir() and
- * seed a single memory record at the matching `.cortex/`
+ * seed a single memory record at the matching `.curion/`
  * location. Returns the temp dir (already containing the
  * SQLite DB). The temp dir is safe to spawn the server in:
- * the project's `.cortex/` will live there.
+ * the project's `.curion/` will live there.
  */
 function seedProject(opts: { preSeedMemory?: boolean } = {}): {
   tmp: string;
-  cortexDir: string;
+  curionDir: string;
 } {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-mcp-e2e-"));
-  const cortexDir = path.join(tmp, ".cortex");
-  // initStorage creates .cortex/ if missing, opens the
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-mcp-e2e-"));
+  const curionDir = path.join(tmp, ".curion");
+  // initStorage creates .curion/ if missing, opens the
   // SQLite file, and applies the schema migrations. We
   // run it once here so the directory and DB exist
   // *before* the server starts; the server's stdio
@@ -508,7 +508,7 @@ function seedProject(opts: { preSeedMemory?: boolean } = {}): {
   } catch {
     // ignore
   }
-  return { tmp, cortexDir };
+  return { tmp, curionDir };
 }
 
 function rmProject(tmp: string): void {
@@ -548,7 +548,7 @@ test("e2e: initialize handshake returns server identity and capabilities", async
     const resp = await client.request("initialize", {
       protocolVersion: "2024-11-05",
       capabilities: {},
-      clientInfo: { name: "cortex-mcp-e2e-test", version: "0.0.0" },
+      clientInfo: { name: "curion-mcp-e2e-test", version: "0.0.0" },
     });
     assert.equal(resp.error, undefined, `initialize returned error: ${JSON.stringify(resp.error)}`);
     const result = resp.result as {
@@ -558,7 +558,7 @@ test("e2e: initialize handshake returns server identity and capabilities", async
     };
     // serverInfo
     assert.ok(result.serverInfo, "initialize result must include serverInfo");
-    assert.equal(result.serverInfo.name, "cortex-mcp-v2");
+    assert.equal(result.serverInfo.name, "curion");
     assert.equal(typeof result.serverInfo.version, "string");
     assert.ok(result.serverInfo.version.length > 0);
     // protocolVersion
@@ -602,7 +602,7 @@ test("e2e: tools/list returns exactly remember and recall, in that order", async
     const init = await client.request("initialize", {
       protocolVersion: "2024-11-05",
       capabilities: {},
-      clientInfo: { name: "cortex-mcp-e2e-test", version: "0.0.0" },
+      clientInfo: { name: "curion-mcp-e2e-test", version: "0.0.0" },
     });
     assert.equal(init.error, undefined);
     client.notify("notifications/initialized", {});
@@ -630,7 +630,7 @@ test("e2e: both tools expose inputSchema with only `text`, required, additionalP
     await client.request("initialize", {
       protocolVersion: "2024-11-05",
       capabilities: {},
-      clientInfo: { name: "cortex-mcp-e2e-test", version: "0.0.0" },
+      clientInfo: { name: "curion-mcp-e2e-test", version: "0.0.0" },
     });
     client.notify("notifications/initialized", {});
     const resp = await client.request("tools/list", {});
@@ -667,7 +667,7 @@ test("e2e: both tools expose outputSchema with a strict status enum", async () =
     await client.request("initialize", {
       protocolVersion: "2024-11-05",
       capabilities: {},
-      clientInfo: { name: "cortex-mcp-e2e-test", version: "0.0.0" },
+      clientInfo: { name: "curion-mcp-e2e-test", version: "0.0.0" },
     });
     client.notify("notifications/initialized", {});
     const resp = await client.request("tools/list", {});
@@ -714,7 +714,7 @@ test("e2e: recall with no stored memory -> { status: 'no_memory' } (no ids, no m
     await client.request("initialize", {
       protocolVersion: "2024-11-05",
       capabilities: {},
-      clientInfo: { name: "cortex-mcp-e2e-test", version: "0.0.0" },
+      clientInfo: { name: "curion-mcp-e2e-test", version: "0.0.0" },
     });
     client.notify("notifications/initialized", {});
     const r = await client.callTool("recall", { text: "anything" });
@@ -756,7 +756,7 @@ test("e2e: recall with a secret-shaped query -> { status: 'rejected', reason }, 
     await client.request("initialize", {
       protocolVersion: "2024-11-05",
       capabilities: {},
-      clientInfo: { name: "cortex-mcp-e2e-test", version: "0.0.0" },
+      clientInfo: { name: "curion-mcp-e2e-test", version: "0.0.0" },
     });
     client.notify("notifications/initialized", {});
     const SECRET = "AKIAIOSFODNN7EXAMPLE";
@@ -820,7 +820,7 @@ test("e2e: recall with an unknown extra top-level key -> isError: true (SDK boun
     await client.request("initialize", {
       protocolVersion: "2024-11-05",
       capabilities: {},
-      clientInfo: { name: "cortex-mcp-e2e-test", version: "0.0.0" },
+      clientInfo: { name: "curion-mcp-e2e-test", version: "0.0.0" },
     });
     client.notify("notifications/initialized", {});
     const r = await client.callTool("recall", {
@@ -871,7 +871,7 @@ test("e2e: remember with vague input -> { status: 'rejected', reason }, no raw e
     await client.request("initialize", {
       protocolVersion: "2024-11-05",
       capabilities: {},
-      clientInfo: { name: "cortex-mcp-e2e-test", version: "0.0.0" },
+      clientInfo: { name: "curion-mcp-e2e-test", version: "0.0.0" },
     });
     client.notify("notifications/initialized", {});
     const VAGUE = "asdf";
@@ -927,7 +927,7 @@ test("e2e: remember with a secret-shaped input -> { status: 'rejected', reason }
     await client.request("initialize", {
       protocolVersion: "2024-11-05",
       capabilities: {},
-      clientInfo: { name: "cortex-mcp-e2e-test", version: "0.0.0" },
+      clientInfo: { name: "curion-mcp-e2e-test", version: "0.0.0" },
     });
     client.notify("notifications/initialized", {});
     const SECRET = "glpat-abcdefghijklmnopqrstuvwxyz0123456789";
@@ -958,7 +958,7 @@ test("e2e: remember with an unknown extra top-level key -> isError: true (SDK bo
     await client.request("initialize", {
       protocolVersion: "2024-11-05",
       capabilities: {},
-      clientInfo: { name: "cortex-mcp-e2e-test", version: "0.0.0" },
+      clientInfo: { name: "curion-mcp-e2e-test", version: "0.0.0" },
     });
     client.notify("notifications/initialized", {});
     const r = await client.callTool("remember", {
@@ -968,7 +968,7 @@ test("e2e: remember with an unknown extra top-level key -> isError: true (SDK bo
       provider: "minimax",
       modelId: "MiniMax-M3",
       debug: true,
-      storage: ".cortex",
+      storage: ".curion",
     });
     assert.equal(
       r.isError,
@@ -999,7 +999,7 @@ test("e2e: stdout contains only newline-delimited JSON-RPC; logs travel on stder
     await client.request("initialize", {
       protocolVersion: "2024-11-05",
       capabilities: {},
-      clientInfo: { name: "cortex-mcp-e2e-test", version: "0.0.0" },
+      clientInfo: { name: "curion-mcp-e2e-test", version: "0.0.0" },
     });
     client.notify("notifications/initialized", {});
     await client.request("tools/list", {});
@@ -1033,21 +1033,21 @@ test("e2e: stdout contains only newline-delimited JSON-RPC; logs travel on stder
         `every stdout line must carry an id (response) or method (notification/signal); got: ${line.slice(0, 200)}`,
       );
     }
-    // No raw `[cortex]` log lines on stdout.
+    // No raw `[curion]` log lines on stdout.
     assert.ok(
-      !stdout.includes("[cortex]"),
-      `stdout must not contain [cortex] log lines; got: ${stdout.slice(0, 400)}`,
+      !stdout.includes("[curion]"),
+      `stdout must not contain [curion] log lines; got: ${stdout.slice(0, 400)}`,
     );
     // stderr is non-empty and carries the project
-    // logger's `[cortex]` prefix.
+    // logger's `[curion]` prefix.
     assert.ok(
       stderr.length > 0,
       `stderr must be non-empty; the server's startup logs should travel there`,
     );
     assert.match(
       stderr,
-      /\[cortex\]/,
-      `stderr must contain the [cortex] log prefix; got: ${stderr.slice(0, 400)}`,
+      /\[curion\]/,
+      `stderr must contain the [curion] log prefix; got: ${stderr.slice(0, 400)}`,
     );
   } finally {
     await client.close();
@@ -1076,7 +1076,7 @@ test("e2e: recall with a pre-seeded memory in a no-API-key env -> { status: 'pro
     await client.request("initialize", {
       protocolVersion: "2024-11-05",
       capabilities: {},
-      clientInfo: { name: "cortex-mcp-e2e-test", version: "0.0.0" },
+      clientInfo: { name: "curion-mcp-e2e-test", version: "0.0.0" },
     });
     client.notify("notifications/initialized", {});
     const r = await client.callTool("recall", {
@@ -1132,7 +1132,7 @@ test("e2e: remember with a safe input in a no-API-key env -> { status: 'provider
     await client.request("initialize", {
       protocolVersion: "2024-11-05",
       capabilities: {},
-      clientInfo: { name: "cortex-mcp-e2e-test", version: "0.0.0" },
+      clientInfo: { name: "curion-mcp-e2e-test", version: "0.0.0" },
     });
     client.notify("notifications/initialized", {});
     const SAFE_TEXT = "The project uses Postgres 16 for the primary data store.";
@@ -1178,7 +1178,7 @@ test("e2e: remember with a safe input in a no-API-key env -> { status: 'provider
     // short-circuited before the storage write. We
     // assert the public surface is clean — the DB may
     // have no row matching the input summary.
-    const dbPath = path.join(tmp, ".cortex", "cortex.sqlite");
+    const dbPath = path.join(tmp, ".curion", "curion.sqlite");
     if (fs.existsSync(dbPath)) {
       // We do not import better-sqlite3 here to keep
       // the test pure; the contract is the wire

@@ -356,7 +356,7 @@ export function formatAbstentionPolicyReport(
   report: AbstentionPolicyReport,
 ): string {
   const lines: string[] = [];
-  lines.push("=== cortex-mcp-v2 retrieval abstention policy ===");
+  lines.push("=== curion retrieval abstention policy ===");
   lines.push(`generated at: ${report.generatedAt}`);
   lines.push("");
   lines.push("--- config ---");

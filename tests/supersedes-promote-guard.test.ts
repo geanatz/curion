@@ -66,7 +66,7 @@
  *      category-change keys.
  *  11. End-to-end on the real lexical
  *      baseline artifact under
- *      `.cortex/benchmark/`.
+ *      `.curion/benchmark/`.
  *  12. CLI argument parsing: default
  *      modes + override flags.
  *  13. Per-category change rollup: the
@@ -827,7 +827,7 @@ test("supersedes-promote-guard: PUBLIC_TOOL_NAMES is exactly two tools", () => {
 // ---------------------------------------------------------------------------
 
 test("supersedes-promote-guard: end-to-end on the real lexical-baseline artifact", () => {
-  const dir = ".cortex/benchmark";
+  const dir = ".curion/benchmark";
   const file = findMostRecentArtifact(dir, "retrieval-baseline-");
   if (!file) {
     // The artifact is not yet
@@ -949,7 +949,7 @@ test("supersedes-promote-guard: oracle diagnostic ceiling", () => {
   // Exp 9's candidate-expansion step
   // cannot be preserved by such a
   // guard.
-  const dir = ".cortex/benchmark";
+  const dir = ".curion/benchmark";
   const file = findMostRecentArtifact(dir, "retrieval-baseline-");
   if (!file) {
     return;
@@ -977,7 +977,7 @@ test("supersedes-promote-guard: oracle diagnostic ceiling", () => {
 });
 
 test("supersedes-promote-guard: end-to-end CLI runs without error and writes an artifact", async () => {
-  const dir = ".cortex/benchmark";
+  const dir = ".curion/benchmark";
   const file = findMostRecentArtifact(dir, "retrieval-baseline-");
   if (!file) {
     return;
@@ -1253,7 +1253,7 @@ test("supersedes-promote-guard: guarded-no-op is a no-op when no candidate is in
   // `afterCurrentTruthAt1` equals the
   // reranker-control's
   // `afterCurrentTruthAt1`.
-  const dir = ".cortex/benchmark";
+  const dir = ".curion/benchmark";
   const file = findMostRecentArtifact(dir, "retrieval-baseline-");
   if (!file) {
     return;

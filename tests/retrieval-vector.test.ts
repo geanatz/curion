@@ -9,7 +9,7 @@
  *   3. The top-K shape contract: `{id, score}[]`, score desc, id asc
  *      tie-break, threshold respected, top-K cap respected.
  *   4. The vector variant runs in-memory and does not write to
- *      the project `.cortex/cortex.sqlite` file (mirror of the
+ *      the project `.curion/curion.sqlite` file (mirror of the
  *      FTS5 isolation test).
  *   5. The benchmark runner supports `--variant vector` and
  *      `--variant all` includes the vector report.
@@ -329,9 +329,9 @@ test("vector ranker: runs in memory and does not write to the project storage", 
   // Mirror of the FTS5 isolation test. The vector ranker is
   // pure: it builds the candidate vectors from the in-memory
   // candidate list and never touches disk. We assert by
-  // running in a temp cwd and checking that no `.cortex/`
+  // running in a temp cwd and checking that no `.curion/`
   // directory appears.
-  const tmpCwd = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-vec-cwd-"));
+  const tmpCwd = fs.mkdtempSync(path.join(os.tmpdir(), "curion-vec-cwd-"));
   const prevCwd = process.cwd();
   process.chdir(tmpCwd);
   try {
@@ -339,8 +339,8 @@ test("vector ranker: runs in memory and does not write to the project storage", 
     const hits = rankVector("Postgres primary data store", cands, { topK: 5 });
     assert.ok(hits.length > 0);
     assert.ok(
-      !fs.existsSync(path.join(tmpCwd, ".cortex")),
-      "vector ranker must not create a .cortex directory in cwd",
+      !fs.existsSync(path.join(tmpCwd, ".curion")),
+      "vector ranker must not create a .curion directory in cwd",
     );
   } finally {
     process.chdir(prevCwd);
@@ -649,7 +649,7 @@ test("public MCP contract unchanged: exactly two tools, one text param each", ()
 // ---------------------------------------------------------------------------
 
 test("runner: vector single-variant artifacts are written with the `vector-` prefix and carry the right variant label", () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-vec-art-"));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-vec-art-"));
   try {
     const dir = resolveBenchmarkArtifactsDir({ artifactsDir: tmp });
     const report = runRetrievalBenchmark({ variant: "vector" });
@@ -671,7 +671,7 @@ test("runner: vector single-variant artifacts are written with the `vector-` pre
 });
 
 test("runner: comparison artifacts are written with the `retrieval-compare-` prefix and contain all three per-variant reports", () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-vec-compare-"));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-vec-compare-"));
   try {
     const dir = resolveBenchmarkArtifactsDir({ artifactsDir: tmp });
     const report = runRetrievalBenchmark({ variant: "all" });

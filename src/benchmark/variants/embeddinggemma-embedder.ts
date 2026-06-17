@@ -224,7 +224,7 @@ export type EmbeddingGemmaTextKind = "query" | "document";
  * Configuration for the EmbeddingGemma embedder.
  * All fields are optional; the defaults are the
  * pinned model + the on-disk cache directory
- * under `.cortex/transformers-cache/`.
+ * under `.curion/transformers-cache/`.
  *
  * The defaults match the user's approved
  * research brief:
@@ -286,7 +286,7 @@ export interface EmbeddingGemmaEmbedderOptions {
   /**
    * Local cache directory for downloaded model
    * artifacts. Default:
-   * `<cwd>/.cortex/transformers-cache/`. The
+   * `<cwd>/.curion/transformers-cache/`. The
    * directory is created on first use; the
    * benchmark runner does not clean it up.
    */
@@ -459,7 +459,7 @@ export class EmbeddingGemmaEmbedder {
     this.pooling = options.pooling ?? "mean";
     this.normalize = options.normalize ?? true;
     this.cacheDir =
-      options.cacheDir ?? `${process.cwd()}/.cortex/transformers-cache`;
+      options.cacheDir ?? `${process.cwd()}/.curion/transformers-cache`;
     this.queryTask = options.queryTask ?? "search result";
     this.probedDim = options.dim ?? 768;
     // Placeholder metadata. The real status /

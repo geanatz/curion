@@ -598,7 +598,7 @@ test("dense calibration CLI: --variant all-dense --calibrate runs the dense cali
 });
 
 test("dense calibration artifact: writeDenseCalibrationReport writes the right prefix", async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-dcal-art-"));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-dcal-art-"));
   try {
     const report = await runDenseCalibration({
       variant: "vector-dense",
@@ -669,7 +669,7 @@ test("dense calibration human report: prints the calibration header exactly once
   // strip the sync header must match an actual body
   // line; otherwise the defensive fallback re-emits the
   // full body and the report prints the inner
-  // `=== cortex-mcp-v2 retrieval calibration ===` header
+  // `=== curion retrieval calibration ===` header
   // twice. Pin the header count and the metadata
   // duplication here.
   const report = await runDenseCalibration({
@@ -678,7 +678,7 @@ test("dense calibration human report: prints the calibration header exactly once
   });
   const out = formatDenseCalibrationReport(report);
   const headerCount = (
-    out.match(/^=== cortex-mcp-v2 retrieval calibration.*===$/gm) ?? []
+    out.match(/^=== curion retrieval calibration.*===$/gm) ?? []
   ).length;
   assert.equal(
     headerCount,
@@ -690,7 +690,7 @@ test("dense calibration human report: prints the calibration header exactly once
   // follow it.
   assert.ok(
     out.startsWith(
-      "=== cortex-mcp-v2 retrieval calibration (dense) ===",
+      "=== curion retrieval calibration (dense) ===",
     ),
     `dense calibration human report should start with the (dense) header, got:\n${out.slice(0, 200)}`,
   );

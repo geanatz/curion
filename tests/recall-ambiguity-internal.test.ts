@@ -98,7 +98,7 @@ import {
 // ---------------------------------------------------------------------------
 
 function mkStorage(): { tmp: string; handle: StorageHandle } {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-amb-ctrl-"));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-amb-ctrl-"));
   const handle = initStorage({ projectRoot: tmp });
   return { tmp, handle };
 }

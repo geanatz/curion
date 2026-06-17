@@ -148,8 +148,8 @@ import {
  * 132-record / 176-query adversarial-expansion
  * checkpoint (the prior `experiment/
  * adversarial-benchmark-expansion` branch HEAD;
- * see `docs/architecture.md` and the policy
- * evaluator's documented headline reading).
+ * and the policy evaluator's documented
+ * headline reading).
  */
 export const FROZEN_TRANSFER_BASELINES: Readonly<
   Record<
@@ -918,7 +918,7 @@ export function formatHeldOutReport(
   report: HeldOutValidationReport,
 ): string {
   const lines: string[] = [];
-  lines.push("=== cortex-mcp-v2 retrieval held-out validation ===");
+  lines.push("=== curion retrieval held-out validation ===");
   lines.push(`generated at: ${report.generatedAt}`);
   lines.push("");
   // ---- Metadata header ----

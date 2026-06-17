@@ -35,7 +35,7 @@
  *      counts and deltas; the top-level report
  *      includes the edge-map summary block.
  *   9. End-to-end on the real lexical baseline
- *      artifact under `.cortex/benchmark/`.
+ *      artifact under `.curion/benchmark/`.
  *  10. CLI argument parsing: default modes +
  *      override flags.
  *  11. Per-category change rollup: the
@@ -752,7 +752,7 @@ test("supersession-edge-simulation: per-variant metrics include the documented b
 
 test("supersession-edge-simulation: end-to-end CLI on the real lexical baseline artifact", async () => {
   const baselinePath = findMostRecentArtifact(
-    ".cortex/benchmark",
+    ".curion/benchmark",
     "retrieval-baseline-",
   );
   if (!baselinePath) return; // skip if no artifact on disk
@@ -1350,7 +1350,7 @@ test("supersession-edge-simulation: evals/queries id mismatch throws", () => {
 
 test("supersession-edge-simulation: per-query alignment with prior diagnostic on the real artifact", () => {
   const baselinePath = findMostRecentArtifact(
-    ".cortex/benchmark",
+    ".curion/benchmark",
     "retrieval-baseline-",
   );
   if (!baselinePath) return;
@@ -1386,7 +1386,7 @@ test("supersession-edge-simulation: combined metadata-simulation variant closes 
   // combined variant subsumes the demote
   // rule).
   const baselinePath = findMostRecentArtifact(
-    ".cortex/benchmark",
+    ".curion/benchmark",
     "retrieval-baseline-",
   );
   if (!baselinePath) return;

@@ -60,11 +60,11 @@ import type { EmbedderMetadata as DenseEmbedderMetadata } from "../../src/benchm
  * Build a sandboxed cache directory for the live
  * test. The directory is removed on teardown so
  * the test does not leak state into the user's
- * `.cortex/` directory.
+ * `.curion/` directory.
  */
 function makeCacheDir(): string {
   return fs.mkdtempSync(
-    path.join(os.tmpdir(), "cortex-qwen3-live-cache-"),
+    path.join(os.tmpdir(), "curion-qwen3-live-cache-"),
   );
 }
 

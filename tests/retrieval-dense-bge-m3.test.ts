@@ -149,7 +149,7 @@ test("BgeM3Embedder: construction exposes the documented metadata", () => {
   // The cache dir is the documented default.
   assert.equal(
     m.cacheDir,
-    `${process.cwd()}/.cortex/transformers-cache`,
+    `${process.cwd()}/.curion/transformers-cache`,
   );
 });
 
@@ -158,14 +158,14 @@ test("BgeM3Embedder: custom modelId, dtype, pooling, cacheDir are honored", () =
     modelId: "custom-org/custom-bge-m3-onnx",
     dtype: "fp16",
     pooling: "mean",
-    cacheDir: "/tmp/cortex-bge-m3-test-cache",
+    cacheDir: "/tmp/curion-bge-m3-test-cache",
   });
   const m = embedder.metadata;
   assert.equal(m.modelId, "custom-org/custom-bge-m3-onnx");
   // `quantized` is `true` only when the dtype
   // starts with `q`. `fp16` is not quantized.
   assert.equal(m.quantized, false);
-  assert.equal(m.cacheDir, "/tmp/cortex-bge-m3-test-cache");
+  assert.equal(m.cacheDir, "/tmp/curion-bge-m3-test-cache");
   // The description surfaces the custom values.
   assert.ok(m.description.includes("fp16"));
   assert.ok(m.description.includes("mean"));
@@ -348,7 +348,7 @@ test("BgeM3Embedder: init() without a real library reports `error` metadata", as
     return;
   }
   const embedder = new BgeM3Embedder({
-    cacheDir: "/tmp/cortex-bge-m3-test-cache-fail",
+    cacheDir: "/tmp/curion-bge-m3-test-cache-fail",
   });
   // The pre-init metadata is `status: "skipped"`.
   assert.equal(embedder.metadata.status, "skipped");
@@ -476,12 +476,12 @@ test("createDenseEmbedder: 'bge-m3:pooling=<unknown>' falls back to the default"
 test("createDenseEmbedder: object spec with backend=bge-m3 dispatches to BGE-M3", async () => {
   const { embedder } = await createDenseEmbedder({
     backend: "bge-m3",
-    cacheDir: "/tmp/cortex-bge-m3-obj-spec-cache",
+    cacheDir: "/tmp/curion-bge-m3-obj-spec-cache",
   });
   assert.equal(embedder.metadata.backend, "bge-m3");
   assert.equal(
     embedder.metadata.cacheDir,
-    "/tmp/cortex-bge-m3-obj-spec-cache",
+    "/tmp/curion-bge-m3-obj-spec-cache",
   );
 });
 
@@ -746,14 +746,14 @@ test("parseRetrievalCli: --embedder bge-m3 --dense-cache-dir composes backend=bg
     "--embedder",
     "bge-m3",
     "--dense-cache-dir",
-    "/tmp/cortex-bge-m3-cli-cache",
+    "/tmp/curion-bge-m3-cli-cache",
   ]);
   const spec = opts.denseEmbedderSpec as {
     backend: string;
     cacheDir: string;
   };
   assert.equal(spec.backend, "bge-m3");
-  assert.equal(spec.cacheDir, "/tmp/cortex-bge-m3-cli-cache");
+  assert.equal(spec.cacheDir, "/tmp/curion-bge-m3-cli-cache");
 });
 
 test("parseRetrievalCli: --embedder bge-m3 --dense-skip composes backend=bge-m3 + skip=true", () => {
@@ -828,14 +828,14 @@ test("parseRetrievalCli: --embedder transformersjs --dense-cache-dir composes ba
     "--embedder",
     "transformersjs",
     "--dense-cache-dir",
-    "/tmp/cortex-xjs-cli-cache",
+    "/tmp/curion-xjs-cli-cache",
   ]);
   const spec = opts.denseEmbedderSpec as {
     backend: string;
     cacheDir: string;
   };
   assert.equal(spec.backend, "transformersjs");
-  assert.equal(spec.cacheDir, "/tmp/cortex-xjs-cli-cache");
+  assert.equal(spec.cacheDir, "/tmp/curion-xjs-cli-cache");
 });
 
 // ---------------------------------------------------------------------------

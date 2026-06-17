@@ -475,7 +475,7 @@ export const SIMULATED_SUPERSESSION_EDGES: ReadonlyMap<
     // temporal-old), 90 = current primary + fallback provider (typed
     // result union). 70 = rate-limit policy belongs to the same
     // versionGroup: the OLD provider did not have a rate-limit policy
-    // and the current one reads it from CORTEX_PROVIDER_RATE_LIMIT.
+    // and the current one reads it from CURION_PROVIDER_RATE_LIMIT.
     { recordId: 59, supersedes: null, supersededBy: 90, versionGroup: "g-provider" },
     { recordId: 90, supersedes: 59, supersededBy: null, versionGroup: "g-provider" },
     // Monitoring chain. 60 = polled every minute (legacy

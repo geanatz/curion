@@ -374,7 +374,7 @@ reviewer should consider for deployment.
 
 ```bash
 # Run the experiment (writes the JSON
-# artifact to .cortex/benchmark/).
+# artifact to .curion/benchmark/).
 npm run benchmark:retrieval:paraphrase-recovery
 
 # Run without writing the artifact.
@@ -638,7 +638,7 @@ generation fix in isolation.
 
 ```bash
 # Run the experiment (writes the JSON
-# artifact to .cortex/benchmark/).
+# artifact to .curion/benchmark/).
 npm run benchmark:retrieval:temporal-truth-diagnostic
 
 # Run without writing the artifact.
@@ -1040,7 +1040,7 @@ per-category change rollup:
 
 ```bash
 # Run the experiment (writes the JSON
-# artifact to .cortex/benchmark/).
+# artifact to .curion/benchmark/).
 npm run benchmark:retrieval:temporal-ranking-preference
 
 # Run without writing the artifact.
@@ -1485,7 +1485,7 @@ lexical baseline:
 
 ```bash
 # Run the experiment (writes the JSON
-# artifact to .cortex/benchmark/).
+# artifact to .curion/benchmark/).
 npm run benchmark:retrieval:supersession-edge-simulation
 
 # Run without writing the artifact.
@@ -1906,7 +1906,7 @@ map?" reads the block.
 
 ```bash
 # Run the experiment (writes the JSON
-# artifact to .cortex/benchmark/).
+# artifact to .curion/benchmark/).
 npm run benchmark:retrieval:multi-anchor-current-previous
 
 # Run without writing the artifact.
@@ -2418,7 +2418,7 @@ research-only.
 
 ```bash
 # Run the experiment (writes the JSON
-# artifact to .cortex/benchmark/).
+# artifact to .curion/benchmark/).
 npm run benchmark:retrieval:temporal-candidate-generation-probe
 
 # Run without writing the artifact.
@@ -2861,7 +2861,7 @@ production-side does NOT have today.
 ```bash
 # Run the experiment (writes the
 # JSON artifact to
-# .cortex/benchmark/).
+# .curion/benchmark/).
 npm run benchmark:retrieval:supersedes-promote-guard
 
 # Run without writing the artifact.

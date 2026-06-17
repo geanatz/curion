@@ -27,12 +27,12 @@ export const PROTOTYPE_FIXTURES: readonly PrototypeFixture[] = [
   {
     id: "P1",
     description: "Project overview: short factual context.",
-    text: "Cortex MCP v2 is a project-local memory layer for AI agents. It exposes exactly two tools, remember and recall, over a stdio MCP transport.",
+    text: "Curion is a project-local memory layer for AI agents. It exposes exactly two tools, remember and recall, over a stdio MCP transport.",
   },
   {
     id: "P2",
     description: "Build and test instruction: structured procedural context.",
-    text: "To build and test: run `npm install`, then `npm run build`, then `npm test`. The default log level is info and can be lowered to debug via CORTEX_LOG_LEVEL=debug.",
+    text: "To build and test: run `npm install`, then `npm run build`, then `npm test`. The default log level is info and can be lowered to debug via CURION_LOG_LEVEL=debug.",
   },
   {
     id: "P3",
@@ -42,7 +42,7 @@ export const PROTOTYPE_FIXTURES: readonly PrototypeFixture[] = [
   {
     id: "P4",
     description: "Storage rules: a small policy statement.",
-    text: "Project storage lives under the project-local .cortex directory. The schema intentionally has no raw text column. The .cortex directory and the local .env are gitignored.",
+    text: "Project storage lives under the project-local .curion directory. The schema intentionally has no raw text column. The .curion directory and the local .env are gitignored.",
   },
   {
     id: "P5",

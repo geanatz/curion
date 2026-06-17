@@ -69,7 +69,7 @@
  *      the category-change keys.
  *  10. End-to-end on the real lexical
  *      baseline artifact under
- *      `.cortex/benchmark/`.
+ *      `.curion/benchmark/`.
  *  11. CLI argument parsing: default modes +
  *      override flags.
  *  12. Per-category change rollup: the
@@ -1011,7 +1011,7 @@ test("temporal-candidate-generation-probe: PUBLIC_TOOL_NAMES is exactly two tool
 // ---------------------------------------------------------------------------
 
 test("temporal-candidate-generation-probe: end-to-end on the real lexical-baseline artifact", () => {
-  const dir = ".cortex/benchmark";
+  const dir = ".curion/benchmark";
   const file = findMostRecentArtifact(dir, "retrieval-baseline-");
   if (!file) {
     // The artifact is not yet
@@ -1171,7 +1171,7 @@ test("temporal-candidate-generation-probe: end-to-end on the real lexical-baseli
 });
 
 test("temporal-candidate-generation-probe: end-to-end CLI runs without error and writes an artifact", async () => {
-  const dir = ".cortex/benchmark";
+  const dir = ".curion/benchmark";
   const file = findMostRecentArtifact(dir, "retrieval-baseline-");
   if (!file) {
     return;

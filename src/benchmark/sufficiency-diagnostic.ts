@@ -190,7 +190,7 @@
  *   policy report shapes are NOT changed; a
  *   reviewer who wants the candidate-set
  *   diagnostic reads the `*sufficiency-*` artifact
- *   under `.cortex/benchmark/`.
+ *   under `.curion/benchmark/`.
  */
 
 import type { BenchmarkQuery, BenchmarkQueryFamily } from "./queries.js";

@@ -190,7 +190,7 @@ test("TransformersJsEmbedder: init() without a real library reports `skipped` me
   // inspection: no init, no model download.
   const e = new TransformersJsEmbedder({
     modelId: "Xenova/all-MiniLM-L6-v2",
-    cacheDir: "/tmp/cortex-test-cache-skipped",
+    cacheDir: "/tmp/curion-test-cache-skipped",
   });
   assert.equal(e.metadata.status, "skipped");
   assert.equal(e.metadata.backend, "transformersjs");
@@ -206,7 +206,7 @@ test("TransformersJsEmbedder: embed() without init falls back to the stub", asyn
   // download is skipped (`--dense-skip`).
   const e = new TransformersJsEmbedder({
     modelId: "Xenova/all-MiniLM-L6-v2",
-    cacheDir: "/tmp/cortex-test-cache-fallback",
+    cacheDir: "/tmp/curion-test-cache-fallback",
   });
   const v = await e.embed("Postgres is the primary data store");
   // The stub is `dim: 384` by default; the
@@ -224,7 +224,7 @@ test("TransformersJsEmbedder: embed() without init falls back to the stub", asyn
 test("TransformersJsEmbedder: embedBatch() without init falls back to the stub batch", async () => {
   const e = new TransformersJsEmbedder({
     modelId: "Xenova/all-MiniLM-L6-v2",
-    cacheDir: "/tmp/cortex-test-cache-batch-fallback",
+    cacheDir: "/tmp/curion-test-cache-batch-fallback",
   });
   const v = await e.embedBatch(["alpha", "bravo", "charlie"]);
   assert.equal(v.length, 3);
@@ -750,10 +750,10 @@ test("parseRetrievalCli: --dense-cache-dir composes a spec object", () => {
     "--embedder",
     "transformersjs",
     "--dense-cache-dir",
-    "/tmp/cortex-bench-cache",
+    "/tmp/curion-bench-cache",
   ]);
   const spec = opts.denseEmbedderSpec as { cacheDir: string };
-  assert.equal(spec.cacheDir, "/tmp/cortex-bench-cache");
+  assert.equal(spec.cacheDir, "/tmp/curion-bench-cache");
 });
 
 test("parseRetrievalCli: --dense-skip composes a spec object with skip=true", () => {
@@ -773,7 +773,7 @@ test("parseRetrievalCli: --dense-skip composes a spec object with skip=true", ()
 // ---------------------------------------------------------------------------
 
 test("writeDenseBenchmarkReport: writes `retrieval-vector-dense-*.json` for vector-dense reports", async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-vd-art-"));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-vd-art-"));
   try {
     const dir = resolveBenchmarkArtifactsDir({ artifactsDir: tmp });
     const report = await runDenseRetrievalBenchmark({
@@ -799,7 +799,7 @@ test("writeDenseBenchmarkReport: writes `retrieval-vector-dense-*.json` for vect
 });
 
 test("writeDenseBenchmarkReport: writes `retrieval-hybrid-dense-*.json` for hybrid-dense reports", async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-hd-art-"));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-hd-art-"));
   try {
     const dir = resolveBenchmarkArtifactsDir({ artifactsDir: tmp });
     const report = await runDenseRetrievalBenchmark({
@@ -823,7 +823,7 @@ test("writeDenseBenchmarkReport: writes `retrieval-hybrid-dense-*.json` for hybr
 });
 
 test("writeDenseComparisonReport: writes `retrieval-compare-dense-*.json`", async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-cd-art-"));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-cd-art-"));
   try {
     const dir = resolveBenchmarkArtifactsDir({ artifactsDir: tmp });
     const report = await runDenseRetrievalBenchmark({

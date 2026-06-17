@@ -59,7 +59,7 @@ import { classifyInput } from "../src/safety/precheck.ts";
 // ---------------------------------------------------------------------------
 
 function mkStorage(): { tmp: string; handle: StorageHandle } {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-recall-"));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-recall-"));
   const handle = initStorage({ projectRoot: tmp });
   return { tmp, handle };
 }

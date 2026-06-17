@@ -958,7 +958,7 @@ test("abstention-audit CLI: --abstention-audit defaults to true with the lexical
 });
 
 test("abstention-audit artifact: writeAbstentionAuditReport writes the right prefix", () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-audit-art-"));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-audit-art-"));
   try {
     const single = runRetrievalBenchmark({ variant: "hybrid" });
     const auditReport = runAbstentionAuditFromBenchmarkReport(single, {

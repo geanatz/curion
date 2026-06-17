@@ -92,7 +92,7 @@ export {
 export function buildServer(options: BuildServerOptions = {}): McpServer {
   const server = new McpServer(
     {
-      name: options.name ?? "cortex-mcp-v2",
+      name: options.name ?? "curion",
       version: options.version ?? "0.1.0",
     },
     {

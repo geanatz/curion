@@ -810,7 +810,7 @@ test("policy: artifact is written to the abstention-policy prefix and is byte-st
   normalizeReport(policyReport2);
   assert.deepEqual(policyReport1, policyReport2);
   // Artifact writer writes the right prefix.
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-policy-art-"));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-policy-art-"));
   try {
     const file = writeAbstentionPolicyReport(policyReport1, tmp);
     assert.ok(fs.existsSync(file));

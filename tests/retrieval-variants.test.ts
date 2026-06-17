@@ -26,7 +26,7 @@ test("variant registry: five placeholders, stable order", () => {
 });
 
 test("runAllVariants runs every variant against the same query", async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-mcp-v2-retv-"));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-mcp-v2-retv-"));
   let handle: StorageHandle | null = null;
   try {
     handle = initStorage({ projectRoot: tmp });

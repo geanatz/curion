@@ -67,7 +67,7 @@ import {
 // ---------------------------------------------------------------------------
 
 function mkStorage(): { tmp: string; handle: StorageHandle } {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cortex-mcp-rb-"));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-mcp-rb-"));
   const handle = initStorage({ projectRoot: tmp });
   return { tmp, handle };
 }

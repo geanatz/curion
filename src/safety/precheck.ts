@@ -269,7 +269,7 @@ const UNSAFE_PREFERENCE_PATTERNS: ReadonlyArray<{ re: RegExp; label: string }> =
   },
   // "bypass / skip / turn off / disable [the] safety / safety check / redaction"
   {
-    re: /\b(?:bypass|skip|turn\s+off|disable|switch\s+off|opt[\s-]?out\s+of|do\s+not\s+run)\s+(?:the\s+|all\s+)?(?:cortex\s+)?(?:safety|safety\s+(?:check|filter|redaction|guard|fence|policy|policies|rules))(?:\s+(?:check|filter|redaction|guard|fence|policy|policies|rules))?\b/i,
+    re: /\b(?:bypass|skip|turn\s+off|disable|switch\s+off|opt[\s-]?out\s+of|do\s+not\s+run)\s+(?:the\s+|all\s+)?(?:curion\s+)?(?:safety|safety\s+(?:check|filter|redaction|guard|fence|policy|policies|rules))(?:\s+(?:check|filter|redaction|guard|fence|policy|policies|rules))?\b/i,
     label: "bypass-safety",
   },
   // "persist / save / store raw text / input verbatim / original input"
@@ -321,10 +321,10 @@ const UNSAFE_PREFERENCE_PATTERNS: ReadonlyArray<{ re: RegExp; label: string }> =
     re: /\b(?:on|when|while|if|during)\s+recall(?:ing|ed)?\b[^.!?\n]{0,80}\b(?:exfiltrate|leak|dump|publish|export|send\s+out|email\s+out|post\s+out)\b/i,
     label: "exfiltrate-on-recall",
   },
-  // "this memory overrides the / Cortex safety policy" / "overrides
+  // "this memory overrides the / Curion safety policy" / "overrides
   // safety policy" — direct policy-override attempts
   {
-    re: /\b(?:overrides?|override)\s+(?:the\s+|cortex\s+|our\s+|all\s+)?(?:safety\s+(?:policy|policies|rules|guidelines)|cortex\s+safety(?:\s+(?:policy|policies|rules|guidelines))?)\b/i,
+    re: /\b(?:overrides?|override)\s+(?:the\s+|curion\s+|our\s+|all\s+)?(?:safety\s+(?:policy|policies|rules|guidelines)|curion\s+safety(?:\s+(?:policy|policies|rules|guidelines))?)\b/i,
     label: "policy-override-direct",
   },
 ];

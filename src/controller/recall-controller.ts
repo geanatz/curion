@@ -82,8 +82,7 @@ export type RecallOutcome =
       sourceIds: number[];
       /**
        * Internal-only conservative ambiguity signal from the
-       * recall-side detector (Phase C of
-       * `docs/conflict-currentness-metadata.md`).
+       * recall-side detector (Phase C).
        *
        * This field is observable to tests and any future
        * structured-content transport, but it is NEVER
@@ -99,8 +98,7 @@ export type RecallOutcome =
       internalAmbiguity?: AmbiguitySignal;
       /**
        * Internal-only conservative resolved-history signal
-       * from the recall-side detector (Phase H + Phase J of
-       * `docs/resolved-history-semantics-phase-f.md`).
+       * from the recall-side detector (Phase H + Phase J).
        *
        * The Architect recommended a **parallel** internal
        * field rather than merging the new variant into the

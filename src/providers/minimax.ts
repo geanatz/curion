@@ -1,7 +1,7 @@
 /**
  * MiniMax provider (skeleton).
  *
- * Reads `CORTEX_PROVIDER_PRIMARY_KEY` (or `MINIMAX_API_KEY`) from the
+ * Reads `CURION_PROVIDER_PRIMARY_KEY` (or `MINIMAX_API_KEY`) from the
  * environment. When unset, `isConfigured()` returns false and `embed()`
  * returns a stub result with `provider: "minimax"` and a `note` field
  * explaining the missing key. No network call is made.
@@ -17,7 +17,7 @@ export class MiniMaxProvider implements Provider {
   readonly name = PROVIDER_NAME;
 
   isConfigured(): boolean {
-    return Boolean(process.env.CORTEX_PROVIDER_PRIMARY_KEY ?? process.env.MINIMAX_API_KEY);
+    return Boolean(process.env.CURION_PROVIDER_PRIMARY_KEY ?? process.env.MINIMAX_API_KEY);
   }
 
   async embed(text: string): Promise<EmbeddingResult> {
@@ -26,7 +26,7 @@ export class MiniMaxProvider implements Provider {
         provider: PROVIDER_NAME,
         dim: 0,
         vector: [],
-        note: "minimax: no api key configured (set CORTEX_PROVIDER_PRIMARY_KEY)",
+        note: "minimax: no api key configured (set CURION_PROVIDER_PRIMARY_KEY)",
       };
     }
     // Real HTTP call deferred to a later phase. Skeleton returns a

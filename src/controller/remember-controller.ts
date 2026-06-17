@@ -311,8 +311,7 @@ export async function runRememberController(
   }
 
   // -- 6. Persist sanitized summary + metadata -----------------------
-  // The write path is two SQL statements, by design (Phase B of
-  // `docs/conflict-currentness-metadata.md`):
+  // The write path is two SQL statements, by design:
   //
   //   1. INSERT the row with the controller-normalized metadata
   //      (tags / entities / classification / providerFallbackUsed

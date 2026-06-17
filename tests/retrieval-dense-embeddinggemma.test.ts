@@ -155,7 +155,7 @@ test("EmbeddingGemmaEmbedder: construction exposes the documented metadata", () 
   // The cache dir is the documented default.
   assert.equal(
     m.cacheDir,
-    `${process.cwd()}/.cortex/transformers-cache`,
+    `${process.cwd()}/.curion/transformers-cache`,
   );
 });
 
@@ -165,14 +165,14 @@ test("EmbeddingGemmaEmbedder: custom modelId, dtype, queryTask, pooling, cacheDi
     dtype: "fp16",
     queryTask: "custom retrieval task",
     pooling: "last_token",
-    cacheDir: "/tmp/cortex-embeddinggemma-test-cache",
+    cacheDir: "/tmp/curion-embeddinggemma-test-cache",
   });
   const m = embedder.metadata;
   assert.equal(m.modelId, "custom-org/custom-embeddinggemma-onnx");
   // `quantized` is `true` only when the dtype
   // starts with `q`. `fp16` is not quantized.
   assert.equal(m.quantized, false);
-  assert.equal(m.cacheDir, "/tmp/cortex-embeddinggemma-test-cache");
+  assert.equal(m.cacheDir, "/tmp/curion-embeddinggemma-test-cache");
   // The description surfaces the custom values.
   assert.ok(m.description.includes("fp16"));
   assert.ok(m.description.includes("last_token"));
@@ -434,7 +434,7 @@ test("EmbeddingGemmaEmbedder: init() without a real library reports `error` meta
     return;
   }
   const embedder = new EmbeddingGemmaEmbedder({
-    cacheDir: "/tmp/cortex-embeddinggemma-test-cache-fail",
+    cacheDir: "/tmp/curion-embeddinggemma-test-cache-fail",
   });
   // The pre-init metadata is `status: "skipped"`.
   assert.equal(embedder.metadata.status, "skipped");
@@ -564,12 +564,12 @@ test("createDenseEmbedder: 'embeddinggemma:pooling=<unknown>' falls back to the 
 test("createDenseEmbedder: object spec with backend=embeddinggemma dispatches to EmbeddingGemma", async () => {
   const { embedder } = await createDenseEmbedder({
     backend: "embeddinggemma",
-    cacheDir: "/tmp/cortex-embeddinggemma-obj-spec-cache",
+    cacheDir: "/tmp/curion-embeddinggemma-obj-spec-cache",
   });
   assert.equal(embedder.metadata.backend, "embeddinggemma");
   assert.equal(
     embedder.metadata.cacheDir,
-    "/tmp/cortex-embeddinggemma-obj-spec-cache",
+    "/tmp/curion-embeddinggemma-obj-spec-cache",
   );
 });
 
@@ -825,14 +825,14 @@ test("parseRetrievalCli: --embedder embeddinggemma --dense-cache-dir composes ba
     "--embedder",
     "embeddinggemma",
     "--dense-cache-dir",
-    "/tmp/cortex-embeddinggemma-cli-cache",
+    "/tmp/curion-embeddinggemma-cli-cache",
   ]);
   const spec = opts.denseEmbedderSpec as {
     backend: string;
     cacheDir: string;
   };
   assert.equal(spec.backend, "embeddinggemma");
-  assert.equal(spec.cacheDir, "/tmp/cortex-embeddinggemma-cli-cache");
+  assert.equal(spec.cacheDir, "/tmp/curion-embeddinggemma-cli-cache");
 });
 
 test("parseRetrievalCli: --embedder embeddinggemma --dense-skip composes backend=embeddinggemma + skip=true", () => {
@@ -911,14 +911,14 @@ test("parseRetrievalCli: --embedder transformersjs --dense-cache-dir composes ba
     "--embedder",
     "transformersjs",
     "--dense-cache-dir",
-    "/tmp/cortex-xjs-cli-cache",
+    "/tmp/curion-xjs-cli-cache",
   ]);
   const spec = opts.denseEmbedderSpec as {
     backend: string;
     cacheDir: string;
   };
   assert.equal(spec.backend, "transformersjs");
-  assert.equal(spec.cacheDir, "/tmp/cortex-xjs-cli-cache");
+  assert.equal(spec.cacheDir, "/tmp/curion-xjs-cli-cache");
 });
 
 // ---------------------------------------------------------------------------
