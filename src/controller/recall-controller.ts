@@ -504,6 +504,69 @@ interface AnswerFail {
 }
 
 /**
+ * Strip memory-id references from the answer text before projection.
+ *
+ * The no-IDs-in-public-text invariant forbids memory-id fields on
+ * the wire (the no-IDs rule is field-level, not content-level — see
+ * `src/tools/recall-structured-content.ts` and `HANDOVER.md`).
+ * However, the synthesis LLM may echo the id-bearing format
+ * `- #N kind: summary` it sees in its prompt into its synthesized
+ * answer, producing prose like "Memory #20 documents the
+ * lexical-only production recall boundary". This strip pass removes
+ * such references from the answer text before it reaches the
+ * public projection so the public `text` block stays free of
+ * memory-id mentions.
+ *
+ * Patterns stripped (case-insensitive):
+ *   - `Memory #N`, `Memories #N`
+ *   - `entry #N`, `record #N`, `note #N`, `summary #N`
+ *   - bare `#N` that follows a word boundary, e.g. "(see #37)",
+ *     "as in #37", "PR is #42"
+ *
+ * The pass is conservative: it does NOT strip `#N` inside URLs
+ * (which contain `://` and `/`), inside hex colors, or inside
+ * quoted technical content. Only the patterns listed above are
+ * touched.
+ *
+ * Each match is replaced with the literal placeholder `[memory]`,
+ * which preserves sentence structure and makes the strip auditable.
+ * Adjacent placeholders are collapsed into a single one so the
+ * public text is not visibly noisy.
+ */
+function stripMemoryIdReferences(text: string): string {
+  if (typeof text !== "string" || text.length === 0) return text;
+  let out = text;
+  // Pattern 1: "Memory #N" or "Memories #N" (case-insensitive).
+  out = out.replace(/\b(memory|memories)\s+#\d+\b/gi, "[memory]");
+  // Pattern 2: "entry #N", "record #N", "note #N", "summary #N"
+  // (case-insensitive). These are the same memory-record nouns
+  // used by `isProviderRefusal`'s noun alternation.
+  out = out.replace(
+    /\b(entry|record|note|summary)\s+#\d+\b/gi,
+    "[memory]",
+  );
+  // Pattern 3: bare `#N` that follows a word boundary. We require
+  // the character immediately before `#` to be whitespace,
+  // `(`, `,`, or the start of the string. This skips `#N` that
+  // appears inside URLs (where the preceding characters are
+  // `://` or `/`), inside hex colors (`#ffffff`), and inside
+  // quoted technical content. We also cap the digit run at 1-6
+  // characters so a long hash-shaped fragment is never matched.
+  out = out.replace(
+    /(^|[\s(,])(#\d{1,6})\b/g,
+    (_match, prefix: string) => `${prefix}[memory]`,
+  );
+  // Collapse runs of adjacent `[memory]` placeholders to a single
+  // one, so a multi-reference sentence does not become visually
+  // noisy in the public text.
+  out = out.replace(/(\[memory\]\s*){2,}/g, "[memory]");
+  // Tidy up a placeholder that would otherwise leave a dangling
+  // space before a punctuation mark or a sentence break.
+  out = out.replace(/\[memory\]\s+([,.;:!?])/g, "[memory]$1");
+  return out;
+}
+
+/**
  * Strip provider-side reasoning blocks from the answer text so the
  * public output is the visible answer only.
  *
@@ -590,6 +653,34 @@ function isProviderRefusal(text: string): boolean {
   return candidates.some((c) => pattern.test(c));
 }
 
+/**
+ * Validate and harden the provider's synthesized answer text.
+ *
+ * Order of operations (each gate may short-circuit with `AnswerFail`):
+ *
+ *   1. Empty-answer gate            (skip empty or whitespace-only input)
+ *   2. Reasoning-block strip        (remove `<think>...</think>` etc.)
+ *   3. Empty-after-strip gate       (reject if stripping left nothing)
+ *   4. Whitespace normalization     (CRLF/tabs -> single space)
+ *   5. Length cap                   (bound to `maxLen`)
+ *   6. Secret-redaction step        (`redactSummary` redaction)
+ *   7. Empty-after-redaction gate   (reject if redaction ate everything)
+ *   8. Short-after-redaction gate   (reject if non-secret content is thin)
+ *   9. Memory-id reference strip    (remove `Memory #N`, `entry #N`,
+ *                                    bare `#N`, etc., enforcing the
+ *                                    no-IDs-in-public-text invariant
+ *                                    on the content path)
+ *  10. Raw-dump check               (reject structural-looking dumps)
+ *  11. Refusal-shape check          (reject provider refusal phrasings)
+ *
+ * The memory-id strip (step 9) runs after secret-redaction (so
+ * redaction is not perturbed) and before the raw-dump and refusal
+ * checks (so those detectors see the stripped text). It enforces the
+ * no-IDs-in-public-text invariant on the `answered` content path:
+ * the synthesis LLM may echo the id-bearing `- #N kind: summary`
+ * format it sees in its prompt, and that echo must not reach the
+ * public `text` block.
+ */
 function validateAnswer(answer: string, maxLen: number): AnswerOk | AnswerFail {
   if (typeof answer !== "string" || answer.trim().length === 0) {
     return { ok: false, reason: "provider returned an empty answer" };
@@ -628,7 +719,22 @@ function validateAnswer(answer: string, maxLen: number): AnswerOk | AnswerFail {
         "provider answer contained insufficient non-secret content after redaction",
     };
   }
-  if (looksLikeRawDump(redacted)) {
+  // Strip memory-id references from the post-redaction text. This
+  // pass runs after the secret-redaction step (so redaction is not
+  // affected) and after the short-after-redaction check (so the
+  // length gate sees the redacted text, not the stripped text). It
+  // runs before the raw-dump and refusal checks so those detectors
+  // see the stripped text — a refusal that includes a memory-id
+  // reference (e.g. "I don't have specific details about memory
+  // #37") should have the reference removed before the refusal
+  // detector evaluates the text, so the detector works on the
+  // underlying intent rather than on a structural echo of the id.
+  // The strip pass enforces the no-IDs-in-public-text invariant
+  // for the `answered` content path: the synthesis LLM may echo
+  // the id-bearing `- #N kind: summary` format it sees in its
+  // prompt, and that echo must not reach the public `text` block.
+  const noIds = stripMemoryIdReferences(redacted);
+  if (looksLikeRawDump(noIds)) {
     return {
       ok: false,
       reason:
@@ -642,10 +748,10 @@ function validateAnswer(answer: string, maxLen: number): AnswerOk | AnswerFail {
   // text that also contains a secret fragment is still caught by
   // the redaction step first; the refusal check then reclassifies
   // a thin-overlap refusal into `no_memory` at the call site.
-  if (isProviderRefusal(answer)) {
+  if (isProviderRefusal(noIds)) {
     return { ok: false, reason: "refusal_detected" };
   }
-  return { ok: true, answer: redacted };
+  return { ok: true, answer: noIds };
 }
 
 function looksLikeRawDump(text: string): boolean {

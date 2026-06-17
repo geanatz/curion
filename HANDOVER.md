@@ -51,6 +51,7 @@
 - Each tool takes a single `text` parameter
 - 5-status structuredContent returned per tool (no `message` field)
 - No `memoryId` / `sourceIds` / `memoryIds` on the wire (field-level, not content-level: no id-bearing field exists on any status variant; `weak_match.summaries` is `string[]`, `weak_match.coverage` has no id fields; curator summary prose is not sanitized — if a future curator wrote `#N` into a summary, it would surface on both `answered` and `weak_match`, same write-path source)
+- The `answered.answer` field is content-sanitized to remove any memory-id references the synthesis LLM may echo from its prompt format (e.g. "Memory #N", "entry #N", bare "#N"). The `weak_match.summaries` field is NOT sanitized — it carries curator-voice prose verbatim, by design.
 - No `Note:` prefix in public text
 - Plain string notes only
 - Strict Zod input rejects unknown keys

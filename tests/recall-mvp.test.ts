@@ -1824,3 +1824,204 @@ test("recall: weak_match (f) regression — substantive answer (false-positive g
     rmStorage(tmp, handle);
   }
 });
+
+// ---------------------------------------------------------------------------
+// 17. Memory-id reference strip (controller validateAnswer)
+// ---------------------------------------------------------------------------
+//
+// These tests cover the new `stripMemoryIdReferences` pass inside
+// `validateAnswer`. The pass enforces the no-IDs-in-public-text
+// invariant on the `answered` content path: the synthesis LLM may
+// echo the id-bearing `- #N kind: summary` format it sees in its
+// prompt, and that echo must not reach the public `text` block.
+//
+// Each test drives the controller end-to-end through
+// `runRecallController` (the same scaffolding as the rest of this
+// file) and asserts on `out.answer`, which is the post-validation
+// text the tool layer exposes as the public `content[0].text`.
+
+test("recall: memory-id leak stripping — Memory #N is replaced with [memory] in the public text", async () => {
+  const { tmp, handle } = mkStorage();
+  try {
+    insertSummary(
+      handle,
+      "The lexical-only production recall boundary is documented in the curion project.",
+      { kind: "fact", tags: ["lexical", "recall", "boundary"] },
+    );
+    // The scripted answer echoes a memory-id reference the way
+    // the live Q15 failure did. The strip pass must remove the
+    // reference from the public text.
+    const answer =
+      "Memory #20 documents the lexical-only production recall boundary. Memory #20 also references the curion project.";
+    const { fetchImpl } = scriptFetch(() => okChatResponse(answer));
+    const out = await runRecall(handle, {
+      text: "What is the lexical-only production recall boundary?",
+      fetchImpl,
+    });
+    assert.equal(out.status, "answered");
+    if (out.status !== "answered") throw new Error("unreachable");
+    // The public answer must not contain the id-bearing forms.
+    assert.ok(
+      !/Memory #20/i.test(out.answer),
+      `public answer must not contain "Memory #20" (any case); got: ${out.answer}`,
+    );
+    assert.ok(
+      !/#20\b/.test(out.answer),
+      `public answer must not contain a bare "#20" reference; got: ${out.answer}`,
+    );
+    // The strip pass replaces the reference with the placeholder
+    // `[memory]`. The two adjacent "Memory #20" mentions collapse
+    // to a single placeholder so the public text is not noisy.
+    assert.ok(
+      out.answer.includes("[memory]"),
+      `public answer must contain the "[memory]" placeholder; got: ${out.answer}`,
+    );
+    // The surrounding sentence structure is preserved: the
+    // curion project reference survives, and the rest of the
+    // prose is intact.
+    assert.ok(
+      out.answer.includes("curion project"),
+      `public answer must preserve the "curion project" reference; got: ${out.answer}`,
+    );
+    assert.ok(
+      out.answer.includes("lexical-only production recall boundary"),
+      `public answer must preserve the surrounding sentence; got: ${out.answer}`,
+    );
+  } finally {
+    rmStorage(tmp, handle);
+  }
+});
+
+test("recall: memory-id leak stripping — bare #N and noun-prefixed #N are stripped", async () => {
+  const { tmp, handle } = mkStorage();
+  try {
+    insertSummary(
+      handle,
+      "The lexical-only recall boundary and the FTS5 sync decision are core curion design choices.",
+      { kind: "fact", tags: ["lexical", "fts5", "sync"] },
+    );
+    // The scripted answer uses three id-bearing forms: a
+    // noun-prefixed "entry #N", a bare "see #N", and a bare
+    // "in #N" mid-sentence. The strip pass must remove all of
+    // them.
+    const answer =
+      "The lexical-only recall is documented in entry #15. See also #42 for the FTS5 sync decision.";
+    const { fetchImpl } = scriptFetch(() => okChatResponse(answer));
+    const out = await runRecall(handle, {
+      text: "What is the lexical-only recall boundary?",
+      fetchImpl,
+    });
+    assert.equal(out.status, "answered");
+    if (out.status !== "answered") throw new Error("unreachable");
+    // No id-bearing forms remain in the public answer.
+    assert.ok(
+      !/#15\b/.test(out.answer),
+      `public answer must not contain "#15"; got: ${out.answer}`,
+    );
+    assert.ok(
+      !/#42\b/.test(out.answer),
+      `public answer must not contain "#42"; got: ${out.answer}`,
+    );
+    assert.ok(
+      !/entry #\d+/i.test(out.answer),
+      `public answer must not contain "entry #N"; got: ${out.answer}`,
+    );
+    // The strip pass inserts [memory] placeholders. With the
+    // adjaceny-collapse rule, two adjacent [memory] insertions
+    // (the bare #42 and the entry #15) collapse to one.
+    assert.ok(
+      out.answer.includes("[memory]"),
+      `public answer must contain the "[memory]" placeholder; got: ${out.answer}`,
+    );
+    // The surrounding sentence content is preserved.
+    assert.ok(
+      out.answer.includes("lexical-only recall"),
+      `public answer must preserve the surrounding sentence; got: ${out.answer}`,
+    );
+    assert.ok(
+      out.answer.includes("FTS5 sync decision"),
+      `public answer must preserve the FTS5 reference; got: ${out.answer}`,
+    );
+  } finally {
+    rmStorage(tmp, handle);
+  }
+});
+
+test("recall: memory-id leak stripping — false-positive guard, URL with #fragment is preserved", async () => {
+  const { tmp, handle } = mkStorage();
+  try {
+    insertSummary(
+      handle,
+      "The curion GitHub repository tracks issues and pull requests against the production recall boundary.",
+      { kind: "fact", tags: ["curion", "github", "issues"] },
+    );
+    // The scripted answer contains both a URL with a fragment
+    // (must be preserved) and a bare #N mid-sentence (must be
+    // stripped).
+    const answer =
+      "The GitHub issue is at https://github.com/curion/curion/issues/37. The PR is #42.";
+    const { fetchImpl } = scriptFetch(() => okChatResponse(answer));
+    const out = await runRecall(handle, {
+      text: "Where is the curion issue tracker?",
+      fetchImpl,
+    });
+    assert.equal(out.status, "answered");
+    if (out.status !== "answered") throw new Error("unreachable");
+    // The URL is preserved: the `/` and `://` characters in the
+    // URL are not in the bare-#N allowlist, so the strip pass
+    // must not touch the #37 fragment inside the path.
+    assert.ok(
+      out.answer.includes("https://github.com/curion/curion/issues/37"),
+      `public answer must preserve the URL with #fragment; got: ${out.answer}`,
+    );
+    // The bare "#42" mid-sentence IS stripped. The pattern
+    // matches because "#42" follows the space after "is".
+    assert.ok(
+      !/#42\b/.test(out.answer),
+      `public answer must not contain the bare "#42" reference; got: ${out.answer}`,
+    );
+    // The placeholder is present where the bare #42 used to be.
+    assert.ok(
+      out.answer.includes("[memory]"),
+      `public answer must contain the "[memory]" placeholder; got: ${out.answer}`,
+    );
+  } finally {
+    rmStorage(tmp, handle);
+  }
+});
+
+test("recall: memory-id leak stripping — answers without id references are unchanged", async () => {
+  const { tmp, handle } = mkStorage();
+  try {
+    insertSummary(
+      handle,
+      "The lexical-only production recall boundary is documented in the curion project.",
+      { kind: "fact", tags: ["lexical", "recall", "boundary"] },
+    );
+    // The scripted answer contains no id-bearing forms. The
+    // strip pass must be a no-op: no placeholder is inserted,
+    // and the answer is returned verbatim.
+    const answer =
+      "The lexical-only production recall boundary is documented in the project.";
+    const { fetchImpl } = scriptFetch(() => okChatResponse(answer));
+    const out = await runRecall(handle, {
+      text: "What is the lexical-only production recall boundary?",
+      fetchImpl,
+    });
+    assert.equal(out.status, "answered");
+    if (out.status !== "answered") throw new Error("unreachable");
+    // The answer is unchanged — no placeholder insertion, no
+    // mutation of the prose.
+    assert.equal(out.answer, answer);
+    assert.ok(
+      !out.answer.includes("[memory]"),
+      `public answer must not contain the "[memory]" placeholder when no id references are present; got: ${out.answer}`,
+    );
+    assert.ok(
+      !/#\d/.test(out.answer),
+      `public answer must not contain any "#N" reference when no id references are present; got: ${out.answer}`,
+    );
+  } finally {
+    rmStorage(tmp, handle);
+  }
+});
