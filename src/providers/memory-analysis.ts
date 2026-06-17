@@ -402,7 +402,7 @@ function buildAnalysisUserPrompt(
   lines.push("Return EXACTLY one JSON object. No prose, no markdown, no code fences.");
   lines.push("The object MUST match this TypeScript shape:");
   lines.push("{");
-  lines.push('  "summary": string,        // 1-2 sentence summary of the input');
+  lines.push('  "summary": string,        // Write a 1-3 sentence narrative memory that preserves the useful context from the input. Write as if the information is being remembered for future recall, not as a retrospective curator note. Preserve who/what/why/when and concrete terms (file names, branch names, feature names, decisions, constraints) when present. Do not start with "The user asked", "This memory captures", or similar curator framings. Do not invent details. Do not include memory IDs or internal storage references.');
   lines.push('  "confidence": number,     // 0..1, your confidence in the summary');
   lines.push('  "tags": string[],         // up to 8 short tags');
   lines.push('  "entities"?: {name: string, kind: string}[], // optional named entities');
