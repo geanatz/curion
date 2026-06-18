@@ -76,8 +76,16 @@ export const RECALL_DEFAULT_MAX_TOKENS = 512;
 // Public types
 // ---------------------------------------------------------------------------
 
-/** Provider id the recall synthesis adapter can target. */
-export type RecallProviderId = "minimax" | "nvidia-nim";
+/**
+ * Provider id the recall synthesis adapter can target.
+ *
+ * `"unknown"` is reserved for the case where the configured base URL
+ * does not match any provider we recognize (e.g. a custom NIM-
+ * compatible proxy whose host does not contain "nvidia" or "minimax").
+ * Callers can branch on it the same way they branch on the named
+ * values; it is informational, not an error condition.
+ */
+export type RecallProviderId = "minimax" | "nvidia-nim" | "unknown";
 
 /** A safe memory summary handed to the synthesis adapter. */
 export interface RecallMemoryInput {
@@ -217,12 +225,12 @@ export function loadRecallAdapterConfig(
     primaryApiKey: pickTrimmedString(
       overrides.primaryApiKey ?? "",
       readTrimmedString("CURION_PROVIDER_PRIMARY_KEY"),
-      readTrimmedString("MINIMAX_API_KEY"),
+      readTrimmedString("NVIDIA_NIM_API_KEY"),
     ),
     fallbackApiKey: pickTrimmedString(
       overrides.fallbackApiKey ?? "",
       readTrimmedString("CURION_PROVIDER_FALLBACK_KEY"),
-      readTrimmedString("NVIDIA_NIM_API_KEY"),
+      readTrimmedString("MINIMAX_API_KEY"),
     ),
     timeoutMs: overrides.timeoutMs ?? readNumber(
       "CURION_ADAPTER_TIMEOUT_MS",
@@ -233,6 +241,41 @@ export function loadRecallAdapterConfig(
       RECALL_DEFAULT_MAX_TOKENS,
     ),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Provider-id resolution (derived from the base URL)
+//
+// The provider label is informational: it appears in the
+// `providerLabel` passed to the http-client, in the
+// `providerUsed` field of the success result, and in failure
+// messages. To avoid drift between the label and the actual
+// endpoint the request is sent to, the label is derived from the
+// base URL itself instead of being hardcoded at each call site.
+//
+// Recognized hosts (case-insensitive substring match):
+//   - "nvidia"   -> "nvidia-nim"   (NVIDIA NIM, OpenAI-compatible)
+//   - "minimax"  -> "minimax"      (MiniMax, OpenAI-compatible)
+//   - otherwise  -> "unknown"      (custom / unrecognised endpoint)
+//
+// This means swapping the primary/fallback base URLs in the
+// future (or overriding them via env vars or MCP tool options)
+// will automatically produce the correct label without any
+// further code change.
+// ---------------------------------------------------------------------------
+
+/**
+ * Derive a `RecallProviderId` from the base URL the request will
+ * actually be sent to. The match is intentionally a case-
+ * insensitive substring on the host portion so that env-style
+ * overrides like `https://my.nvidia.proxy.example/v1` still
+ * resolve to `"nvidia-nim"`.
+ */
+function resolveRecallProviderId(baseUrl: string): RecallProviderId {
+  const url = (baseUrl ?? "").toLowerCase();
+  if (url.includes("nvidia")) return "nvidia-nim";
+  if (url.includes("minimax")) return "minimax";
+  return "unknown";
 }
 
 // ---------------------------------------------------------------------------
@@ -351,9 +394,13 @@ export async function synthesizeRecallWithFallback(
   }
 
   // --- Primary attempt -------------------------------------------------
+  // The primary provider id is derived from `cfg.primaryBaseUrl`
+  // so the label in `providerLabel` / `providerUsed` / error
+  // messages always matches the endpoint the request is sent to.
+  const primaryProvider = resolveRecallProviderId(cfg.primaryBaseUrl);
   const primaryResult = cfg.primaryApiKey
     ? await runSynthesisCall({
-        provider: "minimax",
+        provider: primaryProvider,
         baseUrl: cfg.primaryBaseUrl,
         model: cfg.primaryModel,
         apiKey: cfg.primaryApiKey,
@@ -368,7 +415,7 @@ export async function synthesizeRecallWithFallback(
         message: "primary provider not configured",
         lastError: {
           kind: "missing-config" as const,
-          message: "minimax: no api key configured",
+          message: `${primaryProvider}: no api key configured`,
           reachedServer: false,
         },
         httpCalls: 0,
@@ -409,8 +456,11 @@ export async function synthesizeRecallWithFallback(
   }
 
   // --- Fallback attempt (fresh, no state shared with primary) ----------
+  // Same derivation rule as the primary: the label follows the
+  // base URL, so a swapped or overridden fallback URL still
+  // produces a label that matches the actual endpoint.
   const fallbackResult = await runSynthesisCall({
-    provider: "nvidia-nim",
+    provider: resolveRecallProviderId(cfg.fallbackBaseUrl),
     baseUrl: cfg.fallbackBaseUrl,
     model: cfg.fallbackModel,
     apiKey: cfg.fallbackApiKey,
