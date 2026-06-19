@@ -19,6 +19,12 @@ npm-debug.log*
 # Archived/exploratory work, kept locally but not source-controlled
 .archive/
 
+# Generated probe outputs in tmp/ (research scripts emit .jsonl and .md artifacts)
+# Note: some .jsonl/.md files in tmp/ are already tracked research artifacts; gitignore
+# does not untrack them, but new files of these types will be ignored by default.
+tmp/*.jsonl
+tmp/*.md
+
 # Test coverage output
 coverage/
 
