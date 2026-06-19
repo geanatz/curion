@@ -129,13 +129,13 @@ function safeAnalysis(opts: {
 
 function insertSummary(
   handle: StorageHandle,
-  summary: string,
+  memoryContent: string,
   opts: { kind?: string; tags?: string[]; classification?: string } = {},
 ): MemoryRecord {
   return insertMemoryRecord(handle, {
     kind: (opts.kind as MemoryRecord["kind"]) ?? "fact",
     state: "active",
-    summary,
+    memoryContent,
     providerId: "minimax",
     modelId: "MiniMax-M3",
     confidence: 0.9,
@@ -864,8 +864,13 @@ test("storage: listActiveMemorySummaries exposes only safe fields", async () => 
     assert.equal(list.length, rows.length);
     for (const r of list) {
       assert.equal(typeof r.id, "number");
-      assert.equal(typeof r.summary, "string");
-      assert.ok(r.summary.length > 0);
+      // Phase 1 internal naming cleanup: the internal
+      // `SafeMemorySummary` property is `memoryContent`
+      // (TS-side). The SQL `summary` column on disk is the
+      // storage boundary; the read projection re-binds the
+      // column to the internal TS field.
+      assert.equal(typeof r.memoryContent, "string");
+      assert.ok(r.memoryContent.length > 0);
       assert.equal(typeof r.kind, "string");
       // No raw/original text column on the schema, but we
       // additionally assert that the projection does not include

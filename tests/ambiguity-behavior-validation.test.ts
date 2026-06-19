@@ -164,7 +164,13 @@ function seedScenarioRows(
     const rec = insertMemoryRecord(handle, {
       kind: "fact",
       state: "active",
-      summary: row.summary,
+      // Phase 1 internal naming cleanup: the internal
+      // `MemoryRecordInput` field is `memoryContent`
+      // (TS-side). The DB column on disk is still
+      // `summary`. The helper's test-side param
+      // `row.summary` is just a test-helper field name and
+      // is mapped here at the storage boundary.
+      memoryContent: row.summary,
       providerId: "minimax",
       modelId: "MiniMax-M3",
       confidence: 0.9,

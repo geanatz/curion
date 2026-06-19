@@ -295,7 +295,7 @@ export async function runRememberController(
   if (!normalized.ok) {
     return normalized.outcome;
   }
-  const { summary, kind, confidence, tags, classification, entities } =
+  const { memoryContent, kind, confidence, tags, classification, entities } =
     normalized;
 
   // -- 5. Confidence gate --------------------------------------------
@@ -328,11 +328,12 @@ export async function runRememberController(
   //      second write is a safe, append-only patch.
   //
   // The `metadata` column is the only thing the second statement
-  // touches. `state` is unchanged (`active`), `summary` is
-  // unchanged, the autoincrement id is unchanged. No schema
-  // change, no raw-text storage, no public-message change.
-  // The clock for `derivedAt` is controller-supplied via
-  // `options.now`; the pure helper itself never reads it.
+  // touches. `state` is unchanged (`active`), the persisted
+  // memory content (DB column `summary`) is unchanged, the
+  // autoincrement id is unchanged. No schema change, no raw-text
+  // storage, no public-message change. The clock for `derivedAt`
+  // is controller-supplied via `options.now`; the pure helper
+  // itself never reads it.
   const existingMetadata: Record<string, unknown> = {
     tags,
     entities,
@@ -344,7 +345,7 @@ export async function runRememberController(
   const record = insertMemoryRecord(storage, {
     kind,
     state: "active",
-    summary,
+    memoryContent,
     providerId: result.providerUsed,
     modelId: result.modelUsed,
     confidence,
@@ -373,7 +374,7 @@ export async function runRememberController(
     id: record.id,
     kind,
     state: "active",
-    summary,
+    memoryContent,
     tags,
     classification: classification ?? null,
     confidence,
@@ -400,8 +401,8 @@ export async function runRememberController(
   if (hasRelationshipKey) {
     // Update ONLY the metadata column on the row we just
     // inserted. `updateMemoryMetadata` is a typed, narrow
-    // patch; it does not touch state, summary, or any other
-    // column.
+    // patch; it does not touch state, memory content
+    // (DB column `summary`), or any other column.
     const updated = updateMemoryMetadata(storage, record.id, patched);
     return {
       status: "saved",
@@ -431,7 +432,16 @@ export async function runRememberController(
 
 interface NormalizedOk {
   ok: true;
-  summary: string;
+  /**
+   * Controller-normalized memory content. Maps the provider
+   * output `MemoryAnalysis.summary` (the JSON field name in the
+   * provider contract) to the internal `memoryContent` name.
+   * The provider contract is unchanged; the internal rename
+   * keeps the controller-side variable consistent with
+   * `MemoryRecordInput.memoryContent` and
+   * `SafeMemorySummary.memoryContent`.
+   */
+  memoryContent: string;
   kind: MemoryKind;
   confidence: number;
   tags: string[];
@@ -448,10 +458,12 @@ function validateAndNormalize(
   value: MemoryAnalysis,
   maxSummaryLength: number,
 ): NormalizedOk | NormalizedFail {
-  // Whitespace + punctuation normalization (minimal).
+  // Whitespace + punctuation normalization (minimal). The
+  // provider field is still `MemoryAnalysis.summary`; we map
+  // it to the internal `memoryContent` here.
   const rawSummary = value.summary ?? "";
-  const summary = normalizeSummary(rawSummary);
-  if (summary.length === 0) {
+  const memoryContent = normalizeSummary(rawSummary);
+  if (memoryContent.length === 0) {
     return {
       ok: false,
       outcome: {
@@ -462,13 +474,14 @@ function validateAndNormalize(
     };
   }
   // Bounded length. Truncate at a word boundary if possible.
-  let bounded = summary;
+  let bounded = memoryContent;
   if (bounded.length > maxSummaryLength) {
     bounded = truncateAtBoundary(bounded, maxSummaryLength);
   }
   // Defense-in-depth: redact any secret-shaped fragments that the
-  // provider may have echoed. If redaction makes the summary empty
-  // (or leaves only the redaction marker), fall back to rejection.
+  // provider may have echoed. If redaction makes the memory
+  // content empty (or leaves only the redaction marker), fall
+  // back to rejection.
   const redacted = redactSummary(bounded);
   if (redacted.trim().length === 0) {
     return {
@@ -515,7 +528,7 @@ function validateAndNormalize(
 
   return {
     ok: true,
-    summary: redacted,
+    memoryContent: redacted,
     kind,
     confidence,
     tags,
@@ -571,13 +584,14 @@ function containsRawDumpShape(summary: string): boolean {
 /**
  * Build a minimal `SafeMemorySummary` from a `RelatedMemory`.
  *
- * The seam's MVP returns only `{ id, summary, kind? }`. The
- * relationship detector consumes a `SafeMemorySummary`, which
- * also carries `state`, `tags`, `classification`, `confidence`.
- * For seam rows that omit those, we fill conservative defaults
- * (`state: "active"` because the seam only returns active
- * candidates, `tags: []`, `classification: null`,
- * `confidence: null`).
+ * The seam's MVP returns only `{ id, memoryContent, kind? }`
+ * (Phase 1 internal naming cleanup: the seam field is the
+ * internal `memoryContent`). The relationship detector consumes
+ * a `SafeMemorySummary`, which also carries `state`, `tags`,
+ * `classification`, `confidence`. For seam rows that omit those,
+ * we fill conservative defaults (`state: "active"` because the
+ * seam only returns active candidates, `tags: []`,
+ * `classification: null`, `confidence: null`).
  *
  * A non-finite / non-number `id` is REJECTED (returns `null`)
  * rather than coerced to a sentinel. Coercing a malformed id
@@ -591,14 +605,14 @@ function toSafeMemorySummary(r: RelatedMemory): SafeMemorySummary | null {
   if (typeof r.id !== "number" || !Number.isFinite(r.id)) {
     return null;
   }
-  if (typeof r.summary !== "string") {
+  if (typeof r.memoryContent !== "string") {
     return null;
   }
   return {
     id: r.id,
     kind: "finding",
     state: "active",
-    summary: r.summary,
+    memoryContent: r.memoryContent,
     tags: [],
     classification: null,
     confidence: null,

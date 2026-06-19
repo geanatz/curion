@@ -436,18 +436,18 @@ function lexicalNegationSignal(
     const a = list[i];
     if (!a) continue;
     if (!isSafeMemorySummaryWithRelationship(a)) continue;
-    if (typeof a.summary !== "string" || a.summary.length === 0) continue;
-    const aTokens = tokenize(a.summary);
+    if (typeof a.memoryContent !== "string" || a.memoryContent.length === 0) continue;
+    const aTokens = tokenize(a.memoryContent);
     if (aTokens.length === 0) continue;
-    const aHasNeg = hasNegationMarker(a.summary);
+    const aHasNeg = hasNegationMarker(a.memoryContent);
     for (let j = i + 1; j < list.length; j += 1) {
       const b = list[j];
       if (!b) continue;
       if (!isSafeMemorySummaryWithRelationship(b)) continue;
-      if (typeof b.summary !== "string" || b.summary.length === 0) continue;
-      const bTokens = tokenize(b.summary);
+      if (typeof b.memoryContent !== "string" || b.memoryContent.length === 0) continue;
+      const bTokens = tokenize(b.memoryContent);
       if (bTokens.length === 0) continue;
-      const bHasNeg = hasNegationMarker(b.summary);
+      const bHasNeg = hasNegationMarker(b.memoryContent);
       // Asymmetric negation: exactly one side negates.
       if (aHasNeg === bHasNeg) continue;
       if (!aHasNeg && !bHasNeg) continue; // unreachable; defensive
@@ -596,7 +596,7 @@ function isSafeMemorySummaryWithRelationship(
   if (typeof v !== "object" || v === null) return false;
   const o = v as Record<string, unknown>;
   if (typeof o.id !== "number" || !Number.isFinite(o.id)) return false;
-  if (typeof o.summary !== "string") return false;
+  if (typeof o.memoryContent !== "string") return false;
   if (typeof o.state !== "string") return false;
   if (!Array.isArray(o.tags)) return false;
   // `relationship` is optional. When present, it must be an

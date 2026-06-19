@@ -145,11 +145,13 @@ test("remember: safe input is stored; raw input is not persisted", async () => {
     // Provider was called exactly once (primary succeeded).
     assert.equal(calls.length, 1);
 
-    // Persisted record shape.
+    // Persisted record shape. Phase 1 internal naming
+    // cleanup: the internal record property is `memoryContent`;
+    // the SQL column on disk is still `summary`.
     const rec = outcome.record;
     assert.ok(rec.id > 0);
-    assert.equal(typeof rec.summary, "string");
-    assert.ok(rec.summary.length > 0);
+    assert.equal(typeof rec.memoryContent, "string");
+    assert.ok(rec.memoryContent.length > 0);
     assert.equal(rec.providerId, "minimax");
     assert.equal(typeof rec.modelId, "string");
     assert.ok((rec.modelId ?? "").length > 0);
@@ -173,9 +175,12 @@ test("remember: safe input is stored; raw input is not persisted", async () => {
         );
       }
     }
-    // The summary stored is the controller-normalized provider summary,
-    // not the raw input.
-    assert.equal(dbRows.summary, rec.summary);
+    // The memory content stored is the controller-normalized
+    // provider summary, not the raw input. SQL column
+    // `dbRows.summary` (DB-side) maps to the internal
+    // `rec.memoryContent` (TS-side) via the storage layer's
+    // read projection.
+    assert.equal(dbRows.summary, rec.memoryContent);
   } finally {
     rmStorage(tmp, handle);
   }
@@ -537,10 +542,13 @@ test("remember: a provider summary with a secret embedded in real text is redact
     });
     assert.equal(outcome.status, "saved");
     if (outcome.status !== "saved") throw new Error("unreachable");
-    const stored = outcome.record.summary;
+    // Phase 1 internal naming cleanup: internal property is
+    // `memoryContent` (TS-side); the persisted SQL column is
+    // still `summary` (DB-side).
+    const stored = outcome.record.memoryContent;
     assert.ok(
       !stored.includes("sk-abcdefghijklmnopqrstuv"),
-      "secret must be redacted from the persisted summary",
+      "secret must be redacted from the persisted memory content",
     );
     assert.ok(stored.includes("<redacted>"), "redaction marker must appear");
   } finally {

@@ -154,7 +154,12 @@ const FALLBACK_KEY = "nvapi-fallback-test-not-real-12345";
 function insertWithRelationship(
   handle: StorageHandle,
   opts: {
-    summary: string;
+    // Phase 1 internal naming cleanup: the helper's
+    // option-object property is renamed to `memoryContent`
+    // to mirror the internal `MemoryRecordInput` field. The
+    // helper maps this to the `summary` SQL column on disk
+    // at the storage boundary.
+    memoryContent: string;
     kind?: MemoryRecord["kind"];
     tags?: string[];
     relationship?: {
@@ -183,7 +188,7 @@ function insertWithRelationship(
   return insertMemoryRecord(handle, {
     kind: opts.kind ?? "fact",
     state: "active",
-    summary: opts.summary,
+    memoryContent: opts.memoryContent,
     providerId: "minimax",
     modelId: "MiniMax-M3",
     confidence: 0.9,
@@ -211,7 +216,7 @@ test("storage: listActiveMemoryRelationshipBlocks projects stored relationship b
   const { tmp, handle } = mkStorage();
   try {
     const r1 = insertWithRelationship(handle, {
-      summary: "we use Postgres for storage",
+      memoryContent: "we use Postgres for storage",
       relationship: {
         conflictsWith: [2],
         olderVariantsOf: [],
@@ -220,7 +225,7 @@ test("storage: listActiveMemoryRelationshipBlocks projects stored relationship b
       },
     });
     const r2 = insertWithRelationship(handle, {
-      summary: "we do not use Postgres",
+      memoryContent: "we do not use Postgres",
     });
     const blocks = listActiveMemoryRelationshipBlocks(handle);
     const ids = blocks.map((b) => b.id);
@@ -302,14 +307,14 @@ test("controller: internal outcome includes ambiguity when stored blocks indicat
     // look at the answer. The detector must emit
     // `conflicting-candidates` with both ids.
     const r1 = insertWithRelationship(handle, {
-      summary: "Postgres stores project data reliably",
+      memoryContent: "Postgres stores project data reliably",
       relationship: {
         conflictsWith: [], // will patch below
         detectionConfidence: 0,
       },
     });
     const r2 = insertWithRelationship(handle, {
-      summary: "Postgres stores project data reliably since 2023",
+      memoryContent: "Postgres stores project data reliably since 2023",
       relationship: {
         conflictsWith: [],
         detectionConfidence: 0,
@@ -386,10 +391,10 @@ test("controller: internal outcome is none when no stored block indicates a conf
     // the lexical safety-net rule requires asymmetric
     // negation (which these rows do not have).
     insertWithRelationship(handle, {
-      summary: "The project uses Postgres 16 for the primary store.",
+      memoryContent: "The project uses Postgres 16 for the primary store.",
     });
     insertWithRelationship(handle, {
-      summary: "The project uses Postgres 16 for the primary data store.",
+      memoryContent: "The project uses Postgres 16 for the primary data store.",
     });
     const { fetchImpl } = scriptFetch(() =>
       okChatResponse("The project uses Postgres 16 for the primary store."),
@@ -420,14 +425,14 @@ test("controller: internal outcome is none when stored block is olderVariantsOf 
     // detector must stay silent on the older-variant path
     // and silent on the conflict path (no `conflictsWith`).
     const r1 = insertWithRelationship(handle, {
-      summary: "Postgres stores project data reliably",
+      memoryContent: "Postgres stores project data reliably",
       relationship: {
         olderVariantsOf: [],
         detectionConfidence: 0.95,
       },
     });
     const r2 = insertWithRelationship(handle, {
-      summary: "Postgres stores project data reliably since 2023",
+      memoryContent: "Postgres stores project data reliably since 2023",
       relationship: {
         olderVariantsOf: [r1.id],
         detectionConfidence: 0.95,
@@ -465,10 +470,10 @@ test("controller: internal outcome is ambiguous with reason older-variant-suspec
   const { tmp, handle } = mkStorage();
   try {
     const r1 = insertWithRelationship(handle, {
-      summary: "Postgres stores project data reliably",
+      memoryContent: "Postgres stores project data reliably",
     });
     const r2 = insertWithRelationship(handle, {
-      summary: "Postgres stores project data reliably since 2023",
+      memoryContent: "Postgres stores project data reliably since 2023",
     });
     // Mutual `olderVariantsOf` pointer at high confidence.
     const blockA = {
@@ -520,10 +525,10 @@ test("controller: internal outcome uses lexical safety-net when stored block is 
     // The summaries share enough tokens with the query for
     // the ranker to keep both rows.
     insertWithRelationship(handle, {
-      summary: "Postgres stores project data reliably; we do not use MySQL",
+      memoryContent: "Postgres stores project data reliably; we do not use MySQL",
     });
     insertWithRelationship(handle, {
-      summary: "Postgres stores project data reliably; we use MySQL",
+      memoryContent: "Postgres stores project data reliably; we use MySQL",
     });
     const { fetchImpl } = scriptFetch(() =>
       okChatResponse("Postgres stores project data reliably; we use MySQL."),
@@ -556,10 +561,10 @@ test("public handleRecall projection: message/answer/sourceIds/status unchanged,
       // detector returns `kind: "none"` for this input
       // (the rows share high overlap but neither negates).
       insertWithRelationship(handle, {
-        summary: "The project uses Postgres 16 for the primary store.",
+        memoryContent: "The project uses Postgres 16 for the primary store.",
       });
       insertWithRelationship(handle, {
-        summary: "The project uses Postgres 16 for the primary data store.",
+        memoryContent: "The project uses Postgres 16 for the primary data store.",
       });
       // We need to drive the recall through the controller
       // (the public tool layer has no fetch override).
@@ -621,7 +626,7 @@ test("public handleRecall: tool-layer result does not expose internalAmbiguity (
       // `internalAmbiguity` field on the controller
       // outcome is dropped at the projection.
       insertWithRelationship(handle, {
-        summary: "The project uses Postgres 16 for the primary store.",
+        memoryContent: "The project uses Postgres 16 for the primary store.",
       });
       const { fetchImpl } = scriptFetch(() =>
         okChatResponse("Postgres 16."),
@@ -720,7 +725,7 @@ test("controller: provider is called exactly once per call; detector does not sh
   const { tmp, handle } = mkStorage();
   try {
     insertWithRelationship(handle, {
-      summary: "The project uses Postgres 16 for the primary store.",
+      memoryContent: "The project uses Postgres 16 for the primary store.",
     });
     const { fetchImpl, calls } = scriptFetch(() =>
       okChatResponse("Postgres."),
@@ -743,7 +748,7 @@ test("controller: the four-status union is preserved (answered | no_memory | rej
   try {
     // Case 1: answered
     insertWithRelationship(handle, {
-      summary: "The project uses Postgres 16 for the primary store.",
+      memoryContent: "The project uses Postgres 16 for the primary store.",
     });
     const { fetchImpl } = scriptFetch(() =>
       okChatResponse("Postgres."),
@@ -809,7 +814,7 @@ test("controller: SafeMemorySummary projection is unchanged (no raw text leaked)
   const { tmp, handle } = mkStorage();
   try {
     insertWithRelationship(handle, {
-      summary: "we use Postgres for storage",
+      memoryContent: "we use Postgres for storage",
     });
     const summaries: SafeMemorySummary[] = listActiveMemorySummaries(handle);
     assert.equal(summaries.length, 1);
@@ -853,14 +858,14 @@ test("Phase D: answered + ambiguous -> public message includes concise ambiguity
     // followed by the synthesized answer. The `answer`
     // field is unchanged.
     const r1 = insertWithRelationship(handle, {
-      summary: "Postgres stores project data reliably",
+      memoryContent: "Postgres stores project data reliably",
       relationship: {
         conflictsWith: [],
         detectionConfidence: 0,
       },
     });
     const r2 = insertWithRelationship(handle, {
-      summary: "Postgres stores project data reliably since 2023",
+      memoryContent: "Postgres stores project data reliably since 2023",
       relationship: {
         conflictsWith: [],
         detectionConfidence: 0,
@@ -944,10 +949,10 @@ test("Phase D: note is prose-only (no ids) and does not echo raw summaries / raw
     // `relationship` block) to drive the detector on a
     // pre-Phase-B shape.
     const r1 = insertWithRelationship(handle, {
-      summary: "Zesty lemon tart is on the office menu every Friday",
+      memoryContent: "Zesty lemon tart is on the office menu every Friday",
     });
     const r2 = insertWithRelationship(handle, {
-      summary: "Zesty lemon tart is not on the office menu",
+      memoryContent: "Zesty lemon tart is not on the office menu",
     });
     const { fetchImpl } = scriptFetch(() =>
       okChatResponse("Zesty lemon tart is on the office menu."),
@@ -1023,7 +1028,7 @@ test("Phase D: no ambiguity signal -> public message byte-equal pre-Phase-D", as
     // be byte-equal to the synthesized answer text only
     // (i.e. no note prefix, no extra characters).
     insertWithRelationship(handle, {
-      summary: "The project uses Postgres 16 for the primary store.",
+      memoryContent: "The project uses Postgres 16 for the primary store.",
     });
     const answer = "The project uses Postgres 16 for the primary store.";
     const { fetchImpl } = scriptFetch(() => okChatResponse(answer));
@@ -1120,7 +1125,7 @@ test("Phase D: provider_error outcome is unchanged (no prefix, no note)", async 
       // message must be the exact `Provider error: ...`
       // shape with no Phase D note.
       insertWithRelationship(handle, {
-        summary: "The project uses Postgres 16 for the primary store.",
+        memoryContent: "The project uses Postgres 16 for the primary store.",
       });
       // We can't inject the fetch through the public
       // surface; drive the controller and re-project the
@@ -1154,10 +1159,10 @@ test("Phase D: provider is still called exactly once (no short-circuit)", async 
     // but the pipeline must still call the provider
     // exactly once.
     const r1 = insertWithRelationship(handle, {
-      summary: "Postgres stores project data reliably",
+      memoryContent: "Postgres stores project data reliably",
     });
     const r2 = insertWithRelationship(handle, {
-      summary: "Postgres stores project data reliably since 2023",
+      memoryContent: "Postgres stores project data reliably since 2023",
     });
     const blockA = {
       derivedSchemaVersion: "ccm-draft-1",
@@ -1210,7 +1215,7 @@ test("Phase D: tool/API contract (single text param, two public tools) still hol
     setRecallStorageProvider(() => ({ handle, ownsHandle: false }));
     try {
       insertWithRelationship(handle, {
-        summary: "The project uses Postgres 16 for the primary store.",
+        memoryContent: "The project uses Postgres 16 for the primary store.",
       });
       const r = await handleRecall({ text: "What database does the project use?" });
       // Four-status union preserved.

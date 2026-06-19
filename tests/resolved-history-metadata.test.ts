@@ -160,7 +160,11 @@ function mkSummary(overrides: Partial<SafeMemorySummary> = {}): SafeMemorySummar
     id: 0,
     kind: "finding",
     state: "active",
-    summary: "default summary",
+    // Phase 1 internal naming cleanup: the internal
+    // `SafeMemorySummary` field is `memoryContent`
+    // (TS-side). Provider JSON / public surface still use
+    // `summary`; the internal type is the seam.
+    memoryContent: "default summary",
     tags: [],
     classification: null,
     confidence: 0.9,
@@ -188,7 +192,7 @@ test("Phase I: LEGACY_DERIVED_SCHEMA_VERSION is the literal ccm-draft-1 (compat)
 });
 
 test("Phase I: deriveRelationshipMetadata emits ccm-draft-2 on a clean call", () => {
-  const candidate = mkSummary({ id: 1, summary: "we use Postgres for storage" });
+  const candidate = mkSummary({ id: 1, memoryContent: "we use Postgres for storage" });
   const out = deriveRelationshipMetadata({
     candidate,
     others: [],
@@ -421,7 +425,13 @@ test("controller: new writes use DERIVED_SCHEMA_VERSION (ccm-draft-2)", async ()
           // consider the related row, and the asymmetric-
           // negation rule needs a real pair to fire on.
           id: 9001,
-          summary: "we use Postgres for this service in production",
+          // Phase 1 internal naming cleanup: this fixture
+          // is the internal `RelatedMemory` seam row, so
+          // the property key is `memoryContent` (TS-side).
+          // The provider JSON contract and the public
+          // surface still use `summary`; the seam is the
+          // boundary.
+          memoryContent: "we use Postgres for this service in production",
         },
       ],
       reason: "test seam override (Phase I schema version pin)",

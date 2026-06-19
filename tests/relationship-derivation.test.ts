@@ -52,7 +52,11 @@ function mkSummary(overrides: Partial<SafeMemorySummary> = {}): SafeMemorySummar
     id,
     kind: "finding",
     state: "active",
-    summary: "default summary",
+    // Phase 1 internal naming cleanup: the internal
+    // `SafeMemorySummary` field is `memoryContent` (TS-side).
+    // Provider JSON / public surface still use `summary`;
+    // the internal type is the seam.
+    memoryContent: "default summary",
     tags: [],
     classification: null,
     confidence: 0.9,
@@ -70,7 +74,7 @@ function clone<T>(v: T): T {
 // ---------------------------------------------------------------------------
 
 test("deriveRelationshipMetadata: empty others -> all derived fields empty", () => {
-  const candidate = mkSummary({ id: 100, summary: "we use Postgres for storage" });
+  const candidate = mkSummary({ id: 100, memoryContent: "we use Postgres for storage" });
   const out = deriveRelationshipMetadata({ candidate, others: [], asOf: 1_700_000_000_000 });
   assert.deepEqual(out.conflictsWith, []);
   assert.deepEqual(out.olderVariantsOf, []);
@@ -80,13 +84,13 @@ test("deriveRelationshipMetadata: empty others -> all derived fields empty", () 
 });
 
 test("deriveRelationshipMetadata: omitted asOf -> derivedAt defaults to 0 (no clock read)", () => {
-  const candidate = mkSummary({ id: 200, summary: "x" });
+  const candidate = mkSummary({ id: 200, memoryContent: "x" });
   const out = deriveRelationshipMetadata({ candidate, others: [] });
   assert.equal(out.derivedAt, 0);
 });
 
 test("deriveRelationshipMetadata: NaN / non-finite asOf is clamped to 0", () => {
-  const candidate = mkSummary({ id: 201, summary: "x" });
+  const candidate = mkSummary({ id: 201, memoryContent: "x" });
   const outNaN = deriveRelationshipMetadata({ candidate, others: [], asOf: Number.NaN });
   const outInf = deriveRelationshipMetadata({ candidate, others: [], asOf: Number.POSITIVE_INFINITY });
   assert.equal(outNaN.derivedAt, 0);
@@ -100,11 +104,11 @@ test("deriveRelationshipMetadata: NaN / non-finite asOf is clamped to 0", () => 
 test("deriveRelationshipMetadata: clean unrelated memory -> no conflict, no older variant", () => {
   const candidate = mkSummary({
     id: 10,
-    summary: "the project uses Postgres for storage",
+    memoryContent: "the project uses Postgres for storage",
   });
   const other = mkSummary({
     id: 11,
-    summary: "the team drinks tea on Tuesdays",
+    memoryContent: "the team drinks tea on Tuesdays",
   });
   const out = deriveRelationshipMetadata({ candidate, others: [other], asOf: 1 });
   assert.deepEqual(out.conflictsWith, []);
@@ -118,11 +122,11 @@ test("deriveRelationshipMetadata: low-overlap memories with negation -> no confl
   // silent.
   const candidate = mkSummary({
     id: 12,
-    summary: "we do not use MongoDB for this service",
+    memoryContent: "we do not use MongoDB for this service",
   });
   const other = mkSummary({
     id: 13,
-    summary: "the team drinks tea on Tuesdays",
+    memoryContent: "the team drinks tea on Tuesdays",
   });
   const out = deriveRelationshipMetadata({ candidate, others: [other], asOf: 1 });
   assert.deepEqual(out.conflictsWith, []);
@@ -139,11 +143,11 @@ test("deriveRelationshipMetadata: high overlap + asymmetric negation -> conflict
   // the conflict signal.
   const candidate = mkSummary({
     id: 20,
-    summary: "we do not use Postgres for this service",
+    memoryContent: "we do not use Postgres for this service",
   });
   const other = mkSummary({
     id: 21,
-    summary: "we use Postgres for this service",
+    memoryContent: "we use Postgres for this service",
   });
   const out = deriveRelationshipMetadata({ candidate, others: [other], asOf: 5 });
   assert.deepEqual(out.conflictsWith, [21]);
@@ -156,11 +160,11 @@ test("deriveRelationshipMetadata: high overlap + asymmetric negation -> conflict
 test("deriveRelationshipMetadata: symmetric negation -> no conflict (they agree on the negation)", () => {
   const candidate = mkSummary({
     id: 22,
-    summary: "we do not use Postgres here",
+    memoryContent: "we do not use Postgres here",
   });
   const other = mkSummary({
     id: 23,
-    summary: "we do not use Postgres here either",
+    memoryContent: "we do not use Postgres here either",
   });
   const out = deriveRelationshipMetadata({ candidate, others: [other], asOf: 5 });
   // Both sides carry the negation marker; this is the
@@ -175,11 +179,11 @@ test("deriveRelationshipMetadata: below-threshold overlap with negation -> no co
   // stays silent by design.
   const candidate = mkSummary({
     id: 24,
-    summary: "we do not use Postgres",
+    memoryContent: "we do not use Postgres",
   });
   const other = mkSummary({
     id: 25,
-    summary: "postgres is the production database and we love it",
+    memoryContent: "postgres is the production database and we love it",
   });
   const out = deriveRelationshipMetadata({ candidate, others: [other], asOf: 5 });
   assert.deepEqual(out.conflictsWith, []);
@@ -191,11 +195,11 @@ test("deriveRelationshipMetadata: identical summaries -> no conflict (paraphrase
   // identical text returns null).
   const candidate = mkSummary({
     id: 26,
-    summary: "we use Postgres for storage",
+    memoryContent: "we use Postgres for storage",
   });
   const other = mkSummary({
     id: 27,
-    summary: "we use Postgres for storage",
+    memoryContent: "we use Postgres for storage",
   });
   const out = deriveRelationshipMetadata({ candidate, others: [other], asOf: 5 });
   assert.deepEqual(out.conflictsWith, []);
@@ -205,12 +209,12 @@ test("deriveRelationshipMetadata: identical summaries -> no conflict (paraphrase
 test("deriveRelationshipMetadata: polarity-tag disagreement + shared tags -> conflict", () => {
   const candidate = mkSummary({
     id: 30,
-    summary: "we use Postgres for storage in production",
+    memoryContent: "we use Postgres for storage in production",
     tags: ["database", "current"],
   });
   const other = mkSummary({
     id: 31,
-    summary: "we use Postgres for storage in production",
+    memoryContent: "we use Postgres for storage in production",
     tags: ["database", "deprecated"],
   });
   // Same summary text, but opposing polarity tags. Even
@@ -237,12 +241,12 @@ test("deriveRelationshipMetadata: near-paraphrase of earlier-id summary -> older
   //   |A ∩ B| / |A ∪ B| = 9 / 10 = 0.90
   const candidate = mkSummary({
     id: 50,
-    summary:
+    memoryContent:
       "Postgres stores project data reliably; migrated from MySQL; production deployment",
   });
   const older = mkSummary({
     id: 40, // strictly earlier id
-    summary:
+    memoryContent:
       "Postgres stores project data reliably; migrated from MySQL; production deployment since 2023",
   });
   const out = deriveRelationshipMetadata({ candidate, others: [older], asOf: 5 });
@@ -256,11 +260,11 @@ test("deriveRelationshipMetadata: near-paraphrase of earlier-id summary -> older
 test("deriveRelationshipMetadata: low-overlap older-id summary -> no older variant", () => {
   const candidate = mkSummary({
     id: 60,
-    summary: "we use Postgres for storage in production",
+    memoryContent: "we use Postgres for storage in production",
   });
   const older = mkSummary({
     id: 59,
-    summary: "the team meets on Tuesdays for lunch",
+    memoryContent: "the team meets on Tuesdays for lunch",
   });
   const out = deriveRelationshipMetadata({ candidate, others: [older], asOf: 5 });
   assert.deepEqual(out.olderVariantsOf, []);
@@ -272,11 +276,11 @@ test("deriveRelationshipMetadata: near-paraphrase of NEWER-id summary -> not old
   // of it. The detector must not fire.
   const candidate = mkSummary({
     id: 70,
-    summary: "we use Postgres for storage in production",
+    memoryContent: "we use Postgres for storage in production",
   });
   const newer = mkSummary({
     id: 71,
-    summary: "we use Postgres for storage in production today",
+    memoryContent: "we use Postgres for storage in production today",
   });
   const out = deriveRelationshipMetadata({ candidate, others: [newer], asOf: 5 });
   assert.deepEqual(out.olderVariantsOf, []);
@@ -285,11 +289,11 @@ test("deriveRelationshipMetadata: near-paraphrase of NEWER-id summary -> not old
 test("deriveRelationshipMetadata: same-id summary -> no older variant", () => {
   const candidate = mkSummary({
     id: 80,
-    summary: "we use Postgres for storage in production",
+    memoryContent: "we use Postgres for storage in production",
   });
   const same = mkSummary({
     id: 80,
-    summary: "we use Postgres for storage in production today",
+    memoryContent: "we use Postgres for storage in production today",
   });
   const out = deriveRelationshipMetadata({ candidate, others: [same], asOf: 5 });
   assert.deepEqual(out.olderVariantsOf, []);
@@ -308,17 +312,17 @@ test("deriveRelationshipMetadata: both conflict and older-variant can fire in on
   //     asymmetric-negation signature fires.
   const candidate = mkSummary({
     id: 100,
-    summary:
+    memoryContent:
       "Postgres stores project data reliably; migrated from MySQL; production deployment supports concurrent users",
   });
   const older = mkSummary({
     id: 90,
-    summary:
+    memoryContent:
       "Postgres stores project data reliably; migrated from MySQL; production deployment supports concurrent users since 2023",
   });
   const conflicting = mkSummary({
     id: 91,
-    summary:
+    memoryContent:
       "we do not use Postgres stores project data reliably; production deployment supports concurrent users",
   });
   const out = deriveRelationshipMetadata({
@@ -347,13 +351,13 @@ test("deriveRelationshipMetadata: both conflict and older-variant can fire in on
 test("deriveRelationshipMetadata: determinism -> same input + same asOf -> byte-equal output", () => {
   const candidate = mkSummary({
     id: 200,
-    summary: "we do not use Postgres for this service",
+    memoryContent: "we do not use Postgres for this service",
     tags: ["database", "current"],
   });
   const others: SafeMemorySummary[] = [
-    mkSummary({ id: 201, summary: "we use Postgres for this service in production" }),
-    mkSummary({ id: 199, summary: "we use Postgres for this service in production" }),
-    mkSummary({ id: 202, summary: "the team drinks tea on Tuesdays" }),
+    mkSummary({ id: 201, memoryContent: "we use Postgres for this service in production" }),
+    mkSummary({ id: 199, memoryContent: "we use Postgres for this service in production" }),
+    mkSummary({ id: 202, memoryContent: "the team drinks tea on Tuesdays" }),
   ];
   const a = deriveRelationshipMetadata({ candidate, others, asOf: 42 });
   const b = deriveRelationshipMetadata({ candidate, others, asOf: 42 });
@@ -368,9 +372,9 @@ test("deriveRelationshipMetadata: determinism -> same input + same asOf -> byte-
 });
 
 test("deriveRelationshipMetadata: determinism -> asOf differs only in derivedAt", () => {
-  const candidate = mkSummary({ id: 210, summary: "x" });
+  const candidate = mkSummary({ id: 210, memoryContent: "x" });
   const others: SafeMemorySummary[] = [
-    mkSummary({ id: 211, summary: "we use Postgres for this service in production" }),
+    mkSummary({ id: 211, memoryContent: "we use Postgres for this service in production" }),
   ];
   const a = deriveRelationshipMetadata({ candidate, others, asOf: 1 });
   const b = deriveRelationshipMetadata({ candidate, others, asOf: 2 });
@@ -387,7 +391,7 @@ test("deriveRelationshipMetadata: determinism -> asOf differs only in derivedAt"
 test("deriveRelationshipMetadata: bounded output -> conflictsWith length <= MAX_RELATED_IDS", () => {
   const candidate = mkSummary({
     id: 300,
-    summary: "we do not use Postgres for this service",
+    memoryContent: "we do not use Postgres for this service",
   });
   // Generate MAX_RELATED_IDS + 5 strong conflict signals.
   const others: SafeMemorySummary[] = [];
@@ -395,7 +399,7 @@ test("deriveRelationshipMetadata: bounded output -> conflictsWith length <= MAX_
     others.push(
       mkSummary({
         id: 301 + i,
-        summary: "we use Postgres for this service in production",
+        memoryContent: "we use Postgres for this service in production",
       }),
     );
   }
@@ -416,15 +420,15 @@ test("deriveRelationshipMetadata: bounded output -> conflictsWith length <= MAX_
 test("deriveRelationshipMetadata: detectionConfidence in [0, 1]", () => {
   const candidate = mkSummary({
     id: 400,
-    summary: "we do not use Postgres for this service",
+    memoryContent: "we do not use Postgres for this service",
   });
   const strong = mkSummary({
     id: 401,
-    summary: "we use Postgres for this service in production",
+    memoryContent: "we use Postgres for this service in production",
   });
   const weak = mkSummary({
     id: 402,
-    summary: "the team drinks tea on Tuesdays",
+    memoryContent: "the team drinks tea on Tuesdays",
   });
   const out = deriveRelationshipMetadata({
     candidate,
@@ -442,12 +446,12 @@ test("deriveRelationshipMetadata: detectionConfidence in [0, 1]", () => {
 test("deriveRelationshipMetadata: does not mutate candidate or others", () => {
   const candidateSnapshot = {
     id: 500,
-    summary: "we do not use Postgres for this service",
+    memoryContent: "we do not use Postgres for this service",
     tags: ["database", "current"],
   };
   const otherSnapshot = {
     id: 501,
-    summary: "we use Postgres for this service in production",
+    memoryContent: "we use Postgres for this service in production",
     tags: ["database", "deprecated"],
   };
   const candidate = mkSummary({ ...candidateSnapshot });
@@ -480,12 +484,12 @@ test("deriveRelationshipMetadata: output never references raw input", () => {
   type WithRaw = SafeMemorySummary & { rawInput?: string };
   const candidate = mkSummary({
     id: 600,
-    summary: "we do not use Postgres for this service",
+    memoryContent: "we do not use Postgres for this service",
   }) as WithRaw;
   candidate.rawInput = "PRIVATE RAW USER TEXT — must never leak";
   const other = mkSummary({
     id: 601,
-    summary: "we use Postgres for this service in production",
+    memoryContent: "we use Postgres for this service in production",
   });
   const out = deriveRelationshipMetadata({ candidate, others: [other], asOf: 1 });
   const serialised = JSON.stringify(out);
@@ -552,7 +556,7 @@ test("deriveRelationshipMetadata: relationship module does not import benchmark 
 // ---------------------------------------------------------------------------
 
 test("deriveRelationshipMetadata: derivedSchemaVersion is the literal ccm-draft-2 (Phase I bump)", () => {
-  const candidate = mkSummary({ id: 700, summary: "x" });
+  const candidate = mkSummary({ id: 700, memoryContent: "x" });
   const out = deriveRelationshipMetadata({ candidate, others: [], asOf: 1 });
   assert.equal(out.derivedSchemaVersion, DERIVED_SCHEMA_VERSION);
   // Phase I bumps the literal from "ccm-draft-1" to
@@ -576,7 +580,7 @@ test("deriveRelationshipMetadata: legacy constant ccm-draft-1 is exported for co
 // ---------------------------------------------------------------------------
 
 test("deriveRelationshipMetadata: output shape is the spec'd block (5 fields)", () => {
-  const candidate = mkSummary({ id: 800, summary: "x" });
+  const candidate = mkSummary({ id: 800, memoryContent: "x" });
   const out: RelationshipMetadataFields = deriveRelationshipMetadata({
     candidate,
     others: [],
@@ -607,11 +611,11 @@ test("deriveRelationshipMetadata: non-active other summaries are skipped", () =>
   // changes in a later phase.
   const candidate = mkSummary({
     id: 900,
-    summary: "we do not use Postgres for this service",
+    memoryContent: "we do not use Postgres for this service",
   });
   const superseded = mkSummary({
     id: 901,
-    summary: "we use Postgres for this service in production",
+    memoryContent: "we use Postgres for this service in production",
     state: "superseded",
   });
   const out = deriveRelationshipMetadata({

@@ -94,12 +94,16 @@ function ftsTerms(
 test("FTS5 sync: INSERT trigger populates memories_fts with the summary", () => {
   const { tmp, handle } = mkStorage();
   try {
-    // Use a distinctive word in the summary so we can verify the
-    // FTS5 tokenizer indexed it correctly.
+    // Use a distinctive word in the memory content so we can
+    // verify the FTS5 tokenizer indexed it correctly. Phase 1
+    // internal naming cleanup: the TS object literal uses the
+    // internal `memoryContent` property; the SQL column the
+    // FTS5 trigger reads is still `summary` (preserved on
+    // disk).
     const record = insertMemoryRecord(handle, {
       kind: "fact",
       state: "active",
-      summary: "The libpurple protocols are upstreamed into the libgnt fork.",
+      memoryContent: "The libpurple protocols are upstreamed into the libgnt fork.",
       providerId: null,
       modelId: null,
       confidence: null,
@@ -142,11 +146,14 @@ test("FTS5 sync: INSERT trigger populates memories_fts with the summary", () => 
 test("FTS5 sync: UPDATE trigger refreshes memories_fts when summary changes", () => {
   const { tmp, handle } = mkStorage();
   try {
-    // Insert with a distinctive original word.
+    // Insert with a distinctive original word. The TS object
+    // literal uses `memoryContent`; the raw SQL UPDATE below
+    // (which is what triggers the FTS5 sync) keeps the SQL
+    // column name `summary` exactly as the schema defines it.
     const record = insertMemoryRecord(handle, {
       kind: "fact",
       state: "active",
-      summary: "The ouroboros protocol loops indefinitely without external input.",
+      memoryContent: "The ouroboros protocol loops indefinitely without external input.",
       providerId: null,
       modelId: null,
       confidence: null,
@@ -227,7 +234,7 @@ test("FTS5 sync: DELETE trigger removes the corresponding memories_fts row", () 
     const record = insertMemoryRecord(handle, {
       kind: "fact",
       state: "active",
-      summary: "The zephyr-7b model fits on a single consumer GPU at int4.",
+      memoryContent: "The zephyr-7b model fits on a single consumer GPU at int4.",
       providerId: null,
       modelId: null,
       confidence: null,

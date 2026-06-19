@@ -494,7 +494,11 @@ function seedProject(opts: { preSeedMemory?: boolean } = {}): {
     insertMemoryRecord(handle, {
       kind: "fact",
       state: "active",
-      summary:
+      // Phase 1 internal naming cleanup: the internal
+      // `MemoryRecordInput` field is `memoryContent`
+      // (TS-side). The DB column on disk is still
+      // `summary`.
+      memoryContent:
         "The project uses Postgres 16 for the primary data store.",
       providerId: "minimax",
       modelId: "MiniMax-M3",

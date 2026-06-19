@@ -121,9 +121,14 @@ function withCleanEnv<T>(
   });
 }
 
+// Phase 1 internal naming cleanup: `RecallMemoryInput` is an
+// internal TS type whose field is now `memoryContent`. The
+// provider JSON contract and the public surface still use
+// `summary`; the internal type is what feeds the synthesis
+// adapter.
 const SAMPLE_MEMORIES: RecallMemoryInput[] = [
-  { id: 1, summary: "The project uses Postgres 16 for the primary store." },
-  { id: 2, summary: "Auth tokens rotate weekly via the rotation job." },
+  { id: 1, memoryContent: "The project uses Postgres 16 for the primary store." },
+  { id: 2, memoryContent: "Auth tokens rotate weekly via the rotation job." },
 ];
 
 // ---------------------------------------------------------------------------

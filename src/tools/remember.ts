@@ -195,14 +195,20 @@ function formatOutcome(outcome: RememberOutcome): RememberResult {
       // `memoryId` structured field for tests and any future
       // structured-content transport; the on-the-wire MCP
       // `text` content block carries calm prose only.
+      //
+      // Phase 1 internal naming cleanup: the internal record
+      // carries `memoryContent`; the public surface
+      // (`RememberResult.summary`) keeps the public name
+      // `summary` for backward compatibility. The tool layer
+      // is the boundary that maps between the two.
       return {
         status: "saved",
-        message: `Saved memory (${outcome.record.kind}, confidence ${(outcome.record.confidence ?? 0).toFixed(2)}): ${outcome.record.summary}`,
+        message: `Saved memory (${outcome.record.kind}, confidence ${(outcome.record.confidence ?? 0).toFixed(2)}): ${outcome.record.memoryContent}`,
         memoryId: outcome.record.id,
         memoryKind: outcome.record.kind,
         modelId: outcome.record.modelId,
         confidence: outcome.record.confidence,
-        summary: outcome.record.summary,
+        summary: outcome.record.memoryContent,
       };
     case "rejected":
       return {

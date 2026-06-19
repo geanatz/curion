@@ -477,7 +477,7 @@ export function detectResolvedHistory(
     if (!Number.isFinite(c.id)) continue;
     if (idSet.has(c.id)) continue;
     idSet.add(c.id);
-    flags.set(c.id, findRowMarkerFlags(c.summary));
+    flags.set(c.id, findRowMarkerFlags(c.memoryContent));
   }
 
   // Walk every pair. The first pair that satisfies the
@@ -610,7 +610,7 @@ function finalizePatternA(
   answer: string,
   asOf: number,
 ): ResolvedHistorySignal | null {
-  const overlap = contentJaccard(answer, current.summary);
+  const overlap = contentJaccard(answer, current.memoryContent);
   if (overlap < RESOLVED_HISTORY_ANSWER_OVERLAP_THRESHOLD) {
     return null;
   }
@@ -643,7 +643,7 @@ function finalizePatternB(
   answer: string,
   asOf: number,
 ): ResolvedHistorySignal | null {
-  const overlap = contentJaccard(answer, current.summary);
+  const overlap = contentJaccard(answer, current.memoryContent);
   if (overlap < RESOLVED_HISTORY_ANSWER_OVERLAP_THRESHOLD) {
     return null;
   }
@@ -867,7 +867,7 @@ function isResolvedHistoryCandidate(
   if (typeof v !== "object" || v === null) return false;
   const o = v as Record<string, unknown>;
   if (typeof o.id !== "number" || !Number.isFinite(o.id)) return false;
-  if (typeof o.summary !== "string") return false;
+  if (typeof o.memoryContent !== "string") return false;
   if (typeof o.state !== "string") return false;
   if (!Array.isArray(o.tags)) return false;
   // `relationship` is optional. A malformed value

@@ -61,7 +61,12 @@ function mkCandidate(
     id,
     kind: "finding",
     state: "active",
-    summary: "default summary",
+    // Phase 1 internal naming cleanup: the internal
+    // `SafeMemorySummaryWithRelationship` field is
+    // `memoryContent` (TS-side). Provider JSON / public
+    // surface still use `summary`; the internal type is
+    // the seam.
+    memoryContent: "default summary",
     tags: [],
     classification: null,
     confidence: 0.9,
@@ -81,7 +86,7 @@ function clone<T>(v: T): T {
 test("detectAmbiguity: single candidate -> kind: 'none'", () => {
   const a = mkCandidate({
     id: 1,
-    summary: "we use Postgres for storage",
+    memoryContent: "we use Postgres for storage",
     relationship: {
       derivedSchemaVersion: "ccm-draft-1",
       derivedAt: 0,
@@ -103,8 +108,8 @@ test("detectAmbiguity: single candidate -> kind: 'none'", () => {
 // ---------------------------------------------------------------------------
 
 test("detectAmbiguity: two unrelated candidates with no stored block -> none", () => {
-  const a = mkCandidate({ id: 1, summary: "we use Postgres for storage" });
-  const b = mkCandidate({ id: 2, summary: "the team drinks earl grey tea" });
+  const a = mkCandidate({ id: 1, memoryContent: "we use Postgres for storage" });
+  const b = mkCandidate({ id: 2, memoryContent: "the team drinks earl grey tea" });
   const out = detectAmbiguity({
     topCandidates: [a, b],
     answer: "Postgres is the primary store.",
@@ -126,7 +131,7 @@ test("detectAmbiguity: stored mutual conflictsWith above threshold -> conflictin
   // stored values.
   const a = mkCandidate({
     id: 10,
-    summary: "we use Postgres for this service",
+    memoryContent: "we use Postgres for this service",
     relationship: {
       derivedSchemaVersion: "ccm-draft-1",
       derivedAt: 0,
@@ -137,7 +142,7 @@ test("detectAmbiguity: stored mutual conflictsWith above threshold -> conflictin
   });
   const b = mkCandidate({
     id: 11,
-    summary: "we use Postgres for this service in production",
+    memoryContent: "we use Postgres for this service in production",
     relationship: {
       derivedSchemaVersion: "ccm-draft-1",
       derivedAt: 0,
@@ -175,7 +180,7 @@ test("detectAmbiguity: stored mutual conflictsWith below threshold -> none", () 
   // opposition.
   const a = mkCandidate({
     id: 20,
-    summary: "we use Postgres for this service",
+    memoryContent: "we use Postgres for this service",
     relationship: {
       derivedSchemaVersion: "ccm-draft-1",
       derivedAt: 0,
@@ -186,7 +191,7 @@ test("detectAmbiguity: stored mutual conflictsWith below threshold -> none", () 
   });
   const b = mkCandidate({
     id: 21,
-    summary: "we use Postgres for this service in production",
+    memoryContent: "we use Postgres for this service in production",
     relationship: {
       derivedSchemaVersion: "ccm-draft-1",
       derivedAt: 0,
@@ -214,7 +219,7 @@ test("detectAmbiguity: stored mutual conflictsWith below threshold -> none", () 
 test("detectAmbiguity: stored mutual olderVariantsOf above threshold -> older-variant-suspected", () => {
   const a = mkCandidate({
     id: 30,
-    summary: "Postgres stores project data reliably since 2023",
+    memoryContent: "Postgres stores project data reliably since 2023",
     relationship: {
       derivedSchemaVersion: "ccm-draft-1",
       derivedAt: 0,
@@ -225,7 +230,7 @@ test("detectAmbiguity: stored mutual olderVariantsOf above threshold -> older-va
   });
   const b = mkCandidate({
     id: 31,
-    summary: "Postgres stores project data reliably",
+    memoryContent: "Postgres stores project data reliably",
     relationship: {
       derivedSchemaVersion: "ccm-draft-1",
       derivedAt: 0,
@@ -256,7 +261,7 @@ test("detectAmbiguity: stored mutual olderVariantsOf above threshold -> older-va
 test("detectAmbiguity: stored mutual olderVariantsOf below threshold -> none", () => {
   const a = mkCandidate({
     id: 40,
-    summary: "Postgres stores project data reliably since 2023",
+    memoryContent: "Postgres stores project data reliably since 2023",
     relationship: {
       derivedSchemaVersion: "ccm-draft-1",
       derivedAt: 0,
@@ -267,7 +272,7 @@ test("detectAmbiguity: stored mutual olderVariantsOf below threshold -> none", (
   });
   const b = mkCandidate({
     id: 41,
-    summary: "Postgres stores project data reliably",
+    memoryContent: "Postgres stores project data reliably",
     relationship: {
       derivedSchemaVersion: "ccm-draft-1",
       derivedAt: 0,
@@ -296,11 +301,11 @@ test("detectAmbiguity: asymmetric negation + answer alignment -> conflicting-can
   // token from the *non-negating* side.
   const a = mkCandidate({
     id: 50,
-    summary: "we do not use Postgres for this service",
+    memoryContent: "we do not use Postgres for this service",
   });
   const b = mkCandidate({
     id: 51,
-    summary: "we use Postgres for this service",
+    memoryContent: "we use Postgres for this service",
   });
   const out = detectAmbiguity({
     topCandidates: [a, b],
@@ -330,11 +335,11 @@ test("detectAmbiguity: asymmetric negation without answer alignment -> none", ()
   // silent: we cannot claim the model took a side.
   const a = mkCandidate({
     id: 60,
-    summary: "we do not use Postgres for this service",
+    memoryContent: "we do not use Postgres for this service",
   });
   const b = mkCandidate({
     id: 61,
-    summary: "we use Postgres for this service",
+    memoryContent: "we use Postgres for this service",
   });
   const out = detectAmbiguity({
     topCandidates: [a, b],
@@ -351,11 +356,11 @@ test("detectAmbiguity: asymmetric negation without answer alignment -> none", ()
 test("detectAmbiguity: deterministic for fixed (topCandidates, answer, asOf)", () => {
   const a = mkCandidate({
     id: 70,
-    summary: "we do not use Postgres for this service",
+    memoryContent: "we do not use Postgres for this service",
   });
   const b = mkCandidate({
     id: 71,
-    summary: "we use Postgres for this service",
+    memoryContent: "we use Postgres for this service",
   });
   const candidates = clone([a, b]);
   const out1 = detectAmbiguity({
@@ -378,7 +383,7 @@ test("detectAmbiguity: deterministic for fixed (topCandidates, answer, asOf)", (
 test("detectAmbiguity: omitted asOf -> asOf in result defaults to 0 (no clock read)", () => {
   const a = mkCandidate({
     id: 80,
-    summary: "we use Postgres for storage",
+    memoryContent: "we use Postgres for storage",
     relationship: {
       derivedSchemaVersion: "ccm-draft-1",
       derivedAt: 0,
@@ -389,7 +394,7 @@ test("detectAmbiguity: omitted asOf -> asOf in result defaults to 0 (no clock re
   });
   const b = mkCandidate({
     id: 81,
-    summary: "we use Postgres for storage in production",
+    memoryContent: "we use Postgres for storage in production",
     relationship: {
       derivedSchemaVersion: "ccm-draft-1",
       derivedAt: 0,
@@ -403,8 +408,8 @@ test("detectAmbiguity: omitted asOf -> asOf in result defaults to 0 (no clock re
 });
 
 test("detectAmbiguity: NaN / non-finite asOf is clamped to 0", () => {
-  const a = mkCandidate({ id: 90, summary: "x" });
-  const b = mkCandidate({ id: 91, summary: "y" });
+  const a = mkCandidate({ id: 90, memoryContent: "x" });
+  const b = mkCandidate({ id: 91, memoryContent: "y" });
   const outNaN = detectAmbiguity({
     topCandidates: [a, b],
     answer: "x",
@@ -430,7 +435,7 @@ test("detectAmbiguity: emitted memoryIds array is bounded to MAX_AMBIGUITY_IDS",
   // and drop non-finite ids.
   const a = mkCandidate({
     id: 100,
-    summary: "we use Postgres",
+    memoryContent: "we use Postgres",
     relationship: {
       derivedSchemaVersion: "ccm-draft-1",
       derivedAt: 0,
@@ -446,7 +451,7 @@ test("detectAmbiguity: emitted memoryIds array is bounded to MAX_AMBIGUITY_IDS",
   ].map((id) =>
     mkCandidate({
       id,
-      summary: "we use Postgres",
+      memoryContent: "we use Postgres",
       relationship: {
         derivedSchemaVersion: "ccm-draft-1",
         derivedAt: 0,
@@ -483,11 +488,11 @@ test("detectAmbiguity: emitted memoryIds array is bounded to MAX_AMBIGUITY_IDS",
 test("detectAmbiguity: does not mutate inputs", () => {
   const a = mkCandidate({
     id: 200,
-    summary: "we do not use Postgres for this service",
+    memoryContent: "we do not use Postgres for this service",
   });
   const b = mkCandidate({
     id: 201,
-    summary: "we use Postgres for this service",
+    memoryContent: "we use Postgres for this service",
   });
   const snapA = JSON.parse(JSON.stringify(a)) as unknown;
   const snapB = JSON.parse(JSON.stringify(b)) as unknown;
@@ -507,11 +512,11 @@ test("detectAmbiguity: does not mutate inputs", () => {
 test("detectAmbiguity: output never references raw text", () => {
   const a = mkCandidate({
     id: 300,
-    summary: "we do not use Postgres for this service",
+    memoryContent: "we do not use Postgres for this service",
   });
   const b = mkCandidate({
     id: 301,
-    summary: "we use Postgres for this service",
+    memoryContent: "we use Postgres for this service",
   });
   const out = detectAmbiguity({
     topCandidates: [a, b],
@@ -588,11 +593,11 @@ test("detectAmbiguity: symmetric negation -> none (both sides agree)", () => {
   // detector must stay silent.
   const a = mkCandidate({
     id: 400,
-    summary: "we do not use Postgres here",
+    memoryContent: "we do not use Postgres here",
   });
   const b = mkCandidate({
     id: 401,
-    summary: "we do not use Postgres here either",
+    memoryContent: "we do not use Postgres here either",
   });
   const out = detectAmbiguity({
     topCandidates: [a, b],

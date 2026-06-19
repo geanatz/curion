@@ -98,8 +98,16 @@ export type AdapterProviderId = "minimax" | "nvidia-nim";
 export interface RelatedMemory {
   /** Stable id of the related memory (number from the `memories` table). */
   id: number;
-  /** Short, redacted summary of the related memory. Never the raw text. */
-  summary: string;
+  /**
+   * Short, redacted memory content of the related memory. Never
+   * the raw text.
+   *
+   * Phase 1 internal naming cleanup: the internal field is
+   * `memoryContent`; the provider JSON contract and the public
+   * surface still use `summary`. The seam / controller is
+   * responsible for translating between the two surfaces.
+   */
+  memoryContent: string;
   /** Optional kind tag, e.g. "memory". */
   kind?: string;
 }
@@ -415,7 +423,7 @@ function buildAnalysisUserPrompt(
     lines.push("Related memories (use only to disambiguate entities; do not copy):");
     for (const rm of relatedMemories) {
       const kind = rm.kind ? ` (${rm.kind})` : "";
-      lines.push(`- #${rm.id}${kind}: ${rm.summary}`);
+      lines.push(`- #${rm.id}${kind}: ${rm.memoryContent}`);
     }
   }
   lines.push("");

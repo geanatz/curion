@@ -87,12 +87,19 @@ export const RECALL_DEFAULT_MAX_TOKENS = 512;
  */
 export type RecallProviderId = "minimax" | "nvidia-nim" | "unknown";
 
-/** A safe memory summary handed to the synthesis adapter. */
+/**
+ * A safe memory entry handed to the synthesis adapter.
+ *
+ * Phase 1 internal naming cleanup: the internal field is
+ * `memoryContent`. The recall controller maps the public
+ * `summary` projection (and the SQL `summary` column) to this
+ * internal field at the storage / controller boundary.
+ */
 export interface RecallMemoryInput {
   /** Stable id (memory table id). */
   id: number;
-  /** Controller-normalized safe summary. */
-  summary: string;
+  /** Controller-normalized safe memory content. */
+  memoryContent: string;
   /** Optional kind tag. */
   kind?: string;
   /** Optional short tags from metadata. */
@@ -315,7 +322,7 @@ function buildSynthesisUserPrompt(
   lines.push("MEMORIES (id: summary):");
   for (const m of memories) {
     const kind = m.kind ? ` [${m.kind}]` : "";
-    lines.push(`- #${m.id}${kind}: ${m.summary}`);
+    lines.push(`- #${m.id}${kind}: ${m.memoryContent}`);
   }
   lines.push("");
   lines.push("QUERY:");

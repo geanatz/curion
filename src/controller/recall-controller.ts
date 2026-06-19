@@ -295,7 +295,7 @@ export async function runRecallController(
     query,
     summaries.map((s: SafeMemorySummary) => ({
       id: s.id,
-      text: s.summary,
+      text: s.memoryContent,
       tags: s.tags,
     })),
     { threshold, topK },
@@ -362,7 +362,7 @@ export async function runRecallController(
 
   const memories: RecallMemoryInput[] = topSummaries.map((s) => ({
     id: s.id,
-    summary: s.summary,
+    memoryContent: s.memoryContent,
     kind: s.kind,
     tags: s.tags,
   }));
@@ -412,7 +412,7 @@ export async function runRecallController(
         );
         return {
           status: "weak_match",
-          summaries: topSummaries.slice(0, 3).map((s) => s.summary),
+          summaries: topSummaries.slice(0, 3).map((s) => s.memoryContent),
           coverage: {
             topScore: ranked[0]!.score,
             supportingCount: ranked.length,

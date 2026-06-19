@@ -450,7 +450,7 @@ test("structuredContent: never includes a memory id or model/provider metadata f
       const rec = insertMemoryRecord(handle, {
         kind: "fact",
         state: "active",
-        summary:
+        memoryContent:
           "The project uses Postgres 16 for the primary store, with related discussion of the storage architecture.",
         providerId: "minimax",
         modelId: "MiniMax-M3",
@@ -550,7 +550,7 @@ test("structuredContent.notes: plain strings, no Note: prefix, no type/severity,
     const r1 = insertMemoryRecord(handle, {
       kind: "fact",
       state: "active",
-      summary: "Postgres stores project data reliably",
+      memoryContent: "Postgres stores project data reliably",
       providerId: "minimax",
       modelId: "MiniMax-M3",
       confidence: 0.9,
@@ -560,7 +560,7 @@ test("structuredContent.notes: plain strings, no Note: prefix, no type/severity,
     const r2 = insertMemoryRecord(handle, {
       kind: "fact",
       state: "active",
-      summary: "Postgres stores project data reliably since 2023",
+      memoryContent: "Postgres stores project data reliably since 2023",
       providerId: "minimax",
       modelId: "MiniMax-M3",
       confidence: 0.9,
@@ -677,7 +677,7 @@ test("structuredContent.notes (resolved-history): plain strings, no Note: prefix
     insertMemoryRecord(handle, {
       kind: "fact",
       state: "active",
-      summary: "Render was the previous hosting platform.",
+      memoryContent: "Render was the previous hosting platform.",
       providerId: "minimax",
       modelId: "MiniMax-M3",
       confidence: 0.9,
@@ -687,7 +687,7 @@ test("structuredContent.notes (resolved-history): plain strings, no Note: prefix
     insertMemoryRecord(handle, {
       kind: "fact",
       state: "active",
-      summary: "Fly.io replaced Render as the hosting platform in 2024.",
+      memoryContent: "Fly.io replaced Render as the hosting platform in 2024.",
       providerId: "minimax",
       modelId: "MiniMax-M3",
       confidence: 0.9,
@@ -745,7 +745,7 @@ test("on-the-wire text fallback (recall.answered with notes): no Note: prefix, n
     const r1 = insertMemoryRecord(handle, {
       kind: "fact",
       state: "active",
-      summary: "Postgres stores project data reliably",
+      memoryContent: "Postgres stores project data reliably",
       providerId: "minimax",
       modelId: "MiniMax-M3",
       confidence: 0.9,
@@ -755,7 +755,7 @@ test("on-the-wire text fallback (recall.answered with notes): no Note: prefix, n
     const r2 = insertMemoryRecord(handle, {
       kind: "fact",
       state: "active",
-      summary: "Postgres stores project data reliably since 2023",
+      memoryContent: "Postgres stores project data reliably since 2023",
       providerId: "minimax",
       modelId: "MiniMax-M3",
       confidence: 0.9,
@@ -830,7 +830,7 @@ test("on-the-wire text fallback (recall.answered without notes): just the answer
     insertMemoryRecord(handle, {
       kind: "fact",
       state: "active",
-      summary: "The project uses Postgres 16 for the primary store.",
+      memoryContent: "The project uses Postgres 16 for the primary store.",
       providerId: "minimax",
       modelId: "MiniMax-M3",
       confidence: 0.9,
@@ -925,7 +925,7 @@ test("recall structuredContent: answered without notes -> { status: 'answered', 
     insertMemoryRecord(handle, {
       kind: "fact",
       state: "active",
-      summary: "The project uses Postgres 16 for the primary store.",
+      memoryContent: "The project uses Postgres 16 for the primary store.",
       providerId: "minimax",
       modelId: "MiniMax-M3",
       confidence: 0.9,
@@ -1054,15 +1054,19 @@ test("remember structuredContent: saved -> { status: 'saved', summary, kind, con
       // expects a RememberOutcome (the controller's
       // discriminated union), so we pass the
       // controller outcome directly.
+      // Phase 1 internal naming cleanup: the internal record
+      // carries `memoryContent`; the public `RememberResult`
+      // keeps `summary` as the user-facing field name. The
+      // test mirrors the tool-layer mapping exactly.
       void formatOutcome; // (kept for completeness; the projection is what we test)
       const rememberResult = {
         status: "saved" as const,
-        message: `Saved memory (${controllerOut.record.kind}, confidence ${(controllerOut.record.confidence ?? 0).toFixed(2)}): ${controllerOut.record.summary}`,
+        message: `Saved memory (${controllerOut.record.kind}, confidence ${(controllerOut.record.confidence ?? 0).toFixed(2)}): ${controllerOut.record.memoryContent}`,
         memoryId: controllerOut.record.id,
         memoryKind: controllerOut.record.kind,
         modelId: controllerOut.record.modelId,
         confidence: controllerOut.record.confidence,
-        summary: controllerOut.record.summary,
+        summary: controllerOut.record.memoryContent,
       };
       const sc = buildRememberStructuredContent(rememberResult);
       assert.equal(sc.status, "saved");

@@ -106,7 +106,11 @@ function mkCandidate(
     id,
     kind: "finding",
     state: "active",
-    summary: "default summary",
+    // Phase 1 internal naming cleanup: the internal
+    // `ResolvedHistoryCandidate` field is `memoryContent`
+    // (TS-side). Provider JSON / public surface still use
+    // `summary`; the internal type is the seam.
+    memoryContent: "default summary",
     tags: [],
     classification: null,
     confidence: 0.9,
@@ -126,7 +130,7 @@ function clone<T>(v: T): T {
 test("detectResolvedHistory: single candidate -> kind: 'none'", () => {
   const a = mkCandidate({
     id: 1,
-    summary: "Render was the previous hosting platform.",
+    memoryContent: "Render was the previous hosting platform.",
   });
   const out = detectResolvedHistory({
     topCandidates: [a],
@@ -171,13 +175,13 @@ test("detectResolvedHistory: SG1 explicit previous+current pair resolves", () =>
   // synthesized answer matches the current side.
   const a = mkCandidate({
     id: 10,
-    summary:
+    memoryContent:
       "Render was the previous hosting platform. The current " +
       "hosting platform is Fly.io.",
   });
   const b = mkCandidate({
     id: 11,
-    summary: "Fly.io is the current hosting platform for production.",
+    memoryContent: "Fly.io is the current hosting platform for production.",
   });
   const out = detectResolvedHistory({
     topCandidates: [a, b],
@@ -208,11 +212,11 @@ test("detectResolvedHistory: SG2 single asymmetric marker only -> none", () => {
   // resolution. The detector must stay silent.
   const a = mkCandidate({
     id: 20,
-    summary: "Render was replaced for production hosting.",
+    memoryContent: "Render was replaced for production hosting.",
   });
   const b = mkCandidate({
     id: 21,
-    summary: "The team uses a hosting platform for the staging app.",
+    memoryContent: "The team uses a hosting platform for the staging app.",
   });
   const out = detectResolvedHistory({
     topCandidates: [a, b],
@@ -233,11 +237,11 @@ test("detectResolvedHistory: SG3 recency-only pair -> none (no recency claim)", 
   // to claim resolution. The pair is silent.
   const a = mkCandidate({
     id: 30,
-    summary: "The project uses Render for hosting.",
+    memoryContent: "The project uses Render for hosting.",
   });
   const b = mkCandidate({
     id: 31,
-    summary: "The project uses Fly.io for hosting.",
+    memoryContent: "The project uses Fly.io for hosting.",
   });
   const out = detectResolvedHistory({
     topCandidates: [a, b],
@@ -254,11 +258,11 @@ test("detectResolvedHistory: id ordering is irrelevant; (high-id previous, low-i
   // on id ordering.
   const a = mkCandidate({
     id: 40,
-    summary: "The project uses Fly.io for hosting.",
+    memoryContent: "The project uses Fly.io for hosting.",
   });
   const b = mkCandidate({
     id: 41,
-    summary: "The project uses Render for hosting.",
+    memoryContent: "The project uses Render for hosting.",
   });
   const out = detectResolvedHistory({
     topCandidates: [a, b],
@@ -280,18 +284,18 @@ test("detectResolvedHistory: SG4 three-step timeline resolves the (history, curr
   // pair and emits `memoryIds: [history, current]`.
   const history = mkCandidate({
     id: 50,
-    summary:
+    memoryContent:
       "Render was the previous hosting platform. It is no longer used.",
   });
   const intermediate = mkCandidate({
     id: 51,
-    summary:
+    memoryContent:
       "Fly.io replaced Render as the hosting platform. " +
       "It has since been superseded.",
   });
   const current = mkCandidate({
     id: 52,
-    summary: "Railway is the current hosting platform for production.",
+    memoryContent: "Railway is the current hosting platform for production.",
   });
   const out = detectResolvedHistory({
     topCandidates: [history, intermediate, current],
@@ -325,11 +329,11 @@ test("detectResolvedHistory: SG5 plain history row + companion current row, no m
   // silent.
   const a = mkCandidate({
     id: 60,
-    summary: "We used Render for hosting in 2023. The team liked it for staging.",
+    memoryContent: "We used Render for hosting in 2023. The team liked it for staging.",
   });
   const b = mkCandidate({
     id: 61,
-    summary: "We use Fly.io for production hosting.",
+    memoryContent: "We use Fly.io for production hosting.",
   });
   const out = detectResolvedHistory({
     topCandidates: [a, b],
@@ -352,7 +356,7 @@ test("detectResolvedHistory: SG6 stored mutual conflictsWith -> none (Phase D wi
   // the Phase D warning can fire independently.
   const a = mkCandidate({
     id: 70,
-    summary: "Render is the current hosting platform.",
+    memoryContent: "Render is the current hosting platform.",
     relationship: {
       derivedSchemaVersion: "ccm-draft-1",
       derivedAt: 1,
@@ -363,7 +367,7 @@ test("detectResolvedHistory: SG6 stored mutual conflictsWith -> none (Phase D wi
   });
   const b = mkCandidate({
     id: 71,
-    summary: "Fly.io is the current hosting platform.",
+    memoryContent: "Fly.io is the current hosting platform.",
     relationship: {
       derivedSchemaVersion: "ccm-draft-1",
       derivedAt: 1,
@@ -393,13 +397,13 @@ test("detectResolvedHistory: SG7 superseded/no-longer wording resolves", () => {
   // answer aligns with the current side.
   const a = mkCandidate({
     id: 80,
-    summary:
+    memoryContent:
       "The old hosting platform was Render. It has been " +
       "superseded by Fly.io.",
   });
   const b = mkCandidate({
     id: 81,
-    summary: "Fly.io is the current hosting platform; Render is no longer used.",
+    memoryContent: "Fly.io is the current hosting platform; Render is no longer used.",
   });
   const out = detectResolvedHistory({
     topCandidates: [a, b],
@@ -436,12 +440,12 @@ test("detectResolvedHistory: SG8 detector operates on safe summary fields only (
   // happens; this test is a defense-in-depth pin.)
   const a = mkCandidate({
     id: 90,
-    summary: "Render was the previous hosting platform.",
+    memoryContent: "Render was the previous hosting platform.",
     state: "active",
   });
   const b = mkCandidate({
     id: 91,
-    summary: "Fly.io is the current hosting platform.",
+    memoryContent: "Fly.io is the current hosting platform.",
     state: "active",
   });
   const out = detectResolvedHistory({
@@ -464,7 +468,7 @@ test("detectResolvedHistory: Pattern B referential pointer resolves", () => {
   // The previous-side row need not carry a marker.
   const a = mkCandidate({
     id: 100,
-    summary: "Render was the project hosting platform.",
+    memoryContent: "Render was the project hosting platform.",
     relationship: {
       derivedSchemaVersion: "ccm-draft-1",
       derivedAt: 1,
@@ -475,7 +479,7 @@ test("detectResolvedHistory: Pattern B referential pointer resolves", () => {
   });
   const b = mkCandidate({
     id: 101,
-    summary: "Fly.io is the current hosting platform for production.",
+    memoryContent: "Fly.io is the current hosting platform for production.",
     relationship: {
       derivedSchemaVersion: "ccm-draft-1",
       derivedAt: 1,
@@ -501,11 +505,11 @@ test("detectResolvedHistory: Pattern B supersedes -> previous side", () => {
   // accepts both directions.
   const a = mkCandidate({
     id: 110,
-    summary: "Render was the project hosting platform.",
+    memoryContent: "Render was the project hosting platform.",
   });
   const b = mkCandidate({
     id: 111,
-    summary: "Fly.io is the current hosting platform for production.",
+    memoryContent: "Fly.io is the current hosting platform for production.",
     relationship: {
       derivedSchemaVersion: "ccm-draft-1",
       derivedAt: 1,
@@ -537,11 +541,11 @@ test("detectResolvedHistory: Pattern B without current-side marker -> none", () 
   // substitute for the marker in the first version).
   const a = mkCandidate({
     id: 120,
-    summary: "Render was the project hosting platform.",
+    memoryContent: "Render was the project hosting platform.",
   });
   const b = mkCandidate({
     id: 121,
-    summary: "Fly.io hosts the production app.",
+    memoryContent: "Fly.io hosts the production app.",
     relationship: {
       derivedSchemaVersion: "ccm-draft-1",
       derivedAt: 1,
@@ -566,11 +570,11 @@ test("detectResolvedHistory: Pattern B without current-side marker -> none", () 
 test("detectResolvedHistory: deterministic for fixed (topCandidates, answer, asOf)", () => {
   const a = mkCandidate({
     id: 130,
-    summary: "Render was the previous hosting platform.",
+    memoryContent: "Render was the previous hosting platform.",
   });
   const b = mkCandidate({
     id: 131,
-    summary: "Fly.io is the current hosting platform for production.",
+    memoryContent: "Fly.io is the current hosting platform for production.",
   });
   const candidates = clone([a, b]);
   const out1 = detectResolvedHistory({
@@ -593,11 +597,11 @@ test("detectResolvedHistory: deterministic for fixed (topCandidates, answer, asO
 test("detectResolvedHistory: omitted asOf -> asOf in result defaults to 0 (no clock read)", () => {
   const a = mkCandidate({
     id: 140,
-    summary: "Render was the previous hosting platform.",
+    memoryContent: "Render was the previous hosting platform.",
   });
   const b = mkCandidate({
     id: 141,
-    summary: "Fly.io is the current hosting platform for production.",
+    memoryContent: "Fly.io is the current hosting platform for production.",
   });
   const out = detectResolvedHistory({
     topCandidates: [a, b],
@@ -611,8 +615,8 @@ test("detectResolvedHistory: omitted asOf -> asOf in result defaults to 0 (no cl
 // ---------------------------------------------------------------------------
 
 test("detectResolvedHistory: NaN / non-finite asOf is clamped to 0", () => {
-  const a = mkCandidate({ id: 150, summary: "x" });
-  const b = mkCandidate({ id: 151, summary: "y" });
+  const a = mkCandidate({ id: 150, memoryContent: "x" });
+  const b = mkCandidate({ id: 151, memoryContent: "y" });
   const outNaN = detectResolvedHistory({
     topCandidates: [a, b],
     answer: "x",
@@ -639,11 +643,11 @@ test("detectResolvedHistory: emitted memoryIds array is bounded to MAX_RESOLVED_
   // large input.
   const a = mkCandidate({
     id: 160,
-    summary: "Render was the previous hosting platform.",
+    memoryContent: "Render was the previous hosting platform.",
   });
   const b = mkCandidate({
     id: 161,
-    summary: "Fly.io is the current hosting platform for production.",
+    memoryContent: "Fly.io is the current hosting platform for production.",
   });
   const out = detectResolvedHistory({
     topCandidates: [a, b],
@@ -668,11 +672,11 @@ test("detectResolvedHistory: emitted memoryIds array is bounded to MAX_RESOLVED_
 test("detectResolvedHistory: does not mutate inputs", () => {
   const a = mkCandidate({
     id: 170,
-    summary: "Render was the previous hosting platform.",
+    memoryContent: "Render was the previous hosting platform.",
   });
   const b = mkCandidate({
     id: 171,
-    summary: "Fly.io is the current hosting platform for production.",
+    memoryContent: "Fly.io is the current hosting platform for production.",
   });
   const snapA = JSON.parse(JSON.stringify(a)) as unknown;
   const snapB = JSON.parse(JSON.stringify(b)) as unknown;
@@ -692,11 +696,11 @@ test("detectResolvedHistory: does not mutate inputs", () => {
 test("detectResolvedHistory: output never references raw text", () => {
   const a = mkCandidate({
     id: 180,
-    summary: "Render was the previous hosting platform.",
+    memoryContent: "Render was the previous hosting platform.",
   });
   const b = mkCandidate({
     id: 181,
-    summary: "Fly.io is the current hosting platform for production.",
+    memoryContent: "Fly.io is the current hosting platform for production.",
   });
   const out = detectResolvedHistory({
     topCandidates: [a, b],
@@ -764,7 +768,7 @@ test("detectResolvedHistory: stored mutual olderVariantsOf -> none (Phase D wins
   // pair (spec §4.2 / §5.2).
   const a = mkCandidate({
     id: 190,
-    summary: "Project data is stored in Postgres on a single host.",
+    memoryContent: "Project data is stored in Postgres on a single host.",
     relationship: {
       derivedSchemaVersion: "ccm-draft-1",
       derivedAt: 1,
@@ -775,7 +779,7 @@ test("detectResolvedHistory: stored mutual olderVariantsOf -> none (Phase D wins
   });
   const b = mkCandidate({
     id: 191,
-    summary: "Project data is stored in Postgres on multiple hosts.",
+    memoryContent: "Project data is stored in Postgres on multiple hosts.",
     relationship: {
       derivedSchemaVersion: "ccm-draft-1",
       derivedAt: 1,
@@ -804,13 +808,13 @@ test("detectResolvedHistory: co-carried markers on a row do not block pairing wh
   // exact-side purity.
   const a = mkCandidate({
     id: 200,
-    summary:
+    memoryContent:
       "Render was the previous hosting platform. The current " +
       "hosting platform is Fly.io.",
   });
   const b = mkCandidate({
     id: 201,
-    summary: "Fly.io is the current hosting platform for production.",
+    memoryContent: "Fly.io is the current hosting platform for production.",
   });
   const out = detectResolvedHistory({
     topCandidates: [a, b],
@@ -831,11 +835,11 @@ test("detectResolvedHistory: 'no longer' bigram flags a row as previous-side", (
   // whole substring on the lowercased copy.
   const a = mkCandidate({
     id: 210,
-    summary: "Postgres is the primary store. It is no longer in use.",
+    memoryContent: "Postgres is the primary store. It is no longer in use.",
   });
   const b = mkCandidate({
     id: 211,
-    summary: "MySQL is the current primary store for production.",
+    memoryContent: "MySQL is the current primary store for production.",
   });
   const out = detectResolvedHistory({
     topCandidates: [a, b],
@@ -858,11 +862,11 @@ test("detectResolvedHistory: 'no longer' bigram without a current-side row -> no
   // §5.2). The pairing rule is bilateral.
   const a = mkCandidate({
     id: 220,
-    summary: "Postgres is no longer the primary store.",
+    memoryContent: "Postgres is no longer the primary store.",
   });
   const b = mkCandidate({
     id: 221,
-    summary: "The team uses a database for the staging app.",
+    memoryContent: "The team uses a database for the staging app.",
   });
   const out = detectResolvedHistory({
     topCandidates: [a, b],
@@ -884,11 +888,11 @@ test("detectResolvedHistory: single current marker alone (no previous anywhere) 
   // claim resolution.
   const a = mkCandidate({
     id: 230,
-    summary: "Fly.io is the current hosting platform.",
+    memoryContent: "Fly.io is the current hosting platform.",
   });
   const b = mkCandidate({
     id: 231,
-    summary: "The team uses a hosting platform for the staging app.",
+    memoryContent: "The team uses a hosting platform for the staging app.",
   });
   const out = detectResolvedHistory({
     topCandidates: [a, b],
@@ -905,11 +909,11 @@ test("detectResolvedHistory: single current marker alone (no previous anywhere) 
 test("detectResolvedHistory: signal shape -> kind / reason / memoryIds / confidence / asOf", () => {
   const a = mkCandidate({
     id: 240,
-    summary: "Render was the previous hosting platform.",
+    memoryContent: "Render was the previous hosting platform.",
   });
   const b = mkCandidate({
     id: 241,
-    summary: "Fly.io is the current hosting platform for production.",
+    memoryContent: "Fly.io is the current hosting platform for production.",
   });
   const out = detectResolvedHistory({
     topCandidates: [a, b],
@@ -940,11 +944,11 @@ test("detectResolvedHistory: signal shape -> kind / reason / memoryIds / confide
 test("detectResolvedHistory: emitted confidence is bounded to [threshold, 1) on a clean pair", () => {
   const a = mkCandidate({
     id: 250,
-    summary: "Render was the previous hosting platform.",
+    memoryContent: "Render was the previous hosting platform.",
   });
   const b = mkCandidate({
     id: 251,
-    summary: "Fly.io is the current hosting platform for production.",
+    memoryContent: "Fly.io is the current hosting platform for production.",
   });
   const out = detectResolvedHistory({
     topCandidates: [a, b],
@@ -965,11 +969,11 @@ test("detectResolvedHistory: emitted confidence is bounded to [threshold, 1) on 
 test("detectResolvedHistory: asOf is echoed verbatim in the signal", () => {
   const a = mkCandidate({
     id: 260,
-    summary: "Render was the previous hosting platform.",
+    memoryContent: "Render was the previous hosting platform.",
   });
   const b = mkCandidate({
     id: 261,
-    summary: "Fly.io is the current hosting platform for production.",
+    memoryContent: "Fly.io is the current hosting platform for production.",
   });
   const out = detectResolvedHistory({
     topCandidates: [a, b],
@@ -994,11 +998,11 @@ test("detectResolvedHistory: malformed relationship block is treated as no relat
   // text.
   const a = mkCandidate({
     id: 270,
-    summary: "Render was the previous hosting platform.",
+    memoryContent: "Render was the previous hosting platform.",
   });
   const b = mkCandidate({
     id: 271,
-    summary: "Fly.io is the current hosting platform for production.",
+    memoryContent: "Fly.io is the current hosting platform for production.",
     relationship: "not-an-object" as unknown as ResolvedHistoryCandidate["relationship"],
   });
   // Cast through unknown for the test fixture: the
@@ -1024,15 +1028,15 @@ test("detectResolvedHistory: duplicate ids in the candidate list are de-duplicat
   // remaining distinct rows.
   const a = mkCandidate({
     id: 280,
-    summary: "Render was the previous hosting platform.",
+    memoryContent: "Render was the previous hosting platform.",
   });
   const aDup = mkCandidate({
     id: 280,
-    summary: "Render was the previous hosting platform.",
+    memoryContent: "Render was the previous hosting platform.",
   });
   const b = mkCandidate({
     id: 281,
-    summary: "Fly.io is the current hosting platform for production.",
+    memoryContent: "Fly.io is the current hosting platform for production.",
   });
   const out = detectResolvedHistory({
     topCandidates: [a, aDup, b],
@@ -1055,11 +1059,11 @@ test("detectResolvedHistory: candidate list order does not affect the result", (
   // produce a byte-equal signal.
   const a = mkCandidate({
     id: 290,
-    summary: "Render was the previous hosting platform.",
+    memoryContent: "Render was the previous hosting platform.",
   });
   const b = mkCandidate({
     id: 291,
-    summary: "Fly.io is the current hosting platform for production.",
+    memoryContent: "Fly.io is the current hosting platform for production.",
   });
   const out1 = detectResolvedHistory({
     topCandidates: [a, b],
@@ -1086,11 +1090,11 @@ test("detectResolvedHistory: answer that does NOT align with the current side ->
   // silent.
   const a = mkCandidate({
     id: 300,
-    summary: "Render was the previous hosting platform.",
+    memoryContent: "Render was the previous hosting platform.",
   });
   const b = mkCandidate({
     id: 301,
-    summary: "Fly.io is the current hosting platform for production.",
+    memoryContent: "Fly.io is the current hosting platform for production.",
   });
   const out = detectResolvedHistory({
     topCandidates: [a, b],
@@ -1108,11 +1112,11 @@ test("detectResolvedHistory: answer that aligns with the previous side -> none (
   // took the current side; it stays silent.
   const a = mkCandidate({
     id: 310,
-    summary: "Render was the previous hosting platform.",
+    memoryContent: "Render was the previous hosting platform.",
   });
   const b = mkCandidate({
     id: 311,
-    summary: "Fly.io is the current hosting platform for production.",
+    memoryContent: "Fly.io is the current hosting platform for production.",
   });
   const out = detectResolvedHistory({
     topCandidates: [a, b],

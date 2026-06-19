@@ -328,7 +328,12 @@ test("controller: seam override returns synthetic related memories -> relationsh
       memories: [
         {
           id: 1000,
-          summary: "we use Postgres for this service in production",
+          // Phase 1 internal naming cleanup: this fixture
+          // is the internal `RelatedMemory` seam row, so the
+          // property key is `memoryContent` (TS-side). The
+          // provider JSON contract and the public surface
+          // still use `summary`; the seam is the boundary.
+          memoryContent: "we use Postgres for this service in production",
         },
       ],
       reason: "test seam override",
@@ -397,7 +402,7 @@ test("controller: stored metadata does not contain raw input string (Phase B inv
       memories: [
         {
           id: 2000,
-          summary: "we use Postgres for this service in production",
+          memoryContent: "we use Postgres for this service in production",
         },
       ],
       reason: "test seam override",
@@ -457,7 +462,7 @@ test("public remember tool result shape is unchanged with seam override (status,
       memories: [
         {
           id: 3000,
-          summary: "we use Postgres for this service in production",
+          memoryContent: "we use Postgres for this service in production",
         },
       ],
       reason: "test seam override",
@@ -577,7 +582,7 @@ test("controller: derivedAt is the value the controller passed via options.now",
       memories: [
         {
           id: 4000,
-          summary: "we use Postgres for this service in production",
+          memoryContent: "we use Postgres for this service in production",
         },
       ],
       reason: "test seam override",
@@ -667,7 +672,7 @@ test("controller: after seam override reset, the seam returns the MVP empty list
   const { tmp, handle } = mkStorage();
   try {
     setRelatedMemoriesImpl(() => ({
-      memories: [{ id: 5000, summary: "anything" }],
+      memories: [{ id: 5000, memoryContent: "anything" }],
       reason: "test override",
     }));
     // Reset back to default.
@@ -737,7 +742,7 @@ test("tool: handleRemember with seam override still returns one of the four stat
       memories: [
         {
           id: 6000,
-          summary: "we use Postgres for this service in production",
+          memoryContent: "we use Postgres for this service in production",
         },
       ],
       reason: "test seam override",
@@ -853,7 +858,7 @@ test("controller: olderVariantsOf is non-empty when a related memory is an earli
       memories: [
         {
           id: 1,
-          summary:
+          memoryContent:
             "Postgres stores project data reliably; migrated from MySQL; production deployment",
         },
       ],
@@ -987,15 +992,15 @@ test("controller: malformed related-memory id is skipped, not coerced to -1 and 
         // that lands in conflictsWith.
         {
           id: 7000,
-          summary: "we use Postgres for this service in production",
+          memoryContent: "we use Postgres for this service in production",
         },
         // Bad rows: non-finite id, string id, NaN, missing id.
         // The MVP impl exposes `id` as `unknown` for the seam;
         // a permissive producer could send any of these.
-        { id: "abc", summary: "we use Postgres for this service in production" } as never,
-        { id: Number.NaN, summary: "we use Postgres for this service in production" } as never,
-        { id: Number.POSITIVE_INFINITY, summary: "we use Postgres for this service in production" } as never,
-        { summary: "we use Postgres for this service in production" } as never,
+        { id: "abc", memoryContent: "we use Postgres for this service in production" } as never,
+        { id: Number.NaN, memoryContent: "we use Postgres for this service in production" } as never,
+        { id: Number.POSITIVE_INFINITY, memoryContent: "we use Postgres for this service in production" } as never,
+        { memoryContent: "we use Postgres for this service in production" } as never,
       ] as never,
       reason: "test seam override (mixed good + malformed ids)",
     }));

@@ -493,7 +493,12 @@ test("remember: safe input is stored with provider-normalized summary; raw input
         );
       }
     }
-    assert.equal(dbRow.summary, rec.summary);
+    // Phase 1 internal naming cleanup: the SQL `summary`
+    // column on disk (dbRow.summary) maps to the internal
+    // `memoryContent` TS-side property (rec.memoryContent) via
+    // the storage layer's read projection. The DB column name
+    // is preserved; the TS property is the internal name.
+    assert.equal(dbRow.summary, rec.memoryContent);
   } finally {
     rmStorage(tmp, handle);
   }

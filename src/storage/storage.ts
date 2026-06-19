@@ -263,19 +263,32 @@ export const MEMORY_STATES: readonly MemoryState[] = [
 ];
 
 /**
- * Persisted record shape. The `summary` field is the
- * controller-normalized safe summary; it is never the raw input
- * text. `metadata` is a JSON-encoded string of provider
+ * Persisted record shape. The `memoryContent` field is the
+ * controller-normalized safe memory content; it is never the
+ * raw input text. `metadata` is a JSON-encoded string of provider
  * tags/entities/classification so the schema stays small and
  * forward-compatible.
+ *
+ * Phase 1 internal naming cleanup: the TypeScript property is
+ * `memoryContent` to avoid the misleading name "summary" (which
+ * suggests a free-form summary string while the field is in
+ * fact the persisted memory body — text the controller produced
+ * from the provider's sanitized output). The underlying SQLite
+ * column is intentionally still named `summary` for backward
+ * compatibility with existing DBs and the FTS5 sync triggers;
+ * the SQL column name is the storage boundary, the TypeScript
+ * property is the internal contract.
  */
 export interface MemoryRecordInput {
   /** Internal kind enum. Falls back to `finding` if unknown. */
   kind: MemoryKind;
   /** State. MVP only writes `active`. */
   state: MemoryState;
-  /** Controller-normalized summary. MUST NOT be raw input. */
-  summary: string;
+  /**
+   * Controller-normalized memory content. MUST NOT be raw input.
+   * Persisted to the DB column `summary` (see SQL layer).
+   */
+  memoryContent: string;
   /** Provider id (`minimax` | `nvidia-nim`) or null. */
   providerId: string | null;
   /** Model id or null. */
@@ -292,7 +305,11 @@ export interface MemoryRecord {
   id: number;
   kind: MemoryKind;
   state: MemoryState;
-  summary: string;
+  /**
+   * Controller-normalized memory content. Source column on disk
+   * is `summary`; the TypeScript property is the internal name.
+   */
+  memoryContent: string;
   providerId: string | null;
   modelId: string | null;
   confidence: number | null;
@@ -308,7 +325,8 @@ export interface MemoryRecord {
  *
  * Only safe fields are exposed:
  *   - `id`, `kind`, `state`
- *   - `summary` (the controller-normalized safe summary)
+ *   - `memoryContent` (the controller-normalized safe memory
+ *     body — source column on disk is `summary`)
  *   - `tags` and `classification` (parsed from the metadata JSON
  *     blob, but never the raw `metadata` object itself)
  *   - `confidence` (provider confidence; useful for ranking)
@@ -317,12 +335,17 @@ export interface MemoryRecord {
  * unredacted metadata fields are exposed. The repo never had
  * columns for raw input; this is enforced at the schema level
  * and re-asserted at this read boundary.
+ *
+ * Phase 1 internal naming cleanup: the internal property is
+ * `memoryContent`. The DB column remains `summary`; the read
+ * projection re-binds SQL `summary` to the TS `memoryContent`
+ * field here.
  */
 export interface SafeMemorySummary {
   id: number;
   kind: MemoryKind;
   state: MemoryState;
-  summary: string;
+  memoryContent: string;
   tags: string[];
   classification: string | null;
   confidence: number | null;
@@ -330,10 +353,16 @@ export interface SafeMemorySummary {
 
 /**
  * Insert a new memory record. Returns the inserted row (including
- * assigned id and timestamps). The summary is stored verbatim as
- * given by the controller — the controller is responsible for never
- * passing raw input through. The repo does not re-validate the
- * summary against the raw input; it trusts the controller seam.
+ * assigned id and timestamps). The memory content is stored
+ * verbatim as given by the controller — the controller is
+ * responsible for never passing raw input through. The repo does
+ * not re-validate the memory content against the raw input; it
+ * trusts the controller seam.
+ *
+ * Phase 1 internal naming cleanup: the TypeScript input field is
+ * `memoryContent`; the underlying SQL column is still `summary`.
+ * The binding name on the parameterized statement (`@summary`)
+ * matches the SQL column name and is preserved.
  */
 export function insertMemoryRecord(
   handle: StorageHandle,
@@ -353,7 +382,7 @@ export function insertMemoryRecord(
     kind: input.kind,
     created_at: now,
     updated_at: now,
-    summary: input.summary,
+    summary: input.memoryContent,
     state: input.state,
     provider_id: input.providerId,
     model_id: input.modelId,
@@ -366,7 +395,7 @@ export function insertMemoryRecord(
     id,
     kind: input.kind,
     state: input.state,
-    summary: input.summary,
+    memoryContent: input.memoryContent,
     providerId: input.providerId,
     modelId: input.modelId,
     confidence: input.confidence,
@@ -495,7 +524,9 @@ export function updateMemoryMetadata(
     state: (MEMORY_STATES.includes(row.state as MemoryState)
       ? (row.state as MemoryState)
       : "active"),
-    summary: row.summary ?? "",
+    // Phase 1 internal naming cleanup: bind the SQL `summary`
+    // column back to the TypeScript `memoryContent` field.
+    memoryContent: row.summary ?? "",
     providerId: row.provider_id,
     modelId: row.model_id,
     confidence: row.confidence,
@@ -564,9 +595,10 @@ export function listActiveMemorySummaries(
     }>;
   const out: SafeMemorySummary[] = [];
   for (const r of rows) {
-    // Defensive: if a future row has null summary, skip it. The
-    // controller never inserts a null summary, but the schema
-    // allows it (TEXT NULL default).
+    // Defensive: if a future row has null memory content (SQL
+    // column is `summary` and allows NULL), skip it. The
+    // controller never inserts a null memory content, but the
+    // schema allows it (TEXT NULL default).
     if (typeof r.summary !== "string" || r.summary.length === 0) continue;
     let tags: string[] = [];
     let classification: string | null = null;
@@ -593,7 +625,9 @@ export function listActiveMemorySummaries(
       state: (MEMORY_STATES.includes(r.state as MemoryState)
         ? (r.state as MemoryState)
         : "active"),
-      summary: r.summary,
+      // Phase 1 internal naming cleanup: SQL `summary` -> TS
+      // `memoryContent`. The DB column name is preserved.
+      memoryContent: r.summary,
       tags,
       classification,
       confidence: r.confidence,

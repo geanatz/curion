@@ -653,7 +653,13 @@ test("adapter: relatedMemories are included in the initial prompt only (not the 
     log,
   );
   const related = [
-    { id: 42, summary: "prior context summary", kind: "memory" },
+    // Phase 1 internal naming cleanup: this fixture is
+    // passed to `analyzeMemoryWithFallback` as a
+    // `RelatedMemory[]` (internal seam type), so the
+    // property key is `memoryContent` (TS-side). The
+    // provider JSON contract and the public surface
+    // still use `summary`; the seam is the boundary.
+    { id: 42, memoryContent: "prior context summary", kind: "memory" },
   ];
   await analyzeMemoryWithFallback("hello", related, {
     primaryApiKey: PRIMARY_KEY,

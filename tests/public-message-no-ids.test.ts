@@ -173,7 +173,11 @@ function insertWithRelationship(
   return insertMemoryRecord(handle, {
     kind: opts.kind ?? "fact",
     state: "active",
-    summary: opts.summary,
+    // Phase 1 internal naming cleanup: the internal record
+    // input uses `memoryContent`; the helper's own
+    // `opts.summary` is just a test-side param name and is
+    // mapped here at the storage boundary.
+    memoryContent: opts.summary,
     providerId: "minimax",
     modelId: "MiniMax-M3",
     confidence: 0.9,
@@ -215,8 +219,13 @@ test("regression: remember tool saved message has no #N id reference; memoryId f
       // independent of internal renames; the only thing we
       // pin is the on-the-wire contract: prose only, no ids.
       const rec = controllerOutcome.record;
+      // Phase 1 internal naming cleanup: the internal
+      // record's TS property is `memoryContent`; the public
+      // `summary` string the message carries is the same
+      // value (the tool-layer boundary maps
+      // record.memoryContent -> public summary).
       const publicMessage =
-        `Saved memory (${rec.kind}, confidence ${(rec.confidence ?? 0).toFixed(2)}): ${rec.summary}`;
+        `Saved memory (${rec.kind}, confidence ${(rec.confidence ?? 0).toFixed(2)}): ${rec.memoryContent}`;
       assertNoMemoryIdRef(publicMessage, "remember tool saved message");
       // The structured `memoryId` field on the tool-layer
       // result is preserved (internal id, available to

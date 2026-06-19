@@ -255,7 +255,7 @@ export function deriveRelationshipMetadata(
   const olderVariantsOf: number[] = [];
   let maxConfidence = 0;
 
-  const candidateTokens = tokenize(candidate.summary);
+  const candidateTokens = tokenize(candidate.memoryContent);
   const candidateTags = normalizeTags(candidate.tags);
 
   for (const other of list) {
@@ -615,7 +615,7 @@ function scoreConflictSignal(
   candidateTags: ReadonlySet<string>,
   other: SafeMemorySummary,
 ): ConflictSignal | null {
-  const otherTokens = tokenize(other.summary);
+  const otherTokens = tokenize(other.memoryContent);
   if (candidateTokens.length === 0 || otherTokens.length === 0) {
     return null;
   }
@@ -635,7 +635,7 @@ function scoreConflictSignal(
     otherPolarity !== null &&
     candPolarity !== otherPolarity &&
     sharedTags.size > 0;
-  if (polarityDisagrees && candidate.summary === other.summary) {
+  if (polarityDisagrees && candidate.memoryContent === other.memoryContent) {
     // Strong, structural signal that survives the
     // byte-identical short-circuit below. Emit at a high
     // confidence so it clears τ (0.85) cleanly.
@@ -646,13 +646,13 @@ function scoreConflictSignal(
   // this is a paraphrase-equal, not a conflict. The
   // `olderVariantsOf` rule (with its tighter τ') is the right
   // place for that.
-  if (candidate.summary === other.summary) return null;
+  if (candidate.memoryContent === other.memoryContent) return null;
 
   const overlap = jaccard(candidateTokens, otherTokens);
   if (overlap < 0.6) return null;
 
-  const candHasNeg = hasNegationMarker(candidate.summary);
-  const otherHasNeg = hasNegationMarker(other.summary);
+  const candHasNeg = hasNegationMarker(candidate.memoryContent);
+  const otherHasNeg = hasNegationMarker(other.memoryContent);
   // Asymmetric negation: exactly one side negates.
   const asymmetricNegation =
     candHasNeg !== otherHasNeg && (candHasNeg || otherHasNeg);
@@ -713,12 +713,12 @@ function scoreOlderVariantSignal(
   candidate: SafeMemorySummary,
   other: SafeMemorySummary,
 ): OlderVariantSignal | null {
-  const candidateTokens = tokenize(candidate.summary);
-  const otherTokens = tokenize(other.summary);
+  const candidateTokens = tokenize(candidate.memoryContent);
+  const otherTokens = tokenize(other.memoryContent);
   if (candidateTokens.length === 0 || otherTokens.length === 0) {
     return null;
   }
-  if (candidate.summary === other.summary) return null;
+  if (candidate.memoryContent === other.memoryContent) return null;
 
   const overlap = jaccard(candidateTokens, otherTokens);
   // τ' is 0.90. The first-version rule requires high
@@ -829,7 +829,7 @@ function isSafeMemorySummary(v: unknown): v is SafeMemorySummary {
   if (typeof v !== "object" || v === null) return false;
   const o = v as Record<string, unknown>;
   if (typeof o.id !== "number" || !Number.isFinite(o.id)) return false;
-  if (typeof o.summary !== "string") return false;
+  if (typeof o.memoryContent !== "string") return false;
   if (typeof o.state !== "string") return false;
   if (!Array.isArray(o.tags)) return false;
   return true;
