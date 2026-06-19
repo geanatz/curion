@@ -47,6 +47,7 @@ import {
 } from "../storage/storage.js";
 import {
   rankLexical,
+  scoreCandidateDetailed,
   DEFAULT_RELEVANCE_THRESHOLD,
   DEFAULT_TOP_K,
   type LexicalScoredCandidate,
@@ -68,6 +69,11 @@ import {
 } from "../providers/recall-synthesis.js";
 import { redactSummary } from "../safety/precheck.js";
 import { logger } from "../logging/logger.js";
+import {
+  RECALL_ACTIVE_MEMORY_READ_KIND,
+  RECALL_LEXICAL_RANKING_KIND,
+  RECALL_SELECTED_CANDIDATES_KIND,
+} from "../trace/trace-tool-boundary.js";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -185,6 +191,60 @@ export interface RecallControllerOptions {
   providerFallbackModel?: string;
   /** Max number of stored summaries scanned. Default 200. */
   storageLimit?: number;
+  /**
+   * Optional Phase 3A trace plumbing. The tool-boundary handler
+   * (and any direct caller that has its own trace run) passes a
+   * small context object so the controller can emit
+   * `recall.active-memory-read`, `recall.lexical-ranking`, and
+   * `recall.selected-candidates` stage events on the SAME trace
+   * run that the public tool boundary opens.
+   *
+   * The context is optional. When omitted (the default), the
+   * controller emits no stage events; existing callers are
+   * unaffected. The `recordStage` callback is expected to be
+   * non-throwing — the controller does not wrap it in a
+   * try/catch because the canonical implementation is the
+   * existing `ToolBoundaryTracer.recordStage`, which already
+   * short-circuits on disabled / closed writers. The controller
+   * also short-circuits when `runId` is null, so an already-
+   * disabled tracer never sees a call.
+   *
+   * NOT in this phase:
+   *   - Provider I/O capture (request / response bodies).
+   *   - Remember-side stage events.
+   *   - A CLI / export / purge surface.
+   */
+  trace?: RecallTraceContext;
+}
+
+/**
+ * Trace plumbing passed in by the caller. The controller uses
+ * this to emit per-stage events on the same run as the public
+ * tool-boundary events.
+ *
+ * `runId` is `null` when the writer is closed or tracing is
+ * disabled; the controller checks this before every emission so
+ * the disabled path is a true no-op (no allocation, no string
+ * formatting, no callback invocation).
+ *
+ * `recordStage` is the only emission method the controller
+ * uses. The kind tag is owned by the controller (the
+ * `RECALL_*_KIND` constants in the trace module); the payload
+ * is the controller's, the redaction is the writer's.
+ */
+export interface RecallTraceContext {
+  /**
+   * Same run id as the public tool-boundary tracer, or `null`
+   * when tracing is disabled / writer is closed. The controller
+   * only emits when this is non-null.
+   */
+  runId: number | null;
+  /**
+   * Non-throwing stage-event recorder. Routes through the
+   * existing trace writer; payloads are redacted by the
+   * writer's `redactPayload` pass before being persisted.
+   */
+  recordStage: (kind: string, payload: unknown) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -290,6 +350,12 @@ export async function runRecallController(
     blockById.set(r.id, r.block);
   }
 
+  // -- Phase 3A trace: active memory read --------------------------------
+  emitActiveMemoryReadStage(options.trace, {
+    readCount: summaries.length,
+    storageLimit,
+  });
+
   // -- 3. Lexical ranking ---------------------------------------------
   const ranked: LexicalScoredCandidate[] = rankLexical(
     query,
@@ -300,6 +366,19 @@ export async function runRecallController(
     })),
     { threshold, topK },
   );
+  // Build the id->summary map once; used by both the trace
+  // event and the topSummaries construction below.
+  const summaryById = new Map<number, SafeMemorySummary>(
+    summaries.map((s) => [s.id, s]),
+  );
+  // -- Phase 3A trace: lexical ranking ---------------------------------
+  emitLexicalRankingStage(options.trace, {
+    query,
+    threshold,
+    topK,
+    ranked,
+    summariesById: summaryById,
+  });
   if (ranked.length === 0) {
     logger.debug("recall: no relevant memory; skipping provider call");
     return { status: "no_memory" };
@@ -312,9 +391,6 @@ export async function runRecallController(
   // block carry `relationship: undefined` and the detector
   // treats them as having no stored data (it can still fire
   // on the lexical / asymmetric-negation path).
-  const summaryById = new Map<number, SafeMemorySummary>(
-    summaries.map((s) => [s.id, s]),
-  );
   const topSummaries: SafeMemorySummaryWithRelationship[] = [];
   for (const r of ranked) {
     const s = summaryById.get(r.id);
@@ -335,6 +411,9 @@ export async function runRecallController(
     );
     return { status: "no_memory" };
   }
+
+  // -- Phase 3A trace: selected candidates -----------------------------
+  emitSelectedCandidatesStage(options.trace, topSummaries);
 
   // -- 4. Provider synthesis -----------------------------------------
   const adapterOptions: RecallSynthesisOptions = {};
@@ -764,4 +843,179 @@ function looksLikeRawDump(text: string): boolean {
     if (/^\s*\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}/.test(l)) dumpLines += 1;
   }
   return dumpLines / lines.length > 0.6;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3A: recall stage trace emission
+// ---------------------------------------------------------------------------
+//
+// The three helpers below build and emit the Phase 3A stage
+// events. They are kept out of the main `runRecallController`
+// body so the hot path stays readable, and so the trace payload
+// shapes are discoverable in one place. All three are pure
+// functions over the existing controller state plus a
+// `RecallTraceContext`; they never mutate the controller state
+// and never read raw provider I/O.
+//
+// The writer's `redactPayload` pass scrubs credentials and
+// drops reasoning keys from the persisted JSON, so a future
+// secret that ends up in a memory body or query text is
+// caught at the storage boundary without the controller having
+// to know about it. The controller does NOT attempt to redact
+// its own payload.
+
+/**
+ * Emit `recall.active-memory-read` — the count of active memory
+ * summaries read from storage and the `storageLimit` that bounded
+ * the read. Pure read-side diagnostic; no memory ids are carried
+ * (the lexical-ranking event carries them, ranked, instead).
+ *
+ * The event fires even when no memories exist (count is 0) so a
+ * reader can distinguish "DB has nothing" from "recall never got
+ * that far" — important for diagnosing a stale-recall bug where
+ * the controller read zero rows.
+ */
+function emitActiveMemoryReadStage(
+  trace: RecallTraceContext | undefined,
+  payload: {
+    readCount: number;
+    storageLimit: number;
+  },
+): void {
+  // Short-circuit on disabled / closed writers or when no trace
+  // context was provided. The check is intentionally outside the
+  // payload-builder so we never build the payload object when
+  // tracing is off.
+  if (!trace || trace.runId === null) return;
+  trace.recordStage(RECALL_ACTIVE_MEMORY_READ_KIND, {
+    readCount: payload.readCount,
+    storageLimit: payload.storageLimit,
+  });
+}
+
+/**
+ * Emit `recall.lexical-ranking` — the query, the ranker
+ * threshold / topK, and the ranked candidates that passed the
+ * threshold (in the same order the ranker returned them, which
+ * is score-desc / id-asc).
+ *
+ * Each candidate carries:
+ *   - `id`            : memory id
+ *   - `rank`          : 1-based position in the ranked list
+ *   - `score`         : raw lexical score from the ranker
+ *   - `overlap`       : absolute count of query tokens that
+ *                      appeared in the candidate's match text
+ *                      (summary + tags). Re-computed via
+ *                      `scoreCandidateDetailed` so the trace
+ *                      matches the ranker's own per-candidate
+ *                      calculation byte-for-byte. The ranker
+ *                      uses an `overlap >= MIN_OVERLAP_TOKENS`
+ *                      floor; the trace event surfaces the
+ *                      post-floor value.
+ *   - `memoryContent` : the safe memory body the ranker scored
+ *                      (controller-normalized text, never raw
+ *                      input). Redacted by the writer before
+ *                      persistence.
+ *   - `kind`          : memory kind enum
+ *   - `tags`          : tag list (possibly empty)
+ *   - `classification`: free-form classification string or null
+ *   - `confidence`    : provider confidence or null
+ *
+ * Memory content is included so a reader can verify what the
+ * ranker actually saw. For the live user-test failure (memory
+ * 151 about a provider swap not being recalled for a general
+ * "what LLMs does this project use" query), this event will
+ * show whether memory 151 was in the candidate pool, what it
+ * scored, and what its content was — the diagnostic the user
+ * asked for.
+ *
+ * When the ranker filters out every candidate, the `ranked`
+ * array is empty and the event still fires (so a reader can
+ * see the empty result rather than infer "never ranked").
+ */
+function emitLexicalRankingStage(
+  trace: RecallTraceContext | undefined,
+  payload: {
+    query: string;
+    threshold: number;
+    topK: number;
+    ranked: LexicalScoredCandidate[];
+    summariesById: Map<number, SafeMemorySummary>;
+  },
+): void {
+  if (!trace || trace.runId === null) return;
+  const rankedDetail = payload.ranked.map((r, index) => {
+    const s = payload.summariesById.get(r.id);
+    // `summariesById` is the same map the controller uses to
+    // build `topSummaries`; a missing entry here would mean the
+    // ranker returned an id that isn't in the read set, which
+    // is impossible in the current code path. We fall back to
+    // an empty match text so the trace event still records
+    // (id, score, overlap=0) for the unexpected id rather
+    // than crashing the trace.
+    const matchText = s ? buildMatchText(s) : "";
+    const { overlap } = matchText
+      ? scoreCandidateDetailed(payload.query, matchText)
+      : { overlap: 0 };
+    return {
+      id: r.id,
+      rank: index + 1,
+      score: r.score,
+      overlap,
+      memoryContent: s ? s.memoryContent : null,
+      kind: s ? s.kind : null,
+      tags: s ? s.tags : [],
+      classification: s ? s.classification : null,
+      confidence: s ? s.confidence : null,
+    };
+  });
+  trace.recordStage(RECALL_LEXICAL_RANKING_KIND, {
+    query: payload.query,
+    threshold: payload.threshold,
+    topK: payload.topK,
+    ranked: rankedDetail,
+  });
+}
+
+/**
+ * Emit `recall.selected-candidates` — the `topSummaries` the
+ * controller is about to feed to the synthesis provider, with
+ * the memory id and the controller-normalized memory body. This
+ * is the ground-truth "what went into the synthesis call" set;
+ * a reader can compare it against `recall.lexical-ranking` to
+ * see which ranked candidates were promoted to synthesis and
+ * which were dropped.
+ *
+ * The `topSummaries` already inherit the ranker's score-sorted
+ * order, so the position in this array matches the rank. We
+ * surface a 1-based `synthesisOrder` for readability.
+ */
+function emitSelectedCandidatesStage(
+  trace: RecallTraceContext | undefined,
+  topSummaries: SafeMemorySummaryWithRelationship[],
+): void {
+  if (!trace || trace.runId === null) return;
+  trace.recordStage(RECALL_SELECTED_CANDIDATES_KIND, {
+    candidates: topSummaries.map((s, index) => ({
+      id: s.id,
+      synthesisOrder: index + 1,
+      memoryContent: s.memoryContent,
+    })),
+  });
+}
+
+/**
+ * Reconstruct the match text the ranker used for a candidate so
+ * the trace event's `overlap` field matches the ranker's own
+ * per-candidate value. The ranker builds
+ * `summary + (" " + tags.join(" "))` when tags are present; we
+ * mirror that exactly so a test asserting `overlap === N` is
+ * consistent with the ranker's internal computation.
+ */
+function buildMatchText(s: SafeMemorySummary): string {
+  const tagPart =
+    Array.isArray(s.tags) && s.tags.length > 0
+      ? ` ${s.tags.join(" ")}`
+      : "";
+  return `${s.memoryContent}${tagPart}`;
 }

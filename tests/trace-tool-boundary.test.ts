@@ -59,6 +59,9 @@ import {
   startToolBoundaryTrace,
   TOOL_INPUT_KIND,
   TOOL_OUTPUT_KIND,
+  RECALL_ACTIVE_MEMORY_READ_KIND,
+  RECALL_LEXICAL_RANKING_KIND,
+  RECALL_SELECTED_CANDIDATES_KIND,
   type ToolBoundaryTracer,
 } from "../src/trace/trace-tool-boundary.ts";
 import {
@@ -73,6 +76,7 @@ import {
   CURION_DIRNAME,
   initStorage,
   closeStorage,
+  insertMemoryRecord,
   type StorageHandle,
 } from "../src/storage/storage.ts";
 import {
@@ -87,6 +91,10 @@ import {
   resetStorageProvider as resetRecallStorageProvider,
   type RecallResult,
 } from "../src/tools/recall.ts";
+import {
+  runRecallController,
+  type RecallTraceContext,
+} from "../src/controller/recall-controller.ts";
 
 // ---------------------------------------------------------------------------
 // Env / state helpers
@@ -463,16 +471,20 @@ test("recall: creates a trace run + tool.input + tool.output events without chan
       assert.equal(meta.boundary, "public-tool-handler");
       assert.equal(typeof meta.durationMs, "number");
 
-      // Two events: tool.input then tool.output.
+      // Phase 2 + Phase 3A: tool.input, then two stage events
+      // (active-memory-read + lexical-ranking for the empty
+      // store path), then tool.output.
       const events = listTraceEventsForRun(run.id);
-      assert.equal(events.length, 2);
+      assert.equal(events.length, 4);
       assert.equal(events[0]?.kind, "tool.input");
-      assert.equal(events[1]?.kind, "tool.output");
+      assert.equal(events[1]?.kind, RECALL_ACTIVE_MEMORY_READ_KIND);
+      assert.equal(events[2]?.kind, RECALL_LEXICAL_RANKING_KIND);
+      assert.equal(events[3]?.kind, "tool.output");
 
       const inputPayload = events[0]?.payload as { text: string };
       assert.equal(inputPayload.text, query);
 
-      const outputPayload = events[1]?.payload as RecallResult;
+      const outputPayload = events[3]?.payload as RecallResult;
       assert.equal(outputPayload.status, "no_memory");
       assert.equal(typeof outputPayload.message, "string");
     } finally {
@@ -906,4 +918,461 @@ test("isTraceEnabled: defaults to ON (no env switch) so the helper writes by def
     delete process.env.CURION_TRACE_ENABLED;
     assert.equal(isTraceEnabled(), true);
   });
+});
+
+// ---------------------------------------------------------------------------
+// 9. Phase 3A: recall stage event tracing
+// ---------------------------------------------------------------------------
+//
+// The recall controller emits three stage events
+// (`recall.active-memory-read`, `recall.lexical-ranking`,
+// `recall.selected-candidates`) on the SAME trace run that
+// carries the public `tool.input` and `tool.output` events.
+// The events are only emitted when tracing is enabled and a
+// trace context is provided.
+
+test("recall Phase 3A: empty store emits active-memory-read + lexical-ranking stage events on the same run as tool.input/tool.output", async () => {
+  const tmp = mkTraceDir();
+  const { memHandle, cleanup } = setupBothStores(tmp);
+  try {
+    setRecallStorageProvider(() => ({
+      handle: memHandle,
+      ownsHandle: false,
+    }));
+    try {
+      // Empty store → no_memory. The controller emits
+      // active-memory-read (count=0) and lexical-ranking
+      // (empty ranked list) before the early return.
+      const result: RecallResult = await handleRecall({ text: "anything" });
+      assert.equal(result.status, "no_memory");
+
+      const runs = listTraceRuns();
+      assert.equal(runs.length, 1);
+      const run = runs[0]!;
+      assert.equal(run.name, "recall");
+
+      const events = listTraceEventsForRun(run.id);
+      // Expected: tool.input, recall.active-memory-read,
+      // recall.lexical-ranking, tool.output
+      assert.equal(events.length, 4, "expected 4 events: tool.input + 2 stages + tool.output");
+      assert.equal(events[0]!.kind, TOOL_INPUT_KIND);
+      assert.equal(events[1]!.kind, RECALL_ACTIVE_MEMORY_READ_KIND);
+      assert.equal(events[2]!.kind, RECALL_LEXICAL_RANKING_KIND);
+      assert.equal(events[3]!.kind, TOOL_OUTPUT_KIND);
+
+      // Verify active-memory-read payload.
+      const amr = events[1]!.payload as {
+        readCount: number;
+        storageLimit: number;
+      };
+      assert.equal(amr.readCount, 0, "empty store → readCount=0");
+      assert.equal(typeof amr.storageLimit, "number");
+      assert.ok(amr.storageLimit > 0);
+
+      // Verify lexical-ranking payload.
+      const lr = events[2]!.payload as {
+        query: string;
+        threshold: number;
+        topK: number;
+        ranked: unknown[];
+      };
+      assert.equal(lr.query, "anything");
+      assert.equal(typeof lr.threshold, "number");
+      assert.equal(typeof lr.topK, "number");
+      assert.deepEqual(lr.ranked, [], "empty store → no ranked candidates");
+
+      // No selected-candidates event because the controller
+      // returns no_memory before reaching that point.
+      const selectedEvents = events.filter(
+        (e) => e.kind === RECALL_SELECTED_CANDIDATES_KIND,
+      );
+      assert.equal(selectedEvents.length, 0, "no selected-candidates on no_memory path");
+    } finally {
+      resetRecallStorageProvider();
+    }
+  } finally {
+    cleanup();
+    rmTraceDir(tmp);
+  }
+});
+
+test("recall Phase 3A: populated store emits all three stage events before provider call", async () => {
+  const tmp = mkTraceDir();
+  const { memHandle, cleanup } = setupBothStores(tmp);
+  try {
+    setRecallStorageProvider(() => ({
+      handle: memHandle,
+      ownsHandle: false,
+    }));
+    try {
+      // Insert two memories: one relevant, one irrelevant.
+      insertMemoryRecord(memHandle, {
+        kind: "fact",
+        state: "active",
+        memoryContent:
+          "The project uses Postgres 16 for the primary data store.",
+        providerId: "test",
+        modelId: "test-model",
+        confidence: 0.9,
+        safetyFlags: ["controller-normalized"],
+        metadata: { tags: ["postgres", "database"] },
+      });
+      insertMemoryRecord(memHandle, {
+        kind: "context",
+        state: "active",
+        memoryContent:
+          "Office plants are watered on a biweekly rotation.",
+        providerId: "test",
+        modelId: "test-model",
+        confidence: 0.8,
+        safetyFlags: ["controller-normalized"],
+        metadata: { tags: ["plants", "office"] },
+      });
+
+      // No API keys configured → provider returns
+      // missing-config error immediately (no network call).
+      // The result is provider_error, but all three trace
+      // stage events are emitted before the provider call.
+      const result: RecallResult = await handleRecall({
+        text: "What database does the project use?",
+      });
+      assert.equal(result.status, "provider_error");
+
+      const runs = listTraceRuns();
+      assert.equal(runs.length, 1);
+      const events = listTraceEventsForRun(runs[0]!.id);
+
+      // Expected: tool.input, recall.active-memory-read,
+      // recall.lexical-ranking, recall.selected-candidates,
+      // tool.output
+      assert.equal(events.length, 5, "expected 5 events: tool.input + 3 stages + tool.output");
+      assert.equal(events[0]!.kind, TOOL_INPUT_KIND);
+      assert.equal(events[1]!.kind, RECALL_ACTIVE_MEMORY_READ_KIND);
+      assert.equal(events[2]!.kind, RECALL_LEXICAL_RANKING_KIND);
+      assert.equal(events[3]!.kind, RECALL_SELECTED_CANDIDATES_KIND);
+      assert.equal(events[4]!.kind, TOOL_OUTPUT_KIND);
+
+      // Verify active-memory-read: 2 memories in the store.
+      const amr = events[1]!.payload as { readCount: number };
+      assert.equal(amr.readCount, 2);
+
+      // Verify lexical-ranking: at least one candidate passed
+      // the threshold for a database-related query.
+      const lr = events[2]!.payload as {
+        query: string;
+        ranked: Array<{
+          id: number;
+          rank: number;
+          score: number;
+          overlap: number;
+          memoryContent: string | null;
+          kind: string | null;
+          tags: string[];
+          classification: string | null;
+          confidence: number | null;
+        }>;
+      };
+      assert.equal(lr.query, "What database does the project use?");
+      assert.ok(lr.ranked.length > 0, "at least one candidate should rank");
+      // The ranked candidate should have the expected fields.
+      const first = lr.ranked[0]!;
+      assert.equal(typeof first.id, "number");
+      assert.equal(first.rank, 1);
+      assert.ok(first.score > 0, "ranked candidate must have positive score");
+      assert.equal(typeof first.overlap, "number");
+      assert.equal(typeof first.memoryContent, "string");
+      assert.ok(first.memoryContent!.length > 0);
+
+      // Verify selected-candidates: the candidates sent to
+      // synthesis should match the ranked list (since topK >=
+      // the number of ranked candidates).
+      const sc = events[3]!.payload as {
+        candidates: Array<{
+          id: number;
+          synthesisOrder: number;
+          memoryContent: string;
+        }>;
+      };
+      assert.ok(sc.candidates.length > 0, "selected candidates must be non-empty");
+      assert.equal(sc.candidates[0]!.synthesisOrder, 1);
+      assert.equal(typeof sc.candidates[0]!.memoryContent, "string");
+    } finally {
+      resetRecallStorageProvider();
+    }
+  } finally {
+    cleanup();
+    rmTraceDir(tmp);
+  }
+});
+
+test("recall Phase 3A: stage event payloads are sufficient to diagnose considered-vs-selected candidates", async () => {
+  const tmp = mkTraceDir();
+  const { memHandle, cleanup } = setupBothStores(tmp);
+  try {
+    setRecallStorageProvider(() => ({
+      handle: memHandle,
+      ownsHandle: false,
+    }));
+    try {
+      // Insert several memories with different relevance levels.
+      // Only the postgres-related ones should rank high enough.
+      const mem1 = insertMemoryRecord(memHandle, {
+        kind: "fact",
+        state: "active",
+        memoryContent:
+          "The project uses Postgres 16 for the primary data store.",
+        providerId: "test",
+        modelId: "test-model",
+        confidence: 0.9,
+        safetyFlags: ["controller-normalized"],
+        metadata: { tags: ["postgres", "database"] },
+      });
+      const mem2 = insertMemoryRecord(memHandle, {
+        kind: "fact",
+        state: "active",
+        memoryContent:
+          "The database uses a connection pool with 20 max connections.",
+        providerId: "test",
+        modelId: "test-model",
+        confidence: 0.85,
+        safetyFlags: ["controller-normalized"],
+        metadata: { tags: ["database", "pool"] },
+      });
+      insertMemoryRecord(memHandle, {
+        kind: "context",
+        state: "active",
+        memoryContent:
+          "Office plants are watered on a biweekly rotation.",
+        providerId: "test",
+        modelId: "test-model",
+        confidence: 0.8,
+        safetyFlags: ["controller-normalized"],
+        metadata: { tags: ["plants", "office"] },
+      });
+
+      const result: RecallResult = await handleRecall({
+        text: "What database does the project use?",
+      });
+      assert.equal(result.status, "provider_error");
+
+      const runs = listTraceRuns();
+      const events = listTraceEventsForRun(runs[0]!.id);
+
+      // Extract the three stage events.
+      const amrEvent = events.find(
+        (e) => e.kind === RECALL_ACTIVE_MEMORY_READ_KIND,
+      );
+      const lrEvent = events.find(
+        (e) => e.kind === RECALL_LEXICAL_RANKING_KIND,
+      );
+      const scEvent = events.find(
+        (e) => e.kind === RECALL_SELECTED_CANDIDATES_KIND,
+      );
+      assert.ok(amrEvent, "active-memory-read event must exist");
+      assert.ok(lrEvent, "lexical-ranking event must exist");
+      assert.ok(scEvent, "selected-candidates event must exist");
+
+      const lr = lrEvent.payload as {
+        ranked: Array<{ id: number; rank: number; score: number }>;
+      };
+      const sc = scEvent.payload as {
+        candidates: Array<{ id: number; synthesisOrder: number }>;
+      };
+
+      // The ranked list should contain at least the two
+      // database-related memories.
+      const rankedIds = lr.ranked.map((r) => r.id);
+      assert.ok(
+        rankedIds.includes(mem1.id),
+        `ranked candidates must include mem1 (${mem1.id}), got [${rankedIds}]`,
+      );
+      assert.ok(
+        rankedIds.includes(mem2.id),
+        `ranked candidates must include mem2 (${mem2.id}), got [${rankedIds}]`,
+      );
+
+      // The irrelevant plant memory must NOT be in the ranked
+      // list (it has zero overlap with the database query).
+      const plantMem = lr.ranked.find(
+        (r) => !r.id || (!rankedIds.includes(mem1.id) && !rankedIds.includes(mem2.id)),
+      );
+      // All ranked ids should be from the database-related memories.
+      for (const r of lr.ranked) {
+        assert.ok(
+          r.id === mem1.id || r.id === mem2.id,
+          `unexpected ranked id ${r.id}; expected only mem1 or mem2`,
+        );
+      }
+
+      // Selected candidates should be a subset of (or equal to)
+      // the ranked list.
+      const selectedIds = sc.candidates.map((c) => c.id);
+      for (const id of selectedIds) {
+        assert.ok(
+          rankedIds.includes(id),
+          `selected candidate ${id} must appear in the ranked list`,
+        );
+      }
+      // Cross-reference: synthesisOrder should be sequential.
+      for (let i = 0; i < sc.candidates.length; i++) {
+        assert.equal(sc.candidates[i]!.synthesisOrder, i + 1);
+      }
+    } finally {
+      resetRecallStorageProvider();
+    }
+  } finally {
+    cleanup();
+    rmTraceDir(tmp);
+  }
+});
+
+test("recall Phase 3A: CURION_TRACE_ENABLED=0 prevents all recall stage event writes", async () => {
+  const tmp = mkTraceDir();
+  await withEnvSnapshot(async () => {
+    process.env.CURION_TRACE_ENABLED = "0";
+    resetTraceWriterForTests();
+    try {
+      const memHandle = initStorage({ projectRoot: tmp });
+      try {
+        // Insert a memory so the controller would emit
+        // stage events if tracing were enabled.
+        insertMemoryRecord(memHandle, {
+          kind: "fact",
+          state: "active",
+          memoryContent: "The project uses Postgres 16.",
+          providerId: "test",
+          modelId: "test-model",
+          confidence: 0.9,
+          safetyFlags: [],
+          metadata: { tags: ["postgres"] },
+        });
+        setRecallStorageProvider(() => ({
+          handle: memHandle,
+          ownsHandle: false,
+        }));
+        try {
+          const result = await handleRecall({
+            text: "What database?",
+          });
+          // Result must still be correct regardless of tracing.
+          assert.ok(
+            result.status === "provider_error" || result.status === "no_memory",
+            `expected provider_error or no_memory, got ${result.status}`,
+          );
+          // No trace DB at all.
+          assert.ok(
+            !fs.existsSync(path.join(tmp, ".curion", "trace.sqlite")),
+            "no trace.sqlite must be created when tracing is disabled",
+          );
+        } finally {
+          resetRecallStorageProvider();
+        }
+      } finally {
+        closeStorage(memHandle);
+      }
+    } finally {
+      resetTraceWriterForTests();
+      rmTraceDir(tmp);
+    }
+  });
+});
+
+test("recall Phase 3A: trace writer failure does not change recall result with populated store", async () => {
+  const tmp = mkTraceDir();
+  await withEnvSnapshot(async () => {
+    delete process.env.CURION_TRACE_ENABLED;
+    resetTraceWriterForTests();
+    try {
+      const memHandle = initStorage({ projectRoot: tmp });
+      try {
+        insertMemoryRecord(memHandle, {
+          kind: "fact",
+          state: "active",
+          memoryContent:
+            "The project uses Postgres 16 for the primary data store.",
+          providerId: "test",
+          modelId: "test-model",
+          confidence: 0.9,
+          safetyFlags: ["controller-normalized"],
+          metadata: { tags: ["postgres", "database"] },
+        });
+        setRecallStorageProvider(() => ({
+          handle: memHandle,
+          ownsHandle: false,
+        }));
+        try {
+          // Close the writer to simulate a storage failure.
+          closeTraceWriter();
+
+          const result = await handleRecall({
+            text: "What database does the project use?",
+          });
+          // The result must be the same as if tracing were
+          // working: the controller ran to completion and
+          // the provider returned missing-config.
+          assert.equal(result.status, "provider_error");
+          assert.equal(typeof result.message, "string");
+          assert.ok(result.message.length > 0);
+        } finally {
+          resetRecallStorageProvider();
+        }
+      } finally {
+        closeStorage(memHandle);
+      }
+    } finally {
+      resetTraceWriterForTests();
+      rmTraceDir(tmp);
+    }
+  });
+});
+
+test("recall Phase 3A: recordStage on the tool-boundary tracer writes stage events to the same run", () => {
+  const tmp = mkTraceDir();
+  const { cleanup } = setupBothStores(tmp);
+  try {
+    // Directly exercise recordStage on the ToolBoundaryTracer
+    // to verify the Phase 3A plumbing works end-to-end.
+    const tracer = startToolBoundaryTrace({
+      toolName: "recall",
+      input: { text: "test query" },
+    });
+    assert.ok(tracer.runId !== null, "tracer must have a run id");
+
+    // Record stage events that mimic what the controller does.
+    tracer.recordStage(RECALL_ACTIVE_MEMORY_READ_KIND, {
+      readCount: 5,
+      storageLimit: 200,
+    });
+    tracer.recordStage(RECALL_LEXICAL_RANKING_KIND, {
+      query: "test query",
+      threshold: 0.2,
+      topK: 5,
+      ranked: [{ id: 1, rank: 1, score: 0.8 }],
+    });
+    tracer.recordStage(RECALL_SELECTED_CANDIDATES_KIND, {
+      candidates: [{ id: 1, synthesisOrder: 1, memoryContent: "memory text" }],
+    });
+    tracer.recordOutput({ status: "answered", message: "answer" });
+    tracer.finish("ok");
+
+    const events = listTraceEventsForRun(tracer.runId);
+    // Expected: tool.input (from constructor) + 3 stage events + tool.output
+    assert.equal(events.length, 5);
+    assert.equal(events[0]!.kind, TOOL_INPUT_KIND);
+    assert.equal(events[1]!.kind, RECALL_ACTIVE_MEMORY_READ_KIND);
+    assert.equal(events[2]!.kind, RECALL_LEXICAL_RANKING_KIND);
+    assert.equal(events[3]!.kind, RECALL_SELECTED_CANDIDATES_KIND);
+    assert.equal(events[4]!.kind, TOOL_OUTPUT_KIND);
+
+    // Sequences should be monotonically increasing.
+    for (let i = 1; i < events.length; i++) {
+      assert.ok(
+        events[i]!.sequence > events[i - 1]!.sequence,
+        `sequence must increase: ${events[i - 1]!.sequence} -> ${events[i]!.sequence}`,
+      );
+    }
+  } finally {
+    cleanup();
+    rmTraceDir(tmp);
+  }
 });

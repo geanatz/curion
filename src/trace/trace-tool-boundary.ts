@@ -46,6 +46,61 @@ import {
 export const TOOL_INPUT_KIND = "tool.input" as const;
 /** Kind tag for the public tool output event. */
 export const TOOL_OUTPUT_KIND = "tool.output" as const;
+// ---------------------------------------------------------------------------
+// Recall stage event kind tags (Phase 3A)
+// ---------------------------------------------------------------------------
+//
+// The recall controller emits these stage events from inside its
+// memory-read and lexical-ranking code paths. They attach to the
+// SAME run opened by `startToolBoundaryTrace` so a reader can
+// correlate the per-stage trace with the public `tool.input` and
+// `tool.output` events at the top of the run. The vocabulary is
+// owned by the trace module; the controller imports the constants
+// and never hard-codes the strings.
+//
+// Phase 3A scope (deliberately narrow):
+//   - Instrument the recall controller's memory-read and
+//     lexical-ranking code paths only.
+//   - Do NOT instrument the remember controller.
+//   - Do NOT capture provider I/O.
+//   - Do NOT add CLI / export / purge.
+//
+// Kind tag summary:
+//   - `recall.active-memory-read`  - the count of active summaries
+//                                   read from storage plus the
+//                                   configured `storageLimit`.
+//   - `recall.lexical-ranking`     - the query, the ranker
+//                                   threshold / topK, and the
+//                                   ranked candidates that passed
+//                                   the threshold, with id,
+//                                   rank, score, overlap, and the
+//                                   summary fields the ranker had
+//                                   access to (memoryContent,
+//                                   kind, tags, classification,
+//                                   confidence).
+//   - `recall.selected-candidates` - the `topSummaries` the
+//                                   controller actually fed to
+//                                   the synthesis provider, with
+//                                   memory id and memoryContent.
+//                                   Useful to compare against
+//                                   `recall.lexical-ranking` to
+//                                   see which ranked candidates
+//                                   were selected vs dropped.
+//
+// The events are emitted on the tool-boundary run id (the same
+// run that carries `tool.input` and `tool.output`). The trace
+// writer is the existing non-throwing writer; failures NEVER
+// change the recall result.
+// ---------------------------------------------------------------------------
+/** Kind tag for the recall memory-read stage event. */
+export const RECALL_ACTIVE_MEMORY_READ_KIND =
+  "recall.active-memory-read" as const;
+/** Kind tag for the recall lexical-ranking stage event. */
+export const RECALL_LEXICAL_RANKING_KIND =
+  "recall.lexical-ranking" as const;
+/** Kind tag for the recall selected-candidates stage event. */
+export const RECALL_SELECTED_CANDIDATES_KIND =
+  "recall.selected-candidates" as const;
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -109,6 +164,25 @@ export interface ToolBoundaryTracer {
    * increasing sequence.
    */
   recordOutput(output: unknown): void;
+  /**
+   * Record a per-stage trace event on the SAME run as the public
+   * tool boundary events. Used by the recall controller (Phase 3A)
+   * to emit memory-read / lexical-ranking / selected-candidates
+   * events that correlate with `tool.input` and `tool.output`.
+   *
+   * The kind must be a non-empty string. The payload is whatever
+   * the caller chooses; it is redacted by the writer's
+   * `redactPayload` pass before being persisted, so credentials
+   * and reasoning fields are scrubbed. Safe to call any number of
+   * times; each call appends a new event with a monotonically
+   * increasing sequence. Never throws; when the tracer is a
+   * no-op (disabled / writer closed) the call is silently
+   * dropped.
+   *
+   * Phase 3A uses this for recall-only stages. Future phases can
+   * add remember-side stages on the same contract.
+   */
+  recordStage(kind: string, payload: unknown): void;
   /**
    * Finalize the trace run. Updates the run with the end
    * timestamp, the run-level status, and a `durationMs` metadata
@@ -192,6 +266,22 @@ class ToolBoundaryTracerImpl implements ToolBoundaryTracer {
 
   recordOutput(output: unknown): void {
     this.recordEvent(TOOL_OUTPUT_KIND, output);
+  }
+
+  recordStage(kind: string, payload: unknown): void {
+    // `recordEvent` already short-circuits when `runId === null`
+    // (tracing disabled / writer closed). The `kind` argument is
+    // owned by the caller; the existing tool-boundary events use
+    // the module-level `TOOL_INPUT_KIND` / `TOOL_OUTPUT_KIND`
+    // constants and the recall-side stages use the
+    // `RECALL_*_KIND` constants from this module. We intentionally
+    // do NOT validate the kind string here; the writer already
+    // rejects empty kinds and the constant-set ownership keeps
+    // the vocabulary small. Future stages (e.g. remember-side
+    // phases) can add new kind constants alongside the existing
+    // ones.
+    if (typeof kind !== "string" || kind.length === 0) return;
+    this.recordEvent(kind, payload);
   }
 
   finish(finalStatus: "ok" | "error"): void {

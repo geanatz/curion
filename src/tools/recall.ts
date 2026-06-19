@@ -272,7 +272,7 @@ export async function handleRecall(input: unknown): Promise<RecallResult> {
     const { handle: storage, ownsHandle } = storageProvider();
     let outcome: RecallOutcome;
     try {
-      outcome = await runRecallController(storage, text);
+      outcome = await runRecallController(storage, text, { trace });
     } catch (err) {
       // Unexpected throw — log and surface a provider_error outcome.
       const msg = err instanceof Error ? err.message : String(err);
