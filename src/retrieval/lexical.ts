@@ -121,6 +121,62 @@ export function tokenize(text: string): string[] {
   return out;
 }
 
+/**
+ * Suffix-stripping tokenizer for the benchmark-only stemmed variant.
+ *
+ * Pipeline:
+ *   1. Run the existing `tokenize(text)` so the input is
+ *      lowercased, split on non-alphanumeric runs, and pre-filtered
+ *      for short tokens, pure-digit tokens, and the original
+ *      STOP_WORDS set.
+ *   2. For each surviving token `w` with `w.length >= 5`, apply
+ *      the suffix-strip regex
+ *        /(?:ingly|edly|ing|ed|ies|ied|ly|s)$/
+ *      The alternation is ordered longest-first so the first
+ *      match wins ("stopped" -> "stopp", "friendly" -> "friend").
+ *   3. Filter the result:
+ *        - drop the empty string (the strip removed everything);
+ *        - drop tokens shorter than 3 characters (a stemmer
+ *          that leaves 1-2 chars is not producing a content
+ *          token; this also catches cases like "using" -> "us");
+ *        - re-check the STOP_WORDS set so a stem does not
+ *          resurrect a stopword (e.g. "use" -> "use" is still
+ *          a stopword; "having" -> "have" is a stopword).
+ *
+ * The function is intentionally a sibling of `tokenize`, not a
+ * modification of it. The production `rankLexical` and all other
+ * production code in this module continue to use `tokenize`.
+ * This sibling is consumed only by the benchmark variant in
+ * `src/benchmark/variants/lexical-stemmed.ts`.
+ *
+ * Determinism: same input -> same output. The regex is greedy
+ * on the first alternative that matches the end of the string;
+ * there is no randomness, no model, no state.
+ */
+export function tokenizeStemmed(text: string): string[] {
+  if (typeof text !== "string") return [];
+  const stemRe = /(?:ingly|edly|ing|ed|ies|ied|ly|s)$/;
+  const out: string[] = [];
+  for (const raw of tokenize(text)) {
+    // Length guard: only strip when the token is long enough
+    // that a 2-5 character suffix removal still leaves a
+    // plausible content word. The spec pins the guard at 5.
+    const stemmed = raw.length >= 5 ? raw.replace(stemRe, "") : raw;
+    if (stemmed.length === 0) continue;
+    // After the strip a token can shrink to 1-2 chars (e.g.
+    // "using" -> "us", "goes" -> "goe"). Those are not content
+    // tokens and must not contribute to overlap. This mirrors
+    // the original tokenize's `length < 3` floor.
+    if (stemmed.length < 3) continue;
+    // Re-check the stopword set so a stem cannot resurrect a
+    // stopword. Example: "use" survives tokenize but is in
+    // STOP_WORDS, so it is still dropped here.
+    if (STOP_WORDS.has(stemmed)) continue;
+    out.push(stemmed);
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // Scoring
 // ---------------------------------------------------------------------------
