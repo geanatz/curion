@@ -1,10 +1,12 @@
 # Curion
 
 Project-local memory layer for AI agents, exposed as a Model Context Protocol
-(MCP) stdio server. v0.1 candidate: local MCP memory server nearing merge to
-`main`. Not broadly production-proven — the public surface is stable, but the
-project is still consolidating experiments (provider adapter, retrieval
-benchmark, conflict / currentness metadata) ahead of a first tagged release.
+(MCP) stdio server. `v0.1.0` is tagged. The public MCP API (the two tools,
+their strict input schemas, and the public `text` / `structuredContent`
+surfaces) is stable and frozen. Recent and ongoing work continues as
+internal improvements — provider adapter refinements, retrieval
+benchmarking, and the related-memory context seam — and does not change
+the public API or the on-disk database / provider JSON surfaces.
 
 ## Status
 
@@ -41,9 +43,11 @@ The embedding-only `Provider` interface in
 `src/providers/{minimax,nvidia-nim}.ts` is still a stubbed seam — the
 memory-analysis path does not go through it, and the retrieval benchmark
 uses local hashed-BoW / FTS5 / dense ONNX embedders rather than these
-modules. A `retrieval/seam.ts` related-memory lookup is also a minimal
-placeholder; the production `recall` controller does not depend on it for
-correctness.
+modules. The `retrieval/seam.ts` related-memory lookup is the small
+stable boundary that feeds `remember`'s provider prompt with the
+lexical top-5 active related memory contents as hidden context;
+`public` `structuredContent` / `text` are unchanged and no internal
+memory ids are included in the provider prompt.
 
 ## Public API
 
