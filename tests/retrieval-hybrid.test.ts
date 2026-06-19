@@ -9,9 +9,9 @@
  *      negative / non-finite weights.
  *   2. `fuseRankings` correctly unions the per-variant
  *      rankings, sums the contributions, and returns the
- *      top-K by RRF score (desc, id-asc tie-break).
+ *      top-K by RRF score (desc, id-desc tie-break).
  *   3. Tie-breaking: when two candidates have the same RRF
- *      score, the lower id wins (stable order, matches the
+ *      score, the higher id wins (newer memory, matches the
  *      other variants' contract).
  *   4. k-parameter behavior: a smaller k makes rank-1
  *      dominate; a larger k flattens the contribution of
@@ -132,7 +132,7 @@ test("rrfContribution: throws on invalid rank (non-positive, non-finite, non-int
 // 2. fuseRankings: rank-only fusion correctness
 // ---------------------------------------------------------------------------
 
-test("fuseRankings: unions per-variant ids, sums contributions, sorts by RRF desc, id asc", () => {
+test("fuseRankings: unions per-variant ids, sums contributions, sorts by RRF desc, id desc", () => {
   // Three variants with disjoint sets; verify the union
   // is the right size and the order is RRF desc.
   const lex = [
@@ -167,15 +167,15 @@ test("fuseRankings: unions per-variant ids, sums contributions, sorts by RRF des
   //   id=4: fts5 rank 1 -> 1/61
   //   id=5: fts5 rank 2 -> 1/62
   //   id=6: vector rank 1 -> 1/61
-  // Descending order, with id-asc tie-break:
-  //   id=1 (0.0325) > id=4 (0.0164) == id=6 (0.0164)
-  //   > id=2 (0.0161) == id=5 (0.0161) > id=3 (0.0159)
-  // Top-5: [1, 4, 6, 2, 5]. id=3 is outside top-5.
+  // Descending order, with id-desc tie-break:
+  //   id=1 (0.0325) > id=6 (0.0164) == id=4 (0.0164)
+  //   > id=5 (0.0161) == id=2 (0.0161) > id=3 (0.0159)
+  // Top-5: [1, 6, 4, 5, 2]. id=3 is outside top-5.
   assert.equal(fused[0]!.id, 1);
-  assert.equal(fused[1]!.id, 4);
-  assert.equal(fused[2]!.id, 6);
-  assert.equal(fused[3]!.id, 2);
-  assert.equal(fused[4]!.id, 5);
+  assert.equal(fused[1]!.id, 6);
+  assert.equal(fused[2]!.id, 4);
+  assert.equal(fused[3]!.id, 5);
+  assert.equal(fused[4]!.id, 2);
   // Every fused entry has a contributor for every
   // source — even sources that did not return the
   // candidate, so a reviewer can see "absent from fts5"
@@ -202,12 +202,12 @@ test("fuseRankings: unions per-variant ids, sums contributions, sorts by RRF des
   assert.ok(Math.abs(vec1.contribution - 1 / 62) < 1e-12);
 });
 
-test("fuseRankings: tie-break is id-ascending when RRF scores are equal", () => {
+test("fuseRankings: tie-break is id-descending when RRF scores are equal", () => {
   // Two candidates with the same RRF score. To get an
   // exact RRF tie we put each at the same rank in a
   // separate variant (id=3 at rank 1 in lexical, id=7
   // at rank 1 in fts5; both contribute 1/(k+1)). The
-  // lower id must come first.
+  // higher id must come first.
   const fused = fuseRankings(
     [
       { label: "lexical", list: [{ id: 3, score: 0.9 }], weight: 1 },
@@ -218,9 +218,8 @@ test("fuseRankings: tie-break is id-ascending when RRF scores are equal", () => 
     5,
   );
   assert.equal(fused.length, 2);
-  assert.equal(fused[0]!.id, 3);
-  assert.equal(fused[1]!.id, 7);
-  assert.equal(fused[0]!.score, fused[1]!.score);
+  assert.equal(fused[0]!.id, 7);
+  assert.equal(fused[1]!.id, 3);
   assert.equal(fused[0]!.score, fused[1]!.score);
 });
 
@@ -507,7 +506,7 @@ test("rankHybrid: invalid k / weight throws at the public boundary", () => {
   );
 });
 
-test("rankHybridAsLexical: adapter returns the {id, score}[] shape with score desc, id asc", () => {
+test("rankHybridAsLexical: adapter returns the {id, score}[] shape with score desc, id desc", () => {
   const candidates = buildCandidates(BENCHMARK_RECORDS);
   const out = rankHybridAsLexical("Postgres primary data store", candidates, {
     k: 60,
@@ -520,10 +519,10 @@ test("rankHybridAsLexical: adapter returns the {id, score}[] shape with score de
     assert.equal(typeof c.score, "number");
     assert.ok((c as unknown as { contributors?: unknown }).contributors === undefined);
   }
-  // Stable order: score desc, id asc.
+  // Stable order: score desc, id desc (newer wins).
   for (let i = 1; i < out.length; i++) {
     if (out[i]!.score === out[i - 1]!.score) {
-      assert.ok(out[i]!.id > out[i - 1]!.id, "id-asc tie-break");
+      assert.ok(out[i]!.id < out[i - 1]!.id, "id-desc tie-break");
     } else {
       assert.ok(out[i]!.score < out[i - 1]!.score, "score-desc order");
     }

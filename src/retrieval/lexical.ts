@@ -17,7 +17,7 @@
  *         query appears verbatim in the candidate (case-insensitive,
  *         whitespace-normalized), the candidate gets a fixed bump.
  *   3. Filter to candidates whose score is >= the threshold.
- *   4. Sort by score descending, then by id ascending for stability.
+ *   4. Sort by score descending, then by id descending (newer wins ties).
  *
  * This is intentionally NOT a proper BM25 / TF-IDF implementation.
  * The MVP is small, deterministic, and easy to reason about. Future
@@ -204,8 +204,8 @@ function hasExactPhraseMatch(
  * Rank candidates by lexical score against the query and return the
  * top-K that pass the threshold.
  *
- * Deterministic: ties on score are broken by ascending id. The input
- * candidates are never mutated.
+ * Deterministic: ties on score are broken by descending id (newer
+ * memory wins). The input candidates are never mutated.
  *
  * Returns an empty array if:
  *   - the query tokenizes to zero tokens, OR
@@ -246,10 +246,10 @@ export function rankLexical(
       scored.push({ id: c.id, score });
     }
   }
-  // Sort: score desc, then id asc (stable tie-break).
+  // Sort: score desc, then id desc (newer memory wins ties).
   scored.sort((a, b) => {
     if (b.score !== a.score) return b.score - a.score;
-    return a.id - b.id;
+    return b.id - a.id;
   });
   return scored.slice(0, topK);
 }

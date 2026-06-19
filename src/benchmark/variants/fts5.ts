@@ -288,8 +288,9 @@ export const DEFAULT_FTS5_THRESHOLD = 0;
  *   - FTS5 may return zero hits (e.g. the corpus has no
  *     matching terms). The function then returns an empty
  *     array, matching the lexical baseline's no-answer path.
- *   - Ties on the squashed score are broken by ascending id,
- *     matching the lexical baseline's stability contract.
+ *   - Ties on the squashed score are broken by descending id,
+ *     giving newer memories priority, matching the lexical
+ *     ranker's stability contract.
  *
  * The function is synchronous. The in-memory index is built
  * once per call; for the current benchmark corpus the cost is
@@ -330,11 +331,11 @@ export function rankFts5(
       if (score < threshold) continue;
       scored.push({ id: r.id, score });
     }
-    // Stable order: score desc, then id asc. This mirrors
-    // the lexical ranker's tie-break.
+    // Stable order: score desc, then id desc. This mirrors
+    // the lexical ranker's tie-break (newer memory wins).
     scored.sort((a, b) => {
       if (b.score !== a.score) return b.score - a.score;
-      return a.id - b.id;
+      return b.id - a.id;
     });
     return scored.slice(0, topK);
   } finally {

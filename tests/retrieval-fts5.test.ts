@@ -141,13 +141,13 @@ test("FTS5 ranker: returns the {id, score}[] top-K shape used by the metrics", (
     assert.ok(h.score >= 0, `score must be non-negative, got ${h.score}`);
     assert.ok(h.score <= 1, `score must be <= 1, got ${h.score}`);
   }
-  // Ordering: by score desc, then by id asc. The lexical
-  // baseline uses the same tie-break.
+  // Ordering: by score desc, then by id desc (newer memory wins).
+  // The lexical baseline uses the same tie-break.
   for (let i = 1; i < hits.length; i++) {
     const a = hits[i - 1]!;
     const b = hits[i]!;
     if (a.score === b.score) {
-      assert.ok(a.id < b.id, `tie-break by id asc failed at index ${i}`);
+      assert.ok(a.id > b.id, `tie-break by id desc failed at index ${i}`);
     } else {
       assert.ok(
         a.score > b.score,

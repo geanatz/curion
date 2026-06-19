@@ -815,10 +815,10 @@ test("lexical: rankLexical is deterministic and stable on ties", () => {
     r1.map((x) => x.id),
     r2.map((x) => x.id),
   );
-  // Tie-break is by ascending id.
+  // Tie-break is by descending id (newer memory wins).
   assert.deepEqual(
     r1.map((x) => x.id),
-    [1, 2, 3],
+    [3, 2, 1],
   );
 });
 

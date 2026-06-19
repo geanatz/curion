@@ -43,9 +43,9 @@
  *   - The transformers.js embedder is deterministic for a
  *     given model + input + runtime. ONNX Runtime is
  *     bit-deterministic for a fixed thread count.
- *   - Ties on cosine score are broken by ascending id,
- *     matching the lexical / FTS5 / hashed-vector stability
- *     contract.
+ *   - Ties on cosine score are broken by descending id (newer
+ *     memory wins), matching the lexical / FTS5 / hashed-vector
+ *     stability contract.
  *
  * Score scale:
  *   Cosine similarity in [-1, 1]. The transformers.js
@@ -170,7 +170,7 @@ export interface DenseVectorRankResult {
  *
  * The function is the dense counterpart of
  * `rankVector`. The shape contract is the same:
- * `{id, score}[]`, score desc, id asc tie-break, top-K
+ * `{id, score}[]`, score desc, id desc tie-break, top-K
  * cap. The only difference is the embedder is async, so
  * the function is async.
  *
@@ -277,11 +277,11 @@ export async function rankDenseVectorWithMetadataAsync(
       scored.push({ id: c.id, score });
     }
   }
-  // Stable order: score desc, then id asc. Mirrors the
-  // lexical and FTS5 ranker tie-break.
+  // Stable order: score desc, then id desc. Mirrors the
+  // lexical and FTS5 ranker tie-break (newer memory wins).
   scored.sort((a, b) => {
     if (b.score !== a.score) return b.score - a.score;
-    return a.id - b.id;
+    return b.id - a.id;
   });
   return {
     hits: scored.slice(0, topK),

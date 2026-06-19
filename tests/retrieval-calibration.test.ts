@@ -1486,20 +1486,24 @@ test("calibration: does not change the existing single-variant or comparison rep
   //      because the new conflict and false-premise-anchor
   //      records share tokens with existing no-answer
   //      queries.
-  //   2. The new queries (80 added) include 54 positive
+   //   2. The new queries (80 added) include 54 positive
   //      queries targeting the new clusters (the ranker
   //      finds them) and 22 no-answer queries (most of
   //      which confabulate because the new cluster-31
   //      anchors share tokens with them). The aggregate
   //      shifts to: rank1 82/130=63.1%, hit@5
   //      111/130=85.4%, noAnswerCorrect 3/46=6.5%.
+  //   3. The newer-first tiebreaker (id-desc) changes
+  //      which candidate wins when scores are tied,
+  //      shifting: rank1 72/130=55.4%, hit@5
+  //      105/130=80.8%, noAnswerCorrect 3/46=6.5%.
   // A future corpus / query set change is a deliberate,
   // visible change; update these numbers and the
   // README's headline table together.
   const single = runRetrievalBenchmark({ variant: "lexical" });
   assert.ok(isSingleVariantReport(single));
-  assert.equal(single.metrics.hitAt5, 111, "lexical hit@5 (post-adversarial-expansion)");
-  assert.equal(single.metrics.rank1, 82, "lexical rank1 (post-adversarial-expansion)");
+  assert.equal(single.metrics.hitAt5, 105, "lexical hit@5 (post-adversarial-expansion, newer-first tiebreaker)");
+  assert.equal(single.metrics.rank1, 72, "lexical rank1 (post-adversarial-expansion, newer-first tiebreaker)");
   assert.equal(single.metrics.noAnswerCorrect, 3, "lexical noAnswerCorrect (post-adversarial-expansion)");
 
   const all = runRetrievalBenchmark({ variant: "all" });

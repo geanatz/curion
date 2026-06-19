@@ -383,8 +383,9 @@ export const DEFAULT_VECTOR_TOP_K = 5;
  *     default threshold of 0 it appears in the result list with
  *     score 0; it is still a candidate the controller can
  *     inspect.
- *   - Ties on cosine score are broken by ascending id, matching
- *     the lexical and FTS5 stability contract.
+ *   - Ties on cosine score are broken by descending id (newer
+ *     memory wins), matching the lexical and FTS5 stability
+ *     contract.
  *   - The function is deterministic for a given (query,
  *     corpus, embedder, threshold, top-K). The embedder is
  *     the only source of non-determinism, and the default
@@ -437,11 +438,11 @@ export function rankVector(
       scored.push({ id: c.id, score });
     }
   }
-  // Stable order: score desc, then id asc. Mirrors the lexical
-  // and FTS5 ranker tie-break.
+  // Stable order: score desc, then id desc. Mirrors the lexical
+  // and FTS5 ranker tie-break (newer memory wins).
   scored.sort((a, b) => {
     if (b.score !== a.score) return b.score - a.score;
-    return a.id - b.id;
+    return b.id - a.id;
   });
   return scored.slice(0, topK);
 }

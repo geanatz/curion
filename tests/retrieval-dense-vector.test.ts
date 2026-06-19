@@ -19,7 +19,7 @@
  *   4. `rankDenseVectorAsync` returns the same
  *      `{id, score}[]` top-K shape the existing
  *      `rankVector` does, with cosine similarity in
- *      `[-1, 1]`, score desc, id asc tie-break.
+ *      `[-1, 1]`, score desc, id desc tie-break.
  *   5. `rankHybridAsync` swaps the hashed-bag-of-words
  *      `vector` slot for the real `vector-dense` slot
  *      when `useDenseVector: true`; the contributor
@@ -348,12 +348,12 @@ test("rankDenseVectorAsync: returns the {id, score}[] top-K shape", async () => 
     assert.ok(h.score >= -1);
     assert.ok(h.score <= 1);
   }
-  // Score desc, id asc tie-break.
+  // Score desc, id desc tie-break.
   for (let i = 1; i < hits.length; i++) {
     const a = hits[i - 1]!;
     const b = hits[i]!;
     if (a.score === b.score) {
-      assert.ok(a.id < b.id);
+      assert.ok(a.id > b.id);
     } else {
       assert.ok(a.score > b.score);
     }

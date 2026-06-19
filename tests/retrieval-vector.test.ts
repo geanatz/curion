@@ -6,7 +6,7 @@
  *      and across machines (same text -> same vector, byte-for-byte).
  *   2. The hashing-trick + TF-IDF + L2-normalize pipeline produces
  *      unit vectors with cosine similarity in [-1, 1].
- *   3. The top-K shape contract: `{id, score}[]`, score desc, id asc
+ *   3. The top-K shape contract: `{id, score}[]`, score desc, id desc
  *      tie-break, threshold respected, top-K cap respected.
  *   4. The vector variant runs in-memory and does not write to
  *      the project `.curion/curion.sqlite` file (mirror of the
@@ -220,13 +220,13 @@ test("vector ranker: returns the {id, score}[] top-K shape used by the metrics",
     assert.ok(h.score >= -1, `score must be >= -1, got ${h.score}`);
     assert.ok(h.score <= 1, `score must be <= 1, got ${h.score}`);
   }
-  // Ordering: by score desc, then by id asc. The lexical and
-  // FTS5 baselines use the same tie-break.
+  // Ordering: by score desc, then by id desc (newer memory wins).
+  // The lexical and FTS5 baselines use the same tie-break.
   for (let i = 1; i < hits.length; i++) {
     const a = hits[i - 1]!;
     const b = hits[i]!;
     if (a.score === b.score) {
-      assert.ok(a.id < b.id, `tie-break by id asc failed at index ${i}`);
+      assert.ok(a.id > b.id, `tie-break by id desc failed at index ${i}`);
     } else {
       assert.ok(
         a.score > b.score,

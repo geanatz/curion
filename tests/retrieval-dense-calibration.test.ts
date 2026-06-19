@@ -776,14 +776,16 @@ test("dense calibration: existing single-variant and comparison benchmark report
   // surface, and the 80 new queries include 54 positive
   // and 22 no-answer queries. The aggregate shifts to
   // rank1 82/130=63.1%, hit@5 111/130=85.4%,
-  // noAnswerCorrect 3/46=6.5%. A future corpus / query
-  // set change is a deliberate, visible change; update
-  // these numbers and the README's headline table
-  // together.
+  // noAnswerCorrect 3/46=6.5%. The newer-first tiebreaker
+  // (id-desc) further shifts to rank1 72/130=55.4%,
+  // hit@5 105/130=80.8%, noAnswerCorrect 3/46=6.5%.
+  // A future corpus / query set change is a deliberate,
+  // visible change; update these numbers and the README's
+  // headline table together.
   const single = runRetrievalBenchmark({ variant: "lexical" });
   assert.ok(isSingleVariantReport(single));
-  assert.equal(single.metrics.hitAt5, 111);
-  assert.equal(single.metrics.rank1, 82);
+  assert.equal(single.metrics.hitAt5, 105);
+  assert.equal(single.metrics.rank1, 72);
   assert.equal(single.metrics.noAnswerCorrect, 3);
 
   const all = runRetrievalBenchmark({ variant: "all" });

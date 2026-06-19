@@ -64,8 +64,9 @@
  *     (query, corpus, options). The fusion is a pure function
  *     of the per-variant rankings, so the hybrid output is
  *     deterministic for a given (query, corpus, k, weights).
- *   - Ties on the RRF score are broken by ascending id, the
- *     same stability contract the three single variants use.
+ *   - Ties on the RRF score are broken by descending id (newer
+ *     memory wins), the same stability contract the three single
+ *     variants use.
  *
  * Score scale:
  *   - With three variants, all weights 1.0, the maximum RRF
@@ -355,7 +356,7 @@ export function rrfContribution(
  * ranking. The function is pure: it takes the three ranked
  * lists (each as `LexicalScoredCandidate[]`), the weights,
  * and `k`, and returns the top-K candidates sorted by RRF
- * score descending with id ascending tie-break.
+ * score descending with id descending (newer-first) tie-break.
  *
  * Inputs:
  *   - `rankings`  : one ranked list per variant. The order
@@ -370,7 +371,7 @@ export function rrfContribution(
  *
  * Output:
  *   - A list of `HybridScoredCandidate` objects, sorted by
- *     RRF score desc, id asc, length ≤ `topK`. The
+ *     RRF score desc, id desc (newer wins), length ≤ `topK`. The
  *     `contributors` field carries one entry per source
  *     (including the sources that did NOT return the
  *     candidate) so a reviewer can see the full trace.
@@ -466,11 +467,12 @@ export function fuseRankings(
     }
     fused.push({ id, score: total, contributors });
   }
-  // Stable sort: RRF score desc, then id asc. Matches the
-  // stability contract of the three single variants.
+  // Stable sort: RRF score desc, then id desc (newer memory
+  // wins). Matches the stability contract the three single
+  // variants use.
   fused.sort((a, b) => {
     if (b.score !== a.score) return b.score - a.score;
-    return a.id - b.id;
+    return b.id - a.id;
   });
   return fused.slice(0, topK);
 }
@@ -494,7 +496,7 @@ export function fuseRankings(
  *     builds it from the corpus records.
  *   - The function is deterministic for a given (query,
  *     corpus, k, weights, per-variant options, threshold,
- *     top-K). Ties on the RRF score are broken by ascending
+ *     top-K). Ties on the RRF score are broken by descending
  *     id, the same stability contract the three single
  *     variants use.
  *   - A query that tokenizes to nothing returns an empty
@@ -589,8 +591,8 @@ export function rankHybrid(
 /**
  * Adapter that returns the hybrid ranking in the same
  * `LexicalScoredCandidate[]` shape the metrics / runner
- * expect: `{id, score}[]`, score descending, id ascending
- * tie-break, top-K clipped. The full per-contributor
+ * expect: `{id, score}[]`, score descending, id descending
+ * (newer wins) tie-break, top-K clipped. The full per-contributor
  * diagnostics are dropped in this shape; the benchmark
  * runner calls `rankHybrid` directly when it wants the
  * diagnostics.

@@ -18,7 +18,7 @@
  *   5. End-to-end: the diagnostic on the real
  *      lexical baseline no-answer artifact
  *      produces a meaningful damage report on
- *      the 24 FPs the prior experiment
+ *      the 30 FPs the prior experiment
  *      surfaced.
  *   6. Semantic-evidence integration: with the
  *      pre-computed EmbeddingGemma evidence
@@ -1269,7 +1269,7 @@ test("false-abstention-damage: end-to-end on the lexical baseline no-answer arti
   // prior experiment's end-to-end test does)
   // and feed it to the damage runner. The
   // test pins the headline numbers a
-  // reviewer expects: 24 FPs, distributed
+  // reviewer expects: 30 FPs, distributed
   // across the documented categories.
   const candidates = buildCandidates(BENCHMARK_RECORDS);
   const corpusTokenSets = buildCorpusTokenSets(BENCHMARK_RECORDS);
@@ -1331,39 +1331,38 @@ test("false-abstention-damage: end-to-end on the lexical baseline no-answer arti
     noAnswerPolicy,
     perQuery,
   );
-  // The 24 FPs are the positive queries
+  // The 30 FPs are the positive queries
   // the policy abstained on. Sanity-check
   // the count.
   const fpCount = noAnswerDecisions.filter(
     (d) => d.abstain && d.isPositive,
   ).length;
-  assert.equal(fpCount, 24);
+  assert.equal(fpCount, 30);
   // Run the damage report.
   const report = buildFalseAbstentionDamageReport({
     recordCount: BENCHMARK_RECORDS.length,
     perQuery,
     policy: noAnswerPolicy,
   });
-  // 24 FPs total.
-  assert.equal(report.config.falseAbstainedTotal, 24);
-  assert.equal(report.entries.length, 24);
-  // Per-family breakdown: 4 families with
-  // damage (exact has 0 damage on the
-  // lexical baseline). The fixture's 24
-  // FPs are concentrated on paraphrase
-  // (8), orientation (8), multi-hop (5),
-  // and temporal (3).
+  // 30 FPs total.
+  assert.equal(report.config.falseAbstainedTotal, 30);
+  assert.equal(report.entries.length, 30);
+  // Per-family breakdown: 5 families with
+  // damage (exact now has 2 damage with
+  // the newer-first tiebreaker). The
+  // fixture's 30 FPs are concentrated on
+  // orientation (10), paraphrase (9),
+  // multi-hop (5), temporal (4), and
+  // exact (2).
   const familyTotals: Record<string, number> = {};
   for (const e of report.entries) {
     familyTotals[e.family] = (familyTotals[e.family] ?? 0) + 1;
   }
-  assert.equal(familyTotals["paraphrase"], 8);
-  assert.equal(familyTotals["orientation"], 8);
+  assert.equal(familyTotals["paraphrase"], 9);
+  assert.equal(familyTotals["orientation"], 10);
   assert.equal(familyTotals["multi-hop"], 5);
-  assert.equal(familyTotals["temporal"], 3);
-  // `exact` has 0 damage on the lexical
-  // baseline.
-  assert.equal(familyTotals["exact"] ?? 0, 0);
+  assert.equal(familyTotals["temporal"], 4);
+  assert.equal(familyTotals["exact"] ?? 0, 2);
   // The category summary is non-trivial:
   // at least the 4 priority-2..5
   // categories should be populated.
@@ -1410,12 +1409,12 @@ test("false-abstention-damage: end-to-end on the lexical baseline no-answer arti
     recoverableCount >= 1,
     `expected at least one score-threshold-on-recoverable FP, got ${recoverableCount}`,
   );
-  // The category summary sums to 24.
+  // The category summary sums to 30.
   const total = report.categorySummary.reduce(
     (a, c) => a + c.count,
     0,
   );
-  assert.equal(total, 24);
+  assert.equal(total, 30);
   // The per-score-band breakdown is
   // non-trivial: the lexical baseline's
   // score distribution is concentrated
@@ -1439,7 +1438,7 @@ test("false-abstention-damage: end-to-end on the lexical baseline no-answer arti
   }
 });
 
-test("false-abstention-damage: end-to-end with semantic evidence annotates 24 FPs", () => {
+test("false-abstention-damage: end-to-end with semantic evidence annotates 30 FPs", () => {
   // Re-derive the no-answer artifact (same
   // path as above) and feed it to the
   // damage runner with the pre-computed
@@ -1518,9 +1517,9 @@ test("false-abstention-damage: end-to-end with semantic evidence annotates 24 FP
     report.semanticRollup!.evidenceSource,
     "embeddinggemma-hybrid-dense-176-queries-v1",
   );
-  // The total FPs are 24.
-  assert.equal(report.config.falseAbstainedTotal, 24);
-  // The 24 FPs are the lexical-baseline
+  // The total FPs are 30.
+  assert.equal(report.config.falseAbstainedTotal, 30);
+  // The 30 FPs are the lexical-baseline
   // false abstentions. The semantic
   // evidence should cover most of them
   // (the rank-1 misses are 41 in total;
@@ -1530,7 +1529,7 @@ test("false-abstention-damage: end-to-end with semantic evidence annotates 24 FP
   ).length;
   assert.ok(
     annotated >= 20,
-    `expected at least 20 of 24 FPs to be in the semantic evidence map, got ${annotated}`,
+    `expected at least 20 of 30 FPs to be in the semantic evidence map, got ${annotated}`,
   );
   // The honest finding: most FPs are
   // `also-miss` on the dense path. The
@@ -1553,10 +1552,10 @@ test("false-abstention-damage: end-to-end with semantic evidence annotates 24 FP
   // (the rank-1-was-right cases like
   // para-deploy-strategy) and at most
   // the FPs the lexical path abstained on
-  // (24).
+  // (30).
   assert.ok(
-    recoverable >= 1 && recoverable <= 24,
-    `recoverable count must be in [1, 24], got ${recoverable}`,
+    recoverable >= 1 && recoverable <= 30,
+    `recoverable count must be in [1, 30], got ${recoverable}`,
   );
 });
 
@@ -1831,8 +1830,8 @@ test("false-abstention-damage: runFalseAbstentionDamageCli round-trips a report"
         // abstention-damage-*.json`.
         assert.ok(written);
         assert.ok(written!.startsWith(dir));
-        // The report has 24 FPs.
-        assert.equal(report.config.falseAbstainedTotal, 24);
+        // The report has 30 FPs.
+        assert.equal(report.config.falseAbstainedTotal, 30);
       });
     } finally {
       process.stdout.write = realStdoutWrite;
