@@ -420,10 +420,21 @@ function buildAnalysisUserPrompt(
   lines.push("Wrap the JSON in a ```json ... ``` block. Do not include any other text.");
   if (relatedMemories && relatedMemories.length > 0) {
     lines.push("");
+    // The related-memory block is prose-only. The internal `id`
+    // field on `RelatedMemory` is preserved for controller-side
+    // relationship derivation, but it is intentionally OMITTED
+    // from the provider prompt: emitting `#123` (or any other
+    // internal id token) would leak a storage handle into the
+    // model's input and would be a no-op for the disambiguation
+    // use case the block exists to serve. The model uses the
+    // `memoryContent` + optional `kind` only.
     lines.push("Related memories (use only to disambiguate entities; do not copy):");
     for (const rm of relatedMemories) {
-      const kind = rm.kind ? ` (${rm.kind})` : "";
-      lines.push(`- #${rm.id}${kind}: ${rm.memoryContent}`);
+      if (rm.kind) {
+        lines.push(`- (${rm.kind}): ${rm.memoryContent}`);
+      } else {
+        lines.push(`- ${rm.memoryContent}`);
+      }
     }
   }
   lines.push("");

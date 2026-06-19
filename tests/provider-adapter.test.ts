@@ -677,6 +677,81 @@ test("adapter: relatedMemories are included in the initial prompt only (not the 
   );
 });
 
+test("adapter: related-memory prompt rendering is prose-only (no #id, includes memoryContent, includes kind)", async () => {
+  const log: Array<{ url: string; body: string }> = [];
+  const fetchImpl = scriptedFetch([() => okChatResponse(VALID_JSON)], log);
+  const related = [
+    { id: 7, memoryContent: "Postgres is the project database", kind: "fact" },
+    { id: 11, memoryContent: "The team prefers dark mode in the dashboard" },
+  ];
+  await analyzeMemoryWithFallback("hello", related, {
+    primaryApiKey: PRIMARY_KEY,
+    primaryBaseUrl: "https://primary.test/v1",
+    primaryModel: "p",
+    fetchImpl,
+  });
+  assert.equal(log.length, 1);
+  const body = log[0]!.body;
+  // The memoryContent of every related row is present.
+  assert.match(body, /Postgres is the project database/);
+  assert.match(body, /dark mode in the dashboard/);
+  // The kind tag is present (wrapped in parens) for the kinded row.
+  assert.match(body, /\(fact\)/);
+  // No internal id token (`#7`, `#11`, or any other `#\d+`) leaks
+  // into the provider prompt. The id is preserved on the seam
+  // object for controller-side relationship derivation, but the
+  // prompt rendering intentionally strips it.
+  assert.ok(
+    !/#\d+/.test(body),
+    `provider prompt must not include any #N id token; got: ${body}`,
+  );
+  // No `id` value as a JSON key in the user-role content either
+  // (defense-in-depth: the related-memory block is a single
+  // user-role text payload, so this is the only surface to check).
+  assert.ok(
+    !/"id"\s*:/.test(body),
+    `related-memory block must not include an "id" JSON key in the prompt; got: ${body}`,
+  );
+});
+
+test("adapter: related-memory prompt includes memoryContent when related is non-empty; repair prompt excludes it", async () => {
+  const log: Array<{ url: string; body: string }> = [];
+  const fetchImpl = scriptedFetch(
+    [
+      () => okChatResponse("not-json"),
+      () => okChatResponse("```json\n" + VALID_JSON + "\n```"),
+    ],
+    log,
+  );
+  const related = [
+    { id: 99, memoryContent: "Render was the previous hosting platform" },
+  ];
+  await analyzeMemoryWithFallback("hello", related, {
+    primaryApiKey: PRIMARY_KEY,
+    primaryBaseUrl: "https://primary.test/v1",
+    primaryModel: "p",
+    fetchImpl,
+  });
+  assert.equal(log.length, 2);
+  // Initial prompt: memoryContent is present, no internal id token.
+  assert.match(log[0]!.body, /Render was the previous hosting platform/);
+  assert.ok(
+    !/#\d+/.test(log[0]!.body),
+    `initial prompt must not include any #N id token; got: ${log[0]!.body}`,
+  );
+  // Repair prompt: no related-memory text at all (not even the
+  // kind tag / memoryContent). The repair branch never reads the
+  // related-memories argument.
+  assert.ok(
+    !log[1]!.body.includes("Render was the previous hosting platform"),
+    "repair prompt must not echo the related memory text",
+  );
+  assert.ok(
+    !log[1]!.body.includes("Related memories"),
+    "repair prompt must not include the 'Related memories' block",
+  );
+});
+
 test("adapter: no key values appear in serialized failure results", async () => {
   const log: Array<{ url: string; body: string }> = [];
   const fetchImpl = scriptedFetch(

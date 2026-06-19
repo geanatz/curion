@@ -34,6 +34,7 @@ import { runRememberController } from "../src/controller/remember-controller.ts"
 import {
   initStorage,
   closeStorage,
+  insertMemoryRecord,
   type StorageHandle,
 } from "../src/storage/storage.ts";
 import {
@@ -690,16 +691,205 @@ test("redactSummary: redacts secret-shaped substrings and preserves safe text", 
 });
 
 // ---------------------------------------------------------------------------
-// Related-memory seam: returns empty for the MVP slice
+// Related-memory seam: V1 lexical top-K behavior
 // ---------------------------------------------------------------------------
 
-test("related-memory seam: returns empty list with a stable reason for the MVP", () => {
+test("related-memory seam: returns empty list with a stable reason on empty store", () => {
   const { tmp, handle } = mkStorage();
   try {
     const out = findRelatedMemories(handle, { text: "anything" });
     assert.deepEqual(out.memories, []);
     assert.equal(typeof out.reason, "string");
-    assert.match(out.reason, /mvp|no related/i);
+    assert.equal(out.reason, "no stored active memories");
+  } finally {
+    rmStorage(tmp, handle);
+  }
+});
+
+test("related-memory seam: returns top lexical related memories from active records", () => {
+  const { tmp, handle } = mkStorage();
+  try {
+    // Seed three active memories. The ranker uses lexical overlap
+    // on the `summary` column (read back as `memoryContent`); the
+    // query shares "postgres storage" with row 1 strongly, with
+    // row 2 weakly, and with row 3 not at all. Row 1 must come
+    // back at the top.
+    insertMemoryRecord(handle, {
+      kind: "fact",
+      state: "active",
+      memoryContent:
+        "The project uses Postgres for primary data storage in production",
+      providerId: "minimax",
+      modelId: "MiniMax-M3",
+      confidence: 0.9,
+      safetyFlags: ["controller-normalized"],
+      metadata: { tags: ["postgres", "storage"] },
+    });
+    insertMemoryRecord(handle, {
+      kind: "context",
+      state: "active",
+      memoryContent: "The team also stores some analytics data in Clickhouse",
+      providerId: "minimax",
+      modelId: "MiniMax-M3",
+      confidence: 0.8,
+      safetyFlags: ["controller-normalized"],
+      metadata: { tags: ["analytics"] },
+    });
+    insertMemoryRecord(handle, {
+      kind: "preference",
+      state: "active",
+      memoryContent: "The team prefers dark mode in the dashboard",
+      providerId: "minimax",
+      modelId: "MiniMax-M3",
+      confidence: 0.7,
+      safetyFlags: ["controller-normalized"],
+      metadata: { tags: ["ui"] },
+    });
+    const out = findRelatedMemories(handle, {
+      text: "postgres storage choice for the new service",
+    });
+    assert.ok(out.memories.length > 0, "expected at least one related memory");
+    // The strong match is the Postgres row; it must be present and
+    // must be the top result. The "dark mode" row must not appear.
+    const ids = out.memories.map((m) => m.id);
+    assert.ok(ids.includes(1), "row id 1 (Postgres) must be in the result");
+    assert.ok(
+      !out.memories.some((m) =>
+        m.memoryContent.toLowerCase().includes("dark mode"),
+      ),
+      "unrelated 'dark mode' memory must not be returned",
+    );
+    // The top result must be the Postgres row.
+    assert.equal(out.memories[0]!.id, 1);
+    // Each result is a RelatedMemory with id, memoryContent, kind.
+    for (const m of out.memories) {
+      assert.equal(typeof m.id, "number");
+      assert.equal(typeof m.memoryContent, "string");
+      assert.ok(m.memoryContent.length > 0);
+      assert.equal(typeof m.kind, "string");
+    }
+  } finally {
+    rmStorage(tmp, handle);
+  }
+});
+
+test("related-memory seam: respects the default topK of 5", () => {
+  const { tmp, handle } = mkStorage();
+  try {
+    // Seed 8 active memories that all share a strong overlap with
+    // the query. The default topK is 5, so the result must have
+    // exactly 5 entries even though the candidate pool is larger.
+    for (let i = 0; i < 8; i++) {
+      insertMemoryRecord(handle, {
+        kind: "fact",
+        state: "active",
+        memoryContent: `Postgres storage notes part ${i} for the project`,
+        providerId: "minimax",
+        modelId: "MiniMax-M3",
+        confidence: 0.8,
+        safetyFlags: ["controller-normalized"],
+        metadata: { tags: ["postgres", "storage"] },
+      });
+    }
+    const out = findRelatedMemories(handle, {
+      text: "postgres storage decision",
+    });
+    assert.equal(
+      out.memories.length,
+      5,
+      "default topK must be 5",
+    );
+  } finally {
+    rmStorage(tmp, handle);
+  }
+});
+
+test("related-memory seam: respects an explicit topK override", () => {
+  const { tmp, handle } = mkStorage();
+  try {
+    for (let i = 0; i < 6; i++) {
+      insertMemoryRecord(handle, {
+        kind: "fact",
+        state: "active",
+        memoryContent: `Postgres storage notes part ${i} for the project`,
+        providerId: "minimax",
+        modelId: "MiniMax-M3",
+        confidence: 0.8,
+        safetyFlags: ["controller-normalized"],
+        metadata: { tags: ["postgres", "storage"] },
+      });
+    }
+    const out = findRelatedMemories(handle, {
+      text: "postgres storage decision",
+      topK: 2,
+    });
+    assert.equal(out.memories.length, 2, "explicit topK=2 must be respected");
+  } finally {
+    rmStorage(tmp, handle);
+  }
+});
+
+test("related-memory seam: ignores superseded/invalidated memories (active only)", () => {
+  const { tmp, handle } = mkStorage();
+  try {
+    // Insert one active Postgres row (must appear) and one
+    // superseded Postgres row (must NOT appear). The MVP V1
+    // surface only consults active rows; non-active states are
+    // intentionally filtered out by the read side.
+    const active = insertMemoryRecord(handle, {
+      kind: "fact",
+      state: "active",
+      memoryContent: "Postgres storage is the active project database",
+      providerId: "minimax",
+      modelId: "MiniMax-M3",
+      confidence: 0.9,
+      safetyFlags: ["controller-normalized"],
+      metadata: { tags: ["postgres", "storage"] },
+    });
+    insertMemoryRecord(handle, {
+      kind: "fact",
+      state: "superseded",
+      memoryContent: "Postgres storage was the old project database",
+      providerId: "minimax",
+      modelId: "MiniMax-M3",
+      confidence: 0.5,
+      safetyFlags: ["controller-normalized"],
+      metadata: { tags: ["postgres", "storage"] },
+    });
+    const out = findRelatedMemories(handle, {
+      text: "postgres storage decision",
+    });
+    const ids = out.memories.map((m) => m.id);
+    assert.ok(ids.includes(active.id), "active row must be returned");
+    assert.ok(
+      !out.memories.some((m) => m.memoryContent.includes("was the old")),
+      "superseded row must not be returned",
+    );
+  } finally {
+    rmStorage(tmp, handle);
+  }
+});
+
+test("related-memory seam: returns empty when query has no lexical overlap with stored memories", () => {
+  const { tmp, handle } = mkStorage();
+  try {
+    insertMemoryRecord(handle, {
+      kind: "preference",
+      state: "active",
+      memoryContent: "The team prefers dark mode in the dashboard",
+      providerId: "minimax",
+      modelId: "MiniMax-M3",
+      confidence: 0.7,
+      safetyFlags: ["controller-normalized"],
+      metadata: { tags: ["ui"] },
+    });
+    const out = findRelatedMemories(handle, {
+      text: "kubernetes operator deployment topology",
+    });
+    assert.deepEqual(out.memories, []);
+    // The reason is the no-match branch (not the empty-store
+    // branch, since the store is non-empty).
+    assert.equal(out.reason, "no related memories");
   } finally {
     rmStorage(tmp, handle);
   }
