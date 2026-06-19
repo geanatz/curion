@@ -1,25 +1,19 @@
 /**
- * Curion Local Trace — Phase 1 foundation.
+ * Curion Local Trace — Phase 1 foundation + Phase 2 tool-boundary
+ * helper.
  *
- * This module is the single import point for trace infrastructure.
- * It does NOT add tool-call capture: there is no instrumented
- * path that writes to the trace DB from the live `remember` /
- * `recall` flow yet. The writers and the schema exist so later
- * phases can attach a small redacting interceptor to the
- * provider HTTP client and the controller layers.
+ * Phase 1 ships the storage, the redaction layer, the
+ * non-throwing writer, the off switch, and the retention helpers.
+ * Phase 2 adds a small helper (`startToolBoundaryTrace`) that
+ * the outer `remember` / `recall` tool handlers use to record a
+ * run + input/output event pair per public tool invocation. The
+ * controller internals stay untouched; the helper is the only
+ * new public surface.
  *
- * What Phase 1 ships:
- *   - A separate `.curion/trace.sqlite` database, owned by this
- *     module, with its own `_meta` table and forward-compatible
- *     `trace_runs` / `trace_events` tables. The memory DB
- *     (`.curion/curion.sqlite`) is untouched.
- *   - A `CURION_TRACE_ENABLED` off switch (default: enabled).
- *   - A central, recursive, schema-agnostic `redactPayload` that
- *     strips credentials, reasoning / CoT fields, URL basic-auth
- *     credentials, and `` blocks.
- *   - A non-throwing writer API (`writeTraceRun`,
- *     `writeTraceEvent`, `updateTraceRun`, list helpers).
- *   - Retention / purge helpers with a 30-day default window.
+ * The trace storage is a separate `.curion/trace.sqlite` database
+ * with its own `_meta` table and the `trace_runs` / `trace_events`
+ * tables. The memory DB (`.curion/curion.sqlite`) is never
+ * touched by this module.
  *
  * Public surface — re-exported here so callers have a single
  * import.
@@ -69,3 +63,12 @@ export {
   type PurgeResult,
   type PurgeOptions,
 } from "./trace-retention.js";
+
+export {
+  startToolBoundaryTrace,
+  TOOL_INPUT_KIND,
+  TOOL_OUTPUT_KIND,
+  type TracedToolName,
+  type StartToolBoundaryTraceOptions,
+  type ToolBoundaryTracer,
+} from "./trace-tool-boundary.js";

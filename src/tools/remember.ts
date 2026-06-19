@@ -38,6 +38,7 @@ import {
   type StorageHandle,
 } from "../storage/storage.js";
 import { logger } from "../logging/logger.js";
+import { startToolBoundaryTrace } from "../trace/index.js";
 import { z } from "zod";
 
 export const REMEMBER_TOOL_NAME = "remember" as const;
@@ -147,44 +148,76 @@ export function resetStorageProvider(): void {
 /**
  * Run the narrow `remember(text)` pipeline. Defensive shape check
  * on `input.text`, then delegate to the controller.
+ *
+ * Tool-boundary tracing (Phase 2): every public invocation
+ * opens a single trace run and records one `tool.input` event at
+ * entry, one `tool.output` event with the result the handler
+ * returns, and the run's final status + duration on exit. The
+ * tracer is the existing non-throwing writer; trace failures
+ * NEVER change the result and NEVER throw into the MCP path.
  */
 export async function handleRemember(input: unknown): Promise<RememberResult> {
-  if (
-    typeof input !== "object" ||
-    input === null ||
-    typeof (input as { text?: unknown }).text !== "string"
-  ) {
-    throw new Error("remember: `text` (string) is required");
-  }
-  const text = (input as { text: string }).text;
-  if (text.trim().length === 0) {
-    throw new Error("remember: `text` (string) must be non-empty");
-  }
-
-  const { handle: storage, ownsHandle } = storageProvider();
-  let outcome: RememberOutcome;
+  // Open the trace run at the public tool boundary. The helper
+  // is a no-op when `CURION_TRACE_ENABLED=0` or the writer is
+  // unavailable; in either case the rest of the handler runs
+  // unchanged.
+  const trace = startToolBoundaryTrace({ toolName: "remember", input });
   try {
-    outcome = await runRememberController(storage, text);
-  } catch (err) {
-    // Unexpected throw — log and surface a provider_error outcome.
-    const msg = err instanceof Error ? err.message : String(err);
-    logger.error(`remember: unexpected controller error: ${msg}`);
-    return {
-      status: "provider_error",
-      message:
-        "remember: unexpected internal error; nothing was stored",
-    };
-  } finally {
-    if (ownsHandle) {
-      try {
-        closeStorage(storage);
-      } catch {
-        // ignore
+    if (
+      typeof input !== "object" ||
+      input === null ||
+      typeof (input as { text?: unknown }).text !== "string"
+    ) {
+      // Validation failure (programmer / SDK error — the strict
+      // schema should already have rejected this). The trace run
+      // finishes as `error` and re-throws.
+      throw new Error("remember: `text` (string) is required");
+    }
+    const text = (input as { text: string }).text;
+    if (text.trim().length === 0) {
+      throw new Error("remember: `text` (string) must be non-empty");
+    }
+
+    const { handle: storage, ownsHandle } = storageProvider();
+    let outcome: RememberOutcome;
+    try {
+      outcome = await runRememberController(storage, text);
+    } catch (err) {
+      // Unexpected throw — log and surface a provider_error outcome.
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error(`remember: unexpected controller error: ${msg}`);
+      const result: RememberResult = {
+        status: "provider_error",
+        message:
+          "remember: unexpected internal error; nothing was stored",
+      };
+      // The handler returned a result, so the run is `ok` (the
+      // handler itself did not throw). The provider_error status
+      // is captured in the persisted tool.output event.
+      trace.recordOutput(result);
+      trace.finish("ok");
+      return result;
+    } finally {
+      if (ownsHandle) {
+        try {
+          closeStorage(storage);
+        } catch {
+          // ignore
+        }
       }
     }
-  }
 
-  return formatOutcome(outcome);
+    const result = formatOutcome(outcome);
+    trace.recordOutput(result);
+    trace.finish("ok");
+    return result;
+  } catch (err) {
+    // The handler itself threw (validation or some other
+    // unexpected path). Record the run as `error` and re-throw
+    // so the MCP layer sees the original error.
+    trace.finish("error");
+    throw err;
+  }
 }
 
 function formatOutcome(outcome: RememberOutcome): RememberResult {
