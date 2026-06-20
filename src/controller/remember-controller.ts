@@ -36,7 +36,9 @@ import {
   deriveRelationshipMetadata,
   type RelationshipMetadataFields,
 } from "../retrieval/relationship.js";
+import { detectSupersession } from "../retrieval/supersession.js";
 import {
+  addSupersededByToMemory,
   insertMemoryRecord,
   updateMemoryMetadata,
   MEMORY_KINDS,
@@ -398,6 +400,38 @@ export async function runRememberController(
     others: relatedSummaries,
     asOf: (options.now ?? Date.now)(),
   });
+
+  // -- 6c. Supersession detection (Phase I extension) ------------
+  // Run the supersession detector over the related memories to
+  // find any that the new candidate explicitly supersedes (e.g.
+  // "no longer use X, use Y instead; replaced by; superseded by").
+  // The detector is pure, conservative, and returns null when
+  // uncertain. When it fires, we:
+  //   - Add `supersedes: [oldId, ...]` to the new row's block.
+  //   - Back-patch each superseded old row with
+  //     `supersededBy: [newId]`.
+  // The supersession signal contributes to `detectionConfidence`
+  // and can make a supersession-only block (no conflictsWith /
+  // olderVariantsOf) worth persisting.
+  const supersession = detectSupersession({
+    candidate: candidateSummary,
+    others: relatedSummaries,
+  });
+  if (supersession !== null && supersession.supersededIds.length > 0) {
+    // Merge supersession ids into the derived block.
+    derived.supersedes = supersession.supersededIds;
+    if (supersession.confidence > derived.detectionConfidence) {
+      derived.detectionConfidence = supersession.confidence;
+    }
+    // Back-patch each superseded old row: add supersededBy pointing
+    // to the new candidate's id. Safe for missing/deleted rows —
+    // `addSupersededByToMemory` is a no-op when the row does not
+    // exist.
+    for (const supersededId of supersession.supersededIds) {
+      addSupersededByToMemory(storage, supersededId, record.id);
+    }
+  }
+
   // The helper is append-only: it preserves the existing
   // metadata keys (tags / entities / classification / ...) and
   // only adds a `relationship` block when the derived block
@@ -405,6 +439,9 @@ export async function runRememberController(
   // derived block is empty (the MVP default) gets NO update
   // at all, keeping the persisted JSON byte-equal to pre-
   // Phase-B for the no-related-memories case.
+  // Phase I extension: supersession-only blocks (no
+  // conflictsWith / olderVariantsOf) are now also considered
+  // meaningful and are persisted.
   const patched = buildPersistedMetadata(
     record.metadata as Record<string, unknown>,
     derived,

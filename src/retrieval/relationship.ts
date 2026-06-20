@@ -382,22 +382,24 @@ export interface PersistedRelationshipBlock {
  * writing a noisy empty block onto every row (spec §5.1
  * "append only if there is actual relationship data").
  *
- * The forward-looking Phase I fields (`supersedes`,
- * `supersededBy`, `resolvedAt`) are **excluded** from this
- * check. They are pass-through: a row that the detector
- * considers "no relationship data" (empty `conflictsWith` and
- * `olderVariantsOf`) may still carry a Phase I block when the
- * caller supplies the new fields, and that is a valid write.
- * The detector-derived fields remain the gate for the
- * conservative "noisy empty block" rule; the Phase I fields
- * are appended only when explicitly supplied.
+ * **Phase I supersession extension.** A block that carries only
+ * `supersedes` (no `conflictsWith` / `olderVariantsOf`) is now
+ * also considered meaningful. This allows the supersession
+ * detector to write `supersedes`-only blocks without requiring
+ * a coincident `conflictsWith` / `olderVariantsOf` signal.
+ *
+ * The `supersededBy` and `resolvedAt` fields are excluded from
+ * this check: they are written onto the *old* row (the one
+ * being superseded), not the new candidate row, so they do
+ * not gate whether the new row's block is written.
  */
 export function hasMeaningfulRelationshipData(
   fields: RelationshipMetadataFields,
 ): boolean {
   return (
     fields.conflictsWith.length > 0 ||
-    fields.olderVariantsOf.length > 0
+    fields.olderVariantsOf.length > 0 ||
+    (Array.isArray(fields.supersedes) && fields.supersedes.length > 0)
   );
 }
 
