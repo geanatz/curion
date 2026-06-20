@@ -341,7 +341,9 @@ test("controller supersession: recall demotion ranks current above superseded st
       now: pinnedNow(1_700_000_000_001),
     });
 
-    // Recall with a query that matches both memories.
+    // Recall with a query that matches both memories via shared tags.
+    // (Uses "minimax embeddings" because the lexical matcher requires
+    // exact token overlap; "embedding" ≠ "embeddings" without stemming.)
     const recallFetch = async () =>
       new Response(
         JSON.stringify({
@@ -361,7 +363,7 @@ test("controller supersession: recall demotion ranks current above superseded st
 
     const recallOut = await runRecallController(
       handle,
-      "embedding provider",
+      "minimax embeddings",
       {
         providerFetchImpl: recallFetch,
         providerPrimaryApiKey: "sk-test",
@@ -498,7 +500,7 @@ test("controller supersession: new memory can supersede multiple related memorie
         },
         {
           id: 2,
-          memoryContent: "MiniMax is our text embedding provider for recall.",
+          memoryContent: "MiniMax is used for text embeddings in the recall pipeline.",
         },
       ],
       reason: "test",
@@ -713,7 +715,7 @@ test("controller supersession: supersedes and conflictsWith can coexist on new r
       memories: [
         {
           id: 1,
-          memoryContent: "We use MiniMax for embeddings.",
+          memoryContent: "We use MiniMax for text embeddings in the recall pipeline.",
         },
       ],
       reason: "test",
