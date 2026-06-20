@@ -53,6 +53,10 @@ import {
   type LexicalScoredCandidate,
 } from "../retrieval/lexical.js";
 import {
+  demoteSupersededMemories,
+  type ScoredCandidateWithRelationship,
+} from "../retrieval/superseded-demotion.js";
+import {
   detectAmbiguity,
   type AmbiguitySignal,
   type SafeMemorySummaryWithRelationship,
@@ -371,7 +375,10 @@ export async function runRecallController(
   const summaryById = new Map<number, SafeMemorySummary>(
     summaries.map((s) => [s.id, s]),
   );
-  // -- Phase 3A trace: lexical ranking ---------------------------------
+  // -- Phase 3A trace: lexical ranking (before demotion) ----------------
+  // The trace records the raw lexical ranking; the demotion
+  // is a pure post-rank step that only reorders candidates
+  // when superseded relationships exist in the candidate set.
   emitLexicalRankingStage(options.trace, {
     query,
     threshold,
@@ -383,16 +390,38 @@ export async function runRecallController(
     logger.debug("recall: no relevant memory; skipping provider call");
     return { status: "no_memory" };
   }
-  // Re-attach summaries in the order returned by the ranker.
-  // ranked already carries the score-sorted order. We use a
-  // single O(N) map lookup so this stays linear even if the
-  // store grows. The relationship block (Phase C) is
+
+  // -- 3b. Superseded-memory demotion -----------------------------------
+  // When both a superseding candidate (A) and its superseded target (B)
+  // are present in the ranked set, demote B so A ranks higher.
+  // Missing references are silently ignored. The demotion is a pure
+  // reordering step; no I/O, no state change.
+  const scoredWithRelationships: ScoredCandidateWithRelationship[] = ranked.map(
+    (r) => {
+      const block = blockById.get(r.id);
+      return block === undefined
+        ? { id: r.id, score: r.score }
+        : {
+            id: r.id,
+            score: r.score,
+            relationship: {
+              supersedes: block.supersedes,
+              supersededBy: block.supersededBy,
+            },
+          };
+    },
+  );
+  const demotedRanked = demoteSupersededMemories(scoredWithRelationships);
+  // Re-attach summaries in the order returned by the demoted ranker.
+  // demotedRanked carries the score-sorted order (post-demotion).
+  // We use a single O(N) map lookup so this stays linear even if
+  // the store grows. The relationship block (Phase C) is
   // attached as an optional extension; rows without a stored
   // block carry `relationship: undefined` and the detector
   // treats them as having no stored data (it can still fire
   // on the lexical / asymmetric-negation path).
   const topSummaries: SafeMemorySummaryWithRelationship[] = [];
-  for (const r of ranked) {
+  for (const r of demotedRanked) {
     const s = summaryById.get(r.id);
     if (!s) continue;
     const block = blockById.get(r.id);
@@ -405,7 +434,7 @@ export async function runRecallController(
   // Sanity: every ranked id must have a summary. If this ever
   // fails, it means a memory was deleted between the read and
   // the rank — fall back to no_memory rather than fabricating.
-  if (topSummaries.length !== ranked.length) {
+  if (topSummaries.length !== demotedRanked.length) {
     logger.debug(
       "recall: ranked-id missing summary (storage raced); returning no_memory",
     );
