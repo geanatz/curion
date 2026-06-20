@@ -380,30 +380,67 @@ test("Phase I: existing relationship block is NOT overwritten by a new pass-thro
 });
 
 // ---------------------------------------------------------------------------
-// 4. hasMeaningfulRelationshipData ignores the Phase I fields
+// 4. hasMeaningfulRelationshipData: Phase I supersession extension
 // ---------------------------------------------------------------------------
 
-test("hasMeaningfulRelationshipData: does NOT consider the Phase I pass-through fields", () => {
-  // The conservative detector fields are the gate for
-  // "should we write a `relationship` block at all". A
-  // row with only Phase I fields and no conservative
-  // signal is "no detector output" and the writer must
-  // NOT write a noisy empty block.
-  const empty: RelationshipMetadataFields = {
+test("hasMeaningfulRelationshipData: supersedes is now considered meaningful (Phase I supersession extension)", () => {
+  // Phase I supersession extension: a block that carries only
+  // `supersedes` (no `conflictsWith` / `olderVariantsOf`) is now
+  // also considered meaningful. This allows the supersession
+  // detector to write `supersedes`-only blocks without requiring
+  // a coincident `conflictsWith` / `olderVariantsOf` signal.
+  // The `supersededBy` and `resolvedAt` fields are still NOT
+  // considered meaningful for the new row's block (they are
+  // written onto the OLD row being superseded, not the new
+  // candidate row).
+  const supersessionOnly: RelationshipMetadataFields = {
     conflictsWith: [],
     olderVariantsOf: [],
     detectionConfidence: 0,
     derivedSchemaVersion: DERIVED_SCHEMA_VERSION,
     derivedAt: 0,
     supersedes: [10],
+  };
+  assert.equal(
+    hasMeaningfulRelationshipData(supersessionOnly),
+    true,
+    "supersession-only block (supersedes) is now meaningful",
+  );
+
+  // supersededBy alone does NOT make a new row meaningful
+  // (it is written onto the old row, not the new candidate).
+  const supersededByOnly: RelationshipMetadataFields = {
+    conflictsWith: [],
+    olderVariantsOf: [],
+    detectionConfidence: 0,
+    derivedSchemaVersion: DERIVED_SCHEMA_VERSION,
+    derivedAt: 0,
     supersededBy: [11],
+  };
+  assert.equal(
+    hasMeaningfulRelationshipData(supersededByOnly),
+    false,
+    "supersededBy alone does not make a new row meaningful",
+  );
+
+  // resolvedAt alone does NOT make a new row meaningful.
+  const resolvedAtOnly: RelationshipMetadataFields = {
+    conflictsWith: [],
+    olderVariantsOf: [],
+    detectionConfidence: 0,
+    derivedSchemaVersion: DERIVED_SCHEMA_VERSION,
+    derivedAt: 0,
     resolvedAt: 1_700_000_000_000,
   };
-  assert.equal(hasMeaningfulRelationshipData(empty), false);
-  // Sanity: a row with even one conservative field is
-  // still meaningful.
   assert.equal(
-    hasMeaningfulRelationshipData({ ...empty, conflictsWith: [1] }),
+    hasMeaningfulRelationshipData(resolvedAtOnly),
+    false,
+    "resolvedAt alone does not make a new row meaningful",
+  );
+
+  // Sanity: a row with a conservative field is still meaningful.
+  assert.equal(
+    hasMeaningfulRelationshipData({ ...supersessionOnly, conflictsWith: [1] }),
     true,
   );
 });

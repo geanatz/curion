@@ -711,22 +711,28 @@ test("controller supersession: supersedes and conflictsWith can coexist on new r
       });
     }
 
+    // Use a seam text with high overlap (>0.5 Jaccard) with the new
+    // summary so the supersession detector fires. The old memory
+    // text is almost identical to the new one except for the
+    // "no longer" supersession marker.
     setRelatedMemoriesImpl(() => ({
       memories: [
         {
           id: 1,
-          memoryContent: "We use MiniMax for text embeddings in the recall pipeline.",
+          memoryContent:
+            "We use MiniMax for embeddings in the recall pipeline.",
         },
       ],
       reason: "test",
     }));
 
-    // New memory that both supersedes AND conflicts.
+    // New memory that both supersedes AND conflicts (high overlap
+    // with old memory + explicit supersession phrasing + negation).
     const { fetchImpl } = scriptFetch(() =>
       okChatResponse(
         safeAnalysis({
           summary:
-            "We no longer use MiniMax for embeddings; use NVIDIA NIM instead.",
+            "We no longer use MiniMax for embeddings in the recall pipeline; use NVIDIA NIM instead.",
           tags: ["nvidia", "minimax"],
         }),
       ),
@@ -801,11 +807,13 @@ test("controller supersession: back-patch appends to existing supersededBy array
       },
     });
 
+    // Use a seam text with high overlap (>0.5 Jaccard) so the
+    // supersession detector fires and back-patch is triggered.
     setRelatedMemoriesImpl(() => ({
       memories: [
         {
           id: 1,
-          memoryContent: "We use MiniMax for embeddings.",
+          memoryContent: "We use MiniMax for embeddings in the recall pipeline.",
         },
       ],
       reason: "test",
@@ -815,7 +823,7 @@ test("controller supersession: back-patch appends to existing supersededBy array
       okChatResponse(
         safeAnalysis({
           summary:
-            "We no longer use MiniMax; use NVIDIA NIM instead.",
+            "We no longer use MiniMax for embeddings in the recall pipeline; use NVIDIA NIM instead.",
           tags: ["nvidia"],
         }),
       ),
