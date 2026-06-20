@@ -442,10 +442,14 @@ export async function runRememberController(
   // Phase I extension: supersession-only blocks (no
   // conflictsWith / olderVariantsOf) are now also considered
   // meaningful and are persisted.
-  const patched = buildPersistedMetadata(
-    record.metadata as Record<string, unknown>,
-    derived,
-  );
+  //
+  // Pass `existingMetadata` (not `record.metadata`) as the base
+  // for the new row's relationship block. `existingMetadata`
+  // is the clean controller-built object with no `relationship`
+  // key, ensuring the append-only invariant holds and a
+  // supersession-only block is written even if the storage
+  // layer returned a modified metadata object.
+  const patched = buildPersistedMetadata(existingMetadata, derived);
   const hasRelationshipKey =
     Object.prototype.hasOwnProperty.call(patched, "relationship") &&
     patched.relationship !== undefined;
