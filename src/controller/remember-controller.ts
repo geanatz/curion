@@ -413,9 +413,13 @@ export async function runRememberController(
   // The supersession signal contributes to `detectionConfidence`
   // and can make a supersession-only block (no conflictsWith /
   // olderVariantsOf) worth persisting.
+  // Pass rawInputText so the detector can use the user's explicit
+  // supersession language (e.g. "supersedes") even if the provider
+  // summary rephrased it (e.g. to "superseding").
   const supersession = detectSupersession({
     candidate: candidateSummary,
     others: relatedSummaries,
+    rawInputText: rawInput,
   });
   if (supersession !== null && supersession.supersededIds.length > 0) {
     // Merge supersession ids into the derived block.

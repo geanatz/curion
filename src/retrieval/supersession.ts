@@ -83,6 +83,19 @@ export const MIN_OVERLAP_FOR_SUPERSESSION = 0.5;
 export const MIN_SHARED_CONTENT_TOKENS = 2;
 
 /**
+ * Overlap threshold used when the raw input text contains
+ * explicit supersession language (e.g. "supersedes", "previous X
+ * is superseded"). The explicit phrase is a strong signal that
+ * should not be blocked by moderate token divergence between the
+ * provider summary and the related memory.
+ *
+ * Set to 0.2, which is low enough to allow topically-related
+ * memories with modest shared vocabulary to pass, while still
+ * rejecting clearly unrelated pairs.
+ */
+export const REDUCED_OVERLAP_THRESHOLD_FOR_EXPLICIT = 0.2;
+
+/**
  * Hard cap on superseded ids emitted per call. Per spec §6,
  * all id arrays are bounded to 16.
  */
@@ -123,6 +136,16 @@ export interface SupersessionDetectionInput {
    * `id < candidate.id` are considered (newer supersedes older).
    */
   others: readonly SafeMemorySummary[];
+  /**
+   * Optional raw user input text. When provided and the text
+   * contains explicit supersession language (e.g. "supersedes",
+   * "previous X is superseded"), the detector uses a lower
+   * overlap threshold because the user's explicit statement
+   * is a strong signal that should not be blocked by moderate
+   * token divergence between the provider summary and the
+   * related memory.
+   */
+  rawInputText?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -291,16 +314,34 @@ const SUPERSESSION_PATTERNS: readonly PhrasePattern[] = [
 export function detectSupersession(
   input: SupersessionDetectionInput,
 ): SupersessionSignal | null {
-  const { candidate, others } = input;
+  const { candidate, others, rawInputText } = input;
 
   // Fast path: if the candidate memoryContent is empty, no signal.
   if (!candidate.memoryContent || candidate.memoryContent.trim().length === 0) {
     return null;
   }
 
-  // Collect candidates with enough topical overlap.
-  // We compute token sets once per candidate and reuse them.
-  const candidateTokens = tokenize(candidate.memoryContent);
+  // ---- Check for explicit supersession language in raw input ----
+  // If the raw input contains explicit supersession phrasing, we use
+  // a lower overlap threshold and use rawInputText for overlap
+  // computation, because the user's explicit statement is a strong
+  // signal that should not be blocked by moderate token divergence
+  // between the provider summary and the related memory.
+  const hasExplicitSupersession = rawInputText !== undefined &&
+    hasExplicitSupersessionPhrase(rawInputText);
+  const effectiveOverlapThreshold = hasExplicitSupersession
+    ? REDUCED_OVERLAP_THRESHOLD_FOR_EXPLICIT
+    : MIN_OVERLAP_FOR_SUPERSESSION;
+
+  // ---- Determine effective text for overlap computation ----
+  // When rawInputText has explicit supersession language, use it for
+  // overlap because the provider may have rephrased the explicit
+  // language (e.g. "supersedes" -> "superseding"). Otherwise use
+  // candidate.memoryContent as normal.
+  const effectiveText = hasExplicitSupersession
+    ? rawInputText!
+    : candidate.memoryContent;
+  const candidateTokens = tokenize(effectiveText);
   if (candidateTokens.length === 0) return null;
 
   const candidateContentTokens = contentTokens(candidateTokens);
@@ -320,7 +361,7 @@ export function detectSupersession(
 
     // ---- Topical anchor: Jaccard overlap must be high enough ----
     const overlap = jaccard(candidateTokens, otherTokens);
-    if (overlap < MIN_OVERLAP_FOR_SUPERSESSION) continue;
+    if (overlap < effectiveOverlapThreshold) continue;
 
     // Secondary shared-content check: when overlap is marginal,
     // require a minimum number of shared content tokens.
@@ -329,14 +370,21 @@ export function detectSupersession(
       contentTokens(otherTokens),
     );
     if (
-      overlap < MIN_OVERLAP_FOR_SUPERSESSION + 0.1 &&
+      overlap < effectiveOverlapThreshold + 0.1 &&
       sharedContent < MIN_SHARED_CONTENT_TOKENS
     ) {
       continue;
     }
 
     // ---- Scan for supersession phrasing ----
+    // When hasExplicitSupersession is true (rawInputText has explicit
+    // supersession language), we scan rawInputText first because it
+    // contains the user's explicit language before the provider
+    // rephrased it. We fall back to candidate memoryContent if
+    // hasExplicitSupersession is false.
     const result = scanForSupersessionPhrasing(
+      hasExplicitSupersession,
+      rawInputText,
       candidate.memoryContent,
       other.memoryContent,
       overlap,
@@ -375,18 +423,47 @@ export function detectSupersession(
 // ---------------------------------------------------------------------------
 
 /**
+ * Check if text contains explicit supersession language.
+ * This is used to determine whether to use the reduced overlap
+ * threshold, because the user's explicit supersession statement
+ * is a strong signal.
+ */
+function hasExplicitSupersessionPhrase(
+  text: string | undefined,
+): boolean {
+  if (!text) return false;
+  for (const pattern of SUPERSESSION_PATTERNS) {
+    if (pattern.regex.test(text)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Scan candidate text for supersession phrasing.
+ * When hasExplicitSupersession is true (rawInputText has explicit
+ * supersession language), we scan rawInputText first because it
+ * contains the user's explicit language before the provider rephrased
+ * it. Falls back to candidateText if hasExplicitSupersession is false.
+ *
  * Returns null if no supersession language is found.
  */
 function scanForSupersessionPhrasing(
+  hasExplicitSupersession: boolean,
+  rawInputText: string | undefined,
   candidateText: string,
   _otherText: string,
   overlap: number,
 ): { polarity: 1 | -1; confidence: number } | null {
+  // Only use rawInputText for phrase detection if it has explicit supersession
+  const textToCheck = hasExplicitSupersession ? rawInputText! : candidateText;
   for (const pattern of SUPERSESSION_PATTERNS) {
-    if (pattern.regex.test(candidateText)) {
+    if (pattern.regex.test(textToCheck)) {
       // Combine the overlap base with the phrase boost.
-      // overlap is in [MIN_OVERLAP_FOR_SUPERSESSION, 1.0] here.
+      // overlap is in [REDUCED_OVERLAP_THRESHOLD_FOR_EXPLICIT, 1.0] or
+      // [MIN_OVERLAP_FOR_SUPERSESSION, 1.0] depending on which threshold
+      // was used for the caller.
       const confidence = Math.min(1, overlap + pattern.boost);
       return { polarity: pattern.polarity, confidence };
     }
