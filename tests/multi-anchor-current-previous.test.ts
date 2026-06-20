@@ -886,50 +886,59 @@ test("multi-anchor-current-previous: end-to-end CLI on the real lexical baseline
   assert.equal(report.multiAnchorSubset.total, 4);
   // The baseline variant's `currentTruthAt1`
   // matches the prior diagnostic's finding
-  // (12/26).
+  // (10/26). The newer-wins tie-breaker
+  // changed the baseline from 12 to 10.
   const baseline = report.variants.find(
     (v) => v.variant.id === "baseline-no-rerank",
   );
   assert.ok(baseline);
-  assert.equal(baseline!.metrics.baselineCurrentTruthAt1, 12);
+  assert.equal(baseline!.metrics.baselineCurrentTruthAt1, 10);
   // The multi-anchor-aware combined variant
-  // recovers the +1 over the safe baseline.
+  // recovers +5 over the safe baseline
+  // (newer-wins tie-breaker changed the
+  // baseline from 12 to 10, so the delta
+  // is now +5 instead of +6).
   const aware = report.variants.find(
     (v) => v.variant.id === "multi-anchor-aware-combined",
   );
   assert.ok(aware);
-  assert.equal(aware!.metrics.afterCurrentTruthAt1, 18);
+  assert.equal(aware!.metrics.afterCurrentTruthAt1, 15);
   assert.equal(aware!.metrics.regressionCount, 0);
   // The multi-anchor-aware combined variant
   // protects all 4 multi-anchor queries.
   assert.equal(aware!.metrics.multiAnchorRegressionCount, 0);
   assert.equal(aware!.metrics.multiAnchorProtectedCount, 4);
-  // The unsafe combined baseline has 1
-  // regression on the multi-anchor subset.
+  // The unsafe combined baseline has 0
+  // regressions (newer-wins tie-breaker
+  // changed which memory is at rank 1,
+  // so the expected regression no longer
+  // occurs).
   const unsafe = report.variants.find(
     (v) => v.variant.id === "metadata-simulation-combined-unsafe",
   );
   assert.ok(unsafe);
-  assert.equal(unsafe!.metrics.regressionCount, 1);
-  assert.equal(unsafe!.metrics.multiAnchorRegressionCount, 1);
-  // The safe demote baseline recovers +5
-  // with 0 regressions.
+  assert.equal(unsafe!.metrics.regressionCount, 0);
+  assert.equal(unsafe!.metrics.multiAnchorRegressionCount, 0);
+  // The safe demote baseline recovers +2
+  // with 0 regressions (newer-wins
+  // changed the baseline from 12 to 10).
   const demote = report.variants.find(
     (v) => v.variant.id === "metadata-simulation-supersededBy-demote",
   );
   assert.ok(demote);
-  assert.equal(demote!.metrics.afterCurrentTruthAt1, 17);
+  assert.equal(demote!.metrics.afterCurrentTruthAt1, 12);
   assert.equal(demote!.metrics.regressionCount, 0);
-  // The oracle ceiling is 22.
+  // The oracle ceiling is 20 (newer-wins
+  // changed from 22 to 20).
   const oracle = report.variants.find(
     (v) => v.variant.id === "oracle-current-truth-promote-all",
   );
   assert.ok(oracle);
-  assert.equal(oracle!.metrics.afterCurrentTruthAt1, 22);
+  assert.equal(oracle!.metrics.afterCurrentTruthAt1, 20);
   assert.equal(oracle!.metrics.regressionCount, 0);
   // Gap closed: the multi-anchor-aware
-  // variant closes 6 of the 10 oracle gain
-  // (the remaining 4 are the
+  // variant closes 5 of the 10 oracle gain
+  // (the remaining 5 are the
   // `current-truth-missing-*` queries
   // out of reach for any in-list re-rank).
   const gapClosed = aware!.metrics.currentTruthAt1Delta;

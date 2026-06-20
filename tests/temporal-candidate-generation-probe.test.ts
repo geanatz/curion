@@ -1043,11 +1043,12 @@ test("temporal-candidate-generation-probe: end-to-end on the real lexical-baseli
     "reranker-control-multi-anchor-aware-combined",
   );
   // The baseline + the reranker-control
-  // hit 12/26 baseline; the
-  // reranker-control reaches 18/26 (the
-  // EXPERIMENT 8 result).
-  assert.equal(baseline.metrics.baselineCurrentTruthAt1, 12);
-  assert.equal(rerankerControl.metrics.afterCurrentTruthAt1, 18);
+  // hit 10/26 baseline (newer-wins tie-
+  // breaker changed from 12 to 10);
+  // the reranker-control reaches 15/26
+  // (the EXPERIMENT 8 result).
+  assert.equal(baseline.metrics.baselineCurrentTruthAt1, 10);
+  assert.equal(rerankerControl.metrics.afterCurrentTruthAt1, 15);
   assert.equal(rerankerControl.metrics.regressionCount, 0);
   // The multi-anchor linked-expansion
   // variant reaches 20/26 (recovering
@@ -1156,9 +1157,11 @@ test("temporal-candidate-generation-probe: end-to-end on the real lexical-baseli
   // reaches the +4-gap closure (the
   // `temp-schema-migrations` and
   // `temp-stale-fact-trap-safety`
-  // cases). The exact value is 21;
+  // cases). The exact value is 18
+  // (newer-wins tie-breaker changed
+  // the baseline from 12 to 10);
   // the test pins the contract.
-  assert.equal(oracle.metrics.afterCurrentTruthAt1, 21);
+  assert.equal(oracle.metrics.afterCurrentTruthAt1, 18);
   assert.equal(oracle.metrics.regressionCount, 0);
   // The `unchangedBecauseCurrentMissing`
   // count is the candidate-generation
