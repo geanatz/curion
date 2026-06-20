@@ -153,12 +153,13 @@ test("remember: safe input is stored; raw input is not persisted", async () => {
     assert.ok(rec.id > 0);
     assert.equal(typeof rec.memoryContent, "string");
     assert.ok(rec.memoryContent.length > 0);
-    assert.equal(rec.providerId, "minimax");
-    assert.equal(typeof rec.modelId, "string");
-    assert.ok((rec.modelId ?? "").length > 0);
+    // Under the NVIDIA-only stance, the default primary is
+    // NVIDIA NIM; the provider id follows the URL.
+    assert.equal(rec.providerId, "nvidia-nim");
+    assert.equal(rec.modelId, "openai/gpt-oss-120b");
     assert.ok(rec.confidence !== null && rec.confidence > 0);
     assert.equal(rec.state, "active");
-    assert.ok(["fact", "decision", "preference", "context", "conflict", "reference", "finding"].includes(rec.kind));
+    assert.ok(["fact", "decision", "preference", "context", "conflict", "reference", "policy", "constraint", "finding"].includes(rec.kind));
 
     // The raw input MUST NOT be present in any persisted field.
     const dbRows = handle.db
@@ -463,8 +464,10 @@ test("persisted record: has summary, provider, model, confidence, state, kind", 
       .get(outcome.record.id) as Record<string, unknown>;
     assert.equal(typeof row.summary, "string");
     assert.ok((row.summary as string).length > 0);
-    assert.equal(row.provider_id, "minimax");
-    assert.equal(typeof row.model_id, "string");
+    // Under the NVIDIA-only stance, the default primary is
+    // NVIDIA NIM; the provider id follows the URL.
+    assert.equal(row.provider_id, "nvidia-nim");
+    assert.equal(row.model_id, "openai/gpt-oss-120b");
     assert.equal(typeof row.confidence, "number");
     assert.equal(row.state, "active");
     assert.equal(row.kind, "decision");
@@ -487,6 +490,105 @@ test("controller: maps unknown provider classification to 'finding' fallback kin
     assert.equal(outcome.status, "saved");
     if (outcome.status !== "saved") throw new Error("unreachable");
     assert.equal(outcome.record.kind, "finding");
+  } finally {
+    rmStorage(tmp, handle);
+  }
+});
+
+test("controller: classification 'policy' persists as kind policy", async () => {
+  const { tmp, handle } = mkStorage();
+  try {
+    const { fetchImpl } = scriptFetch(() =>
+      okChatResponse(safeAnalysis({ classification: "policy" })),
+    );
+    const outcome = await runRememberController(handle, "We always use Postgres for primary storage.", {
+      providerFetchImpl: fetchImpl,
+      providerPrimaryApiKey: PRIMARY_KEY,
+      providerFallbackApiKey: FALLBACK_KEY,
+    });
+    assert.equal(outcome.status, "saved");
+    if (outcome.status !== "saved") throw new Error("unreachable");
+    assert.equal(outcome.record.kind, "policy");
+  } finally {
+    rmStorage(tmp, handle);
+  }
+});
+
+test("controller: Hermes-style 'policy' classified response maps to policy", async () => {
+  const { tmp, handle } = mkStorage();
+  try {
+    const { fetchImpl } = scriptFetch(() =>
+      okChatResponse(safeAnalysis({ classification: "policy" })),
+    );
+    const outcome = await runRememberController(handle, "Policy: all API calls must timeout after 30s.", {
+      providerFetchImpl: fetchImpl,
+      providerPrimaryApiKey: PRIMARY_KEY,
+      providerFallbackApiKey: FALLBACK_KEY,
+    });
+    assert.equal(outcome.status, "saved");
+    if (outcome.status !== "saved") throw new Error("unreachable");
+    assert.equal(outcome.record.kind, "policy");
+  } finally {
+    rmStorage(tmp, handle);
+  }
+});
+
+test("controller: policy aliases (user-policy/project-policy/rule) map to policy", async () => {
+  const { tmp, handle } = mkStorage();
+  try {
+    for (const label of ["user-policy", "project-policy", "rule", "standing-rule", "operating-rule"]) {
+      const { fetchImpl } = scriptFetch(() =>
+        okChatResponse(safeAnalysis({ classification: label })),
+      );
+      const outcome = await runRememberController(handle, `Standing instruction: ${label}`, {
+        providerFetchImpl: fetchImpl,
+        providerPrimaryApiKey: PRIMARY_KEY,
+        providerFallbackApiKey: FALLBACK_KEY,
+      });
+      assert.equal(outcome.status, "saved", `label '${label}' should save`);
+      if (outcome.status !== "saved") throw new Error("unreachable");
+      assert.equal(outcome.record.kind, "policy", `label '${label}' should map to policy`);
+    }
+  } finally {
+    rmStorage(tmp, handle);
+  }
+});
+
+test("controller: classification 'constraint' persists as kind constraint", async () => {
+  const { tmp, handle } = mkStorage();
+  try {
+    const { fetchImpl } = scriptFetch(() =>
+      okChatResponse(safeAnalysis({ classification: "constraint" })),
+    );
+    const outcome = await runRememberController(handle, "Never exceed 5000 requests per minute.", {
+      providerFetchImpl: fetchImpl,
+      providerPrimaryApiKey: PRIMARY_KEY,
+      providerFallbackApiKey: FALLBACK_KEY,
+    });
+    assert.equal(outcome.status, "saved");
+    if (outcome.status !== "saved") throw new Error("unreachable");
+    assert.equal(outcome.record.kind, "constraint");
+  } finally {
+    rmStorage(tmp, handle);
+  }
+});
+
+test("controller: constraint aliases (project-constraint/requirement/limitation/boundary/hard-limit) map to constraint", async () => {
+  const { tmp, handle } = mkStorage();
+  try {
+    for (const label of ["project-constraint", "requirement", "limitation", "boundary", "hard-limit"]) {
+      const { fetchImpl } = scriptFetch(() =>
+        okChatResponse(safeAnalysis({ classification: label })),
+      );
+      const outcome = await runRememberController(handle, `Hard limit: ${label}`, {
+        providerFetchImpl: fetchImpl,
+        providerPrimaryApiKey: PRIMARY_KEY,
+        providerFallbackApiKey: FALLBACK_KEY,
+      });
+      assert.equal(outcome.status, "saved", `label '${label}' should save`);
+      if (outcome.status !== "saved") throw new Error("unreachable");
+      assert.equal(outcome.record.kind, "constraint", `label '${label}' should map to constraint`);
+    }
   } finally {
     rmStorage(tmp, handle);
   }

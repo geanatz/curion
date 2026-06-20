@@ -30,14 +30,20 @@ to a real end-to-end pipeline:
   reroute (see `structuredContent` shapes below).
 
 The **provider adapter** in `src/providers/memory-analysis.ts` is a real,
-tested adapter that performs chat-completion calls against MiniMax
-(primary) and NVIDIA NIM (fallback) with a typed primary→fallback policy,
-a same-provider LLM repair attempt on parse failure, and a structured-
-output parser. It is consumed by the MCP stdio server via the remember
-controller. A separate **provider prototype runner** in `src/prototype/`
-exercises the adapter against MiniMax, NVIDIA NIM, and Groq
-(prototype-only comparison candidate) over a small set of P1..P6
-memory-analysis fixtures. See "Provider prototype runner" below.
+tested adapter that performs chat-completion calls against NVIDIA NIM
+(primary) with a typed primary→fallback policy, a same-provider LLM
+repair attempt on parse failure, and a structured-output parser. It
+is consumed by the MCP stdio server via the remember controller. The
+adapter follows the current **NVIDIA-only stance**: the fallback slot
+exists architecturally but is unconfigured by default, so there is no
+second engine to silently fall through to. When the primary is down
+the adapter returns `all-providers-failed` (surfaced as
+`provider_error`); an operator who wants a second engine can opt in
+via env vars. A separate **provider prototype runner** in
+`src/prototype/` exercises the adapter against MiniMax, NVIDIA NIM,
+and Groq (prototype-only comparison candidate) over a small set of
+P1..P6 memory-analysis fixtures. See "Provider prototype runner"
+below.
 
 The embedding-only `Provider` interface in
 `src/providers/{minimax,nvidia-nim}.ts` is still a stubbed seam — the
@@ -168,13 +174,13 @@ migrations are additive and idempotent.
 The provider layer is split into two parts:
 
 - **Real adapter** — `src/providers/memory-analysis.ts`. A tested
-  adapter that calls the chat-completions endpoint for MiniMax
-  (primary) and NVIDIA NIM (fallback), with a primary→fallback
-  policy, a same-provider LLM repair attempt on parse failure, and
-  typed `AdapterSuccess` / `AdapterFailure` results. The HTTP
-  client that backs the adapter (`src/providers/http-client.ts`)
-  scrubs API keys and `Bearer ...` tokens from any error message
-  it returns.
+  adapter that calls the chat-completions endpoint for NVIDIA NIM
+  (the production primary) with a primary→fallback policy, a
+  same-provider LLM repair attempt on parse failure, and typed
+  `AdapterSuccess` / `AdapterFailure` results. The HTTP client
+  that backs the adapter (`src/providers/http-client.ts`) scrubs
+  API keys and `Bearer ...` tokens from any error message it
+  returns.
 - **Embedding skeletons** — `src/providers/{minimax,nvidia-nim}.ts`
   implement the embedding-only `Provider` interface defined in
   `src/providers/types.ts`. These still return stub results and
@@ -183,6 +189,102 @@ The provider layer is split into two parts:
 
 Provider configuration is read from environment variables. No API keys are
 hardcoded.
+
+### Current stance: NVIDIA-only
+
+Curion's default runtime uses **NVIDIA NIM as its only configured
+provider**. Both `remember` and `recall` route their primary
+chat-completions call to `openai/gpt-oss-120b` on
+`integrate.api.nvidia.com`. The architecture keeps a primary +
+fallback slot, but the fallback slot is **unconfigured by default**
+— no provider is hardcoded into the fallback. When the primary
+engine is down, the adapter returns `all-providers-failed` (which
+the controllers surface as `provider_error`); the server does not
+silently route to a different vendor.
+
+Tradeoff: this is simpler operationally and removes a silent cross-
+vendor reroute, but it loses the second-engine fallback the
+previous "primary + cross-vendor fallback" config provided.
+MiniMax is **not part of the default runtime setup**; it can
+still be opted in as a fallback by setting `CURION_MINIMAX_*`
+env vars (see "Environment variables per slot" below), but doing
+so is an explicit operator choice, not a default. Groq remains
+a **prototype-only** evaluation candidate (see "Provider prototype
+runner" below); it is NOT promoted to a runtime fallback in this
+phase.
+
+### Provider order per tool
+
+Under the NVIDIA-only stance, **both tools use NVIDIA NIM as
+their primary**. The previous "remember on MiniMax, recall on
+NIM" asymmetry is gone. The fallback slot is empty for both
+tools unless the operator has explicitly configured it.
+
+| Tool       | Primary                          | Fallback                  |
+|------------|----------------------------------|---------------------------|
+| `remember` | NVIDIA NIM `openai/gpt-oss-120b` | **unconfigured by default** |
+| `recall`   | NVIDIA NIM `openai/gpt-oss-120b` | **unconfigured by default** |
+
+The slot provider id is derived from the base URL
+(`memory-analysis.ts` and `recall-synthesis.ts` export a
+`resolveAdapterProviderId` / `resolveRecallProviderId` helper
+that does a case-insensitive substring match on the host). A
+swapped or overridden URL produces a label that matches the
+actual endpoint, so the error labels and `providerUsed` field
+always follow the endpoint the request was sent to. An
+unrecognised host (no "nvidia" or "minimax" substring) resolves
+to `"unknown"`, which is the honest label for an unconfigured
+or off-the-shelf slot.
+
+### Environment variables per slot
+
+Provider configuration is read **only** from `process.env`. The
+stdio server entry point (`src/index.ts`) does **not** call a
+`.env` loader — secrets must be passed in by the parent
+launcher. The prototype runner (`src/prototype/runner.ts`) does
+call the project's own tiny `loadDotEnv` (in
+`src/config/env-loader.ts`) so the prototype CLI is
+self-bootstrapping, but the MCP server is not. A common
+operator footgun is to drop a `.env` file next to the project
+and assume the server will read it; it will not. The parent
+process (Claude Desktop, an editor, a launcher script) must
+export the variables before spawning the stdio server.
+
+The role-named alias wins over the canonical env var, and
+either alone is sufficient. Under the NVIDIA-only stance, the
+NIM env vars feed the **primary** slot for both tools (the
+canonical alias is `NVIDIA_NIM_API_KEY`), and the MiniMax env
+vars feed the **opt-in fallback** slot (the canonical alias
+is `MINIMAX_API_KEY`). The fallback slot is empty unless the
+operator has set the URL + model + key explicitly.
+
+| Slot                            | Env vars (first match wins)                                  | Default model              |
+|---------------------------------|--------------------------------------------------------------|----------------------------|
+| `remember` / `recall` primary   | `CURION_PROVIDER_PRIMARY_KEY` or `NVIDIA_NIM_API_KEY`        | `openai/gpt-oss-120b`      |
+| `remember` / `recall` fallback  | `CURION_PROVIDER_FALLBACK_KEY` or `MINIMAX_API_KEY`          | **unconfigured by default** |
+
+The fallback slot is only "configured" when the operator has
+set all three (key + `CURION_MINIMAX_BASE_URL` +
+`CURION_MINIMAX_MODEL`). A fallback key alone is not enough;
+the adapter returns `all-providers-failed` on primary failure
+without making a second HTTP call.
+
+The env-var name `CURION_NIM_FALLBACK_MODEL` is preserved for
+backward compatibility; under the NVIDIA-only stance, its
+value lands in the **primary** slot (NIM is the primary
+provider). Override this if you want a different primary
+model id.
+
+When the role-named alias disagrees with the canonical alias
+for the same slot, the role-named alias wins. The precedence
+is: per-call option > `CURION_PROVIDER_*` > canonical alias
+(`MINIMAX_API_KEY` / `NVIDIA_NIM_API_KEY`) > default.
+
+Secret values are never logged, echoed in error messages, or
+written to the on-disk report files. The HTTP client
+(`src/providers/http-client.ts`) scrubs known
+`Authorization: Bearer ...` tokens and `sk-...` / `nvapi-...`
+key prefixes from any error message it returns.
 
 ## Retrieval benchmark (current baseline)
 
@@ -4786,15 +4888,16 @@ tools, unchanged). The runner writes sanitized JSON reports under
 
    | Variable | Default | Notes |
    |---|---|---|
-   | `CURION_PROVIDER_PRIMARY_KEY` / `MINIMAX_API_KEY` | unset | Primary provider key. |
-   | `CURION_PROVIDER_FALLBACK_KEY` / `NVIDIA_NIM_API_KEY` | unset | Fallback provider key. |
-   | `CURION_MINIMAX_BASE_URL` | `https://api.minimax.io/v1` | Override only if proxying. |
-   | `CURION_MINIMAX_MODEL` | `MiniMax-M3` | Primary model id. |
+   | `CURION_PROVIDER_PRIMARY_KEY` / `NVIDIA_NIM_API_KEY` | unset | Primary provider key. Under the NVIDIA-only stance, the canonical alias is `NVIDIA_NIM_API_KEY`. |
+   | `CURION_PROVIDER_FALLBACK_KEY` / `MINIMAX_API_KEY` | unset | Fallback provider key. **Opt-in only** under the NVIDIA-only stance; the canonical alias is `MINIMAX_API_KEY`. |
    | `CURION_NIM_BASE_URL` | `https://integrate.api.nvidia.com/v1` | Override only if proxying. |
-   | `CURION_NIM_MODELS` | `openai/gpt-oss-120b,meta/llama-3.3-70b-instruct` | Comma-separated NIM candidates. Both are compared equally; the runner does not assume either wins. |
+   | `CURION_NIM_FALLBACK_MODEL` | `openai/gpt-oss-120b` | Primary model id (env-var name preserved for backward compatibility; the value lands in the **primary** slot under the NVIDIA-only stance). |
+   | `CURION_MINIMAX_BASE_URL` | `https://api.minimax.io/v1` | Override only if proxying. The production provider adapter reads this for the **opt-in** MiniMax fallback slot. |
+   | `CURION_MINIMAX_MODEL` | `MiniMax-M3` | Fallback model id. The production provider adapter reads this for the opt-in MiniMax fallback slot. |
+   | `CURION_NIM_MODELS` | `openai/gpt-oss-120b` | Comma-separated NIM candidates for prototype evaluation. Override to compare additional models. |
    | `CURION_PROTOTYPE_TIMEOUT_MS` | `30000` | Per-request timeout. |
    | `CURION_PROTOTYPE_MAX_TOKENS` | `1024` | Per-request max output tokens. Raise for models that hit `finish_reason=length` on the structured-output fixtures. CLI override: `--max-tokens <n>`. |
-   | `GROQ_API_KEY` | unset | Groq prototype candidate key. **Prototype-only**; the production provider adapter does not read this. |
+   | `GROQ_API_KEY` | unset | Groq prototype candidate key. **Prototype-only**; the production provider adapter does not read this. Groq is not promoted to a runtime fallback in this phase. |
    | `CURION_GROQ_BASE_URL` | `https://api.groq.com/openai/v1` | Groq OpenAI-compatible base URL. Prototype runner only. |
    | `CURION_GROQ_MODEL` | `openai/gpt-oss-120b` | Groq model id used by the prototype runner. |
    | `CURION_GROQ_REASONING_EFFORT` | `high` | Reasoning effort hint forwarded to Groq (e.g. `low`, `medium`, `high`). Prototype runner only. CLI override: `--groq-reasoning-effort <val>`. |
@@ -4826,10 +4929,16 @@ npx tsx src/prototype/runner.ts --live --only-provider groq --groq-reasoning-eff
 
 The runner will:
 
-- Call the MiniMax M3 primary endpoint with each fixture.
-- Call the NVIDIA NIM endpoint with **both** candidate models
-  (`openai/gpt-oss-120b` and `meta/llama-3.3-70b-instruct`) on every
-  fixture, equally. It does not assume one model is better.
+- Call the MiniMax M3 endpoint with each fixture. Under the
+  NVIDIA-only stance, this exercises the **opt-in MiniMax
+  fallback** slot — it only runs when the operator has set
+  `CURION_MINIMAX_BASE_URL`, `CURION_MINIMAX_MODEL`, and a
+  matching key.
+- Call the NVIDIA NIM endpoint with the candidate model
+  (`openai/gpt-oss-120b`) on every fixture. Override
+  `CURION_NIM_MODELS` to compare additional models. Under the
+  NVIDIA-only stance, `openai/gpt-oss-120b` is also the production
+  adapter's default primary model.
 - Call the **Groq** endpoint with `openai/gpt-oss-120b` on every
   fixture. Groq is a **prototype comparison candidate only**; the
   production provider adapter does not use it. Groq requests use

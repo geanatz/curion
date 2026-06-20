@@ -549,7 +549,7 @@ export const BENCHMARK_RECORDS: BenchmarkMemoryRecord[] = [
     id: 45,
     kind: "reference",
     summary:
-      "A memory record's kind is one of: decision, fact, preference, context, conflict, reference, finding; the controller normalizes provider output to one of these.",
+      "A memory record's kind is one of: decision, fact, preference, context, conflict, reference, policy, constraint, finding; the controller normalizes provider output to one of these.",
     tags: ["domain", "memory", "kinds"],
   },
   {

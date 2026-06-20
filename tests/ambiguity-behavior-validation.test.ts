@@ -493,6 +493,15 @@ async function runScenarioAsync(
       // does not expose a fetch override by design; we
       // project the outcome the same way the tool layer
       // does.
+      //
+      // Under the NVIDIA-only stance, the fallback slot is
+      // empty by default. To exercise the
+      // `expectedCalls === 2` invariant (primary + fallback),
+      // the scenario must explicitly opt in to a MiniMax
+      // fallback by setting the URL and model in addition
+      // to the fallback key. With those three present, the
+      // fallback call is attempted and the adapter returns
+      // `all-providers-failed` after both slots fail.
       seedScenarioRows(storage.handle, scenario);
       const { fetchImpl, calls } = scriptFetch(
         () => new Response("boom", { status: 500 }),
@@ -501,6 +510,8 @@ async function runScenarioAsync(
         providerFetchImpl: fetchImpl,
         providerPrimaryApiKey: PRIMARY_KEY,
         providerFallbackApiKey: FALLBACK_KEY,
+        providerFallbackBaseUrl: "https://api.minimax.io/v1",
+        providerFallbackModel: "MiniMax-M3",
       });
       if (out.status !== "provider_error") {
         captured = {

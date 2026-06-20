@@ -478,7 +478,8 @@ test("remember: safe input is stored with provider-normalized summary; raw input
     assert.equal(calls.length, 1, "provider should be called exactly once for safe input");
     const rec = outcome.record;
     assert.ok(rec.id > 0);
-    assert.equal(rec.providerId, "minimax");
+    assert.equal(rec.providerId, "nvidia-nim");
+    assert.equal(rec.modelId, "openai/gpt-oss-120b");
     assert.equal(rec.state, "active");
     assert.equal(rec.kind, "fact");
     assert.ok((rec.confidence ?? 0) > 0);

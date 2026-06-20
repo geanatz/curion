@@ -10,13 +10,41 @@
  * other server-internal modules. No new tools, parameters,
  * resources, or prompts are added.
  *
- * Defaults (fixed for Phase 1 prototype):
- *   - primary:    MiniMax   `MiniMax-M3`         at `https://api.minimax.io/v1`
- *   - fallback:   NVIDIA NIM `openai/gpt-oss-120b` at `https://integrate.api.nvidia.com/v1`
+ * Defaults (NVIDIA-only stance, per current product decision):
+ *   - primary:    NVIDIA NIM `openai/gpt-oss-120b` at `https://integrate.api.nvidia.com/v1`
+ *   - fallback:   unconfigured by default. The architecture keeps the
+ *                 primary+fallback slot so an operator can opt in to a
+ *                 second engine via env vars or per-call overrides, but
+ *                 Curion's default runtime assumes ONE configured engine.
+ *                 No provider name is hardcoded as the fallback default.
  *
  * The third NIM candidate `meta/llama-3.3-70b-instruct` is intentionally
- * NOT the default fallback. It is exposed via `CURION_NIM_FALLBACK_MODEL`
- * only as a comparison/optional override.
+ * NOT the default. It is exposed via `CURION_NIM_FALLBACK_MODEL` (when
+ * the operator has chosen to configure a fallback at all) only as a
+ * comparison/optional override.
+ *
+ * Tradeoff: the previous "MiniMax primary + NVIDIA NIM fallback" config
+ * gave a second engine for resilience. The NVIDIA-only stance trades
+ * that off for a simpler, single-engine runtime; when the primary is
+ * down the adapter returns `all-providers-failed` rather than silently
+ * routing to a different vendor. This is an explicit product decision;
+ * a future Groq-based fallback (or any second engine) can be enabled
+ * by setting `CURION_PROVIDER_FALLBACK_KEY` plus the matching base-URL
+ * and model env vars.
+ *
+ * Provider-id derivation:
+ *   The provider label (`AdapterProviderId`) is derived from the
+ *   configured base URL via `resolveAdapterProviderId`. This mirrors
+ *   the recall-synthesis adapter's design: a swapped / overridden base
+ *   URL produces a label that matches the actual endpoint, so the
+ *   `providerLabel` surfaced to the http-client, the `providerUsed`
+ *   field on success, and the operator-visible error messages all
+ *   stay honest even when the slot is reassigned.
+ *
+ *   Recognized hosts (case-insensitive substring match):
+ *     - "nvidia"   -> "nvidia-nim"   (NVIDIA NIM, OpenAI-compatible)
+ *     - "minimax"  -> "minimax"      (MiniMax, OpenAI-compatible)
+ *     - otherwise  -> "unknown"      (custom / unrecognised endpoint)
  *
  * Fallback policy:
  *   1. Call primary.
@@ -29,10 +57,16 @@
  *      `parseStrategy: "repaired"` for the same response.)
  *   4. If repair still fails OR the primary had a hard failure
  *      (auth, network, timeout, 5xx, missing-config), RESTART the
- *      whole analysis on the fallback provider from scratch.
- *      Partial provider state is never mixed across providers.
- *   5. If fallback also fails, return a typed `AdapterFailure`
- *      with `kind: "all-providers-failed"` and the last error.
+ *      whole analysis on the fallback provider from scratch, if a
+ *      fallback key is configured AND a fallback base URL + model
+ *      are configured. Partial provider state is never mixed
+ *      across providers.
+ *   5. If no fallback is configured, or the configured fallback
+ *      also fails, return a typed `AdapterFailure` with
+ *      `kind: "all-providers-failed"` and the last error. With
+ *      the NVIDIA-only default this is the realistic outcome of a
+ *      primary outage; the operator sees a clear failure rather
+ *      than a silent cross-vendor reroute.
  *
  * Repair terminology:
  *   - `llmRepairAttempts` (on `AdapterSuccess`): count of
@@ -71,16 +105,31 @@ import {
 // ---------------------------------------------------------------------------
 // Defaults
 // ---------------------------------------------------------------------------
+//
+// The constants are role-named (PRIMARY / FALLBACK) rather than
+// provider-named because the orchestration order is what
+// `analyzeMemoryWithFallback` actually depends on. The env-var
+// overrides remain provider-named (`CURION_NIM_*` feeds the primary
+// slot; `CURION_MINIMAX_*` is recognised only as an alias for an
+// operator who has explicitly opted in to a MiniMax slot) so the
+// `loadAdapterConfig` mapping below is the single source of truth
+// for "which provider sits in which role".
+//
+// Per the NVIDIA-only stance, the default primary IS NVIDIA NIM
+// and the default fallback is empty. The architecture keeps the
+// fallback slot (so an operator can opt in), but no provider is
+// hardcoded into the fallback by default — so a missing
+// `CURION_MINIMAX_BASE_URL` / `CURION_MINIMAX_MODEL` does not
+// default to MiniMax. If the operator wants a fallback, they
+// configure it explicitly; otherwise the slot is unconfigured
+// and the adapter returns `all-providers-failed` on primary
+// failure rather than silently routing to a different vendor.
 
-/** Default MiniMax base URL (chat completions, OpenAI-compatible). */
-export const DEFAULT_MINIMAX_BASE_URL = "https://api.minimax.io/v1";
-/** Default MiniMax model id (primary). */
-export const DEFAULT_MINIMAX_MODEL = "MiniMax-M3";
-/** Default NVIDIA NIM base URL (chat completions, OpenAI-compatible). */
-export const DEFAULT_NIM_BASE_URL = "https://integrate.api.nvidia.com/v1";
-/** Default fallback NIM model id. */
-export const DEFAULT_NIM_FALLBACK_MODEL = "openai/gpt-oss-120b";
-/** Optional comparison NIM model id. Not used as the default fallback. */
+/** Default primary provider base URL (NVIDIA NIM, OpenAI-compatible). */
+export const DEFAULT_PRIMARY_BASE_URL = "https://integrate.api.nvidia.com/v1";
+/** Default primary provider model id (`openai/gpt-oss-120b` on NIM). */
+export const DEFAULT_PRIMARY_MODEL = "openai/gpt-oss-120b";
+/** Optional comparison NIM model id. Not used as any default. */
 export const COMPARISON_NIM_MODEL = "meta/llama-3.3-70b-instruct";
 /** Default per-request timeout in ms. */
 export const DEFAULT_ADAPTER_TIMEOUT_MS = 30_000;
@@ -91,8 +140,17 @@ export const DEFAULT_ADAPTER_MAX_TOKENS = 1024;
 // Public types
 // ---------------------------------------------------------------------------
 
-/** Provider id the adapter can target. */
-export type AdapterProviderId = "minimax" | "nvidia-nim";
+/**
+ * Provider id the adapter can target.
+ *
+ * `"unknown"` is reserved for the case where the configured base URL
+ * does not match any provider we recognize (e.g. a custom NIM-
+ * compatible proxy whose host does not contain "nvidia" or "minimax").
+ * Callers can branch on it the same way they branch on the named
+ * values; it is informational, not an error condition. This mirrors
+ * `RecallProviderId` in the recall-synthesis adapter.
+ */
+export type AdapterProviderId = "nvidia-nim" | "minimax" | "unknown";
 
 /** A piece of related memory context to include in the prompt (optional). */
 export interface RelatedMemory {
@@ -139,36 +197,46 @@ export interface MemoryAnalysisAdapterOptions {
   maxTokens?: number;
   /**
    * Override the primary provider key. When unset, the adapter
-   * reads `CURION_PROVIDER_PRIMARY_KEY` / `MINIMAX_API_KEY` from
-   * `process.env`.
+   * reads `CURION_PROVIDER_PRIMARY_KEY` / `NVIDIA_NIM_API_KEY`
+   * from `process.env`. The role-named alias wins over the
+   * provider-named canonical alias.
    */
   primaryApiKey?: string;
   /**
    * Override the fallback provider key. When unset, the adapter
-   * reads `CURION_PROVIDER_FALLBACK_KEY` / `NVIDIA_NIM_API_KEY`.
+   * reads `CURION_PROVIDER_FALLBACK_KEY` / `MINIMAX_API_KEY`.
+   * The fallback slot is unconfigured by default (no fallback is
+   * assumed); these env vars are only consulted when the operator
+   * has opted in to a second engine.
    */
   fallbackApiKey?: string;
   /**
-   * Override the primary base URL. Defaults to
-   * `CURION_MINIMAX_BASE_URL` (or `DEFAULT_MINIMAX_BASE_URL`).
+   * Override the primary base URL. Defaults to the NVIDIA NIM
+   * base URL (`CURION_NIM_BASE_URL` / `DEFAULT_PRIMARY_BASE_URL`).
    */
   primaryBaseUrl?: string;
   /**
    * Override the fallback base URL. Defaults to
-   * `CURION_NIM_BASE_URL` (or `DEFAULT_NIM_BASE_URL`).
+   * `CURION_MINIMAX_BASE_URL` (only when the operator has set
+   * one). With no env var and no override, the fallback slot is
+   * empty and the adapter returns `all-providers-failed` on
+   * primary failure.
    */
   fallbackBaseUrl?: string;
   /**
    * Override the primary model id. Defaults to
-   * `CURION_MINIMAX_MODEL` (or `DEFAULT_MINIMAX_MODEL`).
+   * `CURION_NIM_FALLBACK_MODEL` / `DEFAULT_PRIMARY_MODEL`
+   * (`openai/gpt-oss-120b`). The env-var name is preserved for
+   * backward compatibility; the value lands in the primary slot
+   * under the NVIDIA-only stance.
    */
   primaryModel?: string;
   /**
    * Override the fallback model id. Defaults to
-   * `CURION_NIM_FALLBACK_MODEL` (or `DEFAULT_NIM_FALLBACK_MODEL`).
+   * `CURION_MINIMAX_MODEL` (only when the operator has set one).
+   * With no env var and no override, the fallback slot is empty.
    * Setting this to `COMPARISON_NIM_MODEL` is allowed for
-   * comparison runs, but the production fallback is the
-   * default value.
+   * comparison runs on a configured fallback.
    */
   fallbackModel?: string;
   /**
@@ -271,7 +339,9 @@ export interface AdapterFailure {
   lastParseErrors?: string[];
   /**
    * Number of HTTP round trips actually made before giving up.
-   * Always <= 4 (primary + repair + fallback + fallback-repair).
+   * Always <= 4 (primary + repair + fallback + fallback-repair) when
+   * a fallback is configured. Under the NVIDIA-only default no
+   * fallback is configured, so the cap is 2 (primary + repair).
    */
   httpCalls: number;
 }
@@ -335,6 +405,16 @@ function pickTrimmedString(...candidates: string[]): string {
  * on the parent process's environment, and tests can override
  * keys via `options.primaryApiKey` / `options.fallbackApiKey`.
  *
+ * Per the NVIDIA-only stance, the primary slot reads from the
+ * NIM env vars and the fallback slot reads from the MiniMax
+ * env vars. The fallback slot is unconfigured by default:
+ * `fallbackBaseUrl` and `fallbackModel` are EMPTY when no
+ * MiniMax env vars are set, so a missing `MINIMAX_API_KEY`
+ * alone (with no `CURION_MINIMAX_BASE_URL` /
+ * `CURION_MINIMAX_MODEL`) leaves the slot empty and the
+ * adapter returns `all-providers-failed` on primary failure
+ * rather than silently routing to a different vendor.
+ *
  * All string fields (URLs, model ids, and the API keys themselves)
  * are trimmed before being stored. A value that is missing,
  * empty, or whitespace-only is treated as "absent" and the next
@@ -350,35 +430,41 @@ export function loadAdapterConfig(
   overrides: Partial<AdapterConfig> = {},
 ): AdapterConfig {
   const cfg: AdapterConfig = {
+    // Primary slot: NVIDIA NIM. The env-var alias
+    // `CURION_NIM_FALLBACK_MODEL` is preserved for backward
+    // compatibility; under the NVIDIA-only stance, the value
+    // lands in the primary slot.
     primaryBaseUrl: pickTrimmedString(
       overrides.primaryBaseUrl ?? "",
-      readTrimmedString("CURION_MINIMAX_BASE_URL"),
-      DEFAULT_MINIMAX_BASE_URL,
+      readTrimmedString("CURION_NIM_BASE_URL"),
+      DEFAULT_PRIMARY_BASE_URL,
     ),
     primaryModel: pickTrimmedString(
       overrides.primaryModel ?? "",
-      readTrimmedString("CURION_MINIMAX_MODEL"),
-      DEFAULT_MINIMAX_MODEL,
+      readTrimmedString("CURION_NIM_FALLBACK_MODEL"),
+      DEFAULT_PRIMARY_MODEL,
     ),
+    // Fallback slot: unconfigured by default. An operator who
+    // wants a second engine sets `CURION_MINIMAX_BASE_URL` and
+    // `CURION_MINIMAX_MODEL` (and the matching key). With no
+    // env var and no override, the slot stays empty.
     fallbackBaseUrl: pickTrimmedString(
       overrides.fallbackBaseUrl ?? "",
-      readTrimmedString("CURION_NIM_BASE_URL"),
-      DEFAULT_NIM_BASE_URL,
+      readTrimmedString("CURION_MINIMAX_BASE_URL"),
     ),
     fallbackModel: pickTrimmedString(
       overrides.fallbackModel ?? "",
-      readTrimmedString("CURION_NIM_FALLBACK_MODEL"),
-      DEFAULT_NIM_FALLBACK_MODEL,
+      readTrimmedString("CURION_MINIMAX_MODEL"),
     ),
     primaryApiKey: pickTrimmedString(
       overrides.primaryApiKey ?? "",
       readTrimmedString("CURION_PROVIDER_PRIMARY_KEY"),
-      readTrimmedString("MINIMAX_API_KEY"),
+      readTrimmedString("NVIDIA_NIM_API_KEY"),
     ),
     fallbackApiKey: pickTrimmedString(
       overrides.fallbackApiKey ?? "",
       readTrimmedString("CURION_PROVIDER_FALLBACK_KEY"),
-      readTrimmedString("NVIDIA_NIM_API_KEY"),
+      readTrimmedString("MINIMAX_API_KEY"),
     ),
     timeoutMs: overrides.timeoutMs ?? readNumber(
       "CURION_ADAPTER_TIMEOUT_MS",
@@ -414,7 +500,16 @@ function buildAnalysisUserPrompt(
   lines.push('  "confidence": number,     // 0..1, your confidence in the summary');
   lines.push('  "tags": string[],         // up to 8 short tags');
   lines.push('  "entities"?: {name: string, kind: string}[], // optional named entities');
-  lines.push('  "classification"?: string // optional short label');
+  lines.push('  "classification"?: string // optional short label. Valid labels:');
+  lines.push('                               //   decision  = chosen direction / resolved choice');
+  lines.push('                               //   policy    = standing future behavior / rule (e.g. "always use X for Y")');
+  lines.push('                               //   constraint = hard boundary / requirement / limitation (e.g. "never exceed N")');
+  lines.push('                               //   preference = user likes / style');
+  lines.push('                               //   fact       = observed result / verifiable info');
+  lines.push('                               //   context    = background / surrounding situation');
+  lines.push('                               //   conflict   = tension / contradiction');
+  lines.push('                               //   reference  = domain knowledge / schema / documented fact');
+  lines.push('                               //   finding    = observed result / evidence (default fallback)');
   lines.push("}");
   lines.push("");
   lines.push("Wrap the JSON in a ```json ... ``` block. Do not include any other text.");
@@ -467,7 +562,7 @@ function buildRepairUserPrompt(previousBadResponse: string): string {
     '  "confidence": number,     // 0..1',
     '  "tags": string[],         // up to 8 short tags',
     '  "entities"?: {name: string, kind: string}[]',
-    '  "classification"?: string',
+    '  "classification"?: string // optional. Valid: decision, policy, constraint, preference, fact, context, conflict, reference, finding',
     "}",
     "",
     "Wrap the JSON in a ```json ... ``` block. Do not include any other text.",
@@ -477,6 +572,46 @@ function buildRepairUserPrompt(previousBadResponse: string): string {
     truncated,
     "----- END PREVIOUS RESPONSE -----",
   ].join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Provider-id resolution (derived from the base URL)
+//
+// The provider label is informational: it appears in the
+// `providerLabel` passed to the http-client, in the
+// `providerUsed` field of the success result, and in failure
+// messages. To avoid drift between the label and the actual
+// endpoint the request is sent to, the label is derived from the
+// base URL itself instead of being hardcoded at each call site.
+//
+// Recognized hosts (case-insensitive substring match):
+//   - "nvidia"   -> "nvidia-nim"   (NVIDIA NIM, OpenAI-compatible)
+//   - "minimax"  -> "minimax"      (MiniMax, OpenAI-compatible)
+//   - otherwise  -> "unknown"      (custom / unrecognised endpoint)
+//
+// This mirrors `resolveRecallProviderId` in the recall-synthesis
+// adapter: swapping the base URL (or overriding it via env vars
+// or MCP tool options) automatically produces the correct label
+// without any further code change. The same pattern is used for
+// the missing-config message: the label that goes into the
+// `lastError.message` follows the base URL, not a hardcoded
+// string, so an operator pointing the adapter at an unrecognised
+// host sees `"unknown: no api key configured"` rather than a
+// misleading `"minimax: no api key configured"`.
+// ---------------------------------------------------------------------------
+
+/**
+ * Derive an `AdapterProviderId` from the base URL the request
+ * will actually be sent to. The match is intentionally a case-
+ * insensitive substring on the host portion so that env-style
+ * overrides like `https://my.nvidia.proxy.example/v1` still
+ * resolve to `"nvidia-nim"`.
+ */
+export function resolveAdapterProviderId(baseUrl: string): AdapterProviderId {
+  const url = (baseUrl ?? "").toLowerCase();
+  if (url.includes("nvidia")) return "nvidia-nim";
+  if (url.includes("minimax")) return "minimax";
+  return "unknown";
 }
 
 // ---------------------------------------------------------------------------
@@ -560,9 +695,14 @@ export async function analyzeMemoryWithFallback(
   }
 
   // --- Primary attempt + same-provider repair -------------------------
+  // The primary provider id is derived from `cfg.primaryBaseUrl`
+  // so the label in `providerLabel` / `providerUsed` / error
+  // messages always matches the endpoint the request is sent to.
+  // This is the NVIDIA-only default (NIM URL → "nvidia-nim").
+  const primaryProvider = resolveAdapterProviderId(cfg.primaryBaseUrl);
   const primaryResult: ProviderAttemptResult = cfg.primaryApiKey
     ? await runProviderWithRepair({
-        provider: "minimax",
+        provider: primaryProvider,
         baseUrl: cfg.primaryBaseUrl,
         model: cfg.primaryModel,
         apiKey: cfg.primaryApiKey,
@@ -578,7 +718,7 @@ export async function analyzeMemoryWithFallback(
         message: "primary provider not configured",
         lastError: {
           kind: "missing-config",
-          message: "minimax: no api key configured",
+          message: `${primaryProvider}: no api key configured`,
           reachedServer: false,
         },
         httpCalls: 0,
@@ -600,7 +740,13 @@ export async function analyzeMemoryWithFallback(
     };
   }
 
-  if (!cfg.fallbackApiKey) {
+  // Under the NVIDIA-only stance, the fallback slot is empty by
+  // default (no base URL, no model, no key). The slot is only
+  // usable when the operator has explicitly configured all three
+  // (key + URL + model). If the slot is empty for any reason —
+  // no key, no URL, or no model — we surface
+  // `all-providers-failed` and do NOT make a second HTTP call.
+  if (!cfg.fallbackApiKey || !cfg.fallbackBaseUrl || !cfg.fallbackModel) {
     return {
       ok: false,
       kind: "all-providers-failed",
@@ -613,9 +759,13 @@ export async function analyzeMemoryWithFallback(
     };
   }
 
-  // Restart the whole analysis on the fallback provider.
+  // Restart the whole analysis on the fallback provider. Same
+  // derivation rule as the primary: the label follows the base
+  // URL, so a swapped or overridden fallback URL still produces
+  // a label that matches the actual endpoint.
+  const fallbackProvider = resolveAdapterProviderId(cfg.fallbackBaseUrl);
   const fallbackResult: ProviderAttemptResult = await runProviderWithRepair({
-    provider: "nvidia-nim",
+    provider: fallbackProvider,
     baseUrl: cfg.fallbackBaseUrl,
     model: cfg.fallbackModel,
     apiKey: cfg.fallbackApiKey,

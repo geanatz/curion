@@ -302,3 +302,142 @@ test("sanitizeServerText: non-string input returns empty string", () => {
   const out = sanitizeServerText(undefined as unknown as string);
   assert.equal(out, "");
 });
+
+// ---------------------------------------------------------------------------
+// 6. 200 OK with malformed / missing choices / message / content
+//
+// The HTTP client must translate a 200 OK whose body is missing
+// `choices[0].message.content` (a real regression for NVIDIA NIM on
+// some streamed / refused responses) into a typed `bad-request`
+// `ProviderError`, not silently report success. The message must
+// name the missing field so the operator can diagnose without
+// having to enable debug logging on the provider side.
+//
+// The trigger for this block of tests was the live
+// `memory_recall` failure shape:
+//   `nvidia-nim/openai/gpt-oss-120b#recall response missing
+//    choices[0].message.content`
+// which was actually the HTTP client's bad-request error message
+// surfacing through the recall adapter. These tests pin the
+// client-side behavior so a future change to the message shape is
+// caught here before the recall adapter translates it.
+// ---------------------------------------------------------------------------
+
+/** Helper: drive `chatCompletion` with a scripted 200 OK body. */
+async function chatCompletionWithBody(
+  body: string,
+  contentType: "application/json" | "text/plain" = "application/json",
+): Promise<
+  | { ok: true; response: { content: string } }
+  | { ok: false; error: { kind: string; status?: number; message: string; reachedServer: boolean } }
+> {
+  const f: typeof fetch = async () =>
+    new Response(body, {
+      status: 200,
+      headers: { "content-type": contentType },
+    });
+  return chatCompletion(VALID_REQ, {
+    baseUrl: "https://api.test/v1",
+    apiKey: TEST_KEY,
+    timeoutMs: 5_000,
+    fetchImpl: f,
+    providerLabel: "test",
+  }) as Promise<
+    | { ok: true; response: { content: string } }
+    | { ok: false; error: { kind: string; status?: number; message: string; reachedServer: boolean } }
+  >;
+}
+
+test("http-client: 200 OK with empty choices -> bad-request, missing content message", async () => {
+  const r = await chatCompletionWithBody(
+    JSON.stringify({ id: "x", model: "m", choices: [] }),
+  );
+  assert.equal(r.ok, false);
+  if (!r.ok) {
+    assert.equal(r.error.kind, "bad-request");
+    assert.equal(r.error.status, 200);
+    assert.equal(r.error.reachedServer, true);
+    assert.match(
+      r.error.message,
+      /response missing choices\[0\]\.message\.content/,
+      "operator-visible message must name the missing field",
+    );
+  }
+});
+
+test("http-client: 200 OK with choices[0] lacking message -> bad-request, missing content message", async () => {
+  const r = await chatCompletionWithBody(
+    JSON.stringify({ id: "x", model: "m", choices: [{ finish_reason: "stop" }] }),
+  );
+  assert.equal(r.ok, false);
+  if (!r.ok) {
+    assert.equal(r.error.kind, "bad-request");
+    assert.equal(r.error.status, 200);
+    assert.match(r.error.message, /response missing choices\[0\]\.message\.content/);
+  }
+});
+
+test("http-client: 200 OK with message.content=null -> bad-request, missing content message", async () => {
+  const r = await chatCompletionWithBody(
+    JSON.stringify({
+      id: "x",
+      model: "m",
+      choices: [{ message: { role: "assistant", content: null } }],
+    }),
+  );
+  assert.equal(r.ok, false);
+  if (!r.ok) {
+    assert.equal(r.error.kind, "bad-request");
+    assert.equal(r.error.status, 200);
+    assert.match(r.error.message, /response missing choices\[0\]\.message\.content/);
+  }
+});
+
+test("http-client: 200 OK with message.content='' -> ok with empty string content (call site decides)", async () => {
+  // Note: the http-client returns the raw string content as-is.
+  // An empty string is a valid string, so the client returns
+  // ok=true. The synthesis adapter is responsible for treating
+  // an empty trimmed string as "no usable content" and falling
+  // back; that behavior is pinned in tests/recall-synthesis.test.ts.
+  // Here we only confirm the client does not lie about success.
+  const r = await chatCompletionWithBody(
+    JSON.stringify({
+      id: "x",
+      model: "m",
+      choices: [{ message: { role: "assistant", content: "" } }],
+    }),
+  );
+  assert.equal(r.ok, true);
+  if (r.ok) {
+    assert.equal(r.response.content, "");
+  }
+});
+
+test("http-client: 200 OK with non-JSON body -> bad-request, invalid JSON message", async () => {
+  const r = await chatCompletionWithBody("not json at all");
+  assert.equal(r.ok, false);
+  if (!r.ok) {
+    assert.equal(r.error.kind, "bad-request");
+    assert.equal(r.error.status, 200);
+    assert.equal(r.error.reachedServer, true);
+    assert.match(
+      r.error.message,
+      /invalid JSON response/,
+      "operator-visible message must explain the JSON parse failure",
+    );
+  }
+});
+
+test("http-client: 200 OK with valid choices[0].message.content string -> ok", async () => {
+  const r = await chatCompletionWithBody(
+    JSON.stringify({
+      id: "x",
+      model: "m",
+      choices: [{ message: { role: "assistant", content: "hello" } }],
+    }),
+  );
+  assert.equal(r.ok, true);
+  if (r.ok) {
+    assert.equal(r.response.content, "hello");
+  }
+});

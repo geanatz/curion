@@ -231,6 +231,17 @@ function ensureColumn(
  * Internal kind enum for the MVP slice. Provider classifications are
  * mapped to one of these values by the controller. `finding` is the
  * safe fallback when the provider classification is unrecognized.
+ *
+ * Kind semantics:
+ *   decision  — chosen direction / resolved choice
+ *   fact      — observed result / verifiable piece of information
+ *   preference — user likes / style / stated inclination
+ *   context   — background / surrounding situation
+ *   conflict  — tension / contradiction / open disagreement
+ *   reference — domain knowledge / schema / documented fact
+ *   policy    — standing future behavior / rule (e.g. "always use X for Y")
+ *   constraint — hard boundary / requirement / limitation (e.g. "never exceed N")
+ *   finding   — observed result / evidence (safe fallback)
  */
 export type MemoryKind =
   | "decision"
@@ -239,6 +250,8 @@ export type MemoryKind =
   | "context"
   | "conflict"
   | "reference"
+  | "policy"
+  | "constraint"
   | "finding";
 
 /** Lifecycle state of a memory record. MVP writes only `active`. */
@@ -252,6 +265,8 @@ export const MEMORY_KINDS: readonly MemoryKind[] = [
   "context",
   "conflict",
   "reference",
+  "policy",
+  "constraint",
   "finding",
 ];
 

@@ -43,8 +43,6 @@ import {
   loadRecallAdapterConfig,
   RECALL_DEFAULT_PRIMARY_BASE_URL,
   RECALL_DEFAULT_PRIMARY_MODEL,
-  RECALL_DEFAULT_FALLBACK_BASE_URL,
-  RECALL_DEFAULT_FALLBACK_MODEL,
   RECALL_DEFAULT_TIMEOUT_MS,
   RECALL_DEFAULT_MAX_TOKENS,
   type RecallMemoryInput,
@@ -135,25 +133,26 @@ const SAMPLE_MEMORIES: RecallMemoryInput[] = [
 // Defaults / config
 // ---------------------------------------------------------------------------
 
-test("recall: loadRecallAdapterConfig returns the documented defaults", () => {
+test("recall: loadRecallAdapterConfig returns the documented defaults (NVIDIA-only primary, no default fallback)", () => {
   return withCleanEnv(ENV_KEYS, () => {
     const cfg = loadRecallAdapterConfig();
+    // Primary: NVIDIA NIM with gpt-oss-120b.
     assert.equal(cfg.primaryBaseUrl, RECALL_DEFAULT_PRIMARY_BASE_URL);
     assert.equal(cfg.primaryBaseUrl, "https://integrate.api.nvidia.com/v1");
     assert.equal(cfg.primaryModel, RECALL_DEFAULT_PRIMARY_MODEL);
     assert.equal(cfg.primaryModel, "openai/gpt-oss-120b");
-    assert.equal(cfg.fallbackBaseUrl, RECALL_DEFAULT_FALLBACK_BASE_URL);
-    assert.equal(cfg.fallbackBaseUrl, "https://api.minimax.io/v1");
-    assert.equal(cfg.fallbackModel, RECALL_DEFAULT_FALLBACK_MODEL);
-    assert.equal(cfg.fallbackModel, "MiniMax-M3");
+    // Fallback: UNCONFIGURED. No provider is hardcoded into the
+    // fallback slot by default. The architecture keeps the slot
+    // for opt-in but does not default to MiniMax.
+    assert.equal(cfg.fallbackBaseUrl, "");
+    assert.equal(cfg.fallbackModel, "");
     assert.equal(cfg.timeoutMs, RECALL_DEFAULT_TIMEOUT_MS);
     assert.equal(cfg.timeoutMs, 30_000);
     assert.equal(cfg.maxTokens, RECALL_DEFAULT_MAX_TOKENS);
     assert.equal(cfg.maxTokens, 512);
-    // The primary slot is NVIDIA NIM and the fallback slot is
-    // MiniMax. This is the invariant that the labels must honor.
+    // The primary slot IS the NIM slot under the NVIDIA-only
+    // stance. The fallback slot is empty (no host).
     assert.match(cfg.primaryBaseUrl, /nvidia/);
-    assert.match(cfg.fallbackBaseUrl, /minimax/);
   });
 });
 
@@ -166,10 +165,44 @@ test("recall: loadRecallAdapterConfig treats whitespace-only overrides as missin
     const cfg = loadRecallAdapterConfig();
     assert.equal(cfg.primaryBaseUrl, RECALL_DEFAULT_PRIMARY_BASE_URL);
     assert.equal(cfg.primaryModel, RECALL_DEFAULT_PRIMARY_MODEL);
-    assert.equal(cfg.fallbackBaseUrl, RECALL_DEFAULT_FALLBACK_BASE_URL);
-    assert.equal(cfg.fallbackModel, RECALL_DEFAULT_FALLBACK_MODEL);
+    // Fallback stays empty even with whitespace-only env vars.
+    assert.equal(cfg.fallbackBaseUrl, "");
+    assert.equal(cfg.fallbackModel, "");
     assert.equal(cfg.primaryApiKey, "");
     assert.equal(cfg.fallbackApiKey, "");
+  });
+});
+
+test("recall: NVIDIA-only default (no fallback configured) on primary hard-fail -> all-providers-failed, no fallback call", async () => {
+  // Pin the NVIDIA-only stance: with a clean env and only a
+  // primary key, the adapter must NOT call any fallback. The
+  // missing-config branch fires (no fallback URL + no fallback
+  // model + no fallback key) and the result is
+  // `all-providers-failed`. No second HTTP call.
+  return withCleanEnv(ENV_KEYS, async () => {
+    const log: Array<{ url: string; body: string }> = [];
+    const fetchImpl = scriptedFetch(
+      [
+        () => httpErrorResponse(500, "down"),
+        () => okChatResponse("ignored", "m"),
+      ],
+      log,
+    );
+    const r = await synthesizeRecallWithFallback(
+      "q",
+      SAMPLE_MEMORIES,
+      { primaryApiKey: PRIMARY_KEY, fetchImpl },
+    );
+    assert.equal(r.ok, false);
+    if (!r.ok) {
+      assert.equal(r.kind, "all-providers-failed");
+      assert.equal(r.httpCalls, 1, "no fallback call when fallback slot is empty");
+      assert.match(
+        r.message,
+        /^primary failed and no fallback configured: /,
+      );
+    }
+    assert.equal(log.length, 1);
   });
 });
 
@@ -316,10 +349,13 @@ test("recall: regression - primary 401 error label is nvidia-nim/openai/gpt-oss-
 });
 
 // ---------------------------------------------------------------------------
-// Primary hard failure -> fallback success: label must be minimax + MiniMax-M3
+// Primary hard failure -> fallback success: when the operator has
+// explicitly configured a MiniMax fallback (opt-in, not default),
+// the label must be minimax + MiniMax-M3 and the request must
+// actually go to the MiniMax endpoint.
 // ---------------------------------------------------------------------------
 
-test("recall: primary hard failure falls back to minimax + MiniMax-M3 (the actual fallback endpoint)", async () => {
+test("recall: primary hard failure falls back to minimax + MiniMax-M3 (opt-in MiniMax fallback)", async () => {
   const log: Array<{ url: string; body: string }> = [];
   const fetchImpl = scriptedFetch(
     [
@@ -338,6 +374,13 @@ test("recall: primary hard failure falls back to minimax + MiniMax-M3 (the actua
     {
       primaryApiKey: PRIMARY_KEY,
       fallbackApiKey: FALLBACK_KEY,
+      // Opt-in MiniMax fallback: under the NVIDIA-only stance
+      // the fallback slot is empty by default, so the operator
+      // must explicitly set the URL and model. With these
+      // overrides, the fallback call is attempted and the
+      // adapter surfaces the MiniMax provider id.
+      fallbackBaseUrl: "https://api.minimax.io/v1",
+      fallbackModel: "MiniMax-M3",
       fetchImpl,
     },
   );
@@ -377,6 +420,9 @@ test("recall: both providers fail -> error message uses the actual endpoint labe
     {
       primaryApiKey: PRIMARY_KEY,
       fallbackApiKey: FALLBACK_KEY,
+      // Opt-in MiniMax fallback (see comment above).
+      fallbackBaseUrl: "https://api.minimax.io/v1",
+      fallbackModel: "MiniMax-M3",
       fetchImpl,
     },
   );
@@ -572,11 +618,14 @@ test("recall: serialized result never contains api key values", async () => {
     log,
   );
   const r = await synthesizeRecallWithFallback(
-    "q",
+    "What database does the project use?",
     SAMPLE_MEMORIES,
     {
       primaryApiKey: PRIMARY_KEY,
       fallbackApiKey: FALLBACK_KEY,
+      // Opt-in MiniMax fallback (see comment above).
+      fallbackBaseUrl: "https://api.minimax.io/v1",
+      fallbackModel: "MiniMax-M3",
       fetchImpl,
     },
   );
@@ -697,4 +746,197 @@ test("recall: regression gate - synthesised label never equals 'minimax/openai/g
       );
     }
   }
+});
+
+// ---------------------------------------------------------------------------
+// REGRESSION: primary returns HTTP 200 with no usable content
+// (the live failure mode that surfaced as
+// `nvidia-nim/openai/gpt-oss-120b#recall response missing
+// choices[0].message.content`).
+//
+// The recall adapter must treat a 200 with malformed / missing
+// `choices[0].message.content` as a hard failure on the primary
+// slot and either (a) recover via the fallback or (b) surface
+// `all-providers-failed` with the operator-visible
+// `primary failed and no fallback configured: ...` shape so the
+// operator can tell which slot produced which error.
+//
+// The cases here cover the two outcomes an operator will
+// realistically hit:
+//   1. primary 200 + malformed body, fallback key configured
+//      -> fallback recovers; answer / providerUsed / modelUsed
+//         must reflect the fallback endpoint
+//   2. primary 200 + malformed body, no fallback key configured
+//      -> all-providers-failed; the top-level message and
+//         `lastError.message` must follow the documented
+//         operator-visible shape (no fabricated answer, the
+//         primary's bad-request error is surfaced)
+// ---------------------------------------------------------------------------
+
+/** A 200 OK response whose body is missing choices[0].message.content. */
+function malformedContentResponse(): Response {
+  return new Response(
+    JSON.stringify({
+      id: "x",
+      model: "openai/gpt-oss-120b",
+      // Missing `choices` entirely -> extractContent returns
+      // undefined -> http-client returns ok=false, kind=bad-request
+      // with message "response missing choices[0].message.content".
+    }),
+    { status: 200, headers: { "content-type": "application/json" } },
+  );
+}
+
+test("recall: primary 200 with malformed content (no fallback configured) -> all-providers-failed with primary's bad-request surfaced", async () => {
+  // Case (2): no fallback. The primary is the only configured
+  // slot, and it returns 200 with no usable content. The adapter
+  // must surface the primary's bad-request error to the operator
+  // in the documented shape, with `kind: "all-providers-failed"`
+  // and the `primary failed and no fallback configured:` prefix
+  // on the top-level message.
+  const log: Array<{ url: string; body: string }> = [];
+  const fetchImpl = scriptedFetch(
+    [() => malformedContentResponse()],
+    log,
+  );
+  const r = await synthesizeRecallWithFallback(
+    "What database does the project use?",
+    SAMPLE_MEMORIES,
+    {
+      primaryApiKey: PRIMARY_KEY,
+      fetchImpl,
+    },
+  );
+  assert.equal(r.ok, false, "primary 200 with no usable content must not report ok");
+  if (r.ok) return;
+  assert.equal(r.kind, "all-providers-failed");
+  assert.equal(
+    r.httpCalls,
+    1,
+    "no fallback call when no fallback is configured",
+  );
+  assert.ok(r.lastError, "lastError should be present");
+  // The bad-request error from the primary's http-client call is
+  // the operator-visible signal. It must name the missing field
+  // and use the actual primary endpoint's label (nvidia-nim /
+  // openai/gpt-oss-120b#recall), NOT the stale minimax label.
+  assert.equal(r.lastError!.kind, "bad-request");
+  assert.equal(r.lastError!.status, 200);
+  assert.equal(r.lastError!.reachedServer, true);
+  assert.match(
+    r.lastError!.message,
+    /nvidia-nim\/openai\/gpt-oss-120b#recall: response missing choices\[0\]\.message\.content/,
+    "lastError must name the missing field and use the actual primary endpoint label",
+  );
+  // The top-level message (the string the recall controller
+  // surfaces as the public `provider_error.reason`) must follow
+  // the documented `primary failed and no fallback configured: ...`
+  // shape and include the primary's lastError message.
+  assert.match(
+    r.message,
+    /^primary failed and no fallback configured: nvidia-nim\/openai\/gpt-oss-120b#recall: response missing choices\[0\]\.message\.content$/,
+    "top-level message must follow the operator-visible shape",
+  );
+  // No fabricated answer.
+  assert.ok(!r.message.includes("Postgres"));
+  // Only the primary slot was called.
+  assert.equal(log.length, 1);
+  assert.match(log[0]!.url, /^https:\/\/integrate\.api\.nvidia\.com\//);
+});
+
+test("recall: primary 200 with malformed content + fallback configured -> fallback recovers with minimax + MiniMax-M3", async () => {
+  // Case (1): the primary returns 200 with no usable content;
+  // the fallback is configured and returns a valid synthesis.
+  // The adapter must NOT report failure, must NOT fabricate an
+  // answer from the primary's empty body, and must report the
+  // fallback as the source of the answer.
+  const log: Array<{ url: string; body: string }> = [];
+  const fetchImpl = scriptedFetch(
+    [
+      () => malformedContentResponse(),
+      () =>
+        okChatResponse(
+          "The project uses Postgres 16 for the primary store.",
+          "MiniMax-M3",
+        ),
+    ],
+    log,
+  );
+  const r = await synthesizeRecallWithFallback(
+    "What database does the project use?",
+    SAMPLE_MEMORIES,
+    {
+      primaryApiKey: PRIMARY_KEY,
+      fallbackApiKey: FALLBACK_KEY,
+      // Opt-in MiniMax fallback (see comment above).
+      fallbackBaseUrl: "https://api.minimax.io/v1",
+      fallbackModel: "MiniMax-M3",
+      fetchImpl,
+    },
+  );
+  assert.equal(r.ok, true);
+  if (!r.ok) return;
+  assert.equal(r.fallbackUsed, true, "answer must come from the fallback");
+  assert.equal(r.providerUsed, "minimax");
+  assert.equal(r.modelUsed, "MiniMax-M3");
+  assert.equal(r.httpCalls, 2);
+  // The synthesized answer is the fallback's, not a fabricated
+  // echo of the primary's empty body.
+  assert.match(r.answer, /Postgres 16/);
+  // Call 1 -> NIM (200 malformed). Call 2 -> MiniMax (200 ok).
+  assert.equal(log.length, 2);
+  assert.match(log[0]!.url, /^https:\/\/integrate\.api\.nvidia\.com\//);
+  assert.match(log[1]!.url, /^https:\/\/api\.minimax\.io\//);
+  const fallbackBody = JSON.parse(log[1]!.body);
+  assert.equal(fallbackBody.model, "MiniMax-M3");
+});
+
+test("recall: primary 200 with empty string content (no fallback configured) -> all-providers-failed with 'empty response content' surface", async () => {
+  // The empty-content branch lives in the recall adapter, not
+  // the http-client. The http-client returns ok=true with
+  // content=""; the adapter then classifies it as
+  // "empty response content" and falls back. With no fallback
+  // configured, the operator must see a typed all-providers-
+  // failed outcome whose message names the primary endpoint
+  // (nvidia-nim) and the empty-content reason, with no
+  // `lastError` (because the http-client reported ok=true).
+  const log: Array<{ url: string; body: string }> = [];
+  const fetchImpl = scriptedFetch(
+    [
+      () =>
+        new Response(
+          JSON.stringify({
+            id: "x",
+            model: "openai/gpt-oss-120b",
+            choices: [
+              { message: { role: "assistant", content: "" } },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    ],
+    log,
+  );
+  const r = await synthesizeRecallWithFallback(
+    "q",
+    SAMPLE_MEMORIES,
+    {
+      primaryApiKey: PRIMARY_KEY,
+      fetchImpl,
+    },
+  );
+  assert.equal(r.ok, false);
+  if (r.ok) return;
+  assert.equal(r.kind, "all-providers-failed");
+  assert.equal(r.httpCalls, 1);
+  // The adapter's own failure message is surfaced (it does not
+  // carry a lastError because the http-client reported ok=true).
+  assert.equal(
+    r.message,
+    "nvidia-nim: empty response content",
+    "top-level message must name the primary endpoint and the empty-content reason",
+  );
+  assert.equal(r.lastError, undefined);
+  assert.equal(log.length, 1);
+  assert.match(log[0]!.url, /^https:\/\/integrate\.api\.nvidia\.com\//);
 });

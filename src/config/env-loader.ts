@@ -165,6 +165,28 @@ export function loadDotEnv(options: LoadDotEnvOptions = {}): LoadDotEnvResult {
  * prototype config. Secret values are not returned in the result;
  * only their presence is reported. Use `redactValue` on any
  * caller-side log path.
+ *
+ * Note on the prototype runner vs the production adapter:
+ * the prototype CLI is a comparison harness that exercises
+ * multiple engines against the same fixture corpus. It is
+ * therefore more permissive about the primary/fallback alias
+ * mapping than the production adapter:
+ *
+ *   - `hasPrimaryKey` is true if EITHER
+ *     `CURION_PROVIDER_PRIMARY_KEY` OR `MINIMAX_API_KEY` is set.
+ *     The prototype runner treats MiniMax as the historical
+ *     primary candidate; this preserves the historical alias
+ *     for operators who already have `MINIMAX_API_KEY` in their
+ *     `.env`.
+ *   - `hasFallbackKey` is true if EITHER
+ *     `CURION_PROVIDER_FALLBACK_KEY` OR `NVIDIA_NIM_API_KEY` is
+ *     set.
+ *
+ * The production adapter in `src/providers/memory-analysis.ts`
+ * uses a different mapping (NVIDIA NIM is primary by default;
+ * the fallback slot is empty by default). The prototype runner
+ * deliberately keeps the legacy alias mapping so existing
+ * `.env` files keep working as a comparison harness.
  */
 export interface PrototypeConfig {
   /** True if a primary provider key is available. */
@@ -202,13 +224,16 @@ export interface PrototypeConfig {
   dotenvKeys: string[];
 }
 
+// Per the NVIDIA-only stance, the prototype runner is the
+// only place where MiniMax has a real role: it is a
+// (separately configured) fallback candidate. The defaults
+// below are still the published MiniMax values because the
+// prototype CLI compares multiple engines; they are NOT the
+// production adapter's defaults.
 const DEFAULT_MINIMAX_BASE_URL = "https://api.minimax.io/v1";
 const DEFAULT_MINIMAX_MODEL = "MiniMax-M3";
 const DEFAULT_NIM_BASE_URL = "https://integrate.api.nvidia.com/v1";
-const DEFAULT_NIM_MODELS = [
-  "openai/gpt-oss-120b",
-  "meta/llama-3.3-70b-instruct",
-] as const;
+const DEFAULT_NIM_MODELS = ["openai/gpt-oss-120b"] as const;
 const DEFAULT_GROQ_BASE_URL = "https://api.groq.com/openai/v1";
 const DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b";
 const DEFAULT_GROQ_REASONING_EFFORT = "high";
@@ -234,6 +259,10 @@ export function loadPrototypeConfig(
 ): PrototypeConfig {
   const loaded = loadDotEnv(options);
   return {
+    // Legacy alias mapping preserved for the prototype runner:
+    // `MINIMAX_API_KEY` is the historical primary candidate.
+    // The production adapter uses a different mapping
+    // (see `src/providers/memory-analysis.ts`).
     hasPrimaryKey:
       Boolean(process.env.CURION_PROVIDER_PRIMARY_KEY) ||
       Boolean(process.env.MINIMAX_API_KEY),

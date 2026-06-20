@@ -186,10 +186,7 @@ test("env-loader: loadPrototypeConfig reports presence not values", () => {
     const cfg = loadPrototypeConfig({ skip: true });
     assert.equal(cfg.hasPrimaryKey, false);
     assert.equal(cfg.hasFallbackKey, false);
-    assert.deepEqual(cfg.nimModels, [
-      "openai/gpt-oss-120b",
-      "meta/llama-3.3-70b-instruct",
-    ]);
+    assert.deepEqual(cfg.nimModels, ["openai/gpt-oss-120b"]);
     assert.equal(typeof cfg.minimaxModel, "string");
     assert.ok(cfg.minimaxModel.length > 0);
     assert.equal(typeof cfg.minimaxBaseUrl, "string");
@@ -561,8 +558,8 @@ test("runner: dry-run makes no network calls and reports a plan", async () => {
       dotenvSkip: true,
     });
     assert.equal(report.mode, "dry-run");
-    // 1 minimax + 2 NIM (two candidate models) + 1 groq = 4.
-    assert.equal(report.summary.total, 4);
+    // 1 minimax + 1 NIM + 1 groq = 3.
+    assert.equal(report.summary.total, 3);
     // In dry-run, attempts are not actually parsed, so parsed=0.
     assert.equal(report.summary.parsed, 0);
     assert.equal(report.summary.skipped, 0);
@@ -674,7 +671,7 @@ test("runner: live mode with stubbed fetch that returns fenced-but-broken JSON a
     const report = await runExperiments({
       live: true,
       onlyProviders: ["nvidia-nim"],
-      onlyNimModels: ["meta/llama-3.3-70b-instruct"],
+      onlyNimModels: ["openai/gpt-oss-120b"],
       onlyFixtures: ["P2"],
       fetchImpl,
       dotenvSkip: true,

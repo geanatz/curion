@@ -5,8 +5,7 @@
  * controller to turn a small set of safe stored memory summaries
  * into a natural-language answer to the user's query. It mirrors
  * the policy of the `memory-analysis` adapter (primary → fallback,
- * same-provider LLM repair, typed result) but has a much smaller
- * surface:
+ * typed result) but has a much smaller surface:
  *
  *   - Input: a small set of safe memory summaries + a query.
  *   - Output: a single synthesized answer string.
@@ -26,19 +25,45 @@
  *     The recall MVP does not store recall queries or provider
  *     responses.
  *
+ * Defaults (NVIDIA-only stance, per current product decision):
+ *   - primary:    NVIDIA NIM `openai/gpt-oss-120b` at
+ *                 `https://integrate.api.nvidia.com/v1`
+ *   - fallback:   unconfigured by default. The architecture
+ *                 keeps the primary+fallback slot so an operator
+ *                 can opt in to a second engine via env vars or
+ *                 per-call overrides, but Curion's default
+ *                 runtime assumes ONE configured engine.
+ *
+ * Tradeoff: the previous "NVIDIA NIM primary + MiniMax M3
+ * fallback" config gave a second engine for resilience. The
+ * NVIDIA-only stance trades that off for a simpler, single-
+ * engine runtime; when the primary is down the adapter returns
+ * `all-providers-failed` rather than silently routing to a
+ * different vendor. A future Groq-based fallback (or any
+ * second engine) can be enabled by setting
+ * `CURION_PROVIDER_FALLBACK_KEY` plus the matching base-URL
+ * and model env vars.
+ *
  * Fallback policy:
  *   - Primary (NVIDIA NIM `openai/gpt-oss-120b`) is tried first.
  *   - If primary returns a hard failure (auth / network / timeout /
- *     5xx / missing-config), the adapter restarts the synthesis on
- *     the fallback (MiniMax M3).
+ *     5xx / missing-config), the adapter restarts the synthesis
+ *     on the fallback provider, when a fallback key AND a
+ *     fallback base URL AND a fallback model are all configured.
+ *     The fallback slot is unconfigured by default; a partial
+ *     configuration (e.g. a fallback key with no URL) leaves the
+ *     slot empty and the adapter does not attempt a fallback
+ *     call.
  *   - There is no same-provider LLM repair pass for recall: the
  *     model is asked for plain text, not structured JSON, so the
  *     only failure modes are transport errors and content-policy
  *     refusal. The controller's text-validation pass is the
  *     defense in depth for content issues.
- *   - If both providers fail, the adapter returns
- *     `{ ok: false, kind: "all-providers-failed" }`. The controller
- *     surfaces this as `provider_error` — no fabricated answer.
+ *   - If no fallback is configured, or the configured fallback
+ *     also fails, the adapter returns
+ *     `{ ok: false, kind: "all-providers-failed" }`. The
+ *     controller surfaces this as `provider_error` — no
+ *     fabricated answer.
  */
 
 import {
@@ -54,20 +79,26 @@ import {
 // provider-named because the orchestration order is what
 // `synthesizeRecallWithFallback` actually depends on. The env-var
 // overrides remain provider-named (`CURION_NIM_*` feeds the primary
-// slot; `CURION_MINIMAX_*` feeds the fallback slot) so the
-// `loadRecallAdapterConfig` mapping below is the single source of
-// truth for "which provider sits in which role".
+// slot; `CURION_MINIMAX_*` is recognised as the fallback-slot
+// override path) so the `loadRecallAdapterConfig` mapping below is
+// the single source of truth for "which provider sits in which
+// role".
+//
+// Per the NVIDIA-only stance, the default primary IS NVIDIA NIM
+// and the default fallback is empty. The architecture keeps the
+// fallback slot (so an operator can opt in), but no provider is
+// hardcoded into the fallback by default. The fallback slot is
+// only "configured" when the operator has set a key AND a base
+// URL AND a model — any of those missing leaves the slot empty.
 // ---------------------------------------------------------------------------
 
 /** Default primary provider base URL (NVIDIA NIM, OpenAI-compatible). */
 export const RECALL_DEFAULT_PRIMARY_BASE_URL = "https://integrate.api.nvidia.com/v1";
 /** Default primary provider model id (`openai/gpt-oss-120b` on NIM). */
 export const RECALL_DEFAULT_PRIMARY_MODEL = "openai/gpt-oss-120b";
-/** Default fallback provider base URL (MiniMax, OpenAI-compatible). */
-export const RECALL_DEFAULT_FALLBACK_BASE_URL = "https://api.minimax.io/v1";
-/** Default fallback provider model id (MiniMax M3). */
-export const RECALL_DEFAULT_FALLBACK_MODEL = "MiniMax-M3";
-/** Default per-request timeout in ms. */
+/**
+ * Default per-request timeout in ms.
+ */
 export const RECALL_DEFAULT_TIMEOUT_MS = 30_000;
 /** Default per-request max output tokens. */
 export const RECALL_DEFAULT_MAX_TOKENS = 512;
@@ -204,6 +235,12 @@ function pickTrimmedString(...candidates: string[]): string {
  * env vars as the analysis adapter for symmetry, plus the recall-
  * specific overrides. Returns trimmed strings; whitespace-only
  * values are treated as absent.
+ *
+ * Per the NVIDIA-only stance, the fallback slot is empty by
+ * default: `fallbackBaseUrl` and `fallbackModel` are EMPTY
+ * unless the operator has set `CURION_MINIMAX_BASE_URL` /
+ * `CURION_MINIMAX_MODEL`. The fallback call is only attempted
+ * when the operator has configured all three (key + URL + model).
  */
 export function loadRecallAdapterConfig(
   overrides: Partial<RecallAdapterConfig> = {},
@@ -219,15 +256,17 @@ export function loadRecallAdapterConfig(
       readTrimmedString("CURION_NIM_FALLBACK_MODEL"),
       RECALL_DEFAULT_PRIMARY_MODEL,
     ),
+    // Fallback slot: unconfigured by default. An operator who
+    // wants a second engine sets `CURION_MINIMAX_BASE_URL` and
+    // `CURION_MINIMAX_MODEL` (and the matching key). With no
+    // env var and no override, the slot stays empty.
     fallbackBaseUrl: pickTrimmedString(
       overrides.fallbackBaseUrl ?? "",
       readTrimmedString("CURION_MINIMAX_BASE_URL"),
-      RECALL_DEFAULT_FALLBACK_BASE_URL,
     ),
     fallbackModel: pickTrimmedString(
       overrides.fallbackModel ?? "",
       readTrimmedString("CURION_MINIMAX_MODEL"),
-      RECALL_DEFAULT_FALLBACK_MODEL,
     ),
     primaryApiKey: pickTrimmedString(
       overrides.primaryApiKey ?? "",
@@ -450,7 +489,13 @@ export async function synthesizeRecallWithFallback(
     };
   }
 
-  if (!cfg.fallbackApiKey) {
+  // Under the NVIDIA-only stance, the fallback slot is empty by
+  // default (no base URL, no model, no key). The slot is only
+  // usable when the operator has explicitly configured all three
+  // (key + URL + model). If the slot is empty for any reason —
+  // no key, no URL, or no model — we surface
+  // `all-providers-failed` and do NOT make a second HTTP call.
+  if (!cfg.fallbackApiKey || !cfg.fallbackBaseUrl || !cfg.fallbackModel) {
     return {
       ok: false,
       kind: "all-providers-failed",

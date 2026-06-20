@@ -25,11 +25,10 @@ import assert from "node:assert/strict";
 import {
   analyzeMemoryWithFallback,
   loadAdapterConfig,
+  resolveAdapterProviderId,
   COMPARISON_NIM_MODEL,
-  DEFAULT_MINIMAX_BASE_URL,
-  DEFAULT_MINIMAX_MODEL,
-  DEFAULT_NIM_BASE_URL,
-  DEFAULT_NIM_FALLBACK_MODEL,
+  DEFAULT_PRIMARY_BASE_URL,
+  DEFAULT_PRIMARY_MODEL,
   type MemoryAnalysisResult,
 } from "../src/providers/memory-analysis.ts";
 import { PUBLIC_TOOL_NAMES, buildServer } from "../src/server.ts";
@@ -123,24 +122,59 @@ const ENV_KEYS = [
 // Defaults / config
 // ---------------------------------------------------------------------------
 
-test("adapter: loadAdapterConfig returns the documented defaults", () => {
+test("adapter: loadAdapterConfig returns the documented defaults (NVIDIA-only primary, no default fallback)", () => {
   return withCleanEnv(ENV_KEYS, () => {
     const cfg = loadAdapterConfig();
-    assert.equal(cfg.primaryBaseUrl, DEFAULT_MINIMAX_BASE_URL);
-    assert.equal(cfg.primaryBaseUrl, "https://api.minimax.io/v1");
-    assert.equal(cfg.primaryModel, DEFAULT_MINIMAX_MODEL);
-    assert.equal(cfg.primaryModel, "MiniMax-M3");
-    assert.equal(cfg.fallbackBaseUrl, DEFAULT_NIM_BASE_URL);
-    assert.equal(cfg.fallbackBaseUrl, "https://integrate.api.nvidia.com/v1");
-    assert.equal(cfg.fallbackModel, DEFAULT_NIM_FALLBACK_MODEL);
-    assert.equal(cfg.fallbackModel, "openai/gpt-oss-120b");
+    // Primary: NVIDIA NIM with gpt-oss-120b. This is the
+    // default under the NVIDIA-only stance.
+    assert.equal(cfg.primaryBaseUrl, DEFAULT_PRIMARY_BASE_URL);
+    assert.equal(cfg.primaryBaseUrl, "https://integrate.api.nvidia.com/v1");
+    assert.equal(cfg.primaryModel, DEFAULT_PRIMARY_MODEL);
+    assert.equal(cfg.primaryModel, "openai/gpt-oss-120b");
+    // Fallback: UNCONFIGURED. No provider is hardcoded into the
+    // fallback slot by default. The architecture keeps the slot
+    // for opt-in but does not default to MiniMax.
+    assert.equal(cfg.fallbackBaseUrl, "");
+    assert.equal(cfg.fallbackModel, "");
     assert.equal(typeof cfg.timeoutMs, "number");
     assert.equal(cfg.timeoutMs, 30_000);
     assert.equal(typeof cfg.maxTokens, "number");
     assert.equal(cfg.maxTokens, 1024);
-    // Default fallback is NOT the comparison model.
+    // The comparison NIM model is a known constant; it is not
+    // assigned to any slot by default.
     assert.notEqual(cfg.fallbackModel, COMPARISON_NIM_MODEL);
     assert.equal(COMPARISON_NIM_MODEL, "meta/llama-3.3-70b-instruct");
+  });
+});
+
+test("adapter: loadAdapterConfig maps canonical env-var aliases to NVIDIA-only primary, MiniMax fallback", () => {
+  return withCleanEnv(ENV_KEYS, () => {
+    // NVIDIA_NIM_API_KEY alone -> primaryApiKey. The primary
+    // slot IS the NIM slot under the NVIDIA-only stance, so the
+    // NIM key lands there.
+    process.env.NVIDIA_NIM_API_KEY = "nvapi-test-primary";
+    let cfg = loadAdapterConfig();
+    assert.equal(cfg.primaryApiKey, "nvapi-test-primary");
+    assert.equal(cfg.fallbackApiKey, "");
+
+    // MINIMAX_API_KEY alone -> fallbackApiKey. The fallback
+    // slot is the only place the MiniMax key can land.
+    process.env.MINIMAX_API_KEY = "sk-cp-test-fallback";
+    cfg = loadAdapterConfig();
+    assert.equal(cfg.primaryApiKey, "nvapi-test-primary");
+    assert.equal(cfg.fallbackApiKey, "sk-cp-test-fallback");
+
+    // CURION_PROVIDER_PRIMARY_KEY overrides NVIDIA_NIM_API_KEY.
+    process.env.CURION_PROVIDER_PRIMARY_KEY = "role-primary";
+    cfg = loadAdapterConfig();
+    assert.equal(cfg.primaryApiKey, "role-primary");
+    assert.equal(cfg.fallbackApiKey, "sk-cp-test-fallback");
+
+    // CURION_PROVIDER_FALLBACK_KEY overrides MINIMAX_API_KEY.
+    process.env.CURION_PROVIDER_FALLBACK_KEY = "role-fallback";
+    cfg = loadAdapterConfig();
+    assert.equal(cfg.primaryApiKey, "role-primary");
+    assert.equal(cfg.fallbackApiKey, "role-fallback");
   });
 });
 
@@ -152,16 +186,17 @@ test("adapter: loadAdapterConfig treats whitespace-only env values as missing", 
     process.env.MINIMAX_API_KEY = "\t\n  ";
     process.env.CURION_PROVIDER_FALLBACK_KEY = "  \n";
     process.env.NVIDIA_NIM_API_KEY = " ";
+    process.env.CURION_NIM_BASE_URL = "  ";
+    process.env.CURION_NIM_FALLBACK_MODEL = "   ";
     process.env.CURION_MINIMAX_BASE_URL = "  ";
     process.env.CURION_MINIMAX_MODEL = "   ";
-    process.env.CURION_NIM_BASE_URL = " \t ";
-    process.env.CURION_NIM_FALLBACK_MODEL = "   ";
     const cfg = loadAdapterConfig();
-    // Built-in defaults must still be used for URLs/models.
-    assert.equal(cfg.primaryBaseUrl, DEFAULT_MINIMAX_BASE_URL);
-    assert.equal(cfg.primaryModel, DEFAULT_MINIMAX_MODEL);
-    assert.equal(cfg.fallbackBaseUrl, DEFAULT_NIM_BASE_URL);
-    assert.equal(cfg.fallbackModel, DEFAULT_NIM_FALLBACK_MODEL);
+    // Primary built-in defaults are still used (NIM).
+    assert.equal(cfg.primaryBaseUrl, DEFAULT_PRIMARY_BASE_URL);
+    assert.equal(cfg.primaryModel, DEFAULT_PRIMARY_MODEL);
+    // Fallback stays empty even with whitespace-only env vars.
+    assert.equal(cfg.fallbackBaseUrl, "");
+    assert.equal(cfg.fallbackModel, "");
     // And both keys must be empty so the adapter returns missing-config.
     assert.equal(cfg.primaryApiKey, "");
     assert.equal(cfg.fallbackApiKey, "");
@@ -171,10 +206,10 @@ test("adapter: loadAdapterConfig treats whitespace-only env values as missing", 
 test("adapter: loadAdapterConfig trims surrounding whitespace from env values", () => {
   return withCleanEnv(ENV_KEYS, () => {
     process.env.CURION_PROVIDER_PRIMARY_KEY = `  ${PRIMARY_KEY}\n`;
-    process.env.CURION_MINIMAX_BASE_URL = ` ${DEFAULT_MINIMAX_BASE_URL} `;
+    process.env.CURION_NIM_BASE_URL = ` ${DEFAULT_PRIMARY_BASE_URL} `;
     const cfg = loadAdapterConfig();
     assert.equal(cfg.primaryApiKey, PRIMARY_KEY);
-    assert.equal(cfg.primaryBaseUrl, DEFAULT_MINIMAX_BASE_URL);
+    assert.equal(cfg.primaryBaseUrl, DEFAULT_PRIMARY_BASE_URL);
   });
 });
 
@@ -187,8 +222,44 @@ test("adapter: loadAdapterConfig treats whitespace-only overrides as missing", (
   // Whitespace-only overrides fall through to env/defaults; with
   // env clean, defaults are used.
   assert.equal(cfg.primaryApiKey, "");
-  assert.equal(cfg.primaryBaseUrl, DEFAULT_MINIMAX_BASE_URL);
-  assert.equal(cfg.primaryModel, DEFAULT_MINIMAX_MODEL);
+  assert.equal(cfg.primaryBaseUrl, DEFAULT_PRIMARY_BASE_URL);
+  assert.equal(cfg.primaryModel, DEFAULT_PRIMARY_MODEL);
+});
+
+test("adapter: missing MiniMax key does not make the default config look broken", () => {
+  // Regression coverage: under the NVIDIA-only stance, the
+  // default config (no env vars, no overrides) must be a valid
+  // single-engine configuration. The fallback slot is
+  // intentionally empty; this is not a missing-config error
+  // and not a broken config.
+  return withCleanEnv(ENV_KEYS, () => {
+    const cfg = loadAdapterConfig();
+    // Primary slot is fully populated.
+    assert.notEqual(cfg.primaryBaseUrl, "");
+    assert.notEqual(cfg.primaryModel, "");
+    // Fallback slot is empty (no provider hardcoded).
+    assert.equal(cfg.fallbackBaseUrl, "");
+    assert.equal(cfg.fallbackModel, "");
+    // With a primary key only (and no fallback key), the
+    // adapter is configured for a single engine.
+    const r = (() => {
+      try {
+        // Just structural: confirm loadAdapterConfig did not
+        // throw and the shape is what the adapter expects.
+        return { ok: true, cfg };
+      } catch (e) {
+        return { ok: false, err: e };
+      }
+    })();
+    assert.equal(r.ok, true, "loadAdapterConfig must not throw on default NVIDIA-only config");
+    // resolveAdapterProviderId for the default primary URL is
+    // "nvidia-nim" (not "minimax"), so the operator-visible
+    // labels match the endpoint.
+    assert.equal(resolveAdapterProviderId(cfg.primaryBaseUrl), "nvidia-nim");
+    // An empty fallback URL resolves to "unknown" — exactly the
+    // honest label we want for an unconfigured slot.
+    assert.equal(resolveAdapterProviderId(cfg.fallbackBaseUrl), "unknown");
+  });
 });
 
 test("adapter: whitespace-only primary key in env -> typed missing-config (no http calls)", async () => {
@@ -222,16 +293,21 @@ test("adapter: primary success returns adapter result with no fallback", async (
   const r = await analyzeMemoryWithFallback("hello world", undefined, {
     primaryApiKey: PRIMARY_KEY,
     fallbackApiKey: FALLBACK_KEY,
-    primaryBaseUrl: "https://primary.test/v1",
+    // Use NIM-style URLs so the URL-derived provider id matches
+    // the operator-visible labels. The adapter derives the id
+    // from the base URL, not from a hardcoded string.
+    primaryBaseUrl: "https://primary.nvidia.test/v1",
     primaryModel: "primary-model",
-    fallbackBaseUrl: "https://fallback.test/v1",
+    fallbackBaseUrl: "https://fallback.minimax.test/v1",
     fallbackModel: "fallback-model",
     fetchImpl,
   });
   assert.equal(r.ok, true);
   if (r.ok) {
     assert.equal(r.fallbackUsed, false);
-    assert.equal(r.providerUsed, "minimax");
+    // Provider id is derived from the URL: "nvidia-nim" because
+    // the URL host contains "nvidia".
+    assert.equal(r.providerUsed, "nvidia-nim");
     assert.equal(r.modelUsed, "primary-model");
     assert.equal(r.llmRepairAttempts, 0);
     assert.equal(r.httpCalls, 1);
@@ -241,7 +317,7 @@ test("adapter: primary success returns adapter result with no fallback", async (
   }
   // Exactly one HTTP call, going to the primary URL.
   assert.equal(log.length, 1);
-  assert.match(log[0]!.url, /^https:\/\/primary\.test\/v1\/chat\/completions/);
+  assert.match(log[0]!.url, /^https:\/\/primary\.nvidia\.test\/v1\/chat\/completions/);
   // Request body must not include the API key.
   assert.ok(!log[0]!.body.includes(PRIMARY_KEY));
   assert.ok(!log[0]!.body.includes(FALLBACK_KEY));
@@ -263,24 +339,26 @@ test("adapter: primary hard failure (500) falls back to secondary provider", asy
   const r = await analyzeMemoryWithFallback("hello world", undefined, {
     primaryApiKey: PRIMARY_KEY,
     fallbackApiKey: FALLBACK_KEY,
-    primaryBaseUrl: "https://primary.test/v1",
+    // NIM-style primary; explicit MiniMax-style fallback.
+    primaryBaseUrl: "https://primary.nvidia.test/v1",
     primaryModel: "primary-model",
-    fallbackBaseUrl: "https://fallback.test/v1",
+    fallbackBaseUrl: "https://fallback.minimax.test/v1",
     fallbackModel: "fallback-model",
     fetchImpl,
   });
   assert.equal(r.ok, true);
   if (r.ok) {
     assert.equal(r.fallbackUsed, true);
-    assert.equal(r.providerUsed, "nvidia-nim");
+    // Fallback provider id is derived from the URL: "minimax".
+    assert.equal(r.providerUsed, "minimax");
     assert.equal(r.modelUsed, "fallback-model");
     assert.equal(r.llmRepairAttempts, 0);
     assert.equal(r.httpCalls, 2);
   }
   // Call 1 -> primary URL (500). Call 2 -> fallback URL (200).
   assert.equal(log.length, 2);
-  assert.match(log[0]!.url, /^https:\/\/primary\.test\/v1\/chat\/completions/);
-  assert.match(log[1]!.url, /^https:\/\/fallback\.test\/v1\/chat\/completions/);
+  assert.match(log[0]!.url, /^https:\/\/primary\.nvidia\.test\/v1\/chat\/completions/);
+  assert.match(log[1]!.url, /^https:\/\/fallback\.minimax\.test\/v1\/chat\/completions/);
 });
 
 // ---------------------------------------------------------------------------
@@ -301,16 +379,16 @@ test("adapter: primary invalid JSON triggers one repair on the same provider, no
   const r = await analyzeMemoryWithFallback("hello world", undefined, {
     primaryApiKey: PRIMARY_KEY,
     fallbackApiKey: FALLBACK_KEY,
-    primaryBaseUrl: "https://primary.test/v1",
+    primaryBaseUrl: "https://primary.nvidia.test/v1",
     primaryModel: "primary-model",
-    fallbackBaseUrl: "https://fallback.test/v1",
+    fallbackBaseUrl: "https://fallback.minimax.test/v1",
     fallbackModel: "fallback-model",
     fetchImpl,
   });
   assert.equal(r.ok, true);
   if (r.ok) {
     assert.equal(r.fallbackUsed, false);
-    assert.equal(r.providerUsed, "minimax");
+    assert.equal(r.providerUsed, "nvidia-nim");
     assert.equal(r.modelUsed, "primary-model");
     assert.equal(r.llmRepairAttempts, 1);
     assert.equal(r.httpCalls, 2);
@@ -318,8 +396,8 @@ test("adapter: primary invalid JSON triggers one repair on the same provider, no
   }
   // Both calls went to primary, not fallback.
   assert.equal(log.length, 2);
-  assert.match(log[0]!.url, /^https:\/\/primary\.test\/v1\/chat\/completions/);
-  assert.match(log[1]!.url, /^https:\/\/primary\.test\/v1\/chat\/completions/);
+  assert.match(log[0]!.url, /^https:\/\/primary\.nvidia\.test\/v1\/chat\/completions/);
+  assert.match(log[1]!.url, /^https:\/\/primary\.nvidia\.test\/v1\/chat\/completions/);
 });
 
 // ---------------------------------------------------------------------------
@@ -339,24 +417,24 @@ test("adapter: primary invalid JSON + failed repair falls back to secondary prov
   const r = await analyzeMemoryWithFallback("hello world", undefined, {
     primaryApiKey: PRIMARY_KEY,
     fallbackApiKey: FALLBACK_KEY,
-    primaryBaseUrl: "https://primary.test/v1",
+    primaryBaseUrl: "https://primary.nvidia.test/v1",
     primaryModel: "primary-model",
-    fallbackBaseUrl: "https://fallback.test/v1",
+    fallbackBaseUrl: "https://fallback.minimax.test/v1",
     fallbackModel: "fallback-model",
     fetchImpl,
   });
   assert.equal(r.ok, true);
   if (r.ok) {
     assert.equal(r.fallbackUsed, true);
-    assert.equal(r.providerUsed, "nvidia-nim");
+    assert.equal(r.providerUsed, "minimax");
     assert.equal(r.modelUsed, "fallback-model");
     assert.equal(r.llmRepairAttempts, 0);
     assert.equal(r.httpCalls, 3);
   }
   assert.equal(log.length, 3);
-  assert.match(log[0]!.url, /^https:\/\/primary\.test\/v1\/chat\/completions/);
-  assert.match(log[1]!.url, /^https:\/\/primary\.test\/v1\/chat\/completions/);
-  assert.match(log[2]!.url, /^https:\/\/fallback\.test\/v1\/chat\/completions/);
+  assert.match(log[0]!.url, /^https:\/\/primary\.nvidia\.test\/v1\/chat\/completions/);
+  assert.match(log[1]!.url, /^https:\/\/primary\.nvidia\.test\/v1\/chat\/completions/);
+  assert.match(log[2]!.url, /^https:\/\/fallback\.minimax\.test\/v1\/chat\/completions/);
 });
 
 // ---------------------------------------------------------------------------
@@ -378,9 +456,9 @@ test("adapter: both providers failing returns a typed all-providers-failed resul
   const r = await analyzeMemoryWithFallback("hello world", undefined, {
     primaryApiKey: PRIMARY_KEY,
     fallbackApiKey: FALLBACK_KEY,
-    primaryBaseUrl: "https://primary.test/v1",
+    primaryBaseUrl: "https://primary.nvidia.test/v1",
     primaryModel: "p",
-    fallbackBaseUrl: "https://fallback.test/v1",
+    fallbackBaseUrl: "https://fallback.minimax.test/v1",
     fallbackModel: "f",
     fetchImpl,
   });
@@ -399,8 +477,8 @@ test("adapter: both providers failing returns a typed all-providers-failed resul
   }
   // First call -> primary URL. Second -> fallback URL.
   assert.equal(log.length, 2);
-  assert.match(log[0]!.url, /^https:\/\/primary\.test\/v1\//);
-  assert.match(log[1]!.url, /^https:\/\/fallback\.test\/v1\//);
+  assert.match(log[0]!.url, /^https:\/\/primary\.nvidia\.test\/v1\//);
+  assert.match(log[1]!.url, /^https:\/\/fallback\.minimax\.test\/v1\//);
 });
 
 test("adapter: both providers with invalid structured output (4 calls) returns typed all-providers-failed", async () => {
@@ -421,9 +499,9 @@ test("adapter: both providers with invalid structured output (4 calls) returns t
   const r = await analyzeMemoryWithFallback("hello world", undefined, {
     primaryApiKey: PRIMARY_KEY,
     fallbackApiKey: FALLBACK_KEY,
-    primaryBaseUrl: "https://primary.test/v1",
+    primaryBaseUrl: "https://primary.nvidia.test/v1",
     primaryModel: "p",
-    fallbackBaseUrl: "https://fallback.test/v1",
+    fallbackBaseUrl: "https://fallback.minimax.test/v1",
     fallbackModel: "f",
     fetchImpl,
   });
@@ -436,10 +514,10 @@ test("adapter: both providers with invalid structured output (4 calls) returns t
     assert.equal(r.httpCalls, 4);
   }
   assert.equal(log.length, 4);
-  assert.match(log[0]!.url, /^https:\/\/primary\.test\/v1\//);
-  assert.match(log[1]!.url, /^https:\/\/primary\.test\/v1\//);
-  assert.match(log[2]!.url, /^https:\/\/fallback\.test\/v1\//);
-  assert.match(log[3]!.url, /^https:\/\/fallback\.test\/v1\//);
+  assert.match(log[0]!.url, /^https:\/\/primary\.nvidia\.test\/v1\//);
+  assert.match(log[1]!.url, /^https:\/\/primary\.nvidia\.test\/v1\//);
+  assert.match(log[2]!.url, /^https:\/\/fallback\.minimax\.test\/v1\//);
+  assert.match(log[3]!.url, /^https:\/\/fallback\.minimax\.test\/v1\//);
 });
 
 // ---------------------------------------------------------------------------
@@ -474,7 +552,7 @@ test("adapter: only primary key configured, primary hard-fails -> all-providers-
   );
   const r = await analyzeMemoryWithFallback("hello world", undefined, {
     primaryApiKey: PRIMARY_KEY,
-    primaryBaseUrl: "https://primary.test/v1",
+    primaryBaseUrl: "https://primary.nvidia.test/v1",
     primaryModel: "p",
     fetchImpl,
   });
@@ -486,6 +564,47 @@ test("adapter: only primary key configured, primary hard-fails -> all-providers-
   }
   // Only one HTTP call (primary). No fallback call attempted.
   assert.equal(log.length, 1);
+});
+
+test("adapter: NVIDIA-only default (no fallback configured) on primary hard-fail -> all-providers-failed, no fallback call", async () => {
+  // This pins the NVIDIA-only stance: with a clean env and only
+  // a primary key, the adapter must NOT call any fallback. The
+  // missing-config branch fires (no fallback URL + no fallback
+  // model + no fallback key) and the result is
+  // `all-providers-failed`. No second HTTP call.
+  return withCleanEnv(ENV_KEYS, async () => {
+    const log: Array<{ url: string; body: string }> = [];
+    const fetchImpl = scriptedFetch(
+      [
+        () => httpErrorResponse(500, "down"),
+        () => okChatResponse(VALID_JSON),
+      ],
+      log,
+    );
+    const r = await analyzeMemoryWithFallback("hello world", undefined, {
+      primaryApiKey: PRIMARY_KEY,
+      // No fallback key, no fallback URL, no fallback model.
+      // The default config under the NVIDIA-only stance has an
+      // empty fallback slot.
+      primaryBaseUrl: "https://primary.nvidia.test/v1",
+      primaryModel: "p",
+      fetchImpl,
+    });
+    assert.equal(r.ok, false);
+    if (!r.ok) {
+      assert.equal(r.kind, "all-providers-failed");
+      assert.equal(r.lastError?.kind, "server");
+      assert.equal(r.httpCalls, 1, "no fallback call when fallback slot is empty");
+      // The top-level message follows the operator-visible shape:
+      //   `primary failed and no fallback configured: <lastError.message>`
+      assert.match(
+        r.message,
+        /^primary failed and no fallback configured: /,
+      );
+    }
+    // The second scripted response was never used.
+    assert.equal(log.length, 1);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -507,16 +626,19 @@ test("adapter: success result exposes providerUsed / modelUsed / fallbackUsed an
     {
       primaryApiKey: PRIMARY_KEY,
       fallbackApiKey: FALLBACK_KEY,
-      primaryBaseUrl: "https://primary.test/v1",
+      primaryBaseUrl: "https://primary.nvidia.test/v1",
       primaryModel: "primary-model",
-      fallbackBaseUrl: "https://fallback.test/v1",
+      fallbackBaseUrl: "https://fallback.minimax.test/v1",
       fallbackModel: "fallback-model",
       fetchImpl,
     },
   );
   assert.equal(r.ok, true);
   if (r.ok) {
-    assert.equal(r.providerUsed, "nvidia-nim");
+    // Fallback URL contains "minimax" so the URL-derived id is
+    // "minimax" — the operator-visible label matches the actual
+    // endpoint.
+    assert.equal(r.providerUsed, "minimax");
     assert.equal(r.modelUsed, "fallback-model");
     assert.equal(r.fallbackUsed, true);
     assert.equal(r.llmRepairAttempts, 0);
@@ -534,7 +656,7 @@ test("adapter: result never echoes the input text", async () => {
   const fetchImpl = scriptedFetch([() => okChatResponse(VALID_JSON)], log);
   const r = await analyzeMemoryWithFallback(secretInput, undefined, {
     primaryApiKey: PRIMARY_KEY,
-    primaryBaseUrl: "https://primary.test/v1",
+    primaryBaseUrl: "https://primary.nvidia.test/v1",
     primaryModel: "p",
     fetchImpl,
   });
@@ -601,9 +723,9 @@ test("adapter: disableRepair forces fallback on parse failure (no repair attempt
   const r = await analyzeMemoryWithFallback("hello", undefined, {
     primaryApiKey: PRIMARY_KEY,
     fallbackApiKey: FALLBACK_KEY,
-    primaryBaseUrl: "https://primary.test/v1",
+    primaryBaseUrl: "https://primary.nvidia.test/v1",
     primaryModel: "p",
-    fallbackBaseUrl: "https://fallback.test/v1",
+    fallbackBaseUrl: "https://fallback.minimax.test/v1",
     fallbackModel: "f",
     fetchImpl,
     disableRepair: true,
@@ -615,8 +737,8 @@ test("adapter: disableRepair forces fallback on parse failure (no repair attempt
   }
   assert.equal(log.length, 2);
   // First call to primary, second to fallback. No same-provider repair call.
-  assert.match(log[0]!.url, /^https:\/\/primary\.test\/v1\//);
-  assert.match(log[1]!.url, /^https:\/\/fallback\.test\/v1\//);
+  assert.match(log[0]!.url, /^https:\/\/primary\.nvidia\.test\/v1\//);
+  assert.match(log[1]!.url, /^https:\/\/fallback\.minimax\.test\/v1\//);
 });
 
 test("adapter: repair prompt does not echo the original input text", async () => {
@@ -631,7 +753,7 @@ test("adapter: repair prompt does not echo the original input text", async () =>
   const secretInput = "TOP-SECRET-INPUT-DO-NOT-LEAK";
   await analyzeMemoryWithFallback(secretInput, undefined, {
     primaryApiKey: PRIMARY_KEY,
-    primaryBaseUrl: "https://primary.test/v1",
+    primaryBaseUrl: "https://primary.nvidia.test/v1",
     primaryModel: "p",
     fetchImpl,
   });
@@ -663,7 +785,7 @@ test("adapter: relatedMemories are included in the initial prompt only (not the 
   ];
   await analyzeMemoryWithFallback("hello", related, {
     primaryApiKey: PRIMARY_KEY,
-    primaryBaseUrl: "https://primary.test/v1",
+    primaryBaseUrl: "https://primary.nvidia.test/v1",
     primaryModel: "p",
     fetchImpl,
   });
@@ -686,7 +808,7 @@ test("adapter: related-memory prompt rendering is prose-only (no #id, includes m
   ];
   await analyzeMemoryWithFallback("hello", related, {
     primaryApiKey: PRIMARY_KEY,
-    primaryBaseUrl: "https://primary.test/v1",
+    primaryBaseUrl: "https://primary.nvidia.test/v1",
     primaryModel: "p",
     fetchImpl,
   });
@@ -728,7 +850,7 @@ test("adapter: related-memory prompt includes memoryContent when related is non-
   ];
   await analyzeMemoryWithFallback("hello", related, {
     primaryApiKey: PRIMARY_KEY,
-    primaryBaseUrl: "https://primary.test/v1",
+    primaryBaseUrl: "https://primary.nvidia.test/v1",
     primaryModel: "p",
     fetchImpl,
   });
@@ -766,9 +888,9 @@ test("adapter: no key values appear in serialized failure results", async () => 
   const r = await analyzeMemoryWithFallback("hello world", undefined, {
     primaryApiKey: PRIMARY_KEY,
     fallbackApiKey: FALLBACK_KEY,
-    primaryBaseUrl: "https://primary.test/v1",
+    primaryBaseUrl: "https://primary.nvidia.test/v1",
     primaryModel: "p",
-    fallbackBaseUrl: "https://fallback.test/v1",
+    fallbackBaseUrl: "https://fallback.minimax.test/v1",
     fallbackModel: "f",
     fetchImpl,
   });
@@ -780,7 +902,7 @@ test("adapter: no key values appear in serialized failure results", async () => 
   }
 });
 
-test("adapter: uses documented default model names when env is unset", async () => {
+test("adapter: uses documented NVIDIA-only defaults when env is unset", async () => {
   return withCleanEnv(ENV_KEYS, async () => {
     const log: Array<{ url: string; body: string }> = [];
     const fetchImpl = scriptedFetch([() => okChatResponse(VALID_JSON)], log);
@@ -791,69 +913,116 @@ test("adapter: uses documented default model names when env is unset", async () 
     });
     assert.equal(r.ok, true);
     if (r.ok) {
-      assert.equal(r.providerUsed, "minimax");
-      assert.equal(r.modelUsed, "MiniMax-M3");
+      // Default primary is NVIDIA NIM; provider id follows the
+      // URL and is "nvidia-nim".
+      assert.equal(r.providerUsed, "nvidia-nim");
+      assert.equal(r.modelUsed, "openai/gpt-oss-120b");
     }
-    // Default MiniMax base URL must be present in the request URL.
+    // Default NIM base URL must be present in the request URL.
     assert.match(
       log[0]!.url,
-      /^https:\/\/api\.minimax\.io\/v1\/chat\/completions/,
+      /^https:\/\/integrate\.api\.nvidia\.com\/v1\/chat\/completions/,
     );
     // The model field in the body must be the documented default.
     const body = JSON.parse(log[0]!.body);
-    assert.equal(body.model, "MiniMax-M3");
+    assert.equal(body.model, "openai/gpt-oss-120b");
     assert.equal(body.response_format?.type, "json_object");
     assert.equal(body.temperature, 0);
   });
 });
 
-test("adapter: default fallback model is openai/gpt-oss-120b, not the comparison model", async () => {
-  return withCleanEnv(ENV_KEYS, async () => {
-    const log: Array<{ url: string; body: string }> = [];
-    const fetchImpl = scriptedFetch(
-      [
-        () => httpErrorResponse(500, "primary down"),
-        () => okChatResponse(VALID_JSON),
-      ],
-      log,
-    );
-    const r = await analyzeMemoryWithFallback("hello", undefined, {
-      primaryApiKey: PRIMARY_KEY,
-      fallbackApiKey: FALLBACK_KEY,
-      // No model overrides -> adapter uses default fallback.
-      fetchImpl,
-    });
-    assert.equal(r.ok, true);
-    if (r.ok) {
-      assert.equal(r.fallbackUsed, true);
-      assert.equal(r.modelUsed, "openai/gpt-oss-120b");
-    }
-    const body = JSON.parse(log[1]!.body);
-    assert.equal(body.model, "openai/gpt-oss-120b");
-  });
-});
-
-test("adapter: env override CURION_NIM_FALLBACK_MODEL switches fallback model", async () => {
+test("adapter: env override CURION_NIM_FALLBACK_MODEL switches primary model id (NIM is primary under NVIDIA-only)", async () => {
+  // Under the NVIDIA-only stance, the env-var
+  // `CURION_NIM_FALLBACK_MODEL` (preserved name) feeds the
+  // primary slot. The operator can still override the primary
+  // model id via the same env var.
   return withCleanEnv(ENV_KEYS, async () => {
     process.env.CURION_NIM_FALLBACK_MODEL = COMPARISON_NIM_MODEL;
     const log: Array<{ url: string; body: string }> = [];
     const fetchImpl = scriptedFetch(
-      [
-        () => httpErrorResponse(500, "primary down"),
-        () => okChatResponse(VALID_JSON),
-      ],
+      [() => okChatResponse(VALID_JSON)],
       log,
     );
     const r = await analyzeMemoryWithFallback("hello", undefined, {
       primaryApiKey: PRIMARY_KEY,
-      fallbackApiKey: FALLBACK_KEY,
       fetchImpl,
     });
     assert.equal(r.ok, true);
     if (r.ok) {
       assert.equal(r.modelUsed, COMPARISON_NIM_MODEL);
     }
-    const body = JSON.parse(log[1]!.body);
+    const body = JSON.parse(log[0]!.body);
     assert.equal(body.model, COMPARISON_NIM_MODEL);
+  });
+});
+
+test("adapter: env override CURION_MINIMAX_BASE_URL feeds the (opt-in) fallback slot", async () => {
+  // The MiniMax env vars are recognised only as the fallback-
+  // slot override path. With a fallback key + the MiniMax base
+  // URL + the MiniMax model, the fallback is configured. With
+  // no MiniMax env vars, the fallback stays unconfigured (the
+  // NVIDIA-only default).
+  return withCleanEnv(ENV_KEYS, async () => {
+    process.env.CURION_MINIMAX_BASE_URL = "https://api.minimax.io/v1";
+    process.env.CURION_MINIMAX_MODEL = "MiniMax-M3";
+    const log: Array<{ url: string; body: string }> = [];
+    const fetchImpl = scriptedFetch(
+      [
+        () => httpErrorResponse(500, "primary down"),
+        () => okChatResponse(VALID_JSON),
+      ],
+      log,
+    );
+    const r = await analyzeMemoryWithFallback("hello", undefined, {
+      primaryApiKey: PRIMARY_KEY,
+      fallbackApiKey: FALLBACK_KEY,
+      fetchImpl,
+    });
+    assert.equal(r.ok, true);
+    if (r.ok) {
+      assert.equal(r.fallbackUsed, true);
+      // URL-derived id for the MiniMax host is "minimax".
+      assert.equal(r.providerUsed, "minimax");
+      assert.equal(r.modelUsed, "MiniMax-M3");
+    }
+    const body = JSON.parse(log[1]!.body);
+    assert.equal(body.model, "MiniMax-M3");
+    assert.match(
+      log[1]!.url,
+      /^https:\/\/api\.minimax\.io\/v1\/chat\/completions/,
+    );
+  });
+});
+
+test("adapter: missing CURION_MINIMAX_BASE_URL / CURION_MINIMAX_MODEL / MINIMAX_API_KEY leaves fallback slot empty", async () => {
+  // Regression coverage for the NVIDIA-only stance: with no
+  // MiniMax env vars set and no overrides, the fallback slot
+  // must be EMPTY (not defaulted to MiniMax). The adapter
+  // must NOT make a fallback HTTP call.
+  return withCleanEnv(ENV_KEYS, async () => {
+    const cfg = loadAdapterConfig();
+    assert.equal(cfg.fallbackBaseUrl, "");
+    assert.equal(cfg.fallbackModel, "");
+    assert.equal(cfg.fallbackApiKey, "");
+
+    const log: Array<{ url: string; body: string }> = [];
+    const fetchImpl = scriptedFetch(
+      [
+        () => httpErrorResponse(500, "primary down"),
+        () => okChatResponse(VALID_JSON),
+      ],
+      log,
+    );
+    const r = await analyzeMemoryWithFallback("hello", undefined, {
+      primaryApiKey: PRIMARY_KEY,
+      fetchImpl,
+    });
+    assert.equal(r.ok, false);
+    if (!r.ok) {
+      assert.equal(r.kind, "all-providers-failed");
+      // Exactly one HTTP call: the primary. No fallback call.
+      assert.equal(r.httpCalls, 1);
+    }
+    assert.equal(log.length, 1, "no fallback call when fallback slot is empty");
   });
 });

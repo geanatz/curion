@@ -135,6 +135,20 @@ const CLASSIFICATION_TO_KIND: Record<string, MemoryKind> = {
   conflict: "conflict",
   "conflict-poisoning": "conflict",
   reference: "reference",
+  // Policy variants: standing future behavior / rule
+  policy: "policy",
+  "project-policy": "policy",
+  "user-policy": "policy",
+  rule: "policy",
+  "standing-rule": "policy",
+  "operating-rule": "policy",
+  // Constraint variants: hard boundary / requirement / limitation
+  constraint: "constraint",
+  "project-constraint": "constraint",
+  requirement: "constraint",
+  limitation: "constraint",
+  boundary: "constraint",
+  "hard-limit": "constraint",
   finding: "finding",
 };
 

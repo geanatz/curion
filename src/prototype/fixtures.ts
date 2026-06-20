@@ -37,7 +37,7 @@ export const PROTOTYPE_FIXTURES: readonly PrototypeFixture[] = [
   {
     id: "P3",
     description: "Provider configuration: a small list of facts.",
-    text: "The primary provider is MiniMax, model M3. The fallback provider is NVIDIA NIM, which will be evaluated against two candidate models: openai/gpt-oss-120b and meta/llama-3.3-70b-instruct.",
+    text: "The primary provider is MiniMax, model M3. The fallback provider is NVIDIA NIM with the default model openai/gpt-oss-120b; additional models can be configured via CURION_NIM_MODELS.",
   },
   {
     id: "P4",
