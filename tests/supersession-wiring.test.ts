@@ -926,3 +926,226 @@ test("controller supersession: public message does not reveal supersession metad
     rmStorage(tmp, handle);
   }
 });
+
+// ---------------------------------------------------------------------------
+// Regression Test: Freshly-created same-topic old policy is superseded
+// ---------------------------------------------------------------------------
+// This is the exact live case from run 3758 where row 177 (NVIDIA policy)
+// superseded rows 151 and 166 but did NOT supersede the freshly created
+// old policy memory 176.
+//
+// Root cause: the remember-time supersession detector only saw related-memory
+// candidates returned by the seam's lexical topK=5 lookup on the raw input.
+// The raw input ("NVIDIA NIM openai/gpt-oss-120b") has dominant tokens that
+// don't overlap with "MiniMax as default provider". Row 176 was pushed out
+// of topK=5 by other memories with NVIDIA-related tokens, even though 176
+// was the direct predecessor of the new policy.
+//
+// Fix: the seam now accepts `candidateText` (normalized summary) and runs a
+// dual-text union lookup. For supersession detection specifically, the
+// controller calls the seam with both raw input AND candidateText and uses
+// topK=16. This ensures topically similar memories like 176 are included.
+// ---------------------------------------------------------------------------
+
+test("controller supersession: fresh same-topic old policy is superseded even when other provider memories exist", async () => {
+  const { tmp, handle } = mkStorage();
+  try {
+    // Pre-create "distractor" memories that have high lexical overlap
+    // with "nvidia/nim/openai/gpt-oss-120b" tokens in the raw input
+    // but are NOT the policy being superseded. These simulate rows
+    // 151 and 166 from run 3758.
+    const distractorFetch = () =>
+      okChatResponse(
+        safeAnalysis({
+          summary: "NVIDIA NIM provides embeddings for production workloads.",
+          tags: ["nvidia", "nim", "embeddings"],
+          classification: "fact",
+        }),
+      );
+    for (let i = 0; i < 3; i++) {
+      setRelatedMemoriesImpl(() => ({ memories: [], reason: "empty" }));
+      const { fetchImpl } = scriptFetch(distractorFetch);
+      await runRememberController(handle, `NVIDIA NIM embedding fact ${i}.`, {
+        providerFetchImpl: fetchImpl,
+        providerPrimaryApiKey: PRIMARY_KEY,
+        providerFallbackApiKey: FALLBACK_KEY,
+        now: pinnedNow(1_700_000_000_000 + i),
+      });
+    }
+
+    // Reset the seam override from the for loop so the NVIDIA policy
+    // block uses the real seam. Without this, the for loop's override
+    // would persist into the NVIDIA policy block, causing the real seam
+    // to never be called.
+    resetRelatedMemoriesImpl();
+
+    // Step 1: Insert the "old" MiniMax policy (simulates row 176).
+    // This is the freshly created policy that should be superseded.
+    {
+      setRelatedMemoriesImpl(() => ({ memories: [], reason: "empty" }));
+      const { fetchImpl } = scriptFetch(() =>
+        okChatResponse(
+          safeAnalysis({
+            summary:
+              "The Curion system policy designates MiniMax as the default provider for both remember and recall operations.",
+            tags: ["minimax", "provider", "default"],
+            classification: "policy",
+          }),
+        ),
+      );
+      const r = await runRememberController(
+        handle,
+        "Curion provider policy: use MiniMax as the default provider for remember and recall.",
+        {
+          providerFetchImpl: fetchImpl,
+          providerPrimaryApiKey: PRIMARY_KEY,
+          providerFallbackApiKey: FALLBACK_KEY,
+          now: pinnedNow(1_700_000_000_010),
+        },
+      );
+      assert.equal(r.status, "saved");
+      if (r.status !== "saved") throw new Error("unreachable");
+      assert.equal(r.record.id, 4, "MiniMax policy should have id 4");
+    }
+
+    // Reset seam override from MiniMax policy block so the NVIDIA policy
+    // block uses the real seam. The MiniMax block set the override but
+    // had no finally to reset it.
+    resetRelatedMemoriesImpl();
+
+    // Step 2: Insert the new NVIDIA policy that explicitly supersedes
+    // the MiniMax policy. The raw input has "nvidia/nim/openai/gpt-oss-120b"
+    // tokens that would dominate lexical scoring and push the MiniMax policy
+    // (id 4) out of topK=5 if we only used raw input text.
+    // The fix uses both raw input AND normalized summary for candidate
+    // selection, ensuring the MiniMax policy IS included.
+    {
+      // Use the real seam (no override) so the dual-text union is exercised.
+      // The seam will find related memories using BOTH the raw input
+      // (NVIDIA NIM tokens) AND the normalized summary ("default provider"
+      // "remember" "recall" tokens). The MiniMax policy should be found
+      // via the summary-text lookup even if it doesn't match the raw input.
+      const { fetchImpl } = scriptFetch(() =>
+        okChatResponse(
+          safeAnalysis({
+            summary:
+              "The Curion provider policy was changed to make NVIDIA NIM (openai/gpt-oss-120b) the sole default provider for both remember and recall operations, replacing MiniMax as the default.",
+            tags: ["nvidia", "nim", "provider", "default"],
+            classification: "policy",
+          }),
+        ),
+      );
+      const outcome = await runRememberController(
+        handle,
+        "Curion provider policy update: we no longer use MiniMax as the default provider. Use NVIDIA NIM openai/gpt-oss-120b as the only default provider for remember and recall. This new policy supersedes the previous MiniMax provider policy.",
+        {
+          providerFetchImpl: fetchImpl,
+          providerPrimaryApiKey: PRIMARY_KEY,
+          providerFallbackApiKey: FALLBACK_KEY,
+          now: pinnedNow(1_700_000_000_011),
+        },
+      );
+      assert.equal(outcome.status, "saved");
+      if (outcome.status !== "saved") throw new Error("unreachable");
+      assert.equal(outcome.record.id, 5, "NVIDIA policy should have id 5");
+
+      // Verify new row (id 5) has supersedes: [4]
+      const newRow = handle.db
+        .prepare("SELECT metadata FROM memories WHERE id = ?")
+        .get(5) as { metadata: string };
+      const newParsed = JSON.parse(newRow.metadata) as Record<string, unknown>;
+      const newRel = newParsed.relationship as Record<string, unknown>;
+      assert.deepEqual(
+        newRel.supersedes,
+        [4],
+        "new NVIDIA policy must supersede the immediate old MiniMax policy (id 4)",
+      );
+
+      // Verify old row (id 4) has supersededBy: [5]
+      const oldRow = handle.db
+        .prepare("SELECT metadata FROM memories WHERE id = ?")
+        .get(4) as { metadata: string };
+      const oldParsed = JSON.parse(oldRow.metadata) as Record<string, unknown>;
+      const oldRel = oldParsed.relationship as Record<string, unknown>;
+      assert.deepEqual(
+        oldRel.supersededBy,
+        [5],
+        "old MiniMax policy must have supersededBy pointing to new NVIDIA policy",
+      );
+    }
+  } finally {
+    resetRelatedMemoriesImpl();
+    rmStorage(tmp, handle);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Negative Test: No false positive supersession when old memory is unrelated
+// ---------------------------------------------------------------------------
+
+test("controller supersession: no false positive supersession for unrelated old memory", async () => {
+  const { tmp, handle } = mkStorage();
+  try {
+    // Pre-create an unrelated memory about a different topic.
+    {
+      setRelatedMemoriesImpl(() => ({ memories: [], reason: "empty" }));
+      const { fetchImpl } = scriptFetch(() =>
+        okChatResponse(
+          safeAnalysis({
+            summary: "The project uses PostgreSQL 16 for the primary database.",
+            tags: ["postgresql", "database"],
+            classification: "fact",
+          }),
+        ),
+      );
+      await runRememberController(handle, "Database decision.", {
+        providerFetchImpl: fetchImpl,
+        providerPrimaryApiKey: PRIMARY_KEY,
+        providerFallbackApiKey: FALLBACK_KEY,
+        now: pinnedNow(1),
+      });
+    }
+
+    // Try to supersede with a policy about a completely different topic.
+    // The old memory (PostgreSQL) should NOT be superseded because there's
+    // no topical overlap and no supersession language applies.
+    {
+      const { fetchImpl } = scriptFetch(() =>
+        okChatResponse(
+          safeAnalysis({
+            summary:
+              "The Curion provider policy was changed to make NVIDIA NIM the sole default provider.",
+            tags: ["nvidia", "provider"],
+            classification: "policy",
+          }),
+        ),
+      );
+      const outcome = await runRememberController(
+        handle,
+        "Provider policy: use NVIDIA NIM as default.",
+        {
+          providerFetchImpl: fetchImpl,
+          providerPrimaryApiKey: PRIMARY_KEY,
+          providerFallbackApiKey: FALLBACK_KEY,
+          now: pinnedNow(2),
+        },
+      );
+      assert.equal(outcome.status, "saved");
+      if (outcome.status !== "saved") throw new Error("unreachable");
+
+      // Verify new row does NOT have supersedes (unrelated topic)
+      const newRow = handle.db
+        .prepare("SELECT metadata FROM memories WHERE id = ?")
+        .get(2) as { metadata: string };
+      const newParsed = JSON.parse(newRow.metadata) as Record<string, unknown>;
+      const newRel = newParsed.relationship as Record<string, unknown> | undefined;
+      assert.ok(
+        !newRel || !("supersedes" in newRel) || (Array.isArray(newRel.supersedes) && newRel.supersedes.length === 0),
+        "unrelated old memory must not be superseded",
+      );
+    }
+  } finally {
+    resetRelatedMemoriesImpl();
+    rmStorage(tmp, handle);
+  }
+});

@@ -402,9 +402,24 @@ export async function runRememberController(
   });
 
   // -- 6c. Supersession detection (Phase I extension) ------------
-  // Run the supersession detector over the related memories to
-  // find any that the new candidate explicitly supersedes (e.g.
-  // "no longer use X, use Y instead; replaced by; superseded by").
+  // Run the supersession detector over a broader supersession-
+  // specific candidate set to find any memories the new candidate
+  // explicitly supersedes (e.g. "no longer use X, use Y instead;
+  // replaced by; superseded by").
+  //
+  // The supersession candidate set is derived from BOTH the raw
+  // input text AND the normalized candidate summary (memoryContent).
+  // This dual-text union ensures that topically similar memories
+  // (like a freshly-created same-topic policy) are included even
+  // when they don't lexically overlap with the raw input's dominant
+  // tokens (e.g. the old "MiniMax as default" policy doesn't
+  // overlap with "nvidia/nim" tokens in the raw input for the
+  // new NVIDIA policy update).
+  //
+  // We use topK=16 (RELATED_MEMORIES_MAX_TOP_K) to maximize
+  // candidate coverage for supersession detection, since the
+  // provider prompt token budget is not a concern here.
+  //
   // The detector is pure, conservative, and returns null when
   // uncertain. When it fires, we:
   //   - Add `supersedes: [oldId, ...]` to the new row's block.
@@ -416,9 +431,22 @@ export async function runRememberController(
   // Pass rawInputText so the detector can use the user's explicit
   // supersession language (e.g. "supersedes") even if the provider
   // summary rephrased it (e.g. to "superseding").
+  const { memories: supersessionCandidates } = findRelatedMemories(
+    storage,
+    {
+      text: rawInput,
+      candidateText: memoryContent,
+      topK: 16,
+    },
+  );
+  const supersessionCandidateSummaries: SafeMemorySummary[] =
+    supersessionCandidates
+      .map(toSafeMemorySummary)
+      .filter((s): s is SafeMemorySummary => s !== null);
+
   const supersession = detectSupersession({
     candidate: candidateSummary,
-    others: relatedSummaries,
+    others: supersessionCandidateSummaries,
     rawInputText: rawInput,
   });
   if (supersession !== null && supersession.supersededIds.length > 0) {
