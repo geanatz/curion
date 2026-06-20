@@ -368,3 +368,180 @@ test("demoteSupersededMemories: multiple stale candidates sort by demoted score"
 test("demoteSupersededMemories: DEMOTION_FACTOR is 0.01", () => {
   assert.equal(DEMOTION_FACTOR, 0.01);
 });
+
+// ---------------------------------------------------------------------------
+// 13. Self-supersession ignored
+// ---------------------------------------------------------------------------
+
+test("demoteSupersededMemories: self-supersession (A supersedes A) -> ignored, no crash", () => {
+  // A claims to supersede itself. The self-reference should be ignored.
+  const candidates = [
+    mkCandidate(10, 0.80, { supersedes: [10] }), // self-ref
+  ];
+  // Must not throw.
+  const result = demoteSupersededMemories(candidates);
+  assert.equal(result.length, 1);
+  assert.equal(result[0]!.id, 10);
+  assert.equal(result[0]!.score, 0.80); // unchanged
+});
+
+test("demoteSupersededMemories: self-supersededBy (A supersededBy A) -> ignored, no crash", () => {
+  // A claims to be superseded by itself. The self-reference should be ignored.
+  const candidates = [
+    mkCandidate(10, 0.80, { supersededBy: [10] }), // self-ref
+  ];
+  const result = demoteSupersededMemories(candidates);
+  assert.equal(result.length, 1);
+  assert.equal(result[0]!.id, 10);
+  assert.equal(result[0]!.score, 0.80); // unchanged
+});
+
+test("demoteSupersededMemories: self-supersession with other valid supersession", () => {
+  // A supersedes both B and itself. The self-ref is treated as a real supersession
+  // edge (A supersedes A means A is stale). Both A and B are demoted.
+  // After demotion: B=0.008, A=0.0075. B wins (higher demoted score).
+  const candidates = [
+    mkCandidate(5, 0.80, { supersededBy: [10] }),   // B is superseded by A
+    mkCandidate(10, 0.75, { supersedes: [5, 10] }), // A supersedes B AND self
+  ];
+  const result = demoteSupersededMemories(candidates);
+  // Both demoted; B (0.008) > A (0.0075) because score desc.
+  assert.equal(result[0]!.id, 5);   // B first: 0.80 * 0.01 = 0.008
+  assert.equal(result[0]!.score, 0.80 * DEMOTION_FACTOR);
+  assert.equal(result[1]!.id, 10);  // A second: 0.75 * 0.01 = 0.0075
+  assert.equal(result[1]!.score, 0.75 * DEMOTION_FACTOR);
+});
+
+// ---------------------------------------------------------------------------
+// 14. Duplicate edges harmless
+// ---------------------------------------------------------------------------
+
+test("demoteSupersededMemories: duplicate supersedes entries -> B demoted once", () => {
+  // A supersedes B twice (duplicate in the array). B should be demoted once.
+  const candidates = [
+    mkCandidate(5, 0.80, { supersededBy: [10] }),       // B stale
+    mkCandidate(10, 0.75, { supersedes: [5, 5, 5] }),    // A supersedes B (duplicate)
+  ];
+  const result = demoteSupersededMemories(candidates);
+  assert.equal(result[0]!.id, 10);   // A first
+  assert.equal(result[1]!.id, 5);    // B demoted
+  assert.equal(result[1]!.score, 0.80 * DEMOTION_FACTOR);
+});
+
+test("demoteSupersededMemories: duplicate supersededBy entries -> B demoted once", () => {
+  // B is superseded by A twice. B should be demoted once.
+  const candidates = [
+    mkCandidate(5, 0.80, { supersededBy: [10, 10] }),   // B stale (duplicate)
+    mkCandidate(10, 0.75, { supersedes: [5] }),         // A current
+  ];
+  const result = demoteSupersededMemories(candidates);
+  assert.equal(result[0]!.id, 10);   // A first
+  assert.equal(result[1]!.id, 5);    // B demoted
+  assert.equal(result[1]!.score, 0.80 * DEMOTION_FACTOR);
+});
+
+test("demoteSupersededMemories: both supersedes and supersededBy duplicate -> correct demotion", () => {
+  // Mixed duplicate entries.
+  const candidates = [
+    mkCandidate(5, 0.90, { supersededBy: [10, 10] }),   // B stale (duplicate)
+    mkCandidate(10, 0.75, { supersedes: [5, 5] }),      // A supersedes B (duplicate)
+  ];
+  const result = demoteSupersededMemories(candidates);
+  assert.equal(result[0]!.id, 10);   // A first
+  assert.equal(result[1]!.id, 5);    // B demoted
+  assert.equal(result[1]!.score, 0.90 * DEMOTION_FACTOR);
+});
+
+// ---------------------------------------------------------------------------
+// 15. Malformed / missing relationship data ignored
+// ---------------------------------------------------------------------------
+
+test("demoteSupersededMemories: supersedes with non-finite number -> safely ignored", () => {
+  // NaN and Infinity in the supersedes array.
+  const candidates = [
+    mkCandidate(5, 0.80, { supersededBy: [10] }),
+    mkCandidate(10, 0.75, { supersedes: [5, NaN, Infinity, -Infinity] }),
+  ];
+  const result = demoteSupersededMemories(candidates);
+  assert.equal(result[0]!.id, 10);
+  assert.equal(result[1]!.id, 5);
+  assert.equal(result[1]!.score, 0.80 * DEMOTION_FACTOR);
+});
+
+test("demoteSupersededMemories: supersededBy with non-finite numbers only -> no demotion", () => {
+  // supersededBy contains only non-finite numbers (NaN, Infinity, -Infinity).
+  // None are valid superseding ids, so no demotion occurs.
+  const candidates = [
+    mkCandidate(5, 0.80, { supersededBy: [NaN, Infinity, -Infinity] }),
+    mkCandidate(10, 0.75),
+  ];
+  const result = demoteSupersededMemories(candidates);
+  // No demotion; order by score desc (no tie): 0.80 > 0.75.
+  assert.equal(result[0]!.id, 5);
+  assert.equal(result[0]!.score, 0.80);
+  assert.equal(result[1]!.id, 10);
+  assert.equal(result[1]!.score, 0.75);
+});
+
+test("demoteSupersededMemories: empty supersedes array -> no action", () => {
+  const candidates = [
+    mkCandidate(5, 0.80, { supersededBy: [10] }),
+    mkCandidate(10, 0.75, { supersedes: [] }),
+  ];
+  const result = demoteSupersededMemories(candidates);
+  assert.equal(result[0]!.id, 10);
+  assert.equal(result[1]!.id, 5);
+});
+
+test("demoteSupersededMemories: empty supersededBy array -> no action", () => {
+  const candidates = [
+    mkCandidate(5, 0.80, { supersededBy: [] }),
+    mkCandidate(10, 0.75, { supersedes: [5] }),
+  ];
+  const result = demoteSupersededMemories(candidates);
+  // B has empty supersededBy, so it is NOT demoted
+  assert.equal(result[0]!.id, 10);
+  assert.equal(result[1]!.id, 5);
+});
+
+test("demoteSupersededMemories: null in supersedes array -> safely ignored", () => {
+  const candidates = [
+    mkCandidate(5, 0.80, { supersededBy: [10] }),
+    // @ts-expect-error -- intentionally passing null to test runtime safety
+    mkCandidate(10, 0.75, { supersedes: [5, null] }),
+  ];
+  const result = demoteSupersededMemories(candidates);
+  assert.equal(result[0]!.id, 10);
+  assert.equal(result[1]!.id, 5);
+});
+
+// ---------------------------------------------------------------------------
+// 16. Unrelated ranking order preserved (additional coverage)
+// ---------------------------------------------------------------------------
+
+test("demoteSupersededMemories: unrelated candidates with ties broken by id desc", () => {
+  // All unrelated. Ties on score should be broken by id desc.
+  const candidates = [
+    mkCandidate(1, 0.80),
+    mkCandidate(2, 0.80),
+    mkCandidate(3, 0.80),
+  ];
+  const result = demoteSupersededMemories(candidates);
+  // id desc -> 3, 2, 1
+  assert.deepEqual(result.map((r) => r.id), [3, 2, 1]);
+  assert.deepEqual(result.map((r) => r.score), [0.80, 0.80, 0.80]);
+});
+
+test("demoteSupersededMemories: supersession does not affect non-stale tie-breaking", () => {
+  // A supersedes B. C has same score as A. A and C tie on score; id desc wins.
+  const candidates = [
+    mkCandidate(5, 0.80, { supersededBy: [10] }),   // B stale
+    mkCandidate(10, 0.75, { supersedes: [5] }),     // A current
+    mkCandidate(20, 0.75),                           // C unrelated
+  ];
+  const result = demoteSupersededMemories(candidates);
+  // A (0.75) and C (0.75) tie on score; id desc -> C(20) > A(10) > B(0.008)
+  assert.equal(result[0]!.id, 20);   // C first (id desc tiebreak)
+  assert.equal(result[1]!.id, 10);   // A second
+  assert.equal(result[2]!.id, 5);    // B last (demoted)
+});

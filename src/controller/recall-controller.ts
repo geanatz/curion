@@ -77,6 +77,7 @@ import {
   RECALL_ACTIVE_MEMORY_READ_KIND,
   RECALL_LEXICAL_RANKING_KIND,
   RECALL_SELECTED_CANDIDATES_KIND,
+  RECALL_SUPERSEDED_DEMOTION_KIND,
 } from "../trace/trace-tool-boundary.js";
 
 // ---------------------------------------------------------------------------
@@ -412,6 +413,46 @@ export async function runRecallController(
     },
   );
   const demotedRanked = demoteSupersededMemories(scoredWithRelationships);
+
+  // -- Phase 3A trace: superseded demotion --------------------------------
+  // Compute the stale-id set and superseding-id map from the scored
+  // candidates so the trace event can summarize what was demoted and why.
+  // This mirrors the logic in `demoteSupersededMemories` but surfaces
+  // the intermediate data for tracing.
+  const candidateIds = new Set<number>(scoredWithRelationships.map((c) => c.id));
+  const demotedIds = new Set<number>();
+  const supersededByMap = new Map<number, number>(); // staleId -> supersedingId
+  for (const c of scoredWithRelationships) {
+    const rel = c.relationship;
+    if (!rel) continue;
+    if (rel.supersedes) {
+      for (const otherId of rel.supersedes) {
+        if (typeof otherId !== "number" || !Number.isFinite(otherId)) continue;
+        if (candidateIds.has(otherId)) {
+          demotedIds.add(otherId);
+          // reason for otherId is "supersededBy"; supersedingId is c.id
+          supersededByMap.set(otherId, c.id);
+        }
+      }
+    }
+    if (rel.supersededBy) {
+      for (const otherId of rel.supersededBy) {
+        if (typeof otherId !== "number" || !Number.isFinite(otherId)) continue;
+        if (candidateIds.has(otherId)) {
+          demotedIds.add(c.id);
+          // reason for c.id is "supersededBy"; supersedingId is otherId
+          supersededByMap.set(c.id, otherId);
+        }
+      }
+    }
+  }
+  emitSupersededDemotionStage(options.trace, {
+    before: ranked.map((r) => ({ id: r.id, score: r.score })),
+    after: demotedRanked.map((r) => ({ id: r.id, score: r.score })),
+    demotedIds,
+    supersededByMap,
+  });
+
   // Re-attach summaries in the order returned by the demoted ranker.
   // demotedRanked carries the score-sorted order (post-demotion).
   // We use a single O(N) map lookup so this stays linear even if
@@ -1031,6 +1072,85 @@ function emitSelectedCandidatesStage(
       memoryContent: s.memoryContent,
     })),
   });
+}
+
+/**
+ * Emit `recall.superseded-demotion` — a summary of superseded-memory
+ * demotions applied after lexical ranking and before selected-candidates.
+ *
+ * The event fires after the demotion step (Phase 3b) to give a reader
+ * visibility into what the demotion actually changed. The payload
+ * summarizes demotions only:
+ *   - `id`            : demoted candidate id
+ *   - `rawScore`      : score before demotion
+ *   - `demotedScore`  : score after demotion
+ *   - `reason`        : `"supersedes"` (this candidate supersedes another)
+ *                       or `"supersededBy"` (another candidate superseded this)
+ *   - `supersedingId` : the id of the superseding candidate (omitted when
+ *                       reason is `"supersedes"` because the superseding
+ *                       candidate's score is unchanged)
+ *
+ * When no demotions occurred, a compact `{demotions: 0}` form is emitted
+ * so the reader can distinguish "demotion stage never ran" from
+ * "no candidates demoted."
+ *
+ * Raw memory text and secrets are intentionally omitted from the payload.
+ * The writer's `redactPayload` pass scrubs credentials from the persisted
+ * JSON, so a future secret in a memory body is caught at the storage
+ * boundary without the controller having to know about it.
+ */
+function emitSupersededDemotionStage(
+  trace: RecallTraceContext | undefined,
+  args: {
+    /** Candidates before demotion (the lexical-ranked list). */
+    before: ReadonlyArray<{ id: number; score: number }>;
+    /** Candidates after demotion (the demoted-ranked list). */
+    after: ReadonlyArray<{ id: number; score: number }>;
+    /** Relationship blocks for candidates that were demoted. */
+    demotedIds: ReadonlySet<number>;
+    /** Map from stale id to superseding id (only populated when reason is supersededBy). */
+    supersededByMap: ReadonlyMap<number, number>;
+  },
+): void {
+  if (!trace || trace.runId === null) return;
+
+  // Build the demotion summary. We compute it by scanning the after list
+  // for candidates whose score changed (demoted) and looking up the
+  // corresponding before entry for rawScore.
+  const demotions: Array<{
+    id: number;
+    rawScore: number;
+    demotedScore: number;
+    reason: "supersedes" | "supersededBy";
+    supersedingId?: number;
+  }> = [];
+
+  const beforeMap = new Map<number, number>();
+  for (const c of args.before) {
+    beforeMap.set(c.id, c.score);
+  }
+
+  for (const c of args.after) {
+    if (!args.demotedIds.has(c.id)) continue;
+    const rawScore = beforeMap.get(c.id) ?? c.score;
+    // Determine reason: if this id has a superseding id in the map,
+    // reason is "supersededBy"; otherwise "supersedes".
+    const supersedingId = args.supersededByMap.get(c.id);
+    demotions.push({
+      id: c.id,
+      rawScore,
+      demotedScore: c.score,
+      reason: supersedingId !== undefined ? "supersededBy" : "supersedes",
+      ...(supersedingId !== undefined ? { supersedingId } : {}),
+    });
+  }
+
+  if (demotions.length === 0) {
+    // Compact form: no demotions occurred.
+    trace.recordStage(RECALL_SUPERSEDED_DEMOTION_KIND, { demotions: 0 });
+  } else {
+    trace.recordStage(RECALL_SUPERSEDED_DEMOTION_KIND, { demotions });
+  }
 }
 
 /**

@@ -71,6 +71,7 @@ export {
   RECALL_ACTIVE_MEMORY_READ_KIND,
   RECALL_LEXICAL_RANKING_KIND,
   RECALL_SELECTED_CANDIDATES_KIND,
+  RECALL_SUPERSEDED_DEMOTION_KIND,
   type TracedToolName,
   type StartToolBoundaryTraceOptions,
   type ToolBoundaryTracer,

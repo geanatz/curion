@@ -62,6 +62,7 @@ import {
   RECALL_ACTIVE_MEMORY_READ_KIND,
   RECALL_LEXICAL_RANKING_KIND,
   RECALL_SELECTED_CANDIDATES_KIND,
+  RECALL_SUPERSEDED_DEMOTION_KIND,
   type ToolBoundaryTracer,
 } from "../src/trace/trace-tool-boundary.ts";
 import {
@@ -1043,14 +1044,15 @@ test("recall Phase 3A: populated store emits all three stage events before provi
       const events = listTraceEventsForRun(runs[0]!.id);
 
       // Expected: tool.input, recall.active-memory-read,
-      // recall.lexical-ranking, recall.selected-candidates,
-      // tool.output
-      assert.equal(events.length, 5, "expected 5 events: tool.input + 3 stages + tool.output");
+      // recall.lexical-ranking, recall.superseded-demotion,
+      // recall.selected-candidates, tool.output
+      assert.equal(events.length, 6, "expected 6 events: tool.input + 4 stages + tool.output");
       assert.equal(events[0]!.kind, TOOL_INPUT_KIND);
       assert.equal(events[1]!.kind, RECALL_ACTIVE_MEMORY_READ_KIND);
       assert.equal(events[2]!.kind, RECALL_LEXICAL_RANKING_KIND);
-      assert.equal(events[3]!.kind, RECALL_SELECTED_CANDIDATES_KIND);
-      assert.equal(events[4]!.kind, TOOL_OUTPUT_KIND);
+      assert.equal(events[3]!.kind, RECALL_SUPERSEDED_DEMOTION_KIND);
+      assert.equal(events[4]!.kind, RECALL_SELECTED_CANDIDATES_KIND);
+      assert.equal(events[5]!.kind, TOOL_OUTPUT_KIND);
 
       // Verify active-memory-read: 2 memories in the store.
       const amr = events[1]!.payload as { readCount: number };
@@ -1086,7 +1088,7 @@ test("recall Phase 3A: populated store emits all three stage events before provi
       // Verify selected-candidates: the candidates sent to
       // synthesis should match the ranked list (since topK >=
       // the number of ranked candidates).
-      const sc = events[3]!.payload as {
+      const sc = events[4]!.payload as {
         candidates: Array<{
           id: number;
           synthesisOrder: number;
