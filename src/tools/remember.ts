@@ -26,6 +26,11 @@
  * The controller owns the safety pre-check, the provider call, the
  * validation/normalization, and the persistence write. The tool
  * layer does none of those.
+ *
+ * Multi-project awareness:
+ *   - After a successful `remember` (status: saved), the current
+ *     project is registered in the central registry.
+ *   - Private projects are not registered.
  */
 
 import {
@@ -40,6 +45,9 @@ import {
 import { logger } from "../logging/logger.js";
 import { startToolBoundaryTrace } from "../trace/index.js";
 import { z } from "zod";
+import path from "node:path";
+import { registerProject } from "../config/registry.js";
+import { isProjectPrivate } from "../config/project-config.js";
 
 export const REMEMBER_TOOL_NAME = "remember" as const;
 export const REMEMBER_TOOL_DESCRIPTION =
@@ -146,6 +154,15 @@ export function resetStorageProvider(): void {
 }
 
 /**
+ * Get the current project root from a storage handle.
+ * The handle's `dir` is the `.curion/` path; the project root
+ * is its parent directory.
+ */
+function getProjectRootFromHandle(handle: StorageHandle): string {
+  return path.dirname(handle.dir);
+}
+
+/**
  * Run the narrow `remember(text)` pipeline. Defensive shape check
  * on `input.text`, then delegate to the controller.
  *
@@ -155,6 +172,10 @@ export function resetStorageProvider(): void {
  * returns, and the run's final status + duration on exit. The
  * tracer is the existing non-throwing writer; trace failures
  * NEVER change the result and NEVER throw into the MCP path.
+ *
+ * Multi-project awareness:
+ *   - After a successful `remember` (status: saved), the current
+ *     project is registered in the central registry if not private.
  */
 export async function handleRemember(input: unknown): Promise<RememberResult> {
   // Open the trace run at the public tool boundary. The helper
@@ -179,6 +200,7 @@ export async function handleRemember(input: unknown): Promise<RememberResult> {
     }
 
     const { handle: storage, ownsHandle } = storageProvider();
+    const currentProjectRoot = getProjectRootFromHandle(storage);
     let outcome: RememberOutcome;
     try {
       outcome = await runRememberController(storage, text);
@@ -205,6 +227,12 @@ export async function handleRemember(input: unknown): Promise<RememberResult> {
           // ignore
         }
       }
+    }
+
+    // Register the current project after successful remember.
+    // Only register non-private projects.
+    if (outcome.status === "saved" && !isProjectPrivate(currentProjectRoot)) {
+      registerProject(currentProjectRoot);
     }
 
     const result = formatOutcome(outcome);

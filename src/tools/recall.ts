@@ -77,6 +77,16 @@
  * tests and any future structured-content transport.
  *
  * Storage and provider behavior are not exposed to the caller.
+ *
+ * Multi-project recall (MVP):
+ *   - After local recall, queries known non-private external projects.
+ *   - External results are appended as a supplemental section when
+ *     they are strong and meaningfully additive.
+ *   - Private projects are never mentioned in external results.
+ *   - External results are grouped by source project, labeled with
+ *     folder name, and appended in a separate labeled section.
+ *   - The local answer is authoritative; external context is
+ *     supplemental only.
  */
 
 import {
@@ -86,6 +96,7 @@ import {
 import {
   initStorage,
   closeStorage,
+  resolveCurionDir,
   type StorageHandle,
 } from "../storage/storage.js";
 import { formatAmbiguityNote } from "../retrieval/ambiguity.js";
@@ -93,6 +104,22 @@ import { formatResolvedHistoryNote } from "../retrieval/resolved-history.js";
 import { logger } from "../logging/logger.js";
 import { startToolBoundaryTrace } from "../trace/index.js";
 import { z } from "zod";
+import path from "node:path";
+import { registerProject } from "../config/registry.js";
+import { isProjectPrivate } from "../config/project-config.js";
+import {
+  listRegisteredProjects,
+  type RegistryEntry,
+} from "../config/registry.js";
+import {
+  rankLexical,
+  DEFAULT_RELEVANCE_THRESHOLD,
+  type LexicalScoredCandidate,
+} from "../retrieval/lexical.js";
+import {
+  listActiveMemorySummaries,
+  type SafeMemorySummary,
+} from "../storage/storage.js";
 
 export const RECALL_TOOL_NAME = "recall" as const;
 export const RECALL_TOOL_DESCRIPTION =
@@ -236,6 +263,201 @@ export function resetStorageProvider(): void {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Multi-project recall helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Conservative cross-project recall threshold.
+ * Higher than the local threshold (0.2) to ensure only strong
+ * external matches are surfaced.
+ */
+const EXTERNAL_RELEVANCE_THRESHOLD = 0.35;
+
+/** Maximum total external results to return. */
+const EXTERNAL_MAX_RESULTS = 3;
+
+/**
+ * Get the current project root from a storage handle.
+ * The handle's `dir` is the `.curion/` path; the project root
+ * is its parent directory.
+ */
+function getProjectRootFromHandle(handle: StorageHandle): string {
+  return path.dirname(handle.dir);
+}
+
+/**
+ * Result from querying a single external project.
+ */
+interface ExternalProjectResult {
+  projectRoot: string;
+  displayName: string;
+  summaries: string[];
+}
+
+/**
+ * Query a single external project for relevant memories.
+ *
+ * Opens the external project's storage, runs lexical search,
+ * and returns top summaries. The storage handle is always closed
+ * before returning.
+ *
+ * Returns null if the project is inaccessible, private, or has
+ * no relevant memories.
+ */
+function queryExternalProject(
+  projectRoot: string,
+  displayName: string,
+  query: string,
+): ExternalProjectResult | null {
+  try {
+    // Skip private projects.
+    if (isProjectPrivate(projectRoot)) {
+      return null;
+    }
+    const externalHandle = initStorage({ projectRoot });
+    try {
+      const candidates = listActiveMemorySummaries(externalHandle, {
+        limit: 50,
+      });
+      if (candidates.length === 0) {
+        return null;
+      }
+      const lexicalCandidates = candidates.map((c) => ({
+        id: c.id,
+        text: c.memoryContent,
+        tags: c.tags,
+      }));
+      const ranked = rankLexical(query, lexicalCandidates, {
+        threshold: EXTERNAL_RELEVANCE_THRESHOLD,
+        topK: EXTERNAL_MAX_RESULTS,
+      });
+      if (ranked.length === 0) {
+        return null;
+      }
+      const idSet = new Set(ranked.map((r) => r.id));
+      const topSummaries = candidates
+        .filter((c) => idSet.has(c.id))
+        .sort((a, b) => {
+          const scoreA = ranked.find((r) => r.id === a.id)?.score ?? 0;
+          const scoreB = ranked.find((r) => r.id === b.id)?.score ?? 0;
+          if (scoreB !== scoreA) return scoreB - scoreA;
+          return b.id - a.id;
+        })
+        .slice(0, EXTERNAL_MAX_RESULTS)
+        .map((c) => c.memoryContent);
+      return {
+        projectRoot,
+        displayName,
+        summaries: topSummaries,
+      };
+    } finally {
+      closeStorage(externalHandle);
+    }
+  } catch (err) {
+    // Inaccessible or corrupt project — skip silently.
+    logger.debug(
+      `external recall: skipping ${projectRoot}: ${(err as Error).message}`,
+    );
+    return null;
+  }
+}
+
+/**
+ * Run cross-project recall for the given query.
+ *
+ * Queries all known non-private external projects (excluding the
+ * current project) and returns aggregated results grouped by
+ * source project.
+ *
+ * Results are capped at `EXTERNAL_MAX_RESULTS` total summaries,
+ * drawn from the highest-scoring external projects.
+ */
+function queryExternalProjects(
+  currentProjectRoot: string,
+  query: string,
+): ExternalProjectResult[] {
+  const registered = listRegisteredProjects();
+  if (registered.length === 0) {
+    return [];
+  }
+
+  // Filter to eligible projects: non-private, not current.
+  const eligible = registered.filter(
+    (entry: RegistryEntry) =>
+      entry.projectRoot !== currentProjectRoot && !isProjectPrivate(entry.projectRoot),
+  );
+  if (eligible.length === 0) {
+    return [];
+  }
+
+  const results: ExternalProjectResult[] = [];
+  for (const entry of eligible) {
+    const result = queryExternalProject(entry.projectRoot, entry.displayName, query);
+    if (result !== null && result.summaries.length > 0) {
+      results.push(result);
+    }
+  }
+
+  // Sort by number of summaries descending, then by project displayName.
+  results.sort((a, b) => {
+    if (b.summaries.length !== a.summaries.length) {
+      return b.summaries.length - a.summaries.length;
+    }
+    return a.displayName.localeCompare(b.displayName);
+  });
+
+  // Cap total summaries.
+  const totalCap = EXTERNAL_MAX_RESULTS;
+  const flattened: ExternalProjectResult[] = [];
+  for (const r of results) {
+    if (flattened.length >= totalCap) break;
+    const remaining = totalCap - flattened.length;
+    if (r.summaries.length <= remaining) {
+      flattened.push(r);
+    } else {
+      flattened.push({
+        ...r,
+        summaries: r.summaries.slice(0, remaining),
+      });
+    }
+  }
+
+  return flattened;
+}
+
+/**
+ * Format external results as a supplemental section appended to
+ * the answer text.
+ *
+ * Format:
+ *   ---
+ *   From other projects:
+ *   [displayName]
+ *   - <summary1>
+ *   - <summary2>
+ *   ...
+ *   ---
+ *
+ * Private projects are never mentioned.
+ */
+function formatExternalContext(
+  externalResults: ExternalProjectResult[],
+  currentAnswer: string,
+): string {
+  if (externalResults.length === 0) {
+    return currentAnswer;
+  }
+  const lines: string[] = [];
+  for (const result of externalResults) {
+    lines.push(`[${result.displayName}]`);
+    for (const summary of result.summaries) {
+      lines.push(`- ${summary}`);
+    }
+  }
+  return `${currentAnswer}\n\n---\nFrom other projects:\n${lines.join("\n")}`;
+}
+
 /**
  * Run the narrow `recall(text)` pipeline. Defensive shape check
  * on `input.text`, then delegate to the controller.
@@ -246,6 +468,11 @@ export function resetStorageProvider(): void {
  * returns, and the run's final status + duration on exit. The
  * tracer is the existing non-throwing writer; trace failures
  * NEVER change the result and NEVER throw into the MCP path.
+ *
+ * Multi-project recall: after the local recall completes
+ * successfully (answered or no_memory), the current project is
+ * registered in the central registry, and external non-private
+ * projects are queried for supplemental context.
  */
 export async function handleRecall(input: unknown): Promise<RecallResult> {
   // Open the trace run at the public tool boundary. The helper
@@ -270,6 +497,7 @@ export async function handleRecall(input: unknown): Promise<RecallResult> {
     }
 
     const { handle: storage, ownsHandle } = storageProvider();
+    const currentProjectRoot = getProjectRootFromHandle(storage);
     let outcome: RecallOutcome;
     try {
       outcome = await runRecallController(storage, text, { trace });
@@ -298,7 +526,25 @@ export async function handleRecall(input: unknown): Promise<RecallResult> {
       }
     }
 
-    const result = formatOutcome(outcome);
+    // Register the current project after successful recall.
+    // Skip if the project is private.
+    if (!isProjectPrivate(currentProjectRoot)) {
+      registerProject(currentProjectRoot);
+    }
+
+    // Build the local result first.
+    let result = formatOutcome(outcome);
+
+    // Multi-project recall: append external context for answered
+    // or no_memory outcomes when external results are strong.
+    if (outcome.status === "answered" || outcome.status === "no_memory") {
+      const externalResults = queryExternalProjects(currentProjectRoot, text);
+      if (externalResults.length > 0) {
+        const updatedMessage = formatExternalContext(externalResults, result.message);
+        result = { ...result, message: updatedMessage };
+      }
+    }
+
     trace.recordOutput(result);
     trace.finish("ok");
     return result;
