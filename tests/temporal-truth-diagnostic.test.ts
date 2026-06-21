@@ -862,9 +862,11 @@ test("temporal-truth-diagnostic: end-to-end CLI on the real lexical baseline art
   // The temporal slice is the documented 26 queries.
   assert.equal(report.temporalQueryCount, 26);
   // The headline numbers match the prior diagnostic's
-  // finding (currentTruthAt1 = 12, sufficient = 12,
-  // wrong-current-truth = 12, insufficient = 2).
-  assert.equal(report.metrics.currentTruthAt1, 12);
+  // finding (currentTruthAt1 = 10, sufficient = 10,
+  // wrong-current-truth = 10, insufficient = 2).
+  // The newer-wins tie-breaker changed
+  // currentTruthAt1 from 12 to 10.
+  assert.equal(report.metrics.currentTruthAt1, 10);
   // The current-truth-in-top-K count is at least the
   // current-truth@1 count.
   assert.ok(report.metrics.currentTruthHitsAt5 >= report.metrics.currentTruthAt1);

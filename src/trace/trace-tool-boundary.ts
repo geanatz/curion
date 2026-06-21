@@ -101,6 +101,9 @@ export const RECALL_LEXICAL_RANKING_KIND =
 /** Kind tag for the recall selected-candidates stage event. */
 export const RECALL_SELECTED_CANDIDATES_KIND =
   "recall.selected-candidates" as const;
+/** Kind tag for the recall superseded-demotion stage event. */
+export const RECALL_SUPERSEDED_DEMOTION_KIND =
+  "recall.superseded-demotion" as const;
 
 // ---------------------------------------------------------------------------
 // Public types

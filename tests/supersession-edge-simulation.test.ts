@@ -779,13 +779,15 @@ test("supersession-edge-simulation: end-to-end CLI on the real lexical baseline 
   assert.ok(report.simulatedCurrentInGroupIds.length > 0);
   // The baseline variant's `currentTruthAt1`
   // matches the prior diagnostic's finding
-  // (12/26). The baseline variant is the
+  // (10/26). The newer-wins tie-breaker
+  // changed the baseline from 12 to 10.
+  // The baseline variant is the
   // `baseline-no-rerank` row.
   const baseline = report.variants.find(
     (v) => v.variant.id === "baseline-no-rerank",
   );
   assert.ok(baseline);
-  assert.equal(baseline!.metrics.baselineCurrentTruthAt1, 12);
+  assert.equal(baseline!.metrics.baselineCurrentTruthAt1, 10);
   // The oracle-promote-all variant should
   // produce a higher `currentTruthAt1` than
   // the baseline.
@@ -1364,12 +1366,13 @@ test("supersession-edge-simulation: per-query alignment with prior diagnostic on
     evals: artifact.evals,
     queries,
   });
-  // The baseline's currentTruthAt1 is 12
-  // (from the prior diagnostic's finding).
-  assert.equal(m.baselineCurrentTruthAt1, 12);
+  // The baseline's currentTruthAt1 is 10
+  // (newer-wins tie-breaker changed
+  // baseline from 12 to 10).
+  assert.equal(m.baselineCurrentTruthAt1, 10);
   // The re-ranker is a no-op, so the after
   // count is the same.
-  assert.equal(m.afterCurrentTruthAt1, 12);
+  assert.equal(m.afterCurrentTruthAt1, 10);
   assert.equal(m.currentTruthAt1Delta, 0);
 });
 

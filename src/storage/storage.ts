@@ -553,6 +553,98 @@ export function updateMemoryMetadata(
 }
 
 /**
+ * Add a `supersededBy` id to an existing memory row's relationship
+ * block without disturbing any other metadata keys.
+ *
+ * This is the safe, narrow seam the remember controller uses to
+ * back-patch an old row when a new memory explicitly supersedes it.
+ * The function:
+ *   - Reads the row's current `metadata` JSON.
+ *   - Appends the new id to the existing `supersededBy` array
+ *     (de-duplicated, bounded to 16 entries).
+ *   - Writes the updated metadata back via `updateMemoryMetadata`.
+ *   - Handles missing / malformed `relationship` blocks gracefully.
+ *   - Handles missing / deleted rows safely (no throw; no-op).
+ *
+ * No state transition, no raw text, no schema change.
+ */
+export function addSupersededByToMemory(
+  handle: StorageHandle,
+  id: number,
+  supersededById: number,
+): void {
+  if (typeof id !== "number" || !Number.isFinite(id) || id <= 0) return;
+  if (
+    typeof supersededById !== "number" ||
+    !Number.isFinite(supersededById) ||
+    supersededById <= 0
+  ) {
+    return;
+  }
+
+  const row = handle.db
+    .prepare("SELECT metadata FROM memories WHERE id = ?")
+    .get(id) as { metadata: string | null } | undefined;
+
+  if (!row) return; // row missing or deleted — safe no-op
+
+  let existingBlock: Record<string, unknown> = {};
+  if (typeof row.metadata === "string" && row.metadata.length > 0) {
+    try {
+      const parsed = JSON.parse(row.metadata) as Record<string, unknown>;
+      if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const rel = parsed.relationship;
+        if (rel !== null && typeof rel === "object" && !Array.isArray(rel)) {
+          existingBlock = { ...(rel as Record<string, unknown>) };
+        }
+      }
+    } catch {
+      // Malformed metadata: start with empty block.
+    }
+  }
+
+  const supersededByArr = Array.isArray(existingBlock.supersededBy)
+    ? (existingBlock.supersededBy as unknown[]).filter(
+        (x): x is number =>
+          typeof x === "number" && Number.isFinite(x) && x > 0,
+      )
+    : [];
+
+  // De-duplicate.
+  if (!supersededByArr.includes(supersededById)) {
+    supersededByArr.push(supersededById);
+  }
+
+  // Cap at 16.
+  if (supersededByArr.length > 16) {
+    supersededByArr.length = 16;
+  }
+
+  existingBlock.supersededBy = supersededByArr;
+
+  const updatedMetadata: Record<string, unknown> = {};
+  // Re-parse and preserve all existing metadata keys.
+  if (typeof row.metadata === "string" && row.metadata.length > 0) {
+    try {
+      const parsed = JSON.parse(row.metadata) as Record<string, unknown>;
+      if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+        for (const [k, v] of Object.entries(parsed)) {
+          if (k !== "relationship") {
+            updatedMetadata[k] = v;
+          }
+        }
+      }
+    } catch {
+      // Malformed: start fresh except for the relationship block we're writing.
+    }
+  }
+  updatedMetadata.relationship = existingBlock;
+
+  // Use the existing narrow update seam; it handles the re-read.
+  updateMemoryMetadata(handle, id, updatedMetadata);
+}
+
+/**
  * Close the storage handle. Safe to call multiple times.
  */
 export function closeStorage(handle: StorageHandle): void {

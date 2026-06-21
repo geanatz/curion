@@ -104,6 +104,8 @@
     "benchmark:retrieval:supersedes-promote-guard:no-write": "tsx src/benchmark/supersedes-promote-guard-runner.ts --no-write",
     "benchmark:retrieval:supersedes-promote-guard:with-evidence": "tsx src/benchmark/supersedes-promote-guard-runner.ts --semantic-evidence src/benchmark/data/false-abstention-damage-semantic-evidence.json",
     "test:supersedes-promote-guard": "node --import tsx --test tests/supersedes-promote-guard.test.ts",
+    "benchmark:retrieval:superseded-demotion-production": "tsx src/benchmark/superseded-demotion-production-runner.ts",
+    "benchmark:retrieval:superseded-demotion-production:no-write": "tsx src/benchmark/superseded-demotion-production-runner.ts --no-write",
     "benchmark:retrieval:held-out": "tsx src/benchmark/held-out-runner.ts --variant hybrid-dense --embedder stub-dense",
     "benchmark:retrieval:held-out:hybrid": "tsx src/benchmark/held-out-runner.ts --variant hybrid",
     "benchmark:retrieval:held-out:lexical": "tsx src/benchmark/held-out-runner.ts --variant lexical",

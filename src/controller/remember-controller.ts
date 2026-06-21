@@ -36,7 +36,9 @@ import {
   deriveRelationshipMetadata,
   type RelationshipMetadataFields,
 } from "../retrieval/relationship.js";
+import { detectSupersession } from "../retrieval/supersession.js";
 import {
+  addSupersededByToMemory,
   insertMemoryRecord,
   updateMemoryMetadata,
   MEMORY_KINDS,
@@ -398,6 +400,70 @@ export async function runRememberController(
     others: relatedSummaries,
     asOf: (options.now ?? Date.now)(),
   });
+
+  // -- 6c. Supersession detection (Phase I extension) ------------
+  // Run the supersession detector over a broader supersession-
+  // specific candidate set to find any memories the new candidate
+  // explicitly supersedes (e.g. "no longer use X, use Y instead;
+  // replaced by; superseded by").
+  //
+  // The supersession candidate set is derived from BOTH the raw
+  // input text AND the normalized candidate summary (memoryContent).
+  // This dual-text union ensures that topically similar memories
+  // (like a freshly-created same-topic policy) are included even
+  // when they don't lexically overlap with the raw input's dominant
+  // tokens (e.g. the old "MiniMax as default" policy doesn't
+  // overlap with "nvidia/nim" tokens in the raw input for the
+  // new NVIDIA policy update).
+  //
+  // We use topK=16 (RELATED_MEMORIES_MAX_TOP_K) to maximize
+  // candidate coverage for supersession detection, since the
+  // provider prompt token budget is not a concern here.
+  //
+  // The detector is pure, conservative, and returns null when
+  // uncertain. When it fires, we:
+  //   - Add `supersedes: [oldId, ...]` to the new row's block.
+  //   - Back-patch each superseded old row with
+  //     `supersededBy: [newId]`.
+  // The supersession signal contributes to `detectionConfidence`
+  // and can make a supersession-only block (no conflictsWith /
+  // olderVariantsOf) worth persisting.
+  // Pass rawInputText so the detector can use the user's explicit
+  // supersession language (e.g. "supersedes") even if the provider
+  // summary rephrased it (e.g. to "superseding").
+  const { memories: supersessionCandidates } = findRelatedMemories(
+    storage,
+    {
+      text: rawInput,
+      candidateText: memoryContent,
+      topK: 16,
+    },
+  );
+  const supersessionCandidateSummaries: SafeMemorySummary[] =
+    supersessionCandidates
+      .map(toSafeMemorySummary)
+      .filter((s): s is SafeMemorySummary => s !== null);
+
+  const supersession = detectSupersession({
+    candidate: candidateSummary,
+    others: supersessionCandidateSummaries,
+    rawInputText: rawInput,
+  });
+  if (supersession !== null && supersession.supersededIds.length > 0) {
+    // Merge supersession ids into the derived block.
+    derived.supersedes = supersession.supersededIds;
+    if (supersession.confidence > derived.detectionConfidence) {
+      derived.detectionConfidence = supersession.confidence;
+    }
+    // Back-patch each superseded old row: add supersededBy pointing
+    // to the new candidate's id. Safe for missing/deleted rows —
+    // `addSupersededByToMemory` is a no-op when the row does not
+    // exist.
+    for (const supersededId of supersession.supersededIds) {
+      addSupersededByToMemory(storage, supersededId, record.id);
+    }
+  }
+
   // The helper is append-only: it preserves the existing
   // metadata keys (tags / entities / classification / ...) and
   // only adds a `relationship` block when the derived block
@@ -405,10 +471,17 @@ export async function runRememberController(
   // derived block is empty (the MVP default) gets NO update
   // at all, keeping the persisted JSON byte-equal to pre-
   // Phase-B for the no-related-memories case.
-  const patched = buildPersistedMetadata(
-    record.metadata as Record<string, unknown>,
-    derived,
-  );
+  // Phase I extension: supersession-only blocks (no
+  // conflictsWith / olderVariantsOf) are now also considered
+  // meaningful and are persisted.
+  //
+  // Pass `existingMetadata` (not `record.metadata`) as the base
+  // for the new row's relationship block. `existingMetadata`
+  // is the clean controller-built object with no `relationship`
+  // key, ensuring the append-only invariant holds and a
+  // supersession-only block is written even if the storage
+  // layer returned a modified metadata object.
+  const patched = buildPersistedMetadata(existingMetadata, derived);
   const hasRelationshipKey =
     Object.prototype.hasOwnProperty.call(patched, "relationship") &&
     patched.relationship !== undefined;

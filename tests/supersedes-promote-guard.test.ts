@@ -625,7 +625,7 @@ test("supersedes-promote-guard: verdict is unsafe when regressionCount > 0", () 
     total: 26,
     cleanTotal: 19,
     fixtureAmbiguousTotal: 7,
-    baselineCurrentTruthAt1: 12,
+    baselineCurrentTruthAt1: 10,
     afterCurrentTruthAt1: 12,
     currentTruthAt1Delta: 0,
     currentTruthAt1RateDelta: 0,
@@ -679,10 +679,10 @@ test("supersedes-promote-guard: verdict is safe when currentTruthAt1Delta > 0 an
     total: 26,
     cleanTotal: 19,
     fixtureAmbiguousTotal: 7,
-    baselineCurrentTruthAt1: 12,
-    afterCurrentTruthAt1: 18,
-    currentTruthAt1Delta: 6,
-    currentTruthAt1RateDelta: 6 / 26,
+    baselineCurrentTruthAt1: 10,
+    afterCurrentTruthAt1: 15,
+    currentTruthAt1Delta: 5,
+    currentTruthAt1RateDelta: 5 / 26,
     baselineStaleTop1: 8,
     afterStaleTop1: 2,
     staleTop1Delta: -6,
@@ -725,7 +725,7 @@ test("supersedes-promote-guard: verdict is safe when currentTruthAt1Delta > 0 an
   };
   const { verdict, note } = computeGuardedRerankVerdict(m);
   assert.equal(verdict, "safe");
-  assert.match(note, /recovered 6 currentTruthAt1/);
+  assert.match(note, /recovered 5 currentTruthAt1/);
 });
 
 // ---------------------------------------------------------------------------
@@ -859,11 +859,13 @@ test("supersedes-promote-guard: end-to-end on the real lexical-baseline artifact
     "reranker-control-multi-anchor-aware-combined",
   );
   // The baseline + the reranker-control
-  // hit 12/26 baseline; the
-  // reranker-control reaches 18/26
-  // (the EXPERIMENT 8 result).
-  assert.equal(baseline.metrics.baselineCurrentTruthAt1, 12);
-  assert.equal(rerankerControl.metrics.afterCurrentTruthAt1, 18);
+  // hit 10/26 baseline (newer-wins tie-
+  // breaker changed from 12 to 10);
+  // the reranker-control reaches 15/26
+  // (the EXPERIMENT 8 result, updated
+  // for newer-wins tie-breaker).
+  assert.equal(baseline.metrics.baselineCurrentTruthAt1, 10);
+  assert.equal(rerankerControl.metrics.afterCurrentTruthAt1, 15);
   assert.equal(rerankerControl.metrics.regressionCount, 0);
   // The guarded-multi-anchor-linked-
   // expansion variant (PRIMARY
@@ -902,7 +904,7 @@ test("supersedes-promote-guard: end-to-end on the real lexical-baseline artifact
   assert.equal(guardedPrimary.verdict, "safe");
   // The guarded primary's
   // `afterCurrentTruthAt1` is the
-  // reranker-control's 18 (the +6
+  // reranker-control's 15 (the +5
   // recovery is preserved; the +2
   // recovery of Exp 9's candidate-
   // expansion step is LOST because the
@@ -910,7 +912,7 @@ test("supersedes-promote-guard: end-to-end on the real lexical-baseline artifact
   // `supersedes` promotions of INJECTED
   // candidates — this is the honest
   // trade-off).
-  assert.equal(guardedPrimary.metrics.afterCurrentTruthAt1, 18);
+  assert.equal(guardedPrimary.metrics.afterCurrentTruthAt1, 15);
 });
 
 test("supersedes-promote-guard: oracle diagnostic ceiling", () => {
@@ -941,7 +943,7 @@ test("supersedes-promote-guard: oracle diagnostic ceiling", () => {
   // promote` guard that blocks
   // `supersedes` promotions of injected
   // candidates above non-injected
-  // rank-1 lands at 18/26 (the
+  // rank-1 lands at 15/26 (the
   // reranker-control's level) with 0
   // regressions, regardless of whether
   // the guard consults
@@ -970,10 +972,11 @@ test("supersedes-promote-guard: oracle diagnostic ceiling", () => {
   assert.equal(oracle.metrics.regressionCount, 0);
   assert.equal(oracle.metrics.tempRateLimitRegressionCount, 0);
   // The oracle diagnostic also lands at
-  // 18/26 (the +2 is lost; the oracle
+  // 15/26 (the +2 is lost; the oracle
   // guard's hint does not help recover
-  // it).
-  assert.equal(oracle.metrics.afterCurrentTruthAt1, 18);
+  // it; newer-wins tie-breaker changed
+  // baseline from 12 to 10).
+  assert.equal(oracle.metrics.afterCurrentTruthAt1, 15);
 });
 
 test("supersedes-promote-guard: end-to-end CLI runs without error and writes an artifact", async () => {

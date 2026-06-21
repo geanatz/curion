@@ -47,6 +47,21 @@ export interface RelatedMemoryQuery {
   /** The user text the controller is about to analyze. */
   text: string;
   /**
+   * Optional secondary text to use alongside `text` for candidate
+   * selection. When provided, the seam runs lexical lookups with
+   * both texts and returns the union of results. This is useful
+   * for supersession detection where the normalized candidate
+   * summary may have different token overlap with related memories
+   * than the raw user input.
+   *
+   * Example: when updating "use X" to "use Y", the raw input
+   * tokens ("Y", "nvidia") may not overlap with the old memory
+   * ("X", "minimax"), but the normalized summary tokens ("default
+   * provider") do. Providing `candidateText` ensures the old
+   * memory is included in the candidate set.
+   */
+  candidateText?: string;
+  /**
    * Optional cap. Default `5`. The seam clamps any value to the
    * range `[1, RELATED_MEMORIES_MAX_TOP_K]` so a malformed
    * caller cannot bypass the bound.
@@ -126,15 +141,47 @@ function defaultRelatedMemoriesImpl(
   if (summaries.length === 0) {
     return { memories: [], reason: "no stored active memories" };
   }
-  const ranked = rankLexical(
-    query.text,
-    summaries.map((s: SafeMemorySummary) => ({
-      id: s.id,
-      text: s.memoryContent,
-      tags: s.tags,
-    })),
-    { topK },
-  );
+
+  const candidates = summaries.map((s: SafeMemorySummary) => ({
+    id: s.id,
+    text: s.memoryContent,
+    tags: s.tags,
+  }));
+
+  // When candidateText is provided, run lookups with both texts and
+  // union the results. This ensures topically similar memories that
+  // don't overlap lexically with the raw input (but do overlap with
+  // the normalized summary) are included in the candidate set.
+  let ranked: { id: number; score: number }[];
+  if (query.candidateText !== undefined && query.candidateText.length > 0) {
+    const rankedPrimary = rankLexical(query.text, candidates, {
+      topK: RELATED_MEMORIES_MAX_TOP_K,
+    });
+    const rankedSecondary = rankLexical(query.candidateText, candidates, {
+      topK: RELATED_MEMORIES_MAX_TOP_K,
+    });
+    // Union by id, keeping the higher score.
+    const scoreById = new Map<number, number>();
+    for (const r of rankedPrimary) {
+      scoreById.set(r.id, r.score);
+    }
+    for (const r of rankedSecondary) {
+      const existing = scoreById.get(r.id);
+      if (existing === undefined || r.score > existing) {
+        scoreById.set(r.id, r.score);
+      }
+    }
+    ranked = Array.from(scoreById.entries())
+      .map(([id, score]) => ({ id, score }))
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return b.id - a.id; // newer wins ties
+      })
+      .slice(0, topK);
+  } else {
+    ranked = rankLexical(query.text, candidates, { topK });
+  }
+
   if (ranked.length === 0) {
     return { memories: [], reason: "no related memories" };
   }
@@ -153,7 +200,12 @@ function defaultRelatedMemoriesImpl(
       kind: s.kind,
     });
   }
-  return { memories, reason: "lexical top-K" };
+  return {
+    memories,
+    reason: query.candidateText !== undefined
+      ? "lexical top-K (dual-text union)"
+      : "lexical top-K",
+  };
 }
 
 /**
