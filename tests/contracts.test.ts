@@ -28,10 +28,6 @@ import { logger } from "../src/logging/logger.ts";
 import { resolveCurionDir, CURION_DIRNAME, initStorage } from "../src/storage/storage.ts";
 import { SAFETY_FIXTURES } from "../src/safety/fixtures.ts";
 import { allVariants } from "../src/retrieval/variants.ts";
-import {
-  buildDefaultRegistry,
-  embedWithFallback,
-} from "../src/providers/provider-registry.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
@@ -279,38 +275,6 @@ test("retrieval variants return empty hits in Phase 1 skeleton", async () => {
   } finally {
     if (handle) handle.db.close();
     fs.rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
-test("provider registry exposes MiniMax primary + NVIDIA NIM fallback", async () => {
-  // Wipe env so we can observe the unconfigured path.
-  const orig = {
-    pri1: process.env.CURION_PROVIDER_PRIMARY_KEY,
-    pri2: process.env.MINIMAX_API_KEY,
-    fb1: process.env.CURION_PROVIDER_FALLBACK_KEY,
-    fb2: process.env.NVIDIA_NIM_API_KEY,
-  };
-  delete process.env.CURION_PROVIDER_PRIMARY_KEY;
-  delete process.env.MINIMAX_API_KEY;
-  delete process.env.CURION_PROVIDER_FALLBACK_KEY;
-  delete process.env.NVIDIA_NIM_API_KEY;
-  try {
-    const reg = buildDefaultRegistry();
-    assert.equal(reg.primary.name, "minimax");
-    assert.equal(reg.fallback.name, "nvidia-nim");
-    assert.equal(reg.primary.isConfigured(), false);
-    assert.equal(reg.fallback.isConfigured(), false);
-    const r = await embedWithFallback(reg, "hello");
-    // With no key, no provider returns a real vector; fallback policy
-    // returns the primary's stub.
-    assert.equal(r.provider, "minimax");
-    assert.equal(r.vector.length, 0);
-    assert.match(r.note ?? "", /no api key/i);
-  } finally {
-    for (const [k, v] of Object.entries(orig)) {
-      if (v === undefined) delete (process.env as Record<string, string | undefined>)[k];
-      else (process.env as Record<string, string>)[k] = v as string;
-    }
   }
 });
 

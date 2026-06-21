@@ -1,9 +1,25 @@
 {
   "name": "curion",
   "version": "0.1.0",
-  "private": true,
   "description": "Curion — project-local memory layer for AI agents",
   "type": "module",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/geanatz/curion"
+  },
+  "keywords": [
+    "mcp",
+    "memory",
+    "ai-agent",
+    "context",
+    "context-management",
+    "project-memory",
+    "nvidia-nim"
+  ],
+  "files": [
+    "dist"
+  ],
   "main": "dist/index.js",
   "bin": {
     "curion": "dist/index.js"

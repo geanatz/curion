@@ -4984,9 +4984,9 @@ src/
     types.ts              # embedding provider interface (skeleton)
     http-client.ts        # OpenAI-compatible chat-completions HTTP client
     memory-analysis.ts    # real provider adapter (primary + fallback + repair)
-    minimax.ts            # embedding provider skeleton (primary)
+    minimax.ts            # embedding provider skeleton (BYO-key, optional)
     nvidia-nim.ts         # embedding provider skeleton (fallback)
-    provider-registry.ts  # primary + fallback embedding selection
+
   safety/
     precheck.ts           # local secret / dump / junk classifier + summary redactor
     fixtures.ts           # safety fixture corpus
@@ -5050,4 +5050,4 @@ tests/
 
 ## License
 
-Private prototype. No license granted at this phase.
+Licensed under the Apache License, Version 2.0. See LICENSE for details.
