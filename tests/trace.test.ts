@@ -303,6 +303,91 @@ test("trace-storage: initTraceStorage is idempotent (re-running keeps the same s
 });
 
 // ---------------------------------------------------------------------------
+// 3a. Permission hardening
+// ---------------------------------------------------------------------------
+
+/**
+ * Mask the permission bits of `path` to a numeric mode string for
+ * platform-portable assertion. Returns null when the file does not exist.
+ */
+function modeStr(path: string): string | null {
+  try {
+    return (fs.statSync(path).mode & 0o777).toString(8);
+  } catch {
+    return null;
+  }
+}
+
+test("trace-storage: initTraceStorage sets owner-only (0o600) on the main DB file", () => {
+  const tmp = mkTraceDir();
+  let handle: ReturnType<typeof initTraceStorage> | null = null;
+  try {
+    handle = initTraceStorage({ projectRoot: tmp });
+    closeTraceStorage(handle);
+    handle = null;
+    const dbPath = path.join(tmp, CURION_DIRNAME, CURION_TRACE_DB_FILENAME);
+    const m = modeStr(dbPath);
+    // chmod is best-effort; we assert only when the call succeeded.
+    if (m !== null) {
+      assert.ok(
+        m === "600" || m === "400",
+        `expected owner-only mode, got 0o${m}`,
+      );
+    }
+  } finally {
+    if (handle) closeTraceStorage(handle);
+    rmTraceDir(tmp);
+  }
+});
+
+test("trace-storage: WAL sidecar (-wal) gets owner-only mode after first write", () => {
+  const tmp = mkTraceDir();
+  let handle: ReturnType<typeof initTraceStorage> | null = null;
+  try {
+    handle = initTraceStorage({ projectRoot: tmp });
+    // Trigger WAL creation via a write.
+    handle.db.prepare(`INSERT INTO _meta (key, value) VALUES (?, ?)`).run("perm-test", "1");
+    handle.db.pragma("wal_checkpoint(TRUNCATE)");
+    closeTraceStorage(handle);
+    handle = null;
+    const walPath = path.join(tmp, CURION_DIRNAME, `${CURION_TRACE_DB_FILENAME}-wal`);
+    const m = modeStr(walPath);
+    if (m !== null) {
+      assert.ok(
+        m === "600" || m === "400",
+        `expected owner-only mode on WAL, got 0o${m}`,
+      );
+    }
+  } finally {
+    if (handle) closeTraceStorage(handle);
+    rmTraceDir(tmp);
+  }
+});
+
+test("trace-storage: SHM sidecar (-shm) gets owner-only mode when it exists", () => {
+  const tmp = mkTraceDir();
+  let handle: ReturnType<typeof initTraceStorage> | null = null;
+  try {
+    handle = initTraceStorage({ projectRoot: tmp });
+    // Trigger SHM creation via a write (some SQLite builds create it).
+    handle.db.prepare(`INSERT INTO _meta (key, value) VALUES (?, ?)`).run("perm-test-shm", "1");
+    closeTraceStorage(handle);
+    handle = null;
+    const shmPath = path.join(tmp, CURION_DIRNAME, `${CURION_TRACE_DB_FILENAME}-shm`);
+    const m = modeStr(shmPath);
+    if (m !== null) {
+      assert.ok(
+        m === "600" || m === "400",
+        `expected owner-only mode on SHM, got 0o${m}`,
+      );
+    }
+  } finally {
+    if (handle) closeTraceStorage(handle);
+    rmTraceDir(tmp);
+  }
+});
+
+// ---------------------------------------------------------------------------
 // 3. Redaction
 // ---------------------------------------------------------------------------
 

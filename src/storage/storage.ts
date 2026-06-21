@@ -71,6 +71,13 @@ export function initStorage(config: StorageConfig = {}): StorageHandle {
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
 
+  // Harden file permissions: owner-only (0o600) on the main DB file
+  // and any SQLite sidecar files (-wal, -shm) created by the WAL
+  // journal. This is best-effort — chmod failures are logged and
+  // ignored so they cannot break operation. The .curion/ directory
+  // itself is already created with mode 0o700 above.
+  chmodSqliteFiles(dbPath);
+
   // Minimal Phase 1 schema. Intentionally no raw text column.
   //
   // MVP slice: extend the `memories` table with safe columns used by
@@ -940,4 +947,35 @@ function clampResolvedAt(v: unknown): number {
   if (typeof v !== "number" || !Number.isFinite(v)) return 0;
   if (v < 0) return 0;
   return Math.trunc(v);
+}
+
+// ---------------------------------------------------------------------------
+// Permission hardening
+// ---------------------------------------------------------------------------
+
+/**
+ * Set owner-only permissions (0o600) on the main SQLite database file
+ * and any WAL/SHM sidecar files that may exist alongside it.
+ *
+ * This is a best-effort, non-destructive call. If any chmod fails (e.g.
+ * the file does not exist yet, or the process lacks the ability to change
+ * permissions on the filesystem), the error is logged and swallowed so
+ * it cannot break database operation.
+ *
+ * The function is idempotent and safe to call multiple times. It targets
+ * only the three known SQLite sidecar suffixes; no other files in the
+ * directory are touched.
+ */
+function chmodSqliteFiles(dbPath: string): void {
+  const targets = [dbPath, `${dbPath}-wal`, `${dbPath}-shm`];
+  for (const p of targets) {
+    try {
+      fs.chmodSync(p, 0o600);
+    } catch (err) {
+      // Best-effort: file may not exist yet (WAL/SHM created on first
+      // write) or the filesystem may not support permissions (e.g. some
+      // container or networkFS setups). Log and continue.
+      logger.debug(`chmod ${p}: ${(err as Error).message}`);
+    }
+  }
 }
