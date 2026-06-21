@@ -118,8 +118,21 @@ import {
 } from "../retrieval/lexical.js";
 import {
   listActiveMemorySummaries,
+  listActiveMemorySummariesByFts5,
+  getEmbeddingsForMemories,
   type SafeMemorySummary,
 } from "../storage/storage.js";
+import {
+  createSemanticEmbedder,
+  type SemanticEmbedder,
+} from "../retrieval/semantic/embedder.js";
+import {
+  backfillMissingEmbeddings,
+} from "../retrieval/semantic/embed-on-remember.js";
+import {
+  scoreSemanticCandidates,
+} from "../retrieval/semantic/score.js";
+import { loadEnv } from "../config/env.js";
 
 export const RECALL_TOOL_NAME = "recall" as const;
 export const RECALL_TOOL_DESCRIPTION =
@@ -236,6 +249,14 @@ export interface RecallResult {
   coverage?: { topScore: number; supportingCount: number };
   /** Safety class, when `status === "rejected"`. */
   safetyClass?: string;
+  /**
+   * Source of the answer: "local" means from the current project's
+   * own memory; "cross_project" means the status was promoted to
+   * "answered" based on strong cross-project recall results.
+   * Unset when status is "no_memory" or when no meaningful
+   * cross-project evidence was found.
+   */
+  source?: "local" | "cross_project";
 }
 
 export interface StorageProviderHandle {
@@ -275,7 +296,10 @@ export function resetStorageProvider(): void {
 const EXTERNAL_RELEVANCE_THRESHOLD = 0.35;
 
 /** Maximum total external results to return. */
-const EXTERNAL_MAX_RESULTS = 3;
+const EXTERNAL_MAX_RESULTS = 5;
+
+/** Maximum results per project in cross-project recall. */
+const EXTERNAL_PER_PROJECT_MAX = 2;
 
 /**
  * Get the current project root from a storage handle.
@@ -284,6 +308,17 @@ const EXTERNAL_MAX_RESULTS = 3;
  */
 function getProjectRootFromHandle(handle: StorageHandle): string {
   return path.dirname(handle.dir);
+}
+
+/**
+ * A single candidate from an external project with its quality score.
+ */
+interface ExternalCandidate {
+  id: number;
+  summary: string;
+  /** 'lexical' or 'semantic' */
+  source: "lexical" | "semantic";
+  score: number;
 }
 
 /**
@@ -298,9 +333,14 @@ interface ExternalProjectResult {
 /**
  * Query a single external project for relevant memories.
  *
- * Opens the external project's storage, runs lexical search,
- * and returns top summaries. The storage handle is always closed
- * before returning.
+ * Opens the external project's storage, uses FTS5 to filter candidates
+ * by the query, then runs lexical ranking on the matched set. The
+ * storage handle is always closed before returning.
+ *
+ * FTS5 is the primary candidate filter — no arbitrary cap is used to
+ * exclude memories from consideration. When FTS5 returns no candidates,
+ * the function falls back to scanning the most recent memories to avoid
+ * dropping queries for rare terms not yet in the FTS5 index.
  *
  * Returns null if the project is inaccessible, private, or has
  * no relevant memories.
@@ -309,7 +349,7 @@ function queryExternalProject(
   projectRoot: string,
   displayName: string,
   query: string,
-): ExternalProjectResult | null {
+): { projectRoot: string; displayName: string; candidates: ExternalCandidate[] } | null {
   try {
     // Skip private projects.
     if (isProjectPrivate(projectRoot)) {
@@ -317,9 +357,24 @@ function queryExternalProject(
     }
     const externalHandle = initStorage({ projectRoot });
     try {
-      const candidates = listActiveMemorySummaries(externalHandle, {
-        limit: 50,
+      // Primary path: use FTS5 to filter candidates by the query.
+      // This ensures quality is not degraded for speed — only memories
+      // that actually match the query are retrieved.
+      let candidates = listActiveMemorySummariesByFts5(externalHandle, query, {
+        limit: 200,
       });
+
+      // Fallback: if FTS5 returns no candidates (e.g. rare terms not yet
+      // in the FTS5 index), scan the most recent memories by id DESC.
+      // This keeps semantic recall working for edge cases without
+      // reintroducing the removed 50-cap.
+      if (candidates.length === 0) {
+        candidates = listActiveMemorySummaries(externalHandle, {
+          limit: 200,
+          orderBy: "desc",
+        });
+      }
+
       if (candidates.length === 0) {
         return null;
       }
@@ -335,21 +390,23 @@ function queryExternalProject(
       if (ranked.length === 0) {
         return null;
       }
-      const idSet = new Set(ranked.map((r) => r.id));
-      const topSummaries = candidates
-        .filter((c) => idSet.has(c.id))
-        .sort((a, b) => {
-          const scoreA = ranked.find((r) => r.id === a.id)?.score ?? 0;
-          const scoreB = ranked.find((r) => r.id === b.id)?.score ?? 0;
-          if (scoreB !== scoreA) return scoreB - scoreA;
-          return b.id - a.id;
-        })
-        .slice(0, EXTERNAL_MAX_RESULTS)
-        .map((c) => c.memoryContent);
+      // Build candidates with lexical scores
+      const projectCandidates: ExternalCandidate[] = [];
+      for (const r of ranked) {
+        const c = candidates.find((c) => c.id === r.id);
+        if (c) {
+          projectCandidates.push({
+            id: c.id,
+            summary: c.memoryContent,
+            source: "lexical",
+            score: r.score,
+          });
+        }
+      }
       return {
         projectRoot,
         displayName,
-        summaries: topSummaries,
+        candidates: projectCandidates,
       };
     } finally {
       closeStorage(externalHandle);
@@ -364,19 +421,174 @@ function queryExternalProject(
 }
 
 /**
- * Run cross-project recall for the given query.
+ * Trace event kind for cross-project semantic scoring.
+ * Emitted when semantic cross-project recall is attempted.
+ */
+const RECALL_CROSS_PROJECT_SEMANTIC_KIND = "recall.cross-project-semantic" as const;
+
+/**
+ * Bounded backfill batch size per external project per recall call.
+ * Small to keep cross-project recall responsive.
+ */
+const EXTERNAL_BACKFILL_BATCH_PER_PROJECT = 5;
+
+/**
+ * Maximum total backfill across all external projects per recall call.
+ */
+const EXTERNAL_BACKFILL_TOTAL_CAP = 25;
+
+/**
+ * Minimum semantic score threshold for cross-project semantic candidates.
+ * Conservative to only surface strong semantic matches.
+ */
+const EXTERNAL_SEMANTIC_THRESHOLD = 0.4;
+
+/**
+ * Result from querying a single external project with semantic scoring,
+ * plus the number of embeddings backfilled in that project.
+ */
+interface ExternalProjectSemanticResult_ {
+  result: { projectRoot: string; displayName: string; candidates: ExternalCandidate[] } | null;
+  backfillCount: number;
+}
+
+/**
+ * Query a single external project with semantic scoring.
+ *
+ * Opens the external project's storage, runs bounded backfill,
+ * uses FTS5 to filter candidates by the query, then performs
+ * semantic-only scoring on the matched set. The storage handle
+ * is always closed before returning.
+ *
+ * FTS5 is the primary candidate filter for semantic retrieval as
+ * well — no arbitrary cap is used to exclude memories from
+ * consideration. When FTS5 returns no candidates, the function
+ * falls back to scanning the most recent memories by id DESC so
+ * that semantic recall still works for rare terms not yet in the
+ * FTS5 index.
+ *
+ * Returns { result: null, backfillCount: 0 } if the project is
+ * inaccessible, private, has no embeddings, or semantic scoring
+ * yields no results above threshold.
+ */
+async function queryExternalProjectSemantic(
+  projectRoot: string,
+  displayName: string,
+  query: string,
+  queryVec: number[],
+  embedder: SemanticEmbedder,
+): Promise<ExternalProjectSemanticResult_> {
+  try {
+    // Skip private projects.
+    if (isProjectPrivate(projectRoot)) {
+      return { result: null, backfillCount: 0 };
+    }
+    const externalHandle = initStorage({ projectRoot });
+    try {
+      // Run bounded backfill for this project.
+      const backfillCount = await backfillMissingEmbeddings(externalHandle, embedder, {
+        batchSize: EXTERNAL_BACKFILL_BATCH_PER_PROJECT,
+      });
+      if (backfillCount > 0) {
+        logger.debug(
+          `external semantic recall: backfilled ${backfillCount} embedding(s) in ${displayName}`,
+        );
+      }
+
+      // Primary path: use FTS5 to filter candidates by the query.
+      // Fallback: if FTS5 returns no candidates, scan the most
+      // recent memories by id DESC to keep semantic recall working
+      // for rare terms not yet indexed.
+      let candidates = listActiveMemorySummariesByFts5(externalHandle, query, {
+        limit: 200,
+      });
+      if (candidates.length === 0) {
+        candidates = listActiveMemorySummaries(externalHandle, {
+          limit: 200,
+          orderBy: "desc",
+        });
+      }
+
+      if (candidates.length === 0) {
+        return { result: null, backfillCount };
+      }
+
+      // Get embeddings for all candidates.
+      const allIds = candidates.map((c) => c.id);
+      const embeddings = getEmbeddingsForMemories(externalHandle, allIds);
+      if (embeddings.size === 0) {
+        return { result: null, backfillCount };
+      }
+
+      // Score candidates that have embeddings.
+      const semCandidates = Array.from(embeddings.values()).map((e) => ({
+        id: e.memoryId,
+        vec: e.vec,
+      }));
+      const semRanked = scoreSemanticCandidates(queryVec, semCandidates);
+
+      // Filter by threshold.
+      const aboveThreshold = semRanked.filter((r) => r.score >= EXTERNAL_SEMANTIC_THRESHOLD);
+      if (aboveThreshold.length === 0) {
+        return { result: null, backfillCount };
+      }
+
+      // Build candidates with semantic scores.
+      const projectCandidates: ExternalCandidate[] = [];
+      for (const r of aboveThreshold) {
+        const c = candidates.find((c) => c.id === r.id);
+        if (c) {
+          projectCandidates.push({
+            id: c.id,
+            summary: c.memoryContent,
+            source: "semantic",
+            score: r.score,
+          });
+        }
+      }
+
+      if (projectCandidates.length === 0) {
+        return { result: null, backfillCount };
+      }
+
+      return {
+        result: {
+          projectRoot,
+          displayName,
+          candidates: projectCandidates,
+        },
+        backfillCount,
+      };
+    } finally {
+      closeStorage(externalHandle);
+    }
+  } catch (err) {
+    // Inaccessible or corrupt project — skip silently.
+    logger.debug(
+      `external semantic recall: skipping ${projectRoot}: ${(err as Error).message}`,
+    );
+    return { result: null, backfillCount: 0 };
+  }
+}
+
+/**
+ * Run cross-project semantic recall for the given query.
  *
  * Queries all known non-private external projects (excluding the
- * current project) and returns aggregated results grouped by
+ * current project) using a shared embedder, performs semantic-only
+ * retrieval on each, and returns aggregated results grouped by
  * source project.
  *
- * Results are capped at `EXTERNAL_MAX_RESULTS` total summaries,
- * drawn from the highest-scoring external projects.
+ * A bounded backfill is run per project (up to EXTERNAL_BACKFILL_BATCH_PER_PROJECT
+ * memories per project, total cap EXTERNAL_BACKFILL_TOTAL_CAP across all).
+ *
+ * Returns candidates with semantic scores for merging with lexical results.
  */
-function queryExternalProjects(
+async function queryExternalProjectsSemantic(
   currentProjectRoot: string,
   query: string,
-): ExternalProjectResult[] {
+  embedder: SemanticEmbedder,
+): Promise<{ projectRoot: string; displayName: string; candidates: ExternalCandidate[] }[]> {
   const registered = listRegisteredProjects();
   if (registered.length === 0) {
     return [];
@@ -391,34 +603,227 @@ function queryExternalProjects(
     return [];
   }
 
-  const results: ExternalProjectResult[] = [];
+  // Embed the query once for all external projects.
+  const queryVec = await embedder.embed(query, "query");
+
+  // Track total backfill across all projects to respect the global cap.
+  let totalBackfill = 0;
+  const results: { projectRoot: string; displayName: string; candidates: ExternalCandidate[] }[] = [];
+
   for (const entry of eligible) {
-    const result = queryExternalProject(entry.projectRoot, entry.displayName, query);
-    if (result !== null && result.summaries.length > 0) {
+    // Stop backfill early if we've hit the global cap.
+    if (totalBackfill >= EXTERNAL_BACKFILL_TOTAL_CAP) {
+      break;
+    }
+    const { result, backfillCount } = await queryExternalProjectSemantic(
+      entry.projectRoot,
+      entry.displayName,
+      query,
+      queryVec,
+      embedder,
+    );
+    // Accumulate backfill count and enforce global cap before next project.
+    totalBackfill += backfillCount;
+    if (totalBackfill >= EXTERNAL_BACKFILL_TOTAL_CAP) {
+      totalBackfill = EXTERNAL_BACKFILL_TOTAL_CAP; // cap to avoid overshoot
+    }
+    if (result !== null && result.candidates.length > 0) {
       results.push(result);
     }
   }
 
-  // Sort by number of summaries descending, then by project displayName.
+  // Sort by top semantic score descending, then by project displayName.
   results.sort((a, b) => {
-    if (b.summaries.length !== a.summaries.length) {
-      return b.summaries.length - a.summaries.length;
+    const topScoreA = a.candidates.length > 0 ? a.candidates[0]!.score : 0;
+    const topScoreB = b.candidates.length > 0 ? b.candidates[0]!.score : 0;
+    if (topScoreB !== topScoreA) {
+      return topScoreB - topScoreA;
     }
     return a.displayName.localeCompare(b.displayName);
   });
 
-  // Cap total summaries.
+  return results;
+}
+
+/**
+ * Merge lexical and semantic external results.
+ *
+ * Combines candidates from both lexical and semantic passes, keeping
+ * the best candidates per project (up to EXTERNAL_PER_PROJECT_MAX)
+ * and then applying a global cap (EXTERNAL_MAX_RESULTS).
+ *
+ * Algorithm:
+ * 1. For each project, combine lexical and semantic candidates,
+ *    deduplicating by id (prefer the higher-scoring source).
+ * 2. Sort combined candidates per project by score descending.
+ * 3. Keep up to EXTERNAL_PER_PROJECT_MAX candidates per project.
+ * 4. Collect all candidates into a global pool.
+ * 5. Sort globally by score descending.
+ * 6. Apply global cap of EXTERNAL_MAX_RESULTS.
+ * 7. Group by project and format as ExternalProjectResult.
+ */
+function mergeExternalResults(
+  lexicalResults: { projectRoot: string; displayName: string; candidates: ExternalCandidate[] }[],
+  semanticResults: { projectRoot: string; displayName: string; candidates: ExternalCandidate[] }[],
+): ExternalProjectResult[] {
+  // Build a map of projectRoot -> { displayName, candidates }
+  const projectMap = new Map<string, { displayName: string; candidates: ExternalCandidate[] }>();
+
+  // Add lexical candidates
+  for (const lexResult of lexicalResults) {
+    const existing = projectMap.get(lexResult.projectRoot);
+    if (existing) {
+      // Merge candidates, deduplicating by id
+      for (const lexCand of lexResult.candidates) {
+        const existingIdx = existing.candidates.findIndex((c) => c.id === lexCand.id);
+        if (existingIdx === -1) {
+          existing.candidates.push(lexCand);
+        }
+        // If already exists, keep the one with higher score
+        else if (lexCand.score > existing.candidates[existingIdx]!.score) {
+          existing.candidates[existingIdx] = lexCand;
+        }
+      }
+    } else {
+      projectMap.set(lexResult.projectRoot, {
+        displayName: lexResult.displayName,
+        candidates: [...lexResult.candidates],
+      });
+    }
+  }
+
+  // Add semantic candidates
+  for (const semResult of semanticResults) {
+    const existing = projectMap.get(semResult.projectRoot);
+    if (existing) {
+      // Merge candidates, deduplicating by id
+      for (const semCand of semResult.candidates) {
+        const existingIdx = existing.candidates.findIndex((c) => c.id === semCand.id);
+        if (existingIdx === -1) {
+          existing.candidates.push(semCand);
+        }
+        // If already exists, keep the one with higher score
+        else if (semCand.score > existing.candidates[existingIdx]!.score) {
+          existing.candidates[existingIdx] = semCand;
+        }
+      }
+    } else {
+      projectMap.set(semResult.projectRoot, {
+        displayName: semResult.displayName,
+        candidates: [...semResult.candidates],
+      });
+    }
+  }
+
+  // Sort candidates within each project by score descending
+  for (const project of projectMap.values()) {
+    project.candidates.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return a.id - b.id;
+    });
+  }
+
+  // Collect all candidates from all projects into a global pool with project info
+  type ScoredCandidate = ExternalCandidate & { projectRoot: string; displayName: string };
+  const globalPool: ScoredCandidate[] = [];
+  for (const [projectRoot, project] of projectMap) {
+    // Keep up to EXTERNAL_PER_PROJECT_MAX per project
+    const topCandidates = project.candidates.slice(0, EXTERNAL_PER_PROJECT_MAX);
+    for (const cand of topCandidates) {
+      globalPool.push({ ...cand, projectRoot, displayName: project.displayName });
+    }
+  }
+
+  // Sort globally by score descending
+  globalPool.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    return a.id - b.id;
+  });
+
+  // Apply global cap
+  const cappedCandidates = globalPool.slice(0, EXTERNAL_MAX_RESULTS);
+
+  // Group by project and format as ExternalProjectResult
+  const resultByProject = new Map<string, ExternalProjectResult>();
+  for (const cand of cappedCandidates) {
+    const existing = resultByProject.get(cand.projectRoot);
+    if (existing) {
+      existing.summaries.push(cand.summary);
+    } else {
+      resultByProject.set(cand.projectRoot, {
+        projectRoot: cand.projectRoot,
+        displayName: cand.displayName,
+        summaries: [cand.summary],
+      });
+    }
+  }
+
+  // Return as array, sorted by displayName for stable output
+  return Array.from(resultByProject.values()).sort((a, b) =>
+    a.displayName.localeCompare(b.displayName)
+  );
+}
+
+/**
+ * Run cross-project recall for the given query.
+ *
+ * Queries all known non-private external projects (excluding the
+ * current project) and returns candidates with lexical scores.
+ *
+ * Returns candidates with lexical scores for merging with semantic results.
+ * Results are capped at EXTERNAL_MAX_RESULTS total summaries to maintain
+ * conservative behavior.
+ */
+function queryExternalProjects(
+  currentProjectRoot: string,
+  query: string,
+): { projectRoot: string; displayName: string; candidates: ExternalCandidate[] }[] {
+  const registered = listRegisteredProjects();
+  if (registered.length === 0) {
+    return [];
+  }
+
+  // Filter to eligible projects: non-private, not current.
+  const eligible = registered.filter(
+    (entry: RegistryEntry) =>
+      entry.projectRoot !== currentProjectRoot && !isProjectPrivate(entry.projectRoot),
+  );
+  if (eligible.length === 0) {
+    return [];
+  }
+
+  const results: { projectRoot: string; displayName: string; candidates: ExternalCandidate[] }[] = [];
+  for (const entry of eligible) {
+    const result = queryExternalProject(entry.projectRoot, entry.displayName, query);
+    if (result !== null && result.candidates.length > 0) {
+      results.push(result);
+    }
+  }
+
+  // Sort by top lexical score descending, then by project displayName.
+  results.sort((a, b) => {
+    const topScoreA = a.candidates.length > 0 ? a.candidates[0]!.score : 0;
+    const topScoreB = b.candidates.length > 0 ? b.candidates[0]!.score : 0;
+    if (topScoreB !== topScoreA) {
+      return topScoreB - topScoreA;
+    }
+    return a.displayName.localeCompare(b.displayName);
+  });
+
+  // Cap total candidates to maintain conservative behavior.
+  // Flatten and cap: take up to EXTERNAL_MAX_RESULTS total candidates,
+  // preferring higher-scoring projects.
   const totalCap = EXTERNAL_MAX_RESULTS;
-  const flattened: ExternalProjectResult[] = [];
+  const flattened: { projectRoot: string; displayName: string; candidates: ExternalCandidate[] }[] = [];
   for (const r of results) {
     if (flattened.length >= totalCap) break;
     const remaining = totalCap - flattened.length;
-    if (r.summaries.length <= remaining) {
+    if (r.candidates.length <= remaining) {
       flattened.push(r);
     } else {
       flattened.push({
         ...r,
-        summaries: r.summaries.slice(0, remaining),
+        candidates: r.candidates.slice(0, remaining),
       });
     }
   }
@@ -444,6 +849,7 @@ function queryExternalProjects(
 function formatExternalContext(
   externalResults: ExternalProjectResult[],
   currentAnswer: string,
+  baseMessage?: string,
 ): string {
   if (externalResults.length === 0) {
     return currentAnswer;
@@ -455,7 +861,8 @@ function formatExternalContext(
       lines.push(`- ${summary}`);
     }
   }
-  return `${currentAnswer}\n\n---\nFrom other projects:\n${lines.join("\n")}`;
+  const prefix = baseMessage !== undefined ? baseMessage : currentAnswer;
+  return `${prefix}\n\n---\nFrom other projects:\n${lines.join("\n")}`;
 }
 
 /**
@@ -498,9 +905,63 @@ export async function handleRecall(input: unknown): Promise<RecallResult> {
 
     const { handle: storage, ownsHandle } = storageProvider();
     const currentProjectRoot = getProjectRootFromHandle(storage);
+
+    // Load env for semantic config
+    const env = loadEnv();
+
+    // Semantic embedder and options (created only when semanticEnabled)
+    let semanticEmbedder: SemanticEmbedder | undefined;
+    const semanticOptions: {
+      semanticEnabled: boolean;
+      semanticEmbedder?: SemanticEmbedder;
+    } = { semanticEnabled: false };
+
+    // Run backfill and prepare embedder when semantic is enabled.
+    // Backfill is non-fatal and bounded to avoid startup stalls.
+    if (env.semanticEnabled) {
+      try {
+        const embedder = await createSemanticEmbedder({
+          enabled: true,
+          allowRemote: env.semanticAllowRemote,
+          cacheDir: env.semanticCacheDir,
+          modelId: env.semanticModelId,
+        });
+        semanticEmbedder = embedder;
+
+        // Bounded backfill: default 25 memories per recall call to stay fast.
+        // The backfill processes memories missing embeddings in batches,
+        // stopping after the first partial batch to keep recall responsive.
+        const backfillLimit = 25;
+        const backfillResult = await backfillMissingEmbeddings(
+          storage,
+          embedder,
+          { batchSize: backfillLimit },
+        );
+        if (backfillResult > 0) {
+          logger.debug(
+            `recall: backfilled ${backfillResult} missing embedding(s) before semantic recall`,
+          );
+        }
+      } catch (err) {
+        // Non-fatal: if embedder creation or backfill fails, fall back to lexical.
+        logger.debug(
+          `recall: semantic setup failed: ${(err as Error).message}; falling back to lexical`,
+        );
+        // semanticEnabled stays false, semanticEmbedder stays undefined
+      }
+    }
+
+    if (semanticEmbedder) {
+      semanticOptions.semanticEnabled = true;
+      semanticOptions.semanticEmbedder = semanticEmbedder;
+    }
+
     let outcome: RecallOutcome;
     try {
-      outcome = await runRecallController(storage, text, { trace });
+      outcome = await runRecallController(storage, text, {
+        trace,
+        ...semanticOptions,
+      });
     } catch (err) {
       // Unexpected throw — log and surface a provider_error outcome.
       const msg = err instanceof Error ? err.message : String(err);
@@ -537,11 +998,94 @@ export async function handleRecall(input: unknown): Promise<RecallResult> {
 
     // Multi-project recall: append external context for answered
     // or no_memory outcomes when external results are strong.
+    // When semantic is enabled with a ready embedder, also run
+    // semantic cross-project retrieval and merge with lexical results.
     if (outcome.status === "answered" || outcome.status === "no_memory") {
-      const externalResults = queryExternalProjects(currentProjectRoot, text);
-      if (externalResults.length > 0) {
-        const updatedMessage = formatExternalContext(externalResults, result.message);
+      const lexicalResults = queryExternalProjects(currentProjectRoot, text);
+      let semanticResults: { projectRoot: string; displayName: string; candidates: ExternalCandidate[] }[] = [];
+      let crossProjectStats: {
+        projectsTouched: number;
+        semanticCandidates: number;
+        semanticResultsAdded: number;
+      } | undefined;
+
+      // Run semantic cross-project if embedder is available.
+      if (semanticEmbedder && semanticEmbedder.metadata.status === "ready") {
+        try {
+          semanticResults = await queryExternalProjectsSemantic(
+            currentProjectRoot,
+            text,
+            semanticEmbedder,
+          );
+          crossProjectStats = {
+            projectsTouched: semanticResults.length,
+            semanticCandidates: 0, // not easily tracked without more instrumentation
+            semanticResultsAdded: semanticResults.length,
+          };
+        } catch (err) {
+          // Non-fatal: fall back to lexical-only cross-project.
+          logger.debug(
+            `recall: cross-project semantic failed: ${(err as Error).message}; falling back to lexical-only`,
+          );
+          semanticResults = [];
+        }
+      }
+
+      // Merge lexical and semantic results.
+      // Prefer lexical when both fire to maintain conservative behavior.
+      // Semantic results are additive only when they don't duplicate lexical.
+      const mergedResults = mergeExternalResults(lexicalResults, semanticResults);
+
+      if (mergedResults.length > 0) {
+        // When outcome.status is "no_memory" and cross-project results are
+        // appended, use "Based on cross-project memory:" as the prefix instead
+        // of the default "No relevant memory found." text.
+        const updatedMessage = outcome.status === "no_memory"
+          ? formatExternalContext(mergedResults, result.message, "Based on cross-project memory:")
+          : formatExternalContext(mergedResults, result.message);
         result = { ...result, message: updatedMessage };
+
+        // Option 2 (spec): promote status to "answered" when:
+        //   - local recall returned no_memory AND
+        //   - merged cross-project section is non-empty AND
+        //   - at least one cross-project candidate is "strong"
+        //     (i.e., passed the relevant external threshold).
+        // The threshold check is already applied inside each query path
+        // (lexical: EXTERNAL_RELEVANCE_THRESHOLD=0.35,
+        //  semantic: EXTERNAL_SEMANTIC_THRESHOLD=0.4), so any candidate
+        // present in mergedResults already passed its threshold.
+        // We conservatively check that at least one candidate exists.
+        if (
+          outcome.status === "no_memory" &&
+          mergedResults.length > 0 &&
+          // mergedResults is non-empty; verify it has at least one
+          // candidate with a score (strong enough to pass threshold).
+          mergedResults.some((r) => r.summaries.length > 0)
+        ) {
+          result = {
+            ...result,
+            status: "answered",
+            source: "cross_project",
+            // The cross-project section is already appended to message
+            // above; the answer field is the cross-project content.
+            answer: updatedMessage,
+          };
+        }
+      }
+
+      // When local recall was already "answered", set source to "local".
+      if (outcome.status === "answered") {
+        result = { ...result, source: "local" };
+      }
+
+      // Emit trace event for cross-project semantic scoring.
+      if (crossProjectStats !== undefined) {
+        trace.recordStage(RECALL_CROSS_PROJECT_SEMANTIC_KIND, {
+          projectsTouched: crossProjectStats.projectsTouched,
+          semanticResultsAdded: crossProjectStats.semanticResultsAdded,
+          lexicalResultsCount: lexicalResults.length,
+          semanticResultsCount: semanticResults.length,
+        });
       }
     }
 

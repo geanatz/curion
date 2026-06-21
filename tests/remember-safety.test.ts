@@ -48,6 +48,10 @@ import {
   setStorageProvider as setRecallStorageProvider,
   resetStorageProvider as resetRecallStorageProvider,
 } from "../src/tools/recall.ts";
+import {
+  setListRegisteredProjectsStub,
+  resetListRegisteredProjectsStub,
+} from "../src/config/registry.ts";
 import { buildServer, PUBLIC_TOOL_NAMES } from "../src/server.ts";
 import { classifyInput } from "../src/safety/precheck.ts";
 
@@ -810,6 +814,7 @@ test("recall handler: safe / unsafe input both surface no_memory with no relevan
   const { tmp, handle } = mkStorage();
   try {
     setRecallStorageProvider(() => ({ handle, ownsHandle: false }));
+    setListRegisteredProjectsStub(() => []);
     try {
       const r1 = await handleRecall({ text: "anything" });
       assert.equal(r1.status, "no_memory");
@@ -821,6 +826,7 @@ test("recall handler: safe / unsafe input both surface no_memory with no relevan
       assert.equal(r2.message, NO_RELEVANT_MEMORY);
     } finally {
       resetRecallStorageProvider();
+      resetListRegisteredProjectsStub();
     }
   } finally {
     rmStorage(tmp, handle);

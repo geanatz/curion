@@ -188,8 +188,44 @@ export function unregisterProject(projectRoot: string): void {
  *
  * Returns an array of RegistryEntry in no particular order.
  * Returns empty array if the registry is missing or malformed.
+ *
+ * Test hook: when `setListRegisteredProjectsStub` has been called,
+ * the stub is used instead of the real registry, enabling isolated
+ * unit tests that are not affected by the developer's real
+ * `~/.curion/registry.json`.
  */
 export function listRegisteredProjects(): RegistryEntry[] {
+  if (listRegisteredProjectsStub !== null) {
+    return listRegisteredProjectsStub();
+  }
   const registry = readRegistry();
   return Object.values(registry.projects);
+}
+
+// ---------------------------------------------------------------------------
+// Test stubs
+// ---------------------------------------------------------------------------
+
+/**
+ * Test hook: override `listRegisteredProjects` for isolated unit tests.
+ * Production code does not call this.
+ */
+let listRegisteredProjectsStub: (() => RegistryEntry[]) | null = null;
+
+/**
+ * Test hook: override `listRegisteredProjects`.
+ * Production code does not call this.
+ */
+export function setListRegisteredProjectsStub(
+  stub: () => RegistryEntry[],
+): void {
+  listRegisteredProjectsStub = stub;
+}
+
+/**
+ * Test hook: reset `listRegisteredProjects` to the real implementation.
+ * Production code does not call this.
+ */
+export function resetListRegisteredProjectsStub(): void {
+  listRegisteredProjectsStub = null;
 }

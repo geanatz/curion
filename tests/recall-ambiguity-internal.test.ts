@@ -92,6 +92,10 @@ import {
   setStorageProvider as setRecallStorageProvider,
   resetStorageProvider as resetRecallStorageProvider,
 } from "../src/tools/recall.ts";
+import {
+  setListRegisteredProjectsStub,
+  resetListRegisteredProjectsStub,
+} from "../src/config/registry.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -685,6 +689,7 @@ test("public handleRecall: no_memory path is unchanged (no internalAmbiguity fie
   const { tmp, handle } = mkStorage();
   try {
     setRecallStorageProvider(() => ({ handle, ownsHandle: false }));
+    setListRegisteredProjectsStub(() => []);
     try {
       // No stored memories => the controller short-circuits
       // to `no_memory`. The public message must be the
@@ -711,6 +716,7 @@ test("public handleRecall: no_memory path is unchanged (no internalAmbiguity fie
       }
     } finally {
       resetRecallStorageProvider();
+      resetListRegisteredProjectsStub();
     }
   } finally {
     rmStorage(tmp, handle);
@@ -1076,6 +1082,7 @@ test("Phase D: no_memory outcome is unchanged (no prefix, no note)", async () =>
   const { tmp, handle } = mkStorage();
   try {
     setRecallStorageProvider(() => ({ handle, ownsHandle: false }));
+    setListRegisteredProjectsStub(() => []);
     try {
       // No stored memories => the controller short-circuits
       // to `no_memory`. The public message must be the
@@ -1087,6 +1094,7 @@ test("Phase D: no_memory outcome is unchanged (no prefix, no note)", async () =>
       assert.ok(!r.message.startsWith("Note:"));
     } finally {
       resetRecallStorageProvider();
+      resetListRegisteredProjectsStub();
     }
   } finally {
     rmStorage(tmp, handle);

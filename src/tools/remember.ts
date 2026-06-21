@@ -42,12 +42,19 @@ import {
   closeStorage,
   type StorageHandle,
 } from "../storage/storage.js";
+import {
+  createSemanticEmbedder,
+} from "../retrieval/semantic/embedder.js";
+import {
+  embedOnRemember,
+} from "../retrieval/semantic/embed-on-remember.js";
 import { logger } from "../logging/logger.js";
 import { startToolBoundaryTrace } from "../trace/index.js";
 import { z } from "zod";
 import path from "node:path";
 import { registerProject } from "../config/registry.js";
 import { isProjectPrivate } from "../config/project-config.js";
+import { loadEnv } from "../config/env.js";
 
 export const REMEMBER_TOOL_NAME = "remember" as const;
 export const REMEMBER_TOOL_DESCRIPTION =
@@ -201,9 +208,42 @@ export async function handleRemember(input: unknown): Promise<RememberResult> {
 
     const { handle: storage, ownsHandle } = storageProvider();
     const currentProjectRoot = getProjectRootFromHandle(storage);
+    const env = loadEnv();
     let outcome: RememberOutcome;
     try {
       outcome = await runRememberController(storage, text);
+
+      // After successful save, generate and store semantic embedding.
+      // This must happen while the storage handle is still open.
+      // Embedding failures are non-fatal — the memory is already saved.
+      // Only attempt when semantic retrieval is enabled via env config.
+      if (outcome.status === "saved" && env.semanticEnabled) {
+        try {
+          const embedder = await createSemanticEmbedder({
+            enabled: true,
+            allowRemote: env.semanticAllowRemote,
+            cacheDir: env.semanticCacheDir,
+            modelId: env.semanticModelId,
+          });
+          const embedResult = await embedOnRemember(
+            storage,
+            embedder,
+            outcome.record.id,
+            outcome.record.memoryContent,
+            outcome.record.modelId ?? undefined,
+          );
+          if (!embedResult.stored) {
+            logger.debug(
+              `remember: embedding failed: ${embedResult.error ?? "unknown"}`,
+            );
+          }
+        } catch (err) {
+          // Non-fatal: embedding failure should not break the save outcome.
+          logger.debug(
+            `remember: embedding threw: ${(err as Error).message}`,
+          );
+        }
+      }
     } catch (err) {
       // Unexpected throw — log and surface a provider_error outcome.
       const msg = err instanceof Error ? err.message : String(err);

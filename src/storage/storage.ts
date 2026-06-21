@@ -123,6 +123,17 @@ export function initStorage(config: StorageConfig = {}): StorageHandle {
   ensureColumn(db, "memories", "metadata", "TEXT");
   ensureColumn(db, "memories", "updated_at", "INTEGER");
 
+  // Embeddings table columns (Phase 3 semantic retrieval)
+  // model_id: which embedder model produced the embedding
+  // schema_version: embedding schema version for migrations
+  // summary_hash: hash of the memory summary for change detection
+  // created_at / updated_at: timestamps
+  ensureColumn(db, "embeddings", "model_id", "TEXT");
+  ensureColumn(db, "embeddings", "schema_version", "TEXT NOT NULL DEFAULT 'v1'");
+  ensureColumn(db, "embeddings", "summary_hash", "TEXT");
+  ensureColumn(db, "embeddings", "created_at", "INTEGER NOT NULL");
+  ensureColumn(db, "embeddings", "updated_at", "INTEGER NOT NULL");
+
   // FTS5 is part of the retrieval variant set. We create the virtual
   // table on top of a stub columns; raw text persistence is gated by
   // the `remember` tool which currently refuses to write.
@@ -676,10 +687,10 @@ export function closeStorage(handle: StorageHandle): void {
  * inherently safe; the explicit projection here is defense in depth
  * against future schema changes that might add sensitive columns.
  *
- * Order: oldest first (ascending `id`). This is stable across calls
- * and is the same order the controller will rank in. The retrieval
- * ranking layer applies its own scoring; this function does no
- * scoring.
+ * Order: ascending `id` (oldest first) by default. Pass
+ * `orderBy: 'desc'` to reverse the order (newest first). The
+ * retrieval ranking layer applies its own scoring; this function
+ * does no scoring.
  *
  * Limit defaults to 200 to keep the working set bounded for the
  * recall MVP. The recall controller will re-rank this list and pick
@@ -687,16 +698,17 @@ export function closeStorage(handle: StorageHandle): void {
  */
 export function listActiveMemorySummaries(
   handle: StorageHandle,
-  options: { limit?: number } = {},
+  options: { limit?: number; orderBy?: "asc" | "desc" } = {},
 ): SafeMemorySummary[] {
   const limit = options.limit ?? 200;
+  const order = options.orderBy === "desc" ? "DESC" : "ASC";
   // Only ever select the safe columns. Never SELECT *.
   const rows = handle.db
     .prepare(
       `SELECT id, kind, state, summary, confidence, metadata
          FROM memories
          WHERE state = 'active'
-         ORDER BY id ASC
+         ORDER BY id ${order}
          LIMIT ?`,
     )
     .all(limit) as Array<{
@@ -748,6 +760,145 @@ export function listActiveMemorySummaries(
     });
   }
   return out;
+}
+
+/**
+ * Minimal FTS5 query sanitizer for storage-layer use.
+ *
+ * Strips FTS5 special operators (AND, OR, NOT, *, ", -, etc.) and
+ * returns a safe query string suitable for use in a `MATCH ?`
+ * expression. This prevents injection through the query parameter
+ * while preserving ordinary word tokens.
+ *
+ * Hyphens are replaced with spaces because FTS5 interprets hyphen
+ * as the NOT operator (e.g. "semantic-term" → "semantic AND NOT term").
+ *
+ * Returns an empty string if the sanitized result would be empty.
+ *
+ * Named `cleanFts5Query` to avoid any symbol collision with the
+ * benchmark-only sanitizer in `src/benchmark/variants/fts5.ts`.
+ */
+function cleanFts5Query(query: string): string {
+  // FTS5 query language characters we need to guard against:
+  //   "  -  ( ) * AND OR NOT NEAR :
+  // We replace hyphens with spaces (FTS5 interprets hyphen as NOT).
+  // We strip everything else that is not a word character, apostrophe,
+  // or basic unicode letter/number. This leaves plain tokens intact.
+  // Strategy: replace each run of forbidden chars with a single space,
+  // then trim. An empty result means the query had no usable tokens.
+  const stripped = query
+    .replace(/-/g, " ") // Replace hyphens with spaces first
+    .replace(/[^a-zA-Z0-9'’\u0080-\uFFFF]+/g, " ")
+    .trim();
+  // Collapse multiple spaces back to one.
+  return stripped.replace(/\s+/g, " ");
+}
+
+/**
+ * List active memory summaries matched by an FTS5 full-text query.
+ *
+ * This is the primary candidate filter for cross-project recall.
+ * Instead of scanning all memories with a hard cap, we use the
+ * `memories_fts` virtual table (already kept in sync via triggers)
+ * to retrieve only memories whose `terms` content matches the query.
+ *
+ * The FTS5 `MATCH` is the primary filter; no arbitrary cap is
+ * applied to exclude memories from consideration. The result is
+ * then joined back to `memories` to retrieve the safe columns.
+ *
+ * Ordering is deterministic by FTS5 rank (bm25). When FTS5 returns
+ * no candidates and a fallback is needed (e.g. rare terms not in
+ * the index), callers should fall back to scanning a small recent
+ * set via `listActiveMemorySummaries` with an appropriate limit.
+ *
+ * @param handle - The storage handle.
+ * @param query - Raw user query; sanitized before passing to FTS5.
+ * @param options - Optional limit (default 200).
+ * @returns Matched `SafeMemorySummary[]`, or an empty array if FTS5
+ *          is unavailable or the query yields no matches.
+ */
+export function listActiveMemorySummariesByFts5(
+  handle: StorageHandle,
+  query: string,
+  options: { limit?: number } = {},
+): SafeMemorySummary[] {
+  const limit = options.limit ?? 200;
+  const sanitized = cleanFts5Query(query);
+  if (sanitized.length === 0) {
+    // No usable tokens — return empty rather than running an
+    // empty-pattern MATCH that would match everything.
+    return [];
+  }
+  // FTS5 MATCH: use the sanitized query as-is. The sanitizer
+  // removed all FTS5 operators, so this is safe. FTS5 will
+  // tokenize the query and return documents containing those tokens.
+  // We use a subquery approach because FTS5 MATCH does not work
+  // reliably in a JOIN's WHERE clause with the FTS5 virtual table.
+  try {
+    const rows = handle.db
+      .prepare(
+        `SELECT m.id, m.kind, m.state, m.summary, m.confidence, m.metadata
+           FROM memories m
+          WHERE m.state = 'active'
+            AND m.id IN (
+              SELECT fts.memory_id
+                FROM memories_fts fts
+               WHERE fts.terms MATCH ?
+            )
+          ORDER BY m.id ASC
+          LIMIT ?`,
+      )
+      .all(sanitized, limit) as Array<{
+        id: number;
+        kind: string;
+        state: string;
+        summary: string | null;
+        confidence: number | null;
+        metadata: string | null;
+      }>;
+    const out: SafeMemorySummary[] = [];
+    for (const r of rows) {
+      if (typeof r.summary !== "string" || r.summary.length === 0) continue;
+      let tags: string[] = [];
+      let classification: string | null = null;
+      if (typeof r.metadata === "string" && r.metadata.length > 0) {
+        try {
+          const parsed = JSON.parse(r.metadata) as Record<string, unknown>;
+          if (Array.isArray(parsed.tags)) {
+            tags = (parsed.tags as unknown[])
+              .filter((t): t is string => typeof t === "string")
+              .slice(0, 16);
+          }
+          if (typeof parsed.classification === "string") {
+            classification = parsed.classification;
+          }
+        } catch {
+          // Malformed metadata: treat as no tags / no classification.
+        }
+      }
+      out.push({
+        id: r.id,
+        kind: MEMORY_KINDS.includes(r.kind as MemoryKind)
+          ? (r.kind as MemoryKind)
+          : "finding",
+        state: MEMORY_STATES.includes(r.state as MemoryState)
+          ? (r.state as MemoryState)
+          : "active",
+        memoryContent: r.summary,
+        tags,
+        classification,
+        confidence: r.confidence,
+      });
+    }
+    return out;
+  } catch (err) {
+    // FTS5 is part of SQLite; if the MATCH fails (e.g. malformed
+    // query after sanitization, or FTS5 unavailable), return empty.
+    logger.debug(
+      `listActiveMemorySummariesByFts5: FTS5 query failed: ${(err as Error).message}`,
+    );
+    return [];
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -947,6 +1098,176 @@ function clampResolvedAt(v: unknown): number {
   if (typeof v !== "number" || !Number.isFinite(v)) return 0;
   if (v < 0) return 0;
   return Math.trunc(v);
+}
+
+// ---------------------------------------------------------------------------
+// Embedding storage (Phase 3 semantic retrieval)
+// ---------------------------------------------------------------------------
+
+/**
+ * Persisted embedding record shape.
+ *
+ * Stores a dense vector embedding for a memory, produced by a semantic
+ * embedder. The vector is stored as a binary blob (Float64Array bytes).
+ * The `summaryHash` enables change detection: if a memory's summary
+ * is edited, its embedding can be regenerated.
+ */
+export interface EmbeddingRecord {
+  memoryId: number;
+  dim: number;
+  vec: number[];
+  modelId: string;
+  summaryHash: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/**
+ * Store an embedding for a memory.
+ *
+ * Uses INSERT OR REPLACE so updating an existing embedding for the same
+ * memory_id replaces the old row. This is intentional: the ONNX model
+ * may change, so a fresh embedding should overwrite an stale one.
+ *
+ * @param handle - The storage handle.
+ * @param input - Embedding fields.
+ * @returns The stored record, or null if storage failed (e.g. FK violation).
+ */
+export function storeEmbedding(
+  handle: StorageHandle,
+  input: {
+    memoryId: number;
+    dim: number;
+    vec: number[];
+    modelId: string;
+    summaryHash: string;
+  },
+): EmbeddingRecord | null {
+  try {
+    const now = Date.now();
+    // Serialize float64 vector as a binary Buffer.
+    const vecBuf = Buffer.from(new Float64Array(input.vec).buffer);
+    handle.db
+      .prepare(
+        `INSERT OR REPLACE INTO embeddings
+           (memory_id, dim, vec, model_id, schema_version, summary_hash, created_at, updated_at)
+         VALUES
+           (@memory_id, @dim, @vec, @model_id, 'v1', @summary_hash, @created_at, @updated_at)`,
+      )
+      .run({
+        memory_id: input.memoryId,
+        dim: input.dim,
+        vec: vecBuf,
+        model_id: input.modelId,
+        summary_hash: input.summaryHash,
+        created_at: now,
+        updated_at: now,
+      });
+    return {
+      memoryId: input.memoryId,
+      dim: input.dim,
+      vec: input.vec,
+      modelId: input.modelId,
+      summaryHash: input.summaryHash,
+      createdAt: now,
+      updatedAt: now,
+    };
+  } catch {
+    // FK violation (memory_id does not exist) or other error — return null.
+    return null;
+  }
+}
+
+/**
+ * Retrieve the stored embedding for a memory, or null if none exists.
+ */
+export function getEmbedding(
+  handle: StorageHandle,
+  memoryId: number,
+): EmbeddingRecord | null {
+  const row = handle.db
+    .prepare(
+      `SELECT memory_id, dim, vec, model_id, summary_hash, created_at, updated_at
+         FROM embeddings
+        WHERE memory_id = ?`,
+    )
+    .get(memoryId) as
+    | {
+        memory_id: number;
+        dim: number;
+        vec: Buffer;
+        model_id: string;
+        summary_hash: string;
+        created_at: number;
+        updated_at: number;
+      }
+    | undefined;
+  if (!row) return null;
+  const vecArr = new Float64Array(row.vec.buffer);
+  return {
+    memoryId: row.memory_id,
+    dim: row.dim,
+    vec: Array.from(vecArr),
+    modelId: row.model_id,
+    summaryHash: row.summary_hash,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+/**
+ * Delete the stored embedding for a memory. Non-fatal: does not throw.
+ */
+export function deleteEmbedding(handle: StorageHandle, memoryId: number): void {
+  try {
+    handle.db
+      .prepare("DELETE FROM embeddings WHERE memory_id = ?")
+      .run(memoryId);
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Batch-retrieve embeddings for multiple memories.
+ * Returns a Map from memoryId to EmbeddingRecord.
+ * Memories without embeddings are omitted from the map.
+ */
+export function getEmbeddingsForMemories(
+  handle: StorageHandle,
+  memoryIds: ReadonlyArray<number>,
+): Map<number, EmbeddingRecord> {
+  if (memoryIds.length === 0) return new Map();
+  const placeholders = memoryIds.map(() => "?").join(",");
+  const rows = handle.db
+    .prepare(
+      `SELECT memory_id, dim, vec, model_id, summary_hash, created_at, updated_at
+         FROM embeddings
+        WHERE memory_id IN (${placeholders})`,
+    )
+    .all(...memoryIds) as Array<{
+    memory_id: number;
+    dim: number;
+    vec: Buffer;
+    model_id: string;
+    summary_hash: string;
+    created_at: number;
+    updated_at: number;
+  }>;
+  const out = new Map<number, EmbeddingRecord>();
+  for (const row of rows) {
+    const vecArr = new Float64Array(row.vec.buffer);
+    out.set(row.memory_id, {
+      memoryId: row.memory_id,
+      dim: row.dim,
+      vec: Array.from(vecArr),
+      modelId: row.model_id,
+      summaryHash: row.summary_hash,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    });
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------

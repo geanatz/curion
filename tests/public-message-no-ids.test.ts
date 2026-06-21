@@ -64,6 +64,10 @@ import {
   setStorageProvider as setRecallStorageProvider,
   resetStorageProvider as resetRecallStorageProvider,
 } from "../src/tools/recall.ts";
+import {
+  setListRegisteredProjectsStub,
+  resetListRegisteredProjectsStub,
+} from "../src/config/registry.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -836,6 +840,7 @@ test("regression: recall no_memory public message has no #N id reference", async
   const { tmp, handle } = mkStorage();
   try {
     setRecallStorageProvider(() => ({ handle, ownsHandle: false }));
+    setListRegisteredProjectsStub(() => []);
     try {
       // No stored memories => controller short-circuits
       // to `no_memory`. The public `message` is the exact
@@ -847,6 +852,7 @@ test("regression: recall no_memory public message has no #N id reference", async
       assert.equal(r.status, "no_memory");
       assertNoMemoryIdRef(r.message, "no_memory public message");
     } finally {
+      resetListRegisteredProjectsStub();
       resetRecallStorageProvider();
     }
   } finally {

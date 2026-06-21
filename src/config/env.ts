@@ -32,6 +32,14 @@ export interface CurionEnv {
   fallbackKey?: string;
   /** Project root override. Default: process.cwd(). */
   projectRoot?: string;
+  /** Enable semantic retrieval. Default: false (lexical only). */
+  semanticEnabled?: boolean;
+  /** Allow remote model download for semantic embedder. Default: true. */
+  semanticAllowRemote?: boolean;
+  /** Local cache directory for semantic embedder model files. */
+  semanticCacheDir?: string;
+  /** Hugging Face model id for semantic embedder. Default: Xenova/bge-small-en-v1.5. */
+  semanticModelId?: string;
 }
 
 function readLevel(): CurionEnv["logLevel"] {
@@ -58,5 +66,10 @@ export function loadEnv(): CurionEnv {
       process.env.CURION_PROVIDER_FALLBACK_KEY ??
       process.env.MINIMAX_API_KEY,
     projectRoot: process.env.CURION_PROJECT_ROOT,
+    // Semantic retrieval config (off by default).
+    semanticEnabled: process.env.CURION_SEMANTIC_ENABLED === "1",
+    semanticAllowRemote: process.env.CURION_SEMANTIC_ALLOW_REMOTE !== "0",
+    semanticCacheDir: process.env.CURION_SEMANTIC_CACHE_DIR,
+    semanticModelId: process.env.CURION_SEMANTIC_MODEL_ID,
   };
 }

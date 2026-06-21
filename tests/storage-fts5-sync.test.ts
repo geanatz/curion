@@ -357,3 +357,81 @@ test("FTS5 sync: initStorage creates the three sync triggers and backfills pre-e
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+// ---------------------------------------------------------------------------
+// 5. FTS5 as primary filter: no artificial cap
+// ---------------------------------------------------------------------------
+
+test("FTS5: listActiveMemorySummariesByFts5 retrieves all matched memories without an artificial cap", async () => {
+  const { tmp, handle } = mkStorage();
+  try {
+    // Insert 75 memories, each with a unique distinctive term so
+    // FTS5 can retrieve them individually.
+    const MEMORY_COUNT = 75;
+    const insertedIds: number[] = [];
+    for (let i = 0; i < MEMORY_COUNT; i++) {
+      const record = insertMemoryRecord(handle, {
+        kind: "fact",
+        state: "active",
+        memoryContent: `Memory ${i} contains the unique term semantic-term-${i}-${Date.now()}.`,
+        providerId: "test",
+        modelId: "test",
+        confidence: 0.9,
+        safetyFlags: [],
+        metadata: { tags: [`tag-${i}`] },
+      });
+      insertedIds.push(record.id);
+    }
+
+    // Verify all memories were inserted.
+    const allMemories = handle.db
+      .prepare("SELECT COUNT(*) AS c FROM memories WHERE state = 'active'")
+      .get() as { c: number };
+    assert.equal(allMemories.c, MEMORY_COUNT, `should have ${MEMORY_COUNT} active memories`);
+
+    // Query FTS5 for a distinctive term present in ALL memories.
+    // FTS5 should return all 75 matches without an artificial cap.
+    const { listActiveMemorySummariesByFts5 } = await import("../src/storage/storage.ts");
+    const matched = listActiveMemorySummariesByFts5(handle, "semantic-term", { limit: 200 });
+    assert.equal(
+      matched.length,
+      MEMORY_COUNT,
+      `FTS5 should return all ${MEMORY_COUNT} matched memories; no 50-cap should apply`,
+    );
+
+    // Verify all inserted ids are present in the matched results.
+    const matchedIds = new Set(matched.map((m: { id: number }) => m.id));
+    for (const id of insertedIds) {
+      assert.ok(
+        matchedIds.has(id),
+        `inserted memory id ${id} should be in FTS5 results`,
+      );
+    }
+  } finally {
+    rmStorage(tmp, handle);
+  }
+});
+
+test("FTS5: listActiveMemorySummariesByFts5 returns empty for no-match query without throwing", async () => {
+  const { tmp, handle } = mkStorage();
+  try {
+    // Insert a few memories.
+    insertMemoryRecord(handle, {
+      kind: "fact",
+      state: "active",
+      memoryContent: "The project uses Postgres 16 for the primary store.",
+      providerId: "test",
+      modelId: "test",
+      confidence: 0.9,
+      safetyFlags: [],
+      metadata: { tags: ["postgres"] },
+    });
+
+    // Query for a term that does not exist.
+    const { listActiveMemorySummariesByFts5 } = await import("../src/storage/storage.ts");
+    const matched = listActiveMemorySummariesByFts5(handle, "nonexistent-term-xyz-123", { limit: 200 });
+    assert.equal(matched.length, 0, "FTS5 should return empty array for no-match query");
+  } finally {
+    rmStorage(tmp, handle);
+  }
+});

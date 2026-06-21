@@ -93,6 +93,10 @@ import {
   type RecallResult,
 } from "../src/tools/recall.ts";
 import {
+  setListRegisteredProjectsStub,
+  resetListRegisteredProjectsStub,
+} from "../src/config/registry.ts";
+import {
   runRecallController,
   type RecallTraceContext,
 } from "../src/controller/recall-controller.ts";
@@ -1252,6 +1256,7 @@ test("recall Phase 3A: CURION_TRACE_ENABLED=0 prevents all recall stage event wr
           handle: memHandle,
           ownsHandle: false,
         }));
+        setListRegisteredProjectsStub(() => []);
         try {
           const result = await handleRecall({
             text: "What database?",
@@ -1267,6 +1272,7 @@ test("recall Phase 3A: CURION_TRACE_ENABLED=0 prevents all recall stage event wr
             "no trace.sqlite must be created when tracing is disabled",
           );
         } finally {
+          resetListRegisteredProjectsStub();
           resetRecallStorageProvider();
         }
       } finally {

@@ -42,6 +42,7 @@ import { classifyInput } from "../safety/precheck.js";
 import {
   listActiveMemorySummaries,
   listActiveMemoryRelationshipBlocks,
+  getEmbeddingsForMemories,
   type SafeMemorySummary,
   type StorageHandle,
 } from "../storage/storage.js";
@@ -79,6 +80,14 @@ import {
   RECALL_SELECTED_CANDIDATES_KIND,
   RECALL_SUPERSEDED_DEMOTION_KIND,
 } from "../trace/trace-tool-boundary.js";
+import type { SemanticEmbedder } from "../retrieval/semantic/embedder.js";
+import {
+  createSemanticEmbedder,
+} from "../retrieval/semantic/embedder.js";
+import {
+  fuseLexicalAndSemantic,
+  scoreSemanticCandidates,
+} from "../retrieval/semantic/score.js";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -180,6 +189,19 @@ export interface RecallControllerOptions {
   relevanceThreshold?: number;
   /** Max number of top summaries sent to the provider. Default 5. */
   topK?: number;
+  /** Enable semantic retrieval hybrid. Default false (lexical only). */
+  semanticEnabled?: boolean;
+  /**
+   * Optional injected semantic embedder. When provided, the semantic
+   * path runs regardless of `semanticEnabled` (semanticEnabled is
+   * still respected for whether hybrid fusion occurs, but the embedder
+   * itself is used directly). When omitted, the controller creates
+   * an embedder internally only when `semanticEnabled` is true.
+   *
+   * Tests should pass this directly to exercise the semantic path
+   * without relying on the tool layer's embedder factory.
+   */
+  semanticEmbedder?: SemanticEmbedder;
   /** Optional fetch override for tests. */
   providerFetchImpl?: typeof fetch;
   /** Optional API key override for the primary provider. */
@@ -362,6 +384,11 @@ export async function runRecallController(
   });
 
   // -- 3. Lexical ranking ---------------------------------------------
+  // Run lexical ranking on ALL summaries (not limited by topK) to build
+  // the candidate pool for semantic fusion. Using storageLimit as the
+  // lexical topK limit gives semantic the broadest possible pool to
+  // recover paraphrase hits that lexical would miss.
+  const lexicalTopK = options.semanticEnabled ? storageLimit : topK;
   const ranked: LexicalScoredCandidate[] = rankLexical(
     query,
     summaries.map((s: SafeMemorySummary) => ({
@@ -369,7 +396,7 @@ export async function runRecallController(
       text: s.memoryContent,
       tags: s.tags,
     })),
-    { threshold, topK },
+    { threshold, topK: lexicalTopK },
   );
   // Build the id->summary map once; used by both the trace
   // event and the topSummaries construction below.
@@ -383,21 +410,86 @@ export async function runRecallController(
   emitLexicalRankingStage(options.trace, {
     query,
     threshold,
-    topK,
+    topK: lexicalTopK,
     ranked,
     summariesById: summaryById,
   });
-  if (ranked.length === 0) {
+
+  // -- 3b. Semantic retrieval and hybrid fusion -------------------------
+  // When semanticEnabled is true OR an embedder is explicitly injected,
+  // run semantic scoring on the broadest possible pool (all summaries
+  // with embeddings) and fuse with lexical. This allows semantic to
+  // recover paraphrase hits that lexical topK would not include.
+  //
+  // Behavior:
+  //   - semanticEmbedder injected (tests): use it directly, no internal creation.
+  //   - semanticEnabled only: controller creates embedder internally (tool-layer
+  //     design — controller does NOT create heavy defaults).
+  //   - Neither: semantic path is skipped (lexical-only).
+  let finalRanked = ranked;
+  const shouldRunSemantic = options.semanticEmbedder != null || options.semanticEnabled;
+  if (shouldRunSemantic) {
+    try {
+      // Use injected embedder if provided; otherwise create one internally.
+      const embedder = options.semanticEmbedder ?? await createSemanticEmbedder({ enabled: true });
+      // Only proceed if embedder is ready (not error status)
+      if (embedder.metadata.status === "ready") {
+        // Get embeddings for ALL summaries that have them, not just topK.
+        // This is the key: semantic should see the full active pool.
+        const allMemoryIds = summaries.map((s) => s.id);
+        const embeddings = getEmbeddingsForMemories(storage, allMemoryIds);
+        if (embeddings.size > 0) {
+          // Embed the query once.
+          const queryVec = await embedder.embed(query, "query");
+          // Score ALL candidates that have embeddings.
+          const semCandidates = Array.from(embeddings.values()).map((e) => ({
+            id: e.memoryId,
+            vec: e.vec,
+          }));
+          const semRanked = scoreSemanticCandidates(queryVec, semCandidates);
+          // Fuse semantic with lexical. Use weights that favor semantic
+          // slightly for paraphrase recovery while preserving lexical signal.
+          const fused = fuseLexicalAndSemantic(
+            ranked,
+            semRanked,
+            { lexical: 1, semantic: 1 },
+            60, // RRF k constant
+            storageLimit, // Consider top storageLimit candidates in fusion
+          );
+          finalRanked = fused;
+          logger.debug(
+            `recall: semantic fused ${ranked.length} lexical + ${semRanked.length} semantic -> ${fused.length} final`,
+          );
+        } else {
+          logger.debug("recall: semantic enabled but no embeddings stored");
+        }
+      } else {
+        logger.debug(
+          `recall: semantic embedder not ready (status: ${embedder.metadata.status})`,
+        );
+      }
+    } catch (err) {
+      // Non-fatal: fall back to lexical-only if semantic fails.
+      logger.debug(
+        `recall: semantic retrieval failed: ${(err as Error).message}; falling back to lexical`,
+      );
+    }
+  }
+
+  // Early exit check AFTER semantic fusion.
+  // When semantic is enabled, we defer the check until after fusion
+  // so semantic can recover memories that lexical threshold filtered out.
+  if (finalRanked.length === 0) {
     logger.debug("recall: no relevant memory; skipping provider call");
     return { status: "no_memory" };
   }
 
-  // -- 3b. Superseded-memory demotion -----------------------------------
+  // -- 3c. Superseded-memory demotion -----------------------------------
   // When both a superseding candidate (A) and its superseded target (B)
   // are present in the ranked set, demote B so A ranks higher.
   // Missing references are silently ignored. The demotion is a pure
   // reordering step; no I/O, no state change.
-  const scoredWithRelationships: ScoredCandidateWithRelationship[] = ranked.map(
+  const scoredWithRelationships: ScoredCandidateWithRelationship[] = finalRanked.map(
     (r) => {
       const block = blockById.get(r.id);
       return block === undefined
@@ -563,8 +655,8 @@ export async function runRecallController(
           status: "weak_match",
           summaries: topSummaries.slice(0, 3).map((s) => s.memoryContent),
           coverage: {
-            topScore: ranked[0]!.score,
-            supportingCount: ranked.length,
+            topScore: finalRanked[0]!.score,
+            supportingCount: finalRanked.length,
           },
         };
       }

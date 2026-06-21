@@ -64,12 +64,19 @@ export type RecallStatusValue = (typeof RECALL_STATUS_VALUES)[number];
  * `sourceIds`, `message`, etc. would be caught if they ever
  * leaked into the structuredContent payload.
  */
+export const RECALL_SOURCE_VALUES = ["local", "cross_project"] as const;
+export type RecallSourceValue = (typeof RECALL_SOURCE_VALUES)[number];
+
 export const RECALL_STRUCTURED_CONTENT_SCHEMA = z
   .object({
     status: z.enum(RECALL_STATUS_VALUES),
     // answered
     answer: z.string().optional(),
     notes: z.array(z.string()).optional(),
+    // source: indicates where the answer came from
+    // "local" = from the current project's own memory (default when answered)
+    // "cross_project" = promoted to answered based on cross-project recall
+    source: z.enum(RECALL_SOURCE_VALUES).optional(),
     // weak_match
     summaries: z.array(z.string()).optional(),
     coverage: z
