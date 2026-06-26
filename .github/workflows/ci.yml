@@ -8,7 +8,8 @@ on:
 
 # Least-privilege: the workflow only needs to read the repository contents.
 # No write permissions, no token scopes beyond what is strictly necessary.
-permissions: contents: read
+permissions:
+  contents: read
 
 jobs:
   build-and-test:
