@@ -463,6 +463,7 @@ const ALLOWED_PUBLIC_KEYS = new Set([
   "answer",
   "sourceIds",
   "safetyClass",
+  "source",
 ]);
 
 /** Build the public `RecallResult` exactly the way the

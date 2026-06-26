@@ -59,6 +59,10 @@ import {
 } from "../src/retrieval/lexical.ts";
 import { runRememberController } from "../src/controller/remember-controller.ts";
 import { classifyInput } from "../src/safety/precheck.ts";
+import {
+  setListRegisteredProjectsStub,
+  resetListRegisteredProjectsStub,
+} from "../src/config/registry.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -689,7 +693,13 @@ test("recall e2e: remember then recall via the tool layer with stubbed providers
       // Now recall via the public tool layer. The recall tool
       // should not call the provider for a no-memory path, so we
       // first test that path: an unrelated query.
-      const r1 = await handleRecall({ text: "When is the company picnic?" });
+      setListRegisteredProjectsStub(() => []);
+      let r1: RecallResult;
+      try {
+        r1 = await handleRecall({ text: "When is the company picnic?" });
+      } finally {
+        resetListRegisteredProjectsStub();
+      }
       assert.equal(r1.status, "no_memory");
       assert.equal(r1.message, NO_RELEVANT_MEMORY);
 

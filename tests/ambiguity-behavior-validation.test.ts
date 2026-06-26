@@ -70,6 +70,10 @@ import {
   resetStorageProvider as resetRecallStorageProvider,
   type RecallResult,
 } from "../src/tools/recall.ts";
+import {
+  setListRegisteredProjectsStub,
+  resetListRegisteredProjectsStub,
+} from "../src/config/registry.ts";
 
 import {
   SCENARIOS,
@@ -334,6 +338,7 @@ const ALLOWED_PUBLIC_KEYS = new Set([
   "answer",
   "sourceIds",
   "safetyClass",
+  "source",
 ]);
 
 /** Build the public `RecallResult` exactly the way the tool
@@ -444,7 +449,12 @@ async function runScenarioAsync(
         handle: storage.handle,
         ownsHandle: false,
       }));
-      publicResult = await handleRecall({ text: scenario.query });
+      setListRegisteredProjectsStub(() => []);
+      try {
+        publicResult = await handleRecall({ text: scenario.query });
+      } finally {
+        resetListRegisteredProjectsStub();
+      }
       if (publicResult.status !== "no_memory") {
         captured = {
           kind: "status",
