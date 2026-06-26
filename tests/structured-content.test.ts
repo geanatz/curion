@@ -82,6 +82,10 @@ import {
 } from "../src/storage/storage.ts";
 import { runRememberController } from "../src/controller/remember-controller.ts";
 import { runRecallController } from "../src/controller/recall-controller.ts";
+import {
+  setListRegisteredProjectsStub,
+  resetListRegisteredProjectsStub,
+} from "../src/config/registry.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -873,6 +877,7 @@ test("recall structuredContent: no_memory -> { status: 'no_memory' }", async () 
   const { tmp, handle } = mkStorage();
   try {
     setRecallStorageProvider(() => ({ handle, ownsHandle: false }));
+    setListRegisteredProjectsStub(() => []);
     try {
       const r = await callToolHandler("recall", { text: "anything" });
       const sc = getStructuredContent(r) as RecallStructuredContent;
@@ -881,6 +886,7 @@ test("recall structuredContent: no_memory -> { status: 'no_memory' }", async () 
       const parsed = RECALL_STRUCTURED_CONTENT_SCHEMA.safeParse(sc);
       assert.ok(parsed.success, `schema validation failed: ${parsed.error}`);
     } finally {
+      resetListRegisteredProjectsStub();
       resetRecallStorageProvider();
     }
   } finally {

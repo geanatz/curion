@@ -1,5 +1,5 @@
 /**
- * Structured-output parser and validator for the prototype.
+ * Structured-output parser and validator.
  *
  * The prototype runner asks providers to return JSON inside a fenced
  * block, and validates the result against a zod schema for the

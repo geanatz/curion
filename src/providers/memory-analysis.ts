@@ -100,7 +100,7 @@ import {
 import {
   parseMemoryAnalysis,
   type MemoryAnalysis,
-} from "../prototype/structured-output.js";
+} from "./structured-output.js";
 
 // ---------------------------------------------------------------------------
 // Defaults

@@ -50,6 +50,10 @@ import { buildServer, PUBLIC_TOOL_NAMES } from "../src/server.ts";
 import { classifyInput, redactSummary } from "../src/safety/precheck.ts";
 import { findRelatedMemories } from "../src/retrieval/seam.ts";
 import { SAFETY_FIXTURES } from "../src/safety/fixtures.ts";
+import {
+  setListRegisteredProjectsStub,
+  resetListRegisteredProjectsStub,
+} from "../src/config/registry.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -405,9 +409,14 @@ test("public tool surface is still exactly remember + recall", () => {
 // ---------------------------------------------------------------------------
 
 test("recall handler: no memories -> no_memory placeholder", async () => {
-  const r = await handleRecall({ text: "anything" });
-  assert.equal(r.status, "no_memory");
-  assert.equal(r.message, NO_RELEVANT_MEMORY);
+  setListRegisteredProjectsStub(() => []);
+  try {
+    const r = await handleRecall({ text: "anything" });
+    assert.equal(r.status, "no_memory");
+    assert.equal(r.message, NO_RELEVANT_MEMORY);
+  } finally {
+    resetListRegisteredProjectsStub();
+  }
 });
 
 // ---------------------------------------------------------------------------

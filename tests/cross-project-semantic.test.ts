@@ -52,6 +52,35 @@ function mkStorage(): { tmp: string; handle: StorageHandle } {
   return { tmp, handle };
 }
 
+/**
+ * Temporarily override `os.homedir()` to point to a temp directory so that
+ * `registerProject()` writes go to `tempHome/.curion/registry.json` instead of
+ * the developer's real `~/.curion/registry.json`.
+ *
+ * This is necessary because `registerProject()` calls `readRegistry()` /
+ * `writeRegistry()` which use `os.homedir()` directly (not `process.env.HOME`).
+ * The `listRegisteredProjectsStub` only stubs reads via `listRegisteredProjects()`,
+ * but `registerProject()` bypasses that stub entirely.
+ *
+ * The temp HOME is cleaned up by the caller after each test, matching the
+ * existing pattern used by `mkStorage`/`rmStorage` for project-local state.
+ */
+function withTempHome<T>(fn: () => T): T {
+  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "curion-cross-project-semantic-home-"));
+  const originalHomedir = os.homedir;
+  // Override os.homedir for the duration of `fn`.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (os as any).homedir = () => tmpHome;
+  try {
+    return fn();
+  } finally {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (os as any).homedir = originalHomedir;
+    // Clean up the temp HOME dir.
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+  }
+}
+
 function rmStorage(tmp: string, handle: StorageHandle): void {
   try {
     handle.db.close();
@@ -119,10 +148,18 @@ test("cross-project semantic: private project not surfaced even with semantic en
     // Set external project as private
     setProjectPrivate(externalTmp, true);
 
-    // Register both projects
+    // Isolate: set stub BEFORE registerProject so handleRecall reads stubbed projects
+    setListRegisteredProjectsStub(() => [
+      { projectRoot: currentTmp, displayName: "Current" },
+      { projectRoot: externalTmp, displayName: "External" },
+    ]);
+
+    // Register both projects (isolate writes to temp HOME so ~/.curion/registry.json is not touched)
     const { registerProject } = await import("../src/config/registry.ts");
-    registerProject(currentTmp);
-    registerProject(externalTmp);
+    withTempHome(() => {
+      registerProject(currentTmp);
+      registerProject(externalTmp);
+    });
 
     // Set up storage providers
     setStorageProvider(() => ({ handle: currentHandle, ownsHandle: false }));
@@ -139,6 +176,7 @@ test("cross-project semantic: private project not surfaced even with semantic en
   } finally {
     process.env.CURION_SEMANTIC_ENABLED = origEnabled ?? "";
     process.env.CURION_SEMANTIC_ALLOW_REMOTE = origAllowRemote ?? "";
+    resetListRegisteredProjectsStub();
     resetStorageProvider();
     rmStorage(currentTmp, currentHandle);
     rmStorage(externalTmp, externalHandle);
@@ -165,10 +203,18 @@ test("cross-project semantic: no cross-project section when no semantic match ex
     // semantic shouldn't match "weather" query with "model" query)
     insertTestMemory(externalHandle, "The weather is sunny today");
 
-    // Register both projects
+    // Isolate: set stub BEFORE registerProject so handleRecall reads stubbed projects
+    setListRegisteredProjectsStub(() => [
+      { projectRoot: currentTmp, displayName: "Current" },
+      { projectRoot: externalTmp, displayName: "External" },
+    ]);
+
+    // Register both projects (isolate writes to temp HOME so ~/.curion/registry.json is not touched)
     const { registerProject } = await import("../src/config/registry.ts");
-    registerProject(currentTmp);
-    registerProject(externalTmp);
+    withTempHome(() => {
+      registerProject(currentTmp);
+      registerProject(externalTmp);
+    });
 
     // Set up storage providers
     setStorageProvider(() => ({ handle: currentHandle, ownsHandle: false }));
@@ -184,6 +230,7 @@ test("cross-project semantic: no cross-project section when no semantic match ex
   } finally {
     process.env.CURION_SEMANTIC_ENABLED = origEnabled ?? "";
     process.env.CURION_SEMANTIC_ALLOW_REMOTE = origAllowRemote ?? "";
+    resetListRegisteredProjectsStub();
     resetStorageProvider();
     rmStorage(currentTmp, currentHandle);
     rmStorage(externalTmp, externalHandle);
@@ -208,10 +255,18 @@ test("cross-project semantic: disabled preserves lexical-only cross-project beha
     // The word "provider" overlaps with "What is the primary provider?"
     insertTestMemory(externalHandle, "The primary provider is NVIDIA NIM");
 
-    // Register both projects
+    // Isolate: set stub BEFORE registerProject so handleRecall reads stubbed projects
+    setListRegisteredProjectsStub(() => [
+      { projectRoot: currentTmp, displayName: "Current" },
+      { projectRoot: externalTmp, displayName: "External" },
+    ]);
+
+    // Register both projects (isolate writes to temp HOME so ~/.curion/registry.json is not touched)
     const { registerProject } = await import("../src/config/registry.ts");
-    registerProject(currentTmp);
-    registerProject(externalTmp);
+    withTempHome(() => {
+      registerProject(currentTmp);
+      registerProject(externalTmp);
+    });
 
     // Set up storage providers
     setStorageProvider(() => ({ handle: currentHandle, ownsHandle: false }));
@@ -226,6 +281,7 @@ test("cross-project semantic: disabled preserves lexical-only cross-project beha
     );
   } finally {
     process.env.CURION_SEMANTIC_ENABLED = origEnabled ?? "";
+    resetListRegisteredProjectsStub();
     resetStorageProvider();
     rmStorage(currentTmp, currentHandle);
     rmStorage(externalTmp, externalHandle);
@@ -300,10 +356,12 @@ test("source: no local memory but strong cross-project promotes to answered with
     // Insert ONLY in external project - current project has no memories
     insertTestMemory(externalHandle, "The primary provider is NVIDIA NIM");
 
-    // Register both projects
+    // Register both projects (isolate writes to temp HOME so ~/.curion/registry.json is not touched)
     const { registerProject } = await import("../src/config/registry.ts");
-    registerProject(currentTmp);
-    registerProject(externalTmp);
+    withTempHome(() => {
+      registerProject(currentTmp);
+      registerProject(externalTmp);
+    });
 
     // Set up storage providers
     setStorageProvider(() => ({ handle: currentHandle, ownsHandle: false }));
@@ -367,10 +425,12 @@ test("source: no local memory and weak/empty cross-project keeps no_memory with 
     // External project has unrelated memory that won't match
     insertTestMemory(externalHandle, "The weather is sunny today");
 
-    // Register both projects
+    // Register both projects (isolate writes to temp HOME so ~/.curion/registry.json is not touched)
     const { registerProject } = await import("../src/config/registry.ts");
-    registerProject(currentTmp);
-    registerProject(externalTmp);
+    withTempHome(() => {
+      registerProject(currentTmp);
+      registerProject(externalTmp);
+    });
 
     // Set up storage providers
     setStorageProvider(() => ({ handle: currentHandle, ownsHandle: false }));
@@ -431,11 +491,13 @@ test("source: privacy preserved - private project memories not surfaced even aft
     // Set private project as private
     setProjectPrivate(privateTmp, true);
 
-    // Register all projects
+    // Register all projects (isolate writes to temp HOME so ~/.curion/registry.json is not touched)
     const { registerProject } = await import("../src/config/registry.ts");
-    registerProject(currentTmp);
-    registerProject(privateTmp);
-    registerProject(publicTmp);
+    withTempHome(() => {
+      registerProject(currentTmp);
+      registerProject(privateTmp);
+      registerProject(publicTmp);
+    });
 
     // Set up storage providers
     setStorageProvider(() => ({ handle: currentHandle, ownsHandle: false }));
@@ -490,9 +552,12 @@ test("source: FTS5-based cross-project with seeded projects promotes to answered
     insertTestMemory(curionHandle, "Deployment is handled via Docker containers");
 
     // Register projects (Astromia is current, Curion is external)
+    // (isolate writes to temp HOME so ~/.curion/registry.json is not touched)
     const { registerProject } = await import("../src/config/registry.ts");
-    registerProject(astromiaTmp);
-    registerProject(curionTmp);
+    withTempHome(() => {
+      registerProject(astromiaTmp);
+      registerProject(curionTmp);
+    });
 
     // Set up storage providers for Astromia (current project)
     setStorageProvider(() => ({ handle: astromiaHandle, ownsHandle: false }));

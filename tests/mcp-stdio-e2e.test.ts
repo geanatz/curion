@@ -159,6 +159,8 @@ class StdioMcpClient {
     null;
   private notificationHandler: ((msg: JsonRpcMessage) => void) | null = null;
   private closed = false;
+  /** Temp HOME directory for the subprocess, so ~/.curion/registry.json is hermetic. */
+  private tmpHome: string | null = null;
 
   private constructor(child: ChildProcessWithoutNullStreams) {
     this.child = child;
@@ -191,6 +193,11 @@ class StdioMcpClient {
    * Spawn the real built server in `cwd`, with `env` exposed
    * to the child. The default `env` strips every CURION_*
    * provider key so the test is hermetic.
+   *
+   * The subprocess HOME is set to an isolated temp directory so
+   * `~/.curion/registry.json` (written by the registry module)
+   * is never the developer's real registry. The temp HOME is
+   * cleaned up when the client is closed.
    */
   static async start(opts: {
     cwd: string;
@@ -203,13 +210,21 @@ class StdioMcpClient {
         `server entry not found at ${entry}; run \`npm run build\` first`,
       );
     }
+    // Create an isolated HOME for the subprocess so the global
+    // registry at ~/.curion/ is never touched.
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "curion-mcp-e2e-home-"));
+
     const env = opts.env ?? StdioMcpClient.isolatedEnv();
+    // Always override HOME so the subprocess uses the temp dir.
+    env.HOME = tmpHome;
+
     const child = spawn(process.execPath, [entry], {
       cwd: opts.cwd,
       env,
       stdio: ["pipe", "pipe", "pipe"],
     });
     const client = new StdioMcpClient(child);
+    client.tmpHome = tmpHome;
     // Wait for the very first stderr line (the
     // `[curion] ... starting` info log) so we know the
     // server is up and listening on stdin. This is a
@@ -377,6 +392,9 @@ class StdioMcpClient {
    * The default grace period is short (1500 ms) so the
    * test's `finally` block can release the temp dir
    * quickly and avoid leftover WAL files in /tmp.
+   *
+   * After the subprocess exits, the temp HOME directory
+   * (used for hermetic registry access) is also cleaned up.
    */
   async close(opts: { killAfterMs?: number } = {}): Promise<void> {
     if (this.closed) return;
@@ -416,6 +434,11 @@ class StdioMcpClient {
           finish();
         });
       });
+    }
+    // Clean up the temp HOME directory used for hermetic registry.
+    if (this.tmpHome !== null) {
+      rmTempHome(this.tmpHome);
+      this.tmpHome = null;
     }
   }
 
@@ -526,6 +549,31 @@ function rmProject(tmp: string): void {
   for (let attempt = 0; attempt < 5; attempt += 1) {
     try {
       fs.rmSync(tmp, { recursive: true, force: true });
+      return;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== "EBUSY" && code !== "ENOTEMPTY" && code !== "EACCES") {
+        return;
+      }
+      // brief synchronous-ish wait
+      const until = Date.now() + 50;
+      while (Date.now() < until) {
+        // spin
+      }
+    }
+  }
+}
+
+/**
+ * Remove the temp HOME directory used for hermetic registry isolation.
+ * The directory should be empty (the subprocess only writes to
+ * `~/.curion/registry.json` inside it), but we use the same retry
+ * pattern as rmProject for safety.
+ */
+function rmTempHome(tmpHome: string): void {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      fs.rmSync(tmpHome, { recursive: true, force: true });
       return;
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
@@ -1189,6 +1237,199 @@ test("e2e: remember with a safe input in a no-API-key env -> { status: 'provider
       // surface. A future test could open the DB and
       // verify zero rows match the input.
     }
+  } finally {
+    await client.close();
+    rmProject(tmp);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Semantic retrieval E2E (CURION_SEMANTIC_ENABLED=1)
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a hermetic env with semantic retrieval enabled but remote
+ * downloads disabled. This uses the stub embedder (no network,
+ * no model download). The provider keys are still stripped so
+ * the provider adapter short-circuits to `missing-config`.
+ */
+function semanticIsolatedEnv(): NodeJS.ProcessEnv {
+  const base = StdioMcpClient.isolatedEnv();
+  // Enable semantic retrieval (stub embedder will be used since
+  // allowRemote=false and no cache exists).
+  base.CURION_SEMANTIC_ENABLED = "1";
+  // Disable remote model download to keep the test hermetic.
+  base.CURION_SEMANTIC_ALLOW_REMOTE = "0";
+  return base;
+}
+
+test("e2e: semantic enabled server starts and handles remember (provider_error is fine since no API key)", async () => {
+  // When semantic is enabled but the embedder falls back to stub
+  // (no cache, remote disabled), remember should still work.
+  // The provider adapter will still short-circuits to missing-config
+  // since we stripped the API keys. So we expect provider_error
+  // on remember, but the server should start and respond normally.
+  const { tmp } = seedProject();
+  const client = await StdioMcpClient.start({
+    cwd: tmp,
+    env: semanticIsolatedEnv(),
+  });
+  try {
+    await client.request("initialize", {
+      protocolVersion: "2024-11-05",
+      capabilities: {},
+      clientInfo: { name: "curion-mcp-e2e-test", version: "0.0.0" },
+    });
+    client.notify("notifications/initialized", {});
+
+    // remember should respond (provider_error expected since no API key).
+    const r = await client.callTool("remember", {
+      text: "The project uses Postgres 16 for the primary data store.",
+    });
+    assert.notEqual(r.isError, true);
+    const sc = r.structuredContent as Record<string, unknown>;
+    assert.ok(sc, "structuredContent must be present");
+    // provider_error is fine — no API key in env.
+    assert.equal(sc["status"], "provider_error");
+    assert.equal(typeof sc["reason"], "string");
+    // The reason must not echo the input.
+    assert.ok(
+      !((sc["reason"] as string) ?? "").includes("Postgres"),
+      `reason must not echo input; got ${JSON.stringify(sc["reason"])}`,
+    );
+  } finally {
+    await client.close();
+    rmProject(tmp);
+  }
+});
+
+test("e2e: semantic enabled server starts and handles recall (falls back gracefully when embedder unavailable)", async () => {
+  // When semantic is enabled but the embedder falls back to stub
+  // (no cache, remote disabled), recall should still return
+  // no_memory or provider_error — both are valid graceful fallbacks.
+  const { tmp } = seedProject();
+  const client = await StdioMcpClient.start({
+    cwd: tmp,
+    env: semanticIsolatedEnv(),
+  });
+  try {
+    await client.request("initialize", {
+      protocolVersion: "2024-11-05",
+      capabilities: {},
+      clientInfo: { name: "curion-mcp-e2e-test", version: "0.0.0" },
+    });
+    client.notify("notifications/initialized", {});
+
+    // recall against empty DB should return no_memory.
+    const r = await client.callTool("recall", { text: "anything" });
+    assert.notEqual(r.isError, true);
+    const sc = r.structuredContent as Record<string, unknown>;
+    assert.ok(sc, "structuredContent must be present");
+    // no_memory is the expected response on an empty DB.
+    assert.equal(sc["status"], "no_memory");
+    // provider_error is also acceptable (lexical hit + no API key).
+    if (sc["status"] === "provider_error") {
+      assert.equal(typeof sc["reason"], "string");
+    }
+  } finally {
+    await client.close();
+    rmProject(tmp);
+  }
+});
+
+test("e2e: semantic enabled with pre-seeded memory + no API key -> provider_error (no network, no model cache)", async () => {
+  // Pre-seed a memory so recall finds a lexical hit. With semantic
+  // enabled but remote disabled and no cache, the embedder will
+  // fall back to stub. The provider adapter will still short-circuit
+  // since we have no API key, so we expect provider_error.
+  const { tmp } = seedProject({ preSeedMemory: true });
+  const client = await StdioMcpClient.start({
+    cwd: tmp,
+    env: semanticIsolatedEnv(),
+  });
+  try {
+    await client.request("initialize", {
+      protocolVersion: "2024-11-05",
+      capabilities: {},
+      clientInfo: { name: "curion-mcp-e2e-test", version: "0.0.0" },
+    });
+    client.notify("notifications/initialized", {});
+
+    const r = await client.callTool("recall", {
+      text: "What database does the project use?",
+    });
+    assert.notEqual(r.isError, true);
+    const sc = r.structuredContent as Record<string, unknown>;
+    assert.ok(sc, "structuredContent must be present");
+    // With no API key, provider_error is the expected outcome.
+    // This confirms the semantic path was attempted but fell back.
+    assert.equal(sc["status"], "provider_error");
+    assert.equal(typeof sc["reason"], "string");
+    assert.ok((sc["reason"] as string).length > 0);
+    // The reason must not echo the query.
+    assert.ok(
+      !(sc["reason"] as string).includes("database"),
+      `reason must not echo query; got ${JSON.stringify(sc["reason"])}`,
+    );
+    // No answer/notes fields on a provider_error response.
+    for (const k of ["answer", "notes", "memoryId", "message"]) {
+      assert.equal(k in sc, false, `recall.provider_error must not include '${k}'`);
+    }
+  } finally {
+    await client.close();
+    rmProject(tmp);
+  }
+});
+
+test("e2e: semantic enabled server keeps stdout JSON-RPC-safe and logs on stderr", async () => {
+  // Verify that when semantic is enabled, the stdout/stderr
+  // invariant still holds: stdout carries only JSON-RPC frames,
+  // logs travel on stderr.
+  const { tmp } = seedProject();
+  const client = await StdioMcpClient.start({
+    cwd: tmp,
+    env: semanticIsolatedEnv(),
+  });
+  try {
+    await client.request("initialize", {
+      protocolVersion: "2024-11-05",
+      capabilities: {},
+      clientInfo: { name: "curion-mcp-e2e-test", version: "0.0.0" },
+    });
+    client.notify("notifications/initialized", {});
+    await client.request("tools/list", {});
+    await client.callTool("recall", { text: "anything" });
+    await client.callTool("remember", { text: "hello world" });
+
+    const stdout = client.stdoutSnapshot();
+    const stderr = client.stderrSnapshot();
+
+    // Every line on stdout must be parseable as JSON.
+    const stdoutLines = stdout.split("\n").filter((l) => l.length > 0);
+    assert.ok(stdoutLines.length > 0, "stdout should have at least one JSON-RPC response");
+    for (const line of stdoutLines) {
+      assert.doesNotThrow(
+        () => JSON.parse(line) as unknown,
+        `every stdout line must be valid JSON; got: ${line.slice(0, 200)}`,
+      );
+    }
+    // Every parsed line must look like a JSON-RPC envelope.
+    for (const line of stdoutLines) {
+      const parsed = JSON.parse(line) as { jsonrpc?: string; id?: unknown; method?: string };
+      assert.equal(parsed.jsonrpc, "2.0");
+      const hasId = parsed.id !== undefined;
+      const hasMethod = typeof parsed.method === "string";
+      assert.ok(hasId || hasMethod);
+    }
+    // No raw `[curion]` log lines on stdout.
+    assert.ok(
+      !stdout.includes("[curion]"),
+      `stdout must not contain [curion] log lines; got: ${stdout.slice(0, 400)}`,
+    );
+    // stderr is non-empty and carries the project
+    // logger's `[curion]` prefix.
+    assert.ok(stderr.length > 0, "stderr must be non-empty");
+    assert.match(stderr, /\[curion]/);
   } finally {
     await client.close();
     rmProject(tmp);

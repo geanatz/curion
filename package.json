@@ -18,7 +18,11 @@
     "nvidia-nim"
   ],
   "files": [
-    "dist"
+    "dist",
+    "!dist/benchmark",
+    "!dist/benchmark/**",
+    "!dist/prototype",
+    "!dist/prototype/**"
   ],
   "main": "dist/index.js",
   "bin": {

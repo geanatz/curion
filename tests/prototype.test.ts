@@ -39,7 +39,7 @@ import {
   MemoryAnalysisSchema,
   buildStructuredPrompt,
   parseMemoryAnalysis,
-} from "../src/prototype/structured-output.ts";
+} from "../src/providers/structured-output.ts";
 import { PROTOTYPE_FIXTURES, fixtureById } from "../src/prototype/fixtures.ts";
 import {
   formatHumanReport,

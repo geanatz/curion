@@ -453,6 +453,7 @@ test("recall: creates a trace run + tool.input + tool.output events without chan
       handle: memHandle,
       ownsHandle: false,
     }));
+    setListRegisteredProjectsStub(() => []);
     try {
       // Use a query against an empty store. The controller
       // short-circuits to `no_memory` BEFORE the provider
@@ -493,6 +494,7 @@ test("recall: creates a trace run + tool.input + tool.output events without chan
       assert.equal(outputPayload.status, "no_memory");
       assert.equal(typeof outputPayload.message, "string");
     } finally {
+      resetListRegisteredProjectsStub();
       resetRecallStorageProvider();
     }
   } finally {
@@ -562,6 +564,7 @@ test("recall: CURION_TRACE_ENABLED=0 prevents trace writes for tool boundary cal
           handle: memHandle,
           ownsHandle: false,
         }));
+        setListRegisteredProjectsStub(() => []);
         try {
           const result = await handleRecall({ text: "anything" });
           assert.equal(result.status, "no_memory");
@@ -572,6 +575,7 @@ test("recall: CURION_TRACE_ENABLED=0 prevents trace writes for tool boundary cal
             "no trace.sqlite must be created when tracing is disabled",
           );
         } finally {
+          resetListRegisteredProjectsStub();
           resetRecallStorageProvider();
         }
       } finally {
@@ -646,6 +650,7 @@ test("recall: simulated trace writer failure does not change the result", async 
           handle: memHandle,
           ownsHandle: false,
         }));
+        setListRegisteredProjectsStub(() => []);
         try {
           // Simulate storage failure before the tool call.
           closeTraceWriter();
@@ -658,6 +663,7 @@ test("recall: simulated trace writer failure does not change the result", async 
           assert.equal(typeof result.message, "string");
           assert.ok(result.message.length > 0);
         } finally {
+          resetListRegisteredProjectsStub();
           resetRecallStorageProvider();
         }
       } finally {
@@ -944,6 +950,7 @@ test("recall Phase 3A: empty store emits active-memory-read + lexical-ranking st
       handle: memHandle,
       ownsHandle: false,
     }));
+    setListRegisteredProjectsStub(() => []);
     try {
       // Empty store → no_memory. The controller emits
       // active-memory-read (count=0) and lexical-ranking
@@ -993,6 +1000,7 @@ test("recall Phase 3A: empty store emits active-memory-read + lexical-ranking st
       );
       assert.equal(selectedEvents.length, 0, "no selected-candidates on no_memory path");
     } finally {
+      resetListRegisteredProjectsStub();
       resetRecallStorageProvider();
     }
   } finally {

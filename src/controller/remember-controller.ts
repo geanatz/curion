@@ -28,7 +28,7 @@ import {
   type MemoryAnalysisResult,
   type RelatedMemory,
 } from "../providers/memory-analysis.js";
-import type { MemoryAnalysis } from "../prototype/structured-output.js";
+import type { MemoryAnalysis } from "../providers/structured-output.js";
 import { classifyInput, redactSummary } from "../safety/precheck.js";
 import { findRelatedMemories } from "../retrieval/seam.js";
 import {

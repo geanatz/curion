@@ -28,6 +28,10 @@ import { logger } from "../src/logging/logger.ts";
 import { resolveCurionDir, CURION_DIRNAME, initStorage } from "../src/storage/storage.ts";
 import { SAFETY_FIXTURES } from "../src/safety/fixtures.ts";
 import { allVariants } from "../src/retrieval/variants.ts";
+import {
+  setListRegisteredProjectsStub,
+  resetListRegisteredProjectsStub,
+} from "../src/config/registry.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
@@ -122,14 +126,21 @@ test("recall handler returns 'No relevant memory found.' for a no-memory path", 
   // The recall MVP reads from local project storage. With no stored
   // memories, the controller returns `no_memory` and the tool layer
   // surfaces the public placeholder message.
-  const r = await handleRecall({ text: "anything" });
-  assert.equal(r.status, "no_memory");
-  assert.equal(r.message, NO_RELEVANT_MEMORY);
+  // Isolate: stub listRegisteredProjects so this test does not read
+  // the developer's real ~/.curion/registry.json.
+  setListRegisteredProjectsStub(() => []);
+  try {
+    const r = await handleRecall({ text: "anything" });
+    assert.equal(r.status, "no_memory");
+    assert.equal(r.message, NO_RELEVANT_MEMORY);
 
-  await assert.rejects(
-    async () => handleRecall({}),
-    /text.*required/i,
-  );
+    await assert.rejects(
+      async () => handleRecall({}),
+      /text.*required/i,
+    );
+  } finally {
+    resetListRegisteredProjectsStub();
+  }
 });
 
 test("logger writes to stderr, never stdout", () => {

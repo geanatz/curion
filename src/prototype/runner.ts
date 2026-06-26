@@ -71,7 +71,7 @@ import {
   parseMemoryAnalysis,
   type MemoryAnalysis,
   type ParseResult,
-} from "./structured-output.js";
+} from "../providers/structured-output.js";
 import {
   chatCompletion,
   type ChatCompletionResponse,
