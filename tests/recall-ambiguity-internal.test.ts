@@ -147,6 +147,11 @@ function okChatResponse(content: string): Response {
 
 const PRIMARY_KEY = "sk-primary-test-not-real-12345";
 const FALLBACK_KEY = "nvapi-fallback-test-not-real-12345";
+// Explicit provider config: neutral URLs -> "custom" label.
+const PRIMARY_BASE_URL = "https://api.example.com/v1";
+const PRIMARY_MODEL = "test/model-primary";
+const FALLBACK_BASE_URL = "https://api.fallback.example/v1";
+const FALLBACK_MODEL = "test/model-fallback";
 
 /**
  * Insert a memory record with an optional stored
@@ -208,7 +213,11 @@ function runRecallWith(handle: StorageHandle, opts: {
   return runRecallController(handle, opts.text, {
     providerFetchImpl: opts.fetchImpl,
     providerPrimaryApiKey: PRIMARY_KEY,
+    providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+    providerPrimaryModel: PRIMARY_MODEL,
     providerFallbackApiKey: FALLBACK_KEY,
+    providerFallbackBaseUrl: FALLBACK_BASE_URL,
+    providerFallbackModel: FALLBACK_MODEL,
   });
 }
 
@@ -773,9 +782,13 @@ test("controller: the four-status union is preserved (answered | no_memory | rej
         handle,
         "When is the company picnic?",
         {
-          providerFetchImpl: fetchImpl,
-          providerPrimaryApiKey: PRIMARY_KEY,
-          providerFallbackApiKey: FALLBACK_KEY,
+providerFetchImpl: fetchImpl,
+      providerPrimaryApiKey: PRIMARY_KEY,
+      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+      providerPrimaryModel: PRIMARY_MODEL,
+      providerFallbackApiKey: FALLBACK_KEY,
+      providerFallbackBaseUrl: FALLBACK_BASE_URL,
+      providerFallbackModel: FALLBACK_MODEL,
         },
       );
       assert.equal(r.status, "no_memory");
@@ -786,9 +799,13 @@ test("controller: the four-status union is preserved (answered | no_memory | rej
         handle,
         "AKIAIOSFODNN7EXAMPLE",
         {
-          providerFetchImpl: fetchImpl,
-          providerPrimaryApiKey: PRIMARY_KEY,
-          providerFallbackApiKey: FALLBACK_KEY,
+providerFetchImpl: fetchImpl,
+      providerPrimaryApiKey: PRIMARY_KEY,
+      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+      providerPrimaryModel: PRIMARY_MODEL,
+      providerFallbackApiKey: FALLBACK_KEY,
+      providerFallbackBaseUrl: FALLBACK_BASE_URL,
+      providerFallbackModel: FALLBACK_MODEL,
         },
       );
       assert.equal(r.status, "rejected");

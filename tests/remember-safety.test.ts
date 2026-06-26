@@ -114,6 +114,11 @@ function safeAnalysis(): string {
 
 const PRIMARY_KEY = "sk-primary-test-not-real-12345";
 const FALLBACK_KEY = "nvapi-fallback-test-not-real-12345";
+// Explicit provider config: neutral URLs -> "custom" label.
+const PRIMARY_BASE_URL = "https://api.example.com/v1";
+const PRIMARY_MODEL = "test/model-primary";
+const FALLBACK_BASE_URL = "https://api.fallback.example/v1";
+const FALLBACK_MODEL = "test/model-fallback";
 
 interface RunOpts {
   fetchImpl: typeof fetch;
@@ -125,7 +130,11 @@ async function runController(handle: StorageHandle, opts: RunOpts) {
   return runRememberController(handle, opts.text, {
     providerFetchImpl: opts.fetchImpl,
     providerPrimaryApiKey: PRIMARY_KEY,
+    providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+    providerPrimaryModel: PRIMARY_MODEL,
     providerFallbackApiKey: FALLBACK_KEY,
+    providerFallbackBaseUrl: FALLBACK_BASE_URL,
+    providerFallbackModel: FALLBACK_MODEL,
     confidenceThreshold: opts.confidenceThreshold,
   });
 }
@@ -482,8 +491,9 @@ test("remember: safe input is stored with provider-normalized summary; raw input
     assert.equal(calls.length, 1, "provider should be called exactly once for safe input");
     const rec = outcome.record;
     assert.ok(rec.id > 0);
-    assert.equal(rec.providerId, "nvidia-nim");
-    assert.equal(rec.modelId, "openai/gpt-oss-120b");
+    // Provider label is derived from PRIMARY_BASE_URL (neutral URL -> "custom").
+    assert.equal(rec.providerId, "custom");
+    assert.equal(rec.modelId, PRIMARY_MODEL);
     assert.equal(rec.state, "active");
     assert.equal(rec.kind, "fact");
     assert.ok((rec.confidence ?? 0) > 0);

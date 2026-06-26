@@ -21,8 +21,10 @@ Memories are never sent to a shared backend — everything stays local.
 # Build
 npm run build
 
-# Set your NVIDIA NIM key (required for remember + recall synthesis)
-export NVIDIA_NIM_API_KEY=nvapi-...
+# Configure your OpenAI-compatible provider (required for remember + recall)
+export CURION_PRIMARY_API_KEY=sk-...
+export CURION_PRIMARY_BASE_URL=https://api.openai.com/v1
+export CURION_PRIMARY_MODEL=gpt-4o
 
 # Start the MCP server (stdio — stdout is MCP protocol only, logs go stderr)
 ./dist/index.js
@@ -41,14 +43,16 @@ Curion communicates over stdio. Configure your MCP client to spawn it:
       "command": "node",
       "args": ["/absolute/path/to/dist/index.js"],
       "env": {
-        "NVIDIA_NIM_API_KEY": "nvapi-..."
+        "CURION_PRIMARY_API_KEY": "sk-...",
+        "CURION_PRIMARY_BASE_URL": "https://api.openai.com/v1",
+        "CURION_PRIMARY_MODEL": "gpt-4o"
       }
     }
   }
 }
 ```
 
-**Other MCP clients**: spawn `node dist/index.js` with `NVIDIA_NIM_API_KEY` in
+**Other MCP clients**: spawn `node dist/index.js` with the provider env vars in
 the environment. No `.env` file is loaded — secrets must be passed by the parent
 process.
 
@@ -57,11 +61,19 @@ process.
 Curion does **not** load `.env` files. All configuration is via environment
 variables passed by the parent process.
 
-### Required
+### Required (provider configuration)
+
+Curion has **no built-in provider defaults**. You must configure at least a
+primary provider to use `remember()` and `recall()`.
 
 | Variable | Description |
 |---|---|
-| `NVIDIA_NIM_API_KEY` | API key for the NVIDIA NIM provider. Both `remember` and `recall` use this as their primary provider. |
+| `CURION_PRIMARY_API_KEY` | API key for the primary provider. |
+| `CURION_PRIMARY_BASE_URL` | Base URL for the primary provider's endpoint. For OpenAI-compatible providers this is the base URL for `/chat/completions`. For Anthropic, this defaults to `https://api.anthropic.com` when `CURION_PRIMARY_API_FORMAT=anthropic` and is not set. |
+| `CURION_PRIMARY_MODEL` | Model id for the primary provider. |
+| `CURION_PRIMARY_API_FORMAT` | API format: `openai-compatible` (default) or `anthropic`. Controls whether to use the OpenAI-compatible HTTP path or the official Anthropic SDK. |
+
+Optional: `CURION_PRIMARY_PROVIDER_LABEL` (auto-detected from base URL), `CURION_PRIMARY_STRICT_JSON` (default false).
 
 ### Optional
 
@@ -69,6 +81,19 @@ variables passed by the parent process.
 |---|---|---|
 | `CURION_LOG_LEVEL` | `info` | Minimum log level: `debug`, `info`, `warn`, `error`. |
 | `CURION_PROJECT_ROOT` | `process.cwd()` | Project root override. |
+
+#### Fallback provider (opt-in)
+
+The fallback slot is empty by default. To add a fallback provider:
+
+```sh
+export CURION_FALLBACK_API_KEY=...
+export CURION_FALLBACK_BASE_URL=https://api.example.com/v1
+export CURION_FALLBACK_MODEL=your-model-id
+export CURION_FALLBACK_API_FORMAT=openai-compatible  # or "anthropic"
+```
+
+Optional: `CURION_FALLBACK_PROVIDER_LABEL`, `CURION_FALLBACK_STRICT_JSON`.
 
 #### Semantic retrieval (opt-in)
 
@@ -92,16 +117,6 @@ that the lexical ranker misses.
 The default embedder (`Xenova/bge-small-en-v1.5`, 384-dim, quantized, ~25 MB)
 runs entirely on-device (CPU, no GPU). First launch downloads the ONNX model
 from Hugging Face CDN and caches it locally.
-
-#### Fallback provider (opt-in)
-
-The fallback slot is empty by default. To add a fallback provider:
-
-```sh
-export MINIMAX_API_KEY=...
-export CURION_MINIMAX_BASE_URL=https://api.minimax.io/v1
-export CURION_MINIMAX_MODEL=MiniMax-M3
-```
 
 ## Privacy and cross-project memory
 
@@ -193,7 +208,7 @@ src/
   index.ts              # MCP stdio server entry point
   server.ts             # MCP server wiring
   controller/           # remember + recall controller
-  providers/           # Provider adapters (NVIDIA NIM primary)
+  providers/           # Provider adapters (OpenAI-compatible)
   retrieval/            # Lexical + semantic retrieval
     semantic/           # Production semantic retrieval (opt-in)
   storage/             # SQLite persistence

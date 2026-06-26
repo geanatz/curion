@@ -140,6 +140,11 @@ function safeAnalysis(opts: {
 
 const PRIMARY_KEY = "sk-primary-test-not-real-12345";
 const FALLBACK_KEY = "nvapi-fallback-test-not-real-12345";
+// Explicit provider config: neutral URLs resolve to "custom" label.
+const PRIMARY_BASE_URL = "https://api.example.com/v1";
+const PRIMARY_MODEL = "test/model-primary";
+const FALLBACK_BASE_URL = "https://api.fallback.example/v1";
+const FALLBACK_MODEL = "test/model-fallback";
 
 /**
  * Drive the actual McpServer tool callback for a given tool
@@ -231,7 +236,11 @@ async function projectRecallWireFormat(
   const outcome = await runRecallController(handle, text, {
     providerFetchImpl: fetchImpl,
     providerPrimaryApiKey: PRIMARY_KEY,
+    providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+    providerPrimaryModel: PRIMARY_MODEL,
     providerFallbackApiKey: FALLBACK_KEY,
+    providerFallbackBaseUrl: FALLBACK_BASE_URL,
+    providerFallbackModel: FALLBACK_MODEL,
   });
   // Mirror the tool layer's `formatOutcome` for the
   // `answered` case. The other cases (no_memory /
@@ -483,7 +492,11 @@ test("structuredContent: never includes a memory id or model/provider metadata f
       {
         providerFetchImpl: fetchImpl,
         providerPrimaryApiKey: PRIMARY_KEY,
+        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+        providerPrimaryModel: PRIMARY_MODEL,
         providerFallbackApiKey: FALLBACK_KEY,
+        providerFallbackBaseUrl: FALLBACK_BASE_URL,
+        providerFallbackModel: FALLBACK_MODEL,
       },
     );
     assert.equal(recallOut.status, "answered");
@@ -1042,7 +1055,11 @@ test("remember structuredContent: saved -> { status: 'saved', summary, kind, con
         {
           providerFetchImpl: fetchImpl,
           providerPrimaryApiKey: PRIMARY_KEY,
+          providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+          providerPrimaryModel: PRIMARY_MODEL,
           providerFallbackApiKey: FALLBACK_KEY,
+          providerFallbackBaseUrl: FALLBACK_BASE_URL,
+          providerFallbackModel: FALLBACK_MODEL,
         },
       );
       assert.equal(controllerOut.status, "saved");

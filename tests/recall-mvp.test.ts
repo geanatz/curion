@@ -152,7 +152,12 @@ function insertSummary(
 }
 
 const PRIMARY_KEY = "sk-primary-test-not-real-12345";
-const FALLBACK_KEY = "nvapi-fallback-test-not-real-12345";
+const FALLBACK_KEY = "sk-fallback-test-not-real-12345";
+// Use generic test URLs/models; provider label is derived from base URL.
+const PRIMARY_BASE_URL = "https://api.example.com/v1";
+const PRIMARY_MODEL = "test/model-primary";
+const FALLBACK_BASE_URL = "https://api.fallback.example/v1";
+const FALLBACK_MODEL = "test/model-fallback";
 
 /** Run the recall controller with a scripted fetch and test keys. */
 function runRecall(handle: StorageHandle, opts: {
@@ -164,7 +169,11 @@ function runRecall(handle: StorageHandle, opts: {
   return runRecallController(handle, opts.text, {
     providerFetchImpl: opts.fetchImpl,
     providerPrimaryApiKey: PRIMARY_KEY,
+    providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+    providerPrimaryModel: PRIMARY_MODEL,
     providerFallbackApiKey: FALLBACK_KEY,
+    providerFallbackBaseUrl: FALLBACK_BASE_URL,
+    providerFallbackModel: FALLBACK_MODEL,
     relevanceThreshold: opts.threshold,
     topK: opts.topK,
   });
@@ -684,7 +693,11 @@ test("recall e2e: remember then recall via the tool layer with stubbed providers
       const outcome = await runRememberController(handle, rawInput, {
         providerFetchImpl: rememberFetch.fetchImpl,
         providerPrimaryApiKey: PRIMARY_KEY,
+        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+        providerPrimaryModel: PRIMARY_MODEL,
         providerFallbackApiKey: FALLBACK_KEY,
+        providerFallbackBaseUrl: FALLBACK_BASE_URL,
+        providerFallbackModel: FALLBACK_MODEL,
       });
       assert.equal(outcome.status, "saved");
       if (outcome.status !== "saved") throw new Error("unreachable");
@@ -715,7 +728,11 @@ test("recall e2e: remember then recall via the tool layer with stubbed providers
       const out = await runRecallController(handle, "What database does the project use?", {
         providerFetchImpl: recallFetch.fetchImpl,
         providerPrimaryApiKey: PRIMARY_KEY,
+        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+        providerPrimaryModel: PRIMARY_MODEL,
         providerFallbackApiKey: FALLBACK_KEY,
+        providerFallbackBaseUrl: FALLBACK_BASE_URL,
+        providerFallbackModel: FALLBACK_MODEL,
       });
       assert.equal(out.status, "answered");
       if (out.status !== "answered") throw new Error("unreachable");
@@ -1729,7 +1746,11 @@ test("recall: weak_match (e) structuredContent.weak_match shape — <= 3 summari
     const outcome = await runRecallController(handle, "session 2", {
       providerFetchImpl: fetchImpl,
       providerPrimaryApiKey: PRIMARY_KEY,
+      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+      providerPrimaryModel: PRIMARY_MODEL,
       providerFallbackApiKey: FALLBACK_KEY,
+      providerFallbackBaseUrl: FALLBACK_BASE_URL,
+      providerFallbackModel: FALLBACK_MODEL,
     });
     assert.equal(outcome.status, "weak_match");
     if (outcome.status !== "weak_match") throw new Error("unreachable");

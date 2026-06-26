@@ -447,6 +447,11 @@ test("embedOnRemember: uses provided modelId in metadata", async () => {
 
 const TEST_PRIMARY_KEY = "sk-primary-test-not-real-12345";
 const TEST_FALLBACK_KEY = "sk-fallback-test-not-real-12345";
+// Explicit provider config: neutral URLs -> "custom" label.
+const TEST_PRIMARY_BASE_URL = "https://api.example.com/v1";
+const TEST_PRIMARY_MODEL = "test/model-primary";
+const TEST_FALLBACK_BASE_URL = "https://api.fallback.example/v1";
+const TEST_FALLBACK_MODEL = "test/model-fallback";
 
 /** Scripted fetch for tests that need to call the synthesis provider. */
 function makeScriptedFetch(content: string): typeof fetch {
@@ -476,7 +481,11 @@ test("recall controller: semantic disabled falls back to lexical", async () => {
       semanticEnabled: false, // explicitly disabled = no semantic
       providerFetchImpl: makeScriptedFetch("The primary provider is NVIDIA NIM."),
       providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
       providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
     });
     // Should return answered or no_memory (not error)
     assert.ok(
@@ -503,7 +512,11 @@ test("recall controller: stub embedder enables hybrid path", async () => {
       semanticEmbedder: embedder,
       providerFetchImpl: makeScriptedFetch("NVIDIA NIM is the primary provider."),
       providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
       providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
     });
     // Should work (answered or no_memory, not error)
     assert.ok(
@@ -535,7 +548,11 @@ test("recall controller: paraphrase recovery with stub embedder", async () => {
       relevanceThreshold: 0.0, // very low threshold to allow weak matches
       providerFetchImpl: makeScriptedFetch("The project primarily uses NVIDIA NIM."),
       providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
       providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
     });
     // With stub embedder, paraphrase recovery depends on shared vocabulary.
     // The stub's feature hashing means overlapping tokens in "provider" and "LLM"

@@ -169,7 +169,13 @@ function okChatResponse(content: string): Response {
 }
 
 const PRIMARY_KEY = "sk-primary-test-not-real-12345";
-const FALLBACK_KEY = "nvapi-fallback-test-not-real-12345";
+const FALLBACK_KEY = "sk-fallback-test-not-real-12345";
+// Explicit provider config: base URL contains "nvidia" so provider
+// label is "nvidia-nim", model is the test primary model.
+const PRIMARY_BASE_URL = "https://api.nvidia.example.com/v1";
+const PRIMARY_MODEL = "test/model-primary";
+const FALLBACK_BASE_URL = "https://api.fallback.example/v1";
+const FALLBACK_MODEL = "test/model-fallback";
 
 // ---------------------------------------------------------------------------
 // Row insertion
@@ -314,7 +320,11 @@ async function runProjected(
   const out = await runRecallController(handle, scenario.query, {
     providerFetchImpl: fetchImpl,
     providerPrimaryApiKey: PRIMARY_KEY,
+    providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+    providerPrimaryModel: PRIMARY_MODEL,
     providerFallbackApiKey: FALLBACK_KEY,
+    providerFallbackBaseUrl: FALLBACK_BASE_URL,
+    providerFallbackModel: FALLBACK_MODEL,
   });
   if (out.status === "no_memory") {
     return {
@@ -644,6 +654,8 @@ async function runScenarioAsync(
       const out = await runRecallController(storage.handle, scenario.query, {
         providerFetchImpl: fetchImpl,
         providerPrimaryApiKey: PRIMARY_KEY,
+        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+        providerPrimaryModel: PRIMARY_MODEL,
         providerFallbackApiKey: FALLBACK_KEY,
         providerFallbackBaseUrl: "https://api.minimax.io/v1",
         providerFallbackModel: "MiniMax-M3",
@@ -723,7 +735,11 @@ async function runScenarioAsync(
         await runRecallController(fresh.handle, scenario.query, {
           providerFetchImpl: fetchImpl,
           providerPrimaryApiKey: PRIMARY_KEY,
+          providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+          providerPrimaryModel: PRIMARY_MODEL,
           providerFallbackApiKey: FALLBACK_KEY,
+          providerFallbackBaseUrl: FALLBACK_BASE_URL,
+          providerFallbackModel: FALLBACK_MODEL,
         });
         const activeIds = new Set(
           listActiveMemorySummaries(fresh.handle).map((s) => s.id),
@@ -1065,7 +1081,11 @@ async function runSG9SubStatus(
         {
           providerFetchImpl: fetchImpl,
           providerPrimaryApiKey: PRIMARY_KEY,
+          providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+          providerPrimaryModel: PRIMARY_MODEL,
           providerFallbackApiKey: FALLBACK_KEY,
+          providerFallbackBaseUrl: FALLBACK_BASE_URL,
+          providerFallbackModel: FALLBACK_MODEL,
         },
       );
       if (outcome.status !== "rejected") {
@@ -1140,6 +1160,8 @@ async function runSG9SubStatus(
       const out = await runRecallController(storage.handle, scenario.query, {
         providerFetchImpl: fetchImpl,
         providerPrimaryApiKey: PRIMARY_KEY,
+        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+        providerPrimaryModel: PRIMARY_MODEL,
         providerFallbackApiKey: FALLBACK_KEY,
         providerFallbackBaseUrl: "https://api.minimax.io/v1",
         providerFallbackModel: "MiniMax-M3",

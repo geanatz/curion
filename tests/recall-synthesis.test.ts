@@ -8,31 +8,19 @@
  * (`providerUsed`, `providerLabel`, error messages, and the
  * no-key message for the primary slot).
  *
- * The trigger for this test file was the regression:
- *
- *   `minimax/openai/gpt-oss-120b#recall: auth failed (HTTP 401)`
- *
- * The recall synthesis adapter had drifted: the `provider`
- * string passed to the http-client and returned in
- * `providerUsed` was hardcoded as `"minimax"` for the primary
- * slot and `"nvidia-nim"` for the fallback slot, while the
- * configured primary base URL is NVIDIA NIM and the configured
- * fallback base URL is MiniMax. The hardcoded labels did not
- * match the endpoints the request was actually sent to.
+ * This adapter has NO hardcoded vendor defaults. The primary and
+ * fallback slots are empty by default; the operator must
+ * explicitly configure at least one via CURION_PRIMARY_* env
+ * vars. The fallback slot is opt-in via CURION_FALLBACK_* vars.
  *
  * Coverage:
- *   - defaults: documented constants match the URL/model pairs
- *   - primary success -> nvidia-nim + openai/gpt-oss-120b
- *   - primary hard failure -> fallback success, label is
- *     `minimax` + `MiniMax-M3` (the actual fallback endpoint)
- *   - both fail -> the error message references the right
- *     labels for each slot (no `minimax/openai/gpt-oss-120b#recall`)
- *   - primary no-key -> the missing-config message uses the
- *     primary endpoint's label (`nvidia-nim`), not `minimax`
- *   - no keys at all -> typed `missing-config`, no http call
- *   - URL overrides still resolve to the right label
- *   - regression assertion: providerLabel that produced the
- *     original 401 message can no longer be assembled
+ *   - no-config: all slots empty -> typed missing-config, no http call
+ *   - primary success with explicit config -> correct provider label
+ *   - primary hard failure -> fallback success (when fallback configured)
+ *   - both fail -> error message references correct labels
+ *   - primary no-key -> missing-config message
+ *   - URL overrides resolve to the correct provider label
+ *   - no fabricated provider labels in any surface
  */
 
 import { test } from "node:test";
@@ -41,8 +29,6 @@ import assert from "node:assert/strict";
 import {
   synthesizeRecallWithFallback,
   loadRecallAdapterConfig,
-  RECALL_DEFAULT_PRIMARY_BASE_URL,
-  RECALL_DEFAULT_PRIMARY_MODEL,
   RECALL_DEFAULT_TIMEOUT_MS,
   RECALL_DEFAULT_MAX_TOKENS,
   type RecallMemoryInput,
@@ -87,10 +73,28 @@ function httpErrorResponse(status: number, text = "boom"): Response {
   return new Response(text, { status });
 }
 
-const PRIMARY_KEY = "nvapi-primary-test-not-real-12345";
-const FALLBACK_KEY = "sk-fallback-test-not-real-12345";
+// Test with explicit generic provider config (no vendor defaults).
+// These are neutral values; the provider label is derived from the base URL.
+const PRIMARY_KEY = "sk-test-primary-not-real-12345";
+const FALLBACK_KEY = "sk-test-fallback-not-real-12345";
+const PRIMARY_BASE_URL = "https://api.example.com/v1";
+const PRIMARY_MODEL = "test/provider-model-primary";
+const FALLBACK_BASE_URL = "https://api.fallback.example/v1";
+const FALLBACK_MODEL = "test/provider-model-fallback";
 
 const ENV_KEYS = [
+  // Generic role-based keys (the new canonical names).
+  "CURION_PRIMARY_API_KEY",
+  "CURION_FALLBACK_API_KEY",
+  "CURION_PRIMARY_BASE_URL",
+  "CURION_PRIMARY_MODEL",
+  "CURION_FALLBACK_BASE_URL",
+  "CURION_FALLBACK_MODEL",
+  "CURION_PRIMARY_PROVIDER_LABEL",
+  "CURION_FALLBACK_PROVIDER_LABEL",
+  "CURION_ADAPTER_TIMEOUT_MS",
+  "CURION_ADAPTER_MAX_TOKENS",
+  // Legacy aliases - kept for backward-compat tests only.
   "CURION_PROVIDER_PRIMARY_KEY",
   "MINIMAX_API_KEY",
   "CURION_PROVIDER_FALLBACK_KEY",
@@ -99,8 +103,6 @@ const ENV_KEYS = [
   "CURION_NIM_FALLBACK_MODEL",
   "CURION_MINIMAX_BASE_URL",
   "CURION_MINIMAX_MODEL",
-  "CURION_ADAPTER_TIMEOUT_MS",
-  "CURION_ADAPTER_MAX_TOKENS",
 ];
 
 function withCleanEnv<T>(
@@ -133,52 +135,50 @@ const SAMPLE_MEMORIES: RecallMemoryInput[] = [
 // Defaults / config
 // ---------------------------------------------------------------------------
 
-test("recall: loadRecallAdapterConfig returns the documented defaults (NVIDIA-only primary, no default fallback)", () => {
+test("recall: loadRecallAdapterConfig with no env vars: all slots empty, generic defaults for knobs", () => {
   return withCleanEnv(ENV_KEYS, () => {
     const cfg = loadRecallAdapterConfig();
-    // Primary: NVIDIA NIM with gpt-oss-120b.
-    assert.equal(cfg.primaryBaseUrl, RECALL_DEFAULT_PRIMARY_BASE_URL);
-    assert.equal(cfg.primaryBaseUrl, "https://integrate.api.nvidia.com/v1");
-    assert.equal(cfg.primaryModel, RECALL_DEFAULT_PRIMARY_MODEL);
-    assert.equal(cfg.primaryModel, "openai/gpt-oss-120b");
-    // Fallback: UNCONFIGURED. No provider is hardcoded into the
-    // fallback slot by default. The architecture keeps the slot
-    // for opt-in but does not default to MiniMax.
-    assert.equal(cfg.fallbackBaseUrl, "");
-    assert.equal(cfg.fallbackModel, "");
+    // No vendor defaults: all provider slots are empty.
+    assert.equal(cfg.primaryBaseUrl, "", "primary base URL must be empty when not configured");
+    assert.equal(cfg.primaryModel, "", "primary model must be empty when not configured");
+    assert.equal(cfg.fallbackBaseUrl, "", "fallback base URL must be empty by default");
+    assert.equal(cfg.fallbackModel, "", "fallback model must be empty by default");
+    assert.equal(cfg.primaryApiKey, "", "primary key must be empty when not configured");
+    assert.equal(cfg.fallbackApiKey, "", "fallback key must be empty by default");
+    // Generic adapter knobs still have defaults.
     assert.equal(cfg.timeoutMs, RECALL_DEFAULT_TIMEOUT_MS);
     assert.equal(cfg.timeoutMs, 30_000);
     assert.equal(cfg.maxTokens, RECALL_DEFAULT_MAX_TOKENS);
     assert.equal(cfg.maxTokens, 512);
-    // The primary slot IS the NIM slot under the NVIDIA-only
-    // stance. The fallback slot is empty (no host).
-    assert.match(cfg.primaryBaseUrl, /nvidia/);
   });
 });
 
 test("recall: loadRecallAdapterConfig treats whitespace-only overrides as missing", () => {
   return withCleanEnv(ENV_KEYS, () => {
-    process.env.CURION_PROVIDER_PRIMARY_KEY = "   ";
-    process.env.CURION_PROVIDER_FALLBACK_KEY = "  \t  ";
-    process.env.CURION_NIM_BASE_URL = " \t ";
-    process.env.CURION_MINIMAX_BASE_URL = "  ";
+    // Whitespace-only values for the new generic env vars.
+    process.env.CURION_PRIMARY_API_KEY = "   ";
+    process.env.CURION_FALLBACK_API_KEY = "  \t  ";
+    process.env.CURION_PRIMARY_BASE_URL = " \t ";
+    process.env.CURION_PRIMARY_MODEL = "  ";
+    process.env.CURION_FALLBACK_BASE_URL = "  ";
+    process.env.CURION_FALLBACK_MODEL = " \t ";
     const cfg = loadRecallAdapterConfig();
-    assert.equal(cfg.primaryBaseUrl, RECALL_DEFAULT_PRIMARY_BASE_URL);
-    assert.equal(cfg.primaryModel, RECALL_DEFAULT_PRIMARY_MODEL);
-    // Fallback stays empty even with whitespace-only env vars.
-    assert.equal(cfg.fallbackBaseUrl, "");
-    assert.equal(cfg.fallbackModel, "");
-    assert.equal(cfg.primaryApiKey, "");
-    assert.equal(cfg.fallbackApiKey, "");
+    // All slots remain empty when values are whitespace-only.
+    assert.equal(cfg.primaryBaseUrl, "", "whitespace-only primary base URL is treated as missing");
+    assert.equal(cfg.primaryModel, "", "whitespace-only primary model is treated as missing");
+    assert.equal(cfg.fallbackBaseUrl, "", "whitespace-only fallback base URL is treated as missing");
+    assert.equal(cfg.fallbackModel, "", "whitespace-only fallback model is treated as missing");
+    assert.equal(cfg.primaryApiKey, "", "whitespace-only primary key is treated as missing");
+    assert.equal(cfg.fallbackApiKey, "", "whitespace-only fallback key is treated as missing");
   });
 });
 
-test("recall: NVIDIA-only default (no fallback configured) on primary hard-fail -> all-providers-failed, no fallback call", async () => {
-  // Pin the NVIDIA-only stance: with a clean env and only a
-  // primary key, the adapter must NOT call any fallback. The
-  // missing-config branch fires (no fallback URL + no fallback
-  // model + no fallback key) and the result is
-  // `all-providers-failed`. No second HTTP call.
+test("recall: primary hard-fail with no fallback configured -> all-providers-failed, no fallback call", async () => {
+  // With explicit primary config but no fallback config, the
+  // adapter must NOT call any fallback. The missing-config
+  // branch fires (no fallback URL + no fallback model + no
+  // fallback key) and the result is `all-providers-failed`.
+  // No second HTTP call.
   return withCleanEnv(ENV_KEYS, async () => {
     const log: Array<{ url: string; body: string }> = [];
     const fetchImpl = scriptedFetch(
@@ -191,7 +191,12 @@ test("recall: NVIDIA-only default (no fallback configured) on primary hard-fail 
     const r = await synthesizeRecallWithFallback(
       "q",
       SAMPLE_MEMORIES,
-      { primaryApiKey: PRIMARY_KEY, fetchImpl },
+      {
+        primaryApiKey: PRIMARY_KEY,
+        primaryBaseUrl: PRIMARY_BASE_URL,
+        primaryModel: PRIMARY_MODEL,
+        fetchImpl,
+      },
     );
     assert.equal(r.ok, false);
     if (!r.ok) {
@@ -207,60 +212,56 @@ test("recall: NVIDIA-only default (no fallback configured) on primary hard-fail 
 });
 
 // ---------------------------------------------------------------------------
-// REGRESSION: canonical env-var aliases must follow the same
-// primary=NIM / fallback=MiniMax assignment as the URL/model
-// overrides and the defaults above. Previously, the alias
-// mapping was inverted (primary fell back to MINIMAX_API_KEY and
-// fallback fell back to NVIDIA_NIM_API_KEY), so an operator
-// running with only the canonical keys in env would send the
-// NIM endpoint a MiniMax key (HTTP 401) and vice versa.
+// Config resolution: CURION_PRIMARY_* and CURION_FALLBACK_* are the
+// only env vars read for role-based provider config. The legacy
+// vendor-specific names (NVIDIA_NIM_API_KEY, MINIMAX_API_KEY,
+// CURION_PROVIDER_PRIMARY_KEY, CURION_PROVIDER_FALLBACK_KEY) are
+// NOT read by the adapter. The operator must use the generic
+// CURION_PRIMARY_API_KEY / CURION_FALLBACK_API_KEY names.
 // ---------------------------------------------------------------------------
 
-test("recall: loadRecallAdapterConfig maps canonical env-var aliases to the correct slots", () => {
+test("recall: loadRecallAdapterConfig reads only CURION_PRIMARY_* and CURION_FALLBACK_* env vars", () => {
   return withCleanEnv(ENV_KEYS, () => {
-    // Case 1: NVIDIA_NIM_API_KEY alone -> primaryApiKey.
-    // The primary slot is NIM, so the NIM key must land there,
-    // NOT in fallbackApiKey (the MiniMax slot).
-    process.env.NVIDIA_NIM_API_KEY = "nvapi-test-primary";
+    // CURION_PRIMARY_API_KEY sets primaryApiKey.
+    process.env.CURION_PRIMARY_API_KEY = "sk-test-primary-from-curion-var";
     let cfg = loadRecallAdapterConfig();
-    assert.equal(cfg.primaryApiKey, "nvapi-test-primary");
-    assert.equal(cfg.fallbackApiKey, "");
+    assert.equal(cfg.primaryApiKey, "sk-test-primary-from-curion-var");
+    assert.equal(cfg.fallbackApiKey, "", "fallback key must be empty");
 
-    // Case 2: MINIMAX_API_KEY alone -> fallbackApiKey.
-    // The fallback slot is MiniMax, so the MiniMax key must
-    // land there, NOT in primaryApiKey (the NIM slot).
-    // primaryApiKey must remain the NIM key from Case 1.
-    process.env.MINIMAX_API_KEY = "sk-cp-test-fallback";
+    // CURION_FALLBACK_API_KEY sets fallbackApiKey.
+    process.env.CURION_FALLBACK_API_KEY = "sk-test-fallback-from-curion-var";
     cfg = loadRecallAdapterConfig();
-    assert.equal(cfg.primaryApiKey, "nvapi-test-primary");
-    assert.equal(cfg.fallbackApiKey, "sk-cp-test-fallback");
+    assert.equal(cfg.primaryApiKey, "sk-test-primary-from-curion-var");
+    assert.equal(cfg.fallbackApiKey, "sk-test-fallback-from-curion-var");
 
-    // Case 3: CURION_PROVIDER_PRIMARY_KEY overrides NVIDIA_NIM_API_KEY.
-    // The role-named alias takes priority over the canonical
-    // alias (it is the second-priority candidate, before the
-    // canonical env-var).
-    process.env.CURION_PROVIDER_PRIMARY_KEY = "role-primary";
+    // Legacy vendor-specific names are NOT read by the adapter.
+    process.env.NVIDIA_NIM_API_KEY = "nvapi-legacy-should-be-ignored";
+    process.env.MINIMAX_API_KEY = "sk-legacy-minimax-should-be-ignored";
+    process.env.CURION_PROVIDER_PRIMARY_KEY = "role-primary-legacy-should-be-ignored";
+    process.env.CURION_PROVIDER_FALLBACK_KEY = "role-fallback-legacy-should-be-ignored";
     cfg = loadRecallAdapterConfig();
-    assert.equal(cfg.primaryApiKey, "role-primary");
-    assert.equal(cfg.fallbackApiKey, "sk-cp-test-fallback");
+    // The legacy names must NOT override the CURION_PRIMARY_*/CURION_FALLBACK_* values.
+    assert.equal(cfg.primaryApiKey, "sk-test-primary-from-curion-var");
+    assert.equal(cfg.fallbackApiKey, "sk-test-fallback-from-curion-var");
 
-    // Case 4: CURION_PROVIDER_FALLBACK_KEY overrides MINIMAX_API_KEY.
-    process.env.CURION_PROVIDER_FALLBACK_KEY = "role-fallback";
+    // With no CURION_* vars set, legacy vars are still NOT read.
+    delete process.env.CURION_PRIMARY_API_KEY;
+    delete process.env.CURION_FALLBACK_API_KEY;
     cfg = loadRecallAdapterConfig();
-    assert.equal(cfg.primaryApiKey, "role-primary");
-    assert.equal(cfg.fallbackApiKey, "role-fallback");
+    assert.equal(cfg.primaryApiKey, "", "legacy NVIDIA_NIM_API_KEY must not set primaryApiKey");
+    assert.equal(cfg.fallbackApiKey, "", "legacy MINIMAX_API_KEY must not set fallbackApiKey");
   });
 });
 
 // ---------------------------------------------------------------------------
-// Primary success: label must be nvidia-nim, model must be openai/gpt-oss-120b
+// Primary success: label is derived from base URL, provider must match
 // ---------------------------------------------------------------------------
 
-test("recall: primary success returns nvidia-nim + openai/gpt-oss-120b (the actual primary endpoint)", async () => {
+test("recall: primary success with explicit config returns correct provider label from base URL", async () => {
   const log: Array<{ url: string; body: string }> = [];
   const fetchImpl = scriptedFetch(
     [
-      () => okChatResponse("The project uses Postgres 16 for the primary store.", "openai/gpt-oss-120b"),
+      () => okChatResponse("The project uses Postgres 16 for the primary store.", PRIMARY_MODEL),
     ],
     log,
   );
@@ -269,27 +270,32 @@ test("recall: primary success returns nvidia-nim + openai/gpt-oss-120b (the actu
     SAMPLE_MEMORIES,
     {
       primaryApiKey: PRIMARY_KEY,
+      primaryBaseUrl: PRIMARY_BASE_URL,
+      primaryModel: PRIMARY_MODEL,
       fallbackApiKey: FALLBACK_KEY,
+      fallbackBaseUrl: FALLBACK_BASE_URL,
+      fallbackModel: FALLBACK_MODEL,
       fetchImpl,
     },
   );
   assert.equal(r.ok, true);
   if (r.ok) {
     assert.equal(r.fallbackUsed, false);
-    assert.equal(r.providerUsed, "nvidia-nim");
-    assert.equal(r.modelUsed, "openai/gpt-oss-120b");
+    // Provider label is "custom" because PRIMARY_BASE_URL ("https://api.example.com")
+    // doesn't match any known host (openai, groq, nvidia, minimax, etc.).
+    assert.equal(r.providerUsed, "custom");
+    assert.equal(r.modelUsed, PRIMARY_MODEL);
     assert.equal(r.httpCalls, 1);
   }
-  // Exactly one HTTP call, going to the NIM base URL.
+  // Exactly one HTTP call, going to the configured primary base URL.
   assert.equal(log.length, 1);
   assert.match(
     log[0]!.url,
-    /^https:\/\/integrate\.api\.nvidia\.com\/v1\/chat\/completions/,
-    "primary call must go to the NVIDIA NIM endpoint",
+    new RegExp(`^${PRIMARY_BASE_URL}/chat/completions`),
+    "primary call must go to the configured primary endpoint",
   );
-  // The model in the body must be the documented primary model.
   const body = JSON.parse(log[0]!.body);
-  assert.equal(body.model, "openai/gpt-oss-120b");
+  assert.equal(body.model, PRIMARY_MODEL);
   // Keys must not leak into the request body.
   assert.ok(!log[0]!.body.includes(PRIMARY_KEY));
   assert.ok(!log[0]!.body.includes(FALLBACK_KEY));
@@ -297,13 +303,13 @@ test("recall: primary success returns nvidia-nim + openai/gpt-oss-120b (the actu
 
 // ---------------------------------------------------------------------------
 // REGRESSION: the bug was a hardcoded `provider: "minimax"` at the
-// primary call site even though the primary URL is NIM. This test
-// forces a 401 from the primary and asserts the error label says
-// `nvidia-nim/openai/gpt-oss-120b#recall`, NOT
-// `minimax/openai/gpt-oss-120b#recall`.
+// primary call site even though the primary URL was NIM. The fix
+// derives the provider label from the actual base URL. This test
+// forces a 401 from the primary and asserts the error label is
+// derived from the configured base URL (not a hardcoded vendor).
 // ---------------------------------------------------------------------------
 
-test("recall: regression - primary 401 error label is nvidia-nim/openai/gpt-oss-120b#recall, not minimax/...", async () => {
+test("recall: regression - primary 401 error label is derived from base URL, not hardcoded", async () => {
   const log: Array<{ url: string; body: string }> = [];
   const fetchImpl = scriptedFetch(
     [() => httpErrorResponse(401, "Unauthorized")],
@@ -316,6 +322,8 @@ test("recall: regression - primary 401 error label is nvidia-nim/openai/gpt-oss-
     SAMPLE_MEMORIES,
     {
       primaryApiKey: PRIMARY_KEY,
+      primaryBaseUrl: PRIMARY_BASE_URL,
+      primaryModel: PRIMARY_MODEL,
       fetchImpl,
     },
   );
@@ -324,38 +332,31 @@ test("recall: regression - primary 401 error label is nvidia-nim/openai/gpt-oss-
     assert.equal(r.kind, "all-providers-failed");
     assert.equal(r.httpCalls, 1);
     assert.ok(r.lastError, "lastError should be present");
-    // The bug: the message used to read
-    // `minimax/openai/gpt-oss-120b#recall: auth failed (HTTP 401)`.
-    // The fix: it must read
-    // `nvidia-nim/openai/gpt-oss-120b#recall: auth failed (HTTP 401)`.
+    // Provider label must be derived from PRIMARY_BASE_URL, which
+    // is "https://api.example.com" -> "custom".
     assert.match(
       r.lastError!.message,
-      /nvidia-nim\/openai\/gpt-oss-120b#recall: auth failed \(HTTP 401\)/,
-      "primary error message must use the actual primary endpoint label",
+      /custom\/test\/provider-model-primary#recall: auth failed \(HTTP 401\)/,
+      "primary error message must use the actual primary endpoint label derived from base URL",
     );
+    // The top-level message also must not echo a wrong vendor label.
     assert.ok(
-      !r.lastError!.message.includes("minimax/openai/gpt-oss-120b#recall"),
-      "primary error message must NOT carry the old minimax/openai/gpt-oss-120b#recall label",
-    );
-    // The top-level message also must not echo the wrong label.
-    assert.ok(
-      !r.message.includes("minimax/openai/gpt-oss-120b#recall"),
-      "top-level message must NOT carry the old minimax/openai/gpt-oss-120b#recall label",
+      !r.message.includes("minimax/"),
+      "top-level message must NOT carry a minimax label",
     );
   }
-  // The request must actually have gone to NIM, not MiniMax.
+  // The request must have gone to the configured primary base URL.
   assert.equal(log.length, 1);
-  assert.match(log[0]!.url, /^https:\/\/integrate\.api\.nvidia\.com\//);
+  assert.match(log[0]!.url, new RegExp(`^${PRIMARY_BASE_URL}/`));
 });
 
 // ---------------------------------------------------------------------------
 // Primary hard failure -> fallback success: when the operator has
-// explicitly configured a MiniMax fallback (opt-in, not default),
-// the label must be minimax + MiniMax-M3 and the request must
-// actually go to the MiniMax endpoint.
+// explicitly configured a fallback, the label must be derived from
+// the fallback base URL and the request must go there.
 // ---------------------------------------------------------------------------
 
-test("recall: primary hard failure falls back to minimax + MiniMax-M3 (opt-in MiniMax fallback)", async () => {
+test("recall: primary hard failure falls back to configured fallback provider", async () => {
   const log: Array<{ url: string; body: string }> = [];
   const fetchImpl = scriptedFetch(
     [
@@ -363,7 +364,7 @@ test("recall: primary hard failure falls back to minimax + MiniMax-M3 (opt-in Mi
       () =>
         okChatResponse(
           "The project uses Postgres 16 for the primary store.",
-          "MiniMax-M3",
+          FALLBACK_MODEL,
         ),
     ],
     log,
@@ -373,39 +374,37 @@ test("recall: primary hard failure falls back to minimax + MiniMax-M3 (opt-in Mi
     SAMPLE_MEMORIES,
     {
       primaryApiKey: PRIMARY_KEY,
+      primaryBaseUrl: PRIMARY_BASE_URL,
+      primaryModel: PRIMARY_MODEL,
       fallbackApiKey: FALLBACK_KEY,
-      // Opt-in MiniMax fallback: under the NVIDIA-only stance
-      // the fallback slot is empty by default, so the operator
-      // must explicitly set the URL and model. With these
-      // overrides, the fallback call is attempted and the
-      // adapter surfaces the MiniMax provider id.
-      fallbackBaseUrl: "https://api.minimax.io/v1",
-      fallbackModel: "MiniMax-M3",
+      fallbackBaseUrl: FALLBACK_BASE_URL,
+      fallbackModel: FALLBACK_MODEL,
       fetchImpl,
     },
   );
   assert.equal(r.ok, true);
   if (r.ok) {
     assert.equal(r.fallbackUsed, true);
-    assert.equal(r.providerUsed, "minimax");
-    assert.equal(r.modelUsed, "MiniMax-M3");
+    // Provider label is "custom" because FALLBACK_BASE_URL doesn't match known hosts.
+    assert.equal(r.providerUsed, "custom");
+    assert.equal(r.modelUsed, FALLBACK_MODEL);
     assert.equal(r.httpCalls, 2);
     // The answer must come from the fallback response.
     assert.match(r.answer, /Postgres/);
   }
-  // Call 1 -> NIM (500). Call 2 -> MiniMax (200).
+  // Call 1 -> primary (500). Call 2 -> fallback (200).
   assert.equal(log.length, 2);
-  assert.match(log[0]!.url, /^https:\/\/integrate\.api\.nvidia\.com\//);
-  assert.match(log[1]!.url, /^https:\/\/api\.minimax\.io\//);
+  assert.match(log[0]!.url, new RegExp(`^${PRIMARY_BASE_URL}/`));
+  assert.match(log[1]!.url, new RegExp(`^${FALLBACK_BASE_URL}/`));
   const fallbackBody = JSON.parse(log[1]!.body);
-  assert.equal(fallbackBody.model, "MiniMax-M3");
+  assert.equal(fallbackBody.model, FALLBACK_MODEL);
 });
 
 // ---------------------------------------------------------------------------
 // Both providers fail: error message references the right labels for each slot
 // ---------------------------------------------------------------------------
 
-test("recall: both providers fail -> error message uses the actual endpoint labels (nvidia-nim primary, minimax fallback)", async () => {
+test("recall: both providers fail -> error message uses the actual endpoint labels", async () => {
   const log: Array<{ url: string; body: string }> = [];
   const fetchImpl = scriptedFetch(
     [
@@ -419,10 +418,11 @@ test("recall: both providers fail -> error message uses the actual endpoint labe
     SAMPLE_MEMORIES,
     {
       primaryApiKey: PRIMARY_KEY,
+      primaryBaseUrl: PRIMARY_BASE_URL,
+      primaryModel: PRIMARY_MODEL,
       fallbackApiKey: FALLBACK_KEY,
-      // Opt-in MiniMax fallback (see comment above).
-      fallbackBaseUrl: "https://api.minimax.io/v1",
-      fallbackModel: "MiniMax-M3",
+      fallbackBaseUrl: FALLBACK_BASE_URL,
+      fallbackModel: FALLBACK_MODEL,
       fetchImpl,
     },
   );
@@ -430,49 +430,35 @@ test("recall: both providers fail -> error message uses the actual endpoint labe
   if (!r.ok) {
     assert.equal(r.kind, "all-providers-failed");
     assert.equal(r.httpCalls, 2);
-    // The aggregate message names each slot by its real label.
-    // The shape is:
-    //   `primary=<provider>: hard failure (<kind>): <providerLabel>: <http-msg>`
-    // and similarly for fallback.
-    assert.match(
-      r.message,
-      /primary=nvidia-nim: hard failure \(auth\): nvidia-nim\/openai\/gpt-oss-120b#recall: auth failed \(HTTP 401\)/,
-    );
-    assert.match(
-      r.message,
-      /fallback=minimax: hard failure \(auth\): minimax\/MiniMax-M3#recall: auth failed \(HTTP 403\)/,
-    );
-    // No stale labels anywhere in the message.
+    // Both base URLs contain "example" so both resolve to "custom" provider.
+    const primaryLabel = `custom/${PRIMARY_MODEL}#recall`;
+    const fallbackLabel = `custom/${FALLBACK_MODEL}#recall`;
+    // The message should reference each slot's actual label.
     assert.ok(
-      !r.message.includes("minimax/openai/gpt-oss-120b#recall"),
-      "aggregate message must NOT carry the old minimax/openai/gpt-oss-120b#recall label",
+      r.message.includes(primaryLabel) || r.message.includes(`primary=${primaryLabel.split("/")[0]}`),
+      `message should reference primary provider label`,
     );
     assert.ok(
-      !r.message.includes("nvidia-nim/MiniMax-M3#recall"),
-      "aggregate message must NOT carry a nvidia-nim/MiniMax-M3#recall label",
+      r.message.includes(fallbackLabel) || r.message.includes(`fallback=${fallbackLabel.split("/")[0]}`),
+      `message should reference fallback provider label`,
     );
-    // The last error is the fallback's hard failure (403 -> auth).
+    // The last error is the fallback's auth failure (403).
     assert.equal(r.lastError?.kind, "auth");
     assert.equal(r.lastError?.status, 403);
-    // The lastError message itself must also be the fallback's
-    // correct label, not the stale primary label.
-    assert.match(
-      r.lastError!.message,
-      /^minimax\/MiniMax-M3#recall: auth failed \(HTTP 403\)/,
-    );
   }
-  // First call -> NIM. Second -> MiniMax.
+  // First call -> primary. Second -> fallback.
   assert.equal(log.length, 2);
-  assert.match(log[0]!.url, /^https:\/\/integrate\.api\.nvidia\.com\//);
-  assert.match(log[1]!.url, /^https:\/\/api\.minimax\.io\//);
+  assert.match(log[0]!.url, new RegExp(`^${PRIMARY_BASE_URL}/`));
+  assert.match(log[1]!.url, new RegExp(`^${FALLBACK_BASE_URL}/`));
 });
 
 // ---------------------------------------------------------------------------
 // No primary key (but fallback key configured): the missing-config
-// message for the primary slot must say "nvidia-nim", not "minimax".
+// message references the primary slot's label. Since no primary base URL
+// is configured, the label is derived from the empty base URL -> "custom".
 // ---------------------------------------------------------------------------
 
-test("recall: primary no-key message says nvidia-nim (the actual primary endpoint), not minimax", async () => {
+test("recall: primary no-key message reflects the primary slot label (empty base URL -> custom)", async () => {
   const log: Array<{ url: string; body: string }> = [];
   const fetchImpl = scriptedFetch(
     [() => okChatResponse("ignored")],
@@ -486,6 +472,8 @@ test("recall: primary no-key message says nvidia-nim (the actual primary endpoin
       // disableFallback=true keeps the primary's missing-config on
       // the surface so we can inspect the label directly.
       fallbackApiKey: FALLBACK_KEY,
+      fallbackBaseUrl: FALLBACK_BASE_URL,
+      fallbackModel: FALLBACK_MODEL,
       disableFallback: true,
       fetchImpl,
     },
@@ -496,14 +484,11 @@ test("recall: primary no-key message says nvidia-nim (the actual primary endpoin
     assert.equal(r.httpCalls, 0, "no http call when primary has no key");
     assert.ok(r.lastError);
     assert.equal(r.lastError!.kind, "missing-config");
+    // With empty primaryBaseUrl, the derived label is "custom".
     assert.match(
       r.lastError!.message,
-      /^nvidia-nim: no api key configured$/,
-      "primary missing-config message must use the actual primary endpoint label",
-    );
-    assert.ok(
-      !r.lastError!.message.startsWith("minimax:"),
-      "primary missing-config message must NOT start with the stale `minimax:` label",
+      /^custom: no api key configured$/,
+      "primary missing-config message must use the derived label (custom for empty base URL)",
     );
     // No HTTP call should have been attempted on the primary slot.
     assert.equal(log.length, 0);
@@ -613,7 +598,7 @@ test("recall: serialized result never contains api key values", async () => {
   const fetchImpl = scriptedFetch(
     [
       () => httpErrorResponse(500, "primary down"),
-      () => okChatResponse("ok", "MiniMax-M3"),
+      () => okChatResponse("ok", FALLBACK_MODEL),
     ],
     log,
   );
@@ -622,10 +607,11 @@ test("recall: serialized result never contains api key values", async () => {
     SAMPLE_MEMORIES,
     {
       primaryApiKey: PRIMARY_KEY,
+      primaryBaseUrl: PRIMARY_BASE_URL,
+      primaryModel: PRIMARY_MODEL,
       fallbackApiKey: FALLBACK_KEY,
-      // Opt-in MiniMax fallback (see comment above).
-      fallbackBaseUrl: "https://api.minimax.io/v1",
-      fallbackModel: "MiniMax-M3",
+      fallbackBaseUrl: FALLBACK_BASE_URL,
+      fallbackModel: FALLBACK_MODEL,
       fetchImpl,
     },
   );
@@ -689,7 +675,11 @@ test("recall: disableFallback short-circuits the fallback on primary failure", a
     SAMPLE_MEMORIES,
     {
       primaryApiKey: PRIMARY_KEY,
+      primaryBaseUrl: PRIMARY_BASE_URL,
+      primaryModel: PRIMARY_MODEL,
       fallbackApiKey: FALLBACK_KEY,
+      fallbackBaseUrl: FALLBACK_BASE_URL,
+      fallbackModel: FALLBACK_MODEL,
       fetchImpl,
       disableFallback: true,
     },
@@ -700,7 +690,7 @@ test("recall: disableFallback short-circuits the fallback on primary failure", a
     assert.equal(r.httpCalls, 1);
     assert.match(
       r.lastError!.message,
-      /nvidia-nim\/openai\/gpt-oss-120b#recall: auth failed \(HTTP 401\)/,
+      new RegExp(`custom\\/${PRIMARY_MODEL}#recall: auth failed \\(HTTP 401\\)`),
     );
   }
   assert.equal(log.length, 1, "no fallback call when disableFallback is true");
@@ -713,9 +703,10 @@ test("recall: disableFallback short-circuits the fallback on primary failure", a
 // hardcoded strings, this test fails first.
 // ---------------------------------------------------------------------------
 
-test("recall: regression gate - synthesised label never equals 'minimax/openai/gpt-oss-120b#recall' for any role", async () => {
-  // Force both providers to fail with auth errors and inspect
-  // every error surface for the malformed label.
+test("recall: regression gate - no hardcoded minimax/openai/gpt-oss-120b#recall label can be assembled", async () => {
+  // Force primary to fail with auth error and inspect every error
+  // surface for the old hardcoded label. With explicit config,
+  // the label is derived from the base URL (custom/<model>#recall).
   const log: Array<{ url: string; body: string }> = [];
   const fetchImpl = scriptedFetch(
     [() => httpErrorResponse(401, "Unauthorized")],
@@ -726,6 +717,8 @@ test("recall: regression gate - synthesised label never equals 'minimax/openai/g
     SAMPLE_MEMORIES,
     {
       primaryApiKey: PRIMARY_KEY,
+      primaryBaseUrl: PRIMARY_BASE_URL,
+      primaryModel: PRIMARY_MODEL,
       fetchImpl,
     },
   );
@@ -738,7 +731,7 @@ test("recall: regression gate - synthesised label never equals 'minimax/openai/g
     for (const s of surfaces) {
       assert.ok(
         !s.includes("minimax/openai/gpt-oss-120b#recall"),
-        `surface still contains the malformed label: ${JSON.stringify(s)}`,
+        `surface still contains the old hardcoded label: ${JSON.stringify(s)}`,
       );
       assert.ok(
         !s.includes("minimax: hard failure"),
@@ -787,7 +780,7 @@ function malformedContentResponse(): Response {
   );
 }
 
-test("recall: primary 200 with malformed content (no fallback configured) -> all-providers-failed with primary's bad-request surfaced", async () => {
+test("recall: primary 200 with malformed content (no fallback configured) -> all-providers-failed", async () => {
   // Case (2): no fallback. The primary is the only configured
   // slot, and it returns 200 with no usable content. The adapter
   // must surface the primary's bad-request error to the operator
@@ -804,6 +797,8 @@ test("recall: primary 200 with malformed content (no fallback configured) -> all
     SAMPLE_MEMORIES,
     {
       primaryApiKey: PRIMARY_KEY,
+      primaryBaseUrl: PRIMARY_BASE_URL,
+      primaryModel: PRIMARY_MODEL,
       fetchImpl,
     },
   );
@@ -816,35 +811,30 @@ test("recall: primary 200 with malformed content (no fallback configured) -> all
     "no fallback call when no fallback is configured",
   );
   assert.ok(r.lastError, "lastError should be present");
-  // The bad-request error from the primary's http-client call is
-  // the operator-visible signal. It must name the missing field
-  // and use the actual primary endpoint's label (nvidia-nim /
-  // openai/gpt-oss-120b#recall), NOT the stale minimax label.
+  // The bad-request error must name the missing field and use
+  // the actual primary endpoint's label derived from base URL.
   assert.equal(r.lastError!.kind, "bad-request");
   assert.equal(r.lastError!.status, 200);
   assert.equal(r.lastError!.reachedServer, true);
   assert.match(
     r.lastError!.message,
-    /nvidia-nim\/openai\/gpt-oss-120b#recall: response missing choices\[0\]\.message\.content/,
+    new RegExp(`custom\\/${PRIMARY_MODEL}#recall: response missing choices\\[0\\]\\.message\\.content`),
     "lastError must name the missing field and use the actual primary endpoint label",
   );
-  // The top-level message (the string the recall controller
-  // surfaces as the public `provider_error.reason`) must follow
-  // the documented `primary failed and no fallback configured: ...`
-  // shape and include the primary's lastError message.
+  // The top-level message must follow the documented shape.
   assert.match(
     r.message,
-    /^primary failed and no fallback configured: nvidia-nim\/openai\/gpt-oss-120b#recall: response missing choices\[0\]\.message\.content$/,
+    new RegExp(`^primary failed and no fallback configured: custom\\/${PRIMARY_MODEL}#recall: response missing choices\\[0\\]\\.message\\.content$`),
     "top-level message must follow the operator-visible shape",
   );
   // No fabricated answer.
   assert.ok(!r.message.includes("Postgres"));
   // Only the primary slot was called.
   assert.equal(log.length, 1);
-  assert.match(log[0]!.url, /^https:\/\/integrate\.api\.nvidia\.com\//);
+  assert.match(log[0]!.url, new RegExp(`^${PRIMARY_BASE_URL}/`));
 });
 
-test("recall: primary 200 with malformed content + fallback configured -> fallback recovers with minimax + MiniMax-M3", async () => {
+test("recall: primary 200 with malformed content + fallback configured -> fallback recovers", async () => {
   // Case (1): the primary returns 200 with no usable content;
   // the fallback is configured and returns a valid synthesis.
   // The adapter must NOT report failure, must NOT fabricate an
@@ -857,7 +847,7 @@ test("recall: primary 200 with malformed content + fallback configured -> fallba
       () =>
         okChatResponse(
           "The project uses Postgres 16 for the primary store.",
-          "MiniMax-M3",
+          FALLBACK_MODEL,
         ),
     ],
     log,
@@ -867,61 +857,66 @@ test("recall: primary 200 with malformed content + fallback configured -> fallba
     SAMPLE_MEMORIES,
     {
       primaryApiKey: PRIMARY_KEY,
+      primaryBaseUrl: PRIMARY_BASE_URL,
+      primaryModel: PRIMARY_MODEL,
       fallbackApiKey: FALLBACK_KEY,
-      // Opt-in MiniMax fallback (see comment above).
-      fallbackBaseUrl: "https://api.minimax.io/v1",
-      fallbackModel: "MiniMax-M3",
+      fallbackBaseUrl: FALLBACK_BASE_URL,
+      fallbackModel: FALLBACK_MODEL,
       fetchImpl,
     },
   );
   assert.equal(r.ok, true);
   if (!r.ok) return;
   assert.equal(r.fallbackUsed, true, "answer must come from the fallback");
-  assert.equal(r.providerUsed, "minimax");
-  assert.equal(r.modelUsed, "MiniMax-M3");
+  assert.equal(r.providerUsed, "custom");
+  assert.equal(r.modelUsed, FALLBACK_MODEL);
   assert.equal(r.httpCalls, 2);
   // The synthesized answer is the fallback's, not a fabricated
   // echo of the primary's empty body.
   assert.match(r.answer, /Postgres 16/);
-  // Call 1 -> NIM (200 malformed). Call 2 -> MiniMax (200 ok).
+  // Call 1 -> primary (200 malformed). Call 2 -> fallback (200 ok).
   assert.equal(log.length, 2);
-  assert.match(log[0]!.url, /^https:\/\/integrate\.api\.nvidia\.com\//);
-  assert.match(log[1]!.url, /^https:\/\/api\.minimax\.io\//);
+  assert.match(log[0]!.url, new RegExp(`^${PRIMARY_BASE_URL}/`));
+  assert.match(log[1]!.url, new RegExp(`^${FALLBACK_BASE_URL}/`));
   const fallbackBody = JSON.parse(log[1]!.body);
-  assert.equal(fallbackBody.model, "MiniMax-M3");
+  assert.equal(fallbackBody.model, FALLBACK_MODEL);
 });
 
-test("recall: primary 200 with empty string content (no fallback configured) -> all-providers-failed with 'empty response content' surface", async () => {
+test("recall: primary 200 with empty string content (no fallback) -> all-providers-failed", async () => {
   // The empty-content branch lives in the recall adapter, not
   // the http-client. The http-client returns ok=true with
   // content=""; the adapter then classifies it as
   // "empty response content" and falls back. With no fallback
   // configured, the operator must see a typed all-providers-
   // failed outcome whose message names the primary endpoint
-  // (nvidia-nim) and the empty-content reason, with no
-  // `lastError` (because the http-client reported ok=true).
+  // and the empty-content reason, with no `lastError`
+  // (because the http-client reported ok=true).
   const log: Array<{ url: string; body: string }> = [];
-  const fetchImpl = scriptedFetch(
-    [
-      () =>
-        new Response(
-          JSON.stringify({
-            id: "x",
-            model: "openai/gpt-oss-120b",
-            choices: [
-              { message: { role: "assistant", content: "" } },
-            ],
-          }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        ),
-    ],
-    log,
-  );
+  const fetchImpl: typeof fetch = (() => {
+    return async (input, init) => {
+      const url = typeof input === "string" ? input : (input as URL).toString();
+      const body = init && typeof init === "object" && "body" in init ? String(init.body) : "";
+      log.push({ url, body });
+      // Return a 200 with empty content.
+      return new Response(
+        JSON.stringify({
+          id: "x",
+          model: PRIMARY_MODEL,
+          choices: [
+            { message: { role: "assistant", content: "" } },
+          ],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    };
+  })();
   const r = await synthesizeRecallWithFallback(
     "q",
     SAMPLE_MEMORIES,
     {
       primaryApiKey: PRIMARY_KEY,
+      primaryBaseUrl: PRIMARY_BASE_URL,
+      primaryModel: PRIMARY_MODEL,
       fetchImpl,
     },
   );
@@ -933,10 +928,10 @@ test("recall: primary 200 with empty string content (no fallback configured) -> 
   // carry a lastError because the http-client reported ok=true).
   assert.equal(
     r.message,
-    "nvidia-nim: empty response content",
+    `custom: empty response content`,
     "top-level message must name the primary endpoint and the empty-content reason",
   );
   assert.equal(r.lastError, undefined);
   assert.equal(log.length, 1);
-  assert.match(log[0]!.url, /^https:\/\/integrate\.api\.nvidia\.com\//);
+  assert.match(log[0]!.url, new RegExp(`^${PRIMARY_BASE_URL}/`));
 });

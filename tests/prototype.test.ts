@@ -53,11 +53,17 @@ import {
 // env-loader
 // ---------------------------------------------------------------------------
 
-test("env-loader: SECRET_ENV_VARS contains both aliases for each provider", () => {
+test("env-loader: SECRET_ENV_VARS contains canonical and legacy secret names", () => {
+  // Canonical role-based names.
   for (const v of [
-    "CURION_PROVIDER_PRIMARY_KEY",
+    "CURION_PRIMARY_API_KEY",
+    "CURION_FALLBACK_API_KEY",
+  ]) {
+    assert.ok(SECRET_ENV_VARS.includes(v), `expected ${v} in SECRET_ENV_VARS`);
+  }
+  // Legacy vendor-specific names (kept for backward compat in secret detection).
+  for (const v of [
     "MINIMAX_API_KEY",
-    "CURION_PROVIDER_FALLBACK_KEY",
     "NVIDIA_NIM_API_KEY",
   ]) {
     assert.ok(SECRET_ENV_VARS.includes(v), `expected ${v} in SECRET_ENV_VARS`);

@@ -37,7 +37,7 @@ export const PROTOTYPE_FIXTURES: readonly PrototypeFixture[] = [
   {
     id: "P3",
     description: "Provider configuration: a small list of facts.",
-    text: "The primary provider is MiniMax, model M3. The fallback provider is NVIDIA NIM with the default model openai/gpt-oss-120b; additional models can be configured via CURION_NIM_MODELS.",
+    text: "Curion uses role-based provider configuration. The primary provider is configured via CURION_PRIMARY_BASE_URL, CURION_PRIMARY_API_KEY, and CURION_PRIMARY_MODEL. An optional fallback can be configured via CURION_FALLBACK_BASE_URL, CURION_FALLBACK_API_KEY, and CURION_FALLBACK_MODEL.",
   },
   {
     id: "P4",

@@ -117,7 +117,13 @@ function okChatResponse(content: string): Response {
 }
 
 const PRIMARY_KEY = "sk-primary-test-not-real-12345";
-const FALLBACK_KEY = "nvapi-fallback-test-not-real-12345";
+const FALLBACK_KEY = "sk-fallback-test-not-real-12345";
+// Explicit provider config: base URL contains "nvidia" so provider
+// label is "nvidia-nim", model is the test primary model.
+const PRIMARY_BASE_URL = "https://api.nvidia.example.com/v1";
+const PRIMARY_MODEL = "test/model-primary";
+const FALLBACK_BASE_URL = "https://api.fallback.example/v1";
+const FALLBACK_MODEL = "test/model-fallback";
 
 /** A valid, safe analysis payload the provider would return. */
 function safeAnalysis(opts: {
@@ -213,7 +219,11 @@ test("regression: remember tool saved message has no #N id reference; memoryId f
         {
           providerFetchImpl: fetchImpl,
           providerPrimaryApiKey: PRIMARY_KEY,
+          providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+          providerPrimaryModel: PRIMARY_MODEL,
           providerFallbackApiKey: FALLBACK_KEY,
+          providerFallbackBaseUrl: FALLBACK_BASE_URL,
+          providerFallbackModel: FALLBACK_MODEL,
         },
       );
       assert.equal(controllerOutcome.status, "saved");
@@ -297,7 +307,11 @@ test("regression: remember controller saved message has no #N id reference", asy
       {
         providerFetchImpl: fetchImpl,
         providerPrimaryApiKey: PRIMARY_KEY,
+        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+        providerPrimaryModel: PRIMARY_MODEL,
         providerFallbackApiKey: FALLBACK_KEY,
+        providerFallbackBaseUrl: FALLBACK_BASE_URL,
+        providerFallbackModel: FALLBACK_MODEL,
       },
     );
     assert.equal(r.status, "saved");
@@ -342,7 +356,11 @@ test("regression: remember controller saved message has no #N id reference on po
       {
         providerFetchImpl: fetchImpl,
         providerPrimaryApiKey: PRIMARY_KEY,
+        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+        providerPrimaryModel: PRIMARY_MODEL,
         providerFallbackApiKey: FALLBACK_KEY,
+        providerFallbackBaseUrl: FALLBACK_BASE_URL,
+        providerFallbackModel: FALLBACK_MODEL,
       },
     );
     assert.equal(r.status, "saved");
@@ -414,7 +432,11 @@ test("regression: recall answered-ambiguous public message has no #N id referenc
       {
         providerFetchImpl: fetchImpl,
         providerPrimaryApiKey: PRIMARY_KEY,
+        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+        providerPrimaryModel: PRIMARY_MODEL,
         providerFallbackApiKey: FALLBACK_KEY,
+        providerFallbackBaseUrl: FALLBACK_BASE_URL,
+        providerFallbackModel: FALLBACK_MODEL,
       },
     );
     assert.equal(out.status, "answered");
@@ -513,7 +535,11 @@ test("regression: recall answered-ambiguous public message has no #N id referenc
       {
         providerFetchImpl: fetchImpl,
         providerPrimaryApiKey: PRIMARY_KEY,
+        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+        providerPrimaryModel: PRIMARY_MODEL,
         providerFallbackApiKey: FALLBACK_KEY,
+        providerFallbackBaseUrl: FALLBACK_BASE_URL,
+        providerFallbackModel: FALLBACK_MODEL,
       },
     );
     assert.equal(out.status, "answered");
@@ -595,12 +621,15 @@ test("regression: recall answered-resolved-history public message has no #N id r
       {
         providerFetchImpl: fetchImpl,
         providerPrimaryApiKey: PRIMARY_KEY,
+        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+        providerPrimaryModel: PRIMARY_MODEL,
         providerFallbackApiKey: FALLBACK_KEY,
+        providerFallbackBaseUrl: FALLBACK_BASE_URL,
+        providerFallbackModel: FALLBACK_MODEL,
       },
     );
     assert.equal(out.status, "answered");
     if (out.status !== "answered") throw new Error("unreachable");
-
     // The Phase H resolved-history detector fired.
     assert.equal(out.internalResolvedHistory.kind, "resolved-history");
     if (out.internalResolvedHistory.kind !== "resolved-history") {
@@ -787,7 +816,11 @@ test("regression: recall answered-resolved-history prefers resolved-history note
       {
         providerFetchImpl: fetchImpl,
         providerPrimaryApiKey: PRIMARY_KEY,
+        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+        providerPrimaryModel: PRIMARY_MODEL,
         providerFallbackApiKey: FALLBACK_KEY,
+        providerFallbackBaseUrl: FALLBACK_BASE_URL,
+        providerFallbackModel: FALLBACK_MODEL,
       },
     );
     assert.equal(out.status, "answered");
@@ -897,7 +930,11 @@ test("regression: recall provider_error public message has no #N id reference", 
       {
         providerFetchImpl: errFetch.fetchImpl,
         providerPrimaryApiKey: PRIMARY_KEY,
+        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+        providerPrimaryModel: PRIMARY_MODEL,
         providerFallbackApiKey: FALLBACK_KEY,
+        providerFallbackBaseUrl: FALLBACK_BASE_URL,
+        providerFallbackModel: FALLBACK_MODEL,
       },
     );
     assert.equal(out.status, "provider_error");
@@ -927,7 +964,11 @@ test("regression: internal id fields remain intact (memoryId, sourceIds, memoryI
       {
         providerFetchImpl: fetchImpl,
         providerPrimaryApiKey: PRIMARY_KEY,
+        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+        providerPrimaryModel: PRIMARY_MODEL,
         providerFallbackApiKey: FALLBACK_KEY,
+        providerFallbackBaseUrl: FALLBACK_BASE_URL,
+        providerFallbackModel: FALLBACK_MODEL,
       },
     );
     assert.equal(r.status, "saved");
@@ -965,7 +1006,11 @@ test("regression: internal id fields remain intact (memoryId, sourceIds, memoryI
       {
         providerFetchImpl: recallFetch,
         providerPrimaryApiKey: PRIMARY_KEY,
+        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+        providerPrimaryModel: PRIMARY_MODEL,
         providerFallbackApiKey: FALLBACK_KEY,
+        providerFallbackBaseUrl: FALLBACK_BASE_URL,
+        providerFallbackModel: FALLBACK_MODEL,
       },
     );
     assert.equal(recallOut.status, "answered");

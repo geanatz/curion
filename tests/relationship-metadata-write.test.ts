@@ -126,6 +126,11 @@ function safeAnalysis(opts: {
 
 const PRIMARY_KEY = "sk-primary-test-not-real-12345";
 const FALLBACK_KEY = "nvapi-fallback-test-not-real-12345";
+// Explicit provider config: neutral URLs -> "custom" label.
+const PRIMARY_BASE_URL = "https://api.example.com/v1";
+const PRIMARY_MODEL = "test/model-primary";
+const FALLBACK_BASE_URL = "https://api.fallback.example/v1";
+const FALLBACK_MODEL = "test/model-fallback";
 
 // Pin a deterministic `Date.now()` for tests that read the
 // persisted `derivedAt`. The seam override also reads from this
@@ -291,7 +296,11 @@ test("controller: default seam returns empty list -> no relationship block in me
     const outcome = await runRememberController(handle, "Some safe project fact.", {
       providerFetchImpl: fetchImpl,
       providerPrimaryApiKey: PRIMARY_KEY,
+      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+      providerPrimaryModel: PRIMARY_MODEL,
       providerFallbackApiKey: FALLBACK_KEY,
+      providerFallbackBaseUrl: FALLBACK_BASE_URL,
+      providerFallbackModel: FALLBACK_MODEL,
     });
     assert.equal(outcome.status, "saved");
     if (outcome.status !== "saved") throw new Error("unreachable");
@@ -354,7 +363,11 @@ test("controller: seam override returns synthetic related memories -> relationsh
       {
         providerFetchImpl: fetchImpl,
         providerPrimaryApiKey: PRIMARY_KEY,
+        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+        providerPrimaryModel: PRIMARY_MODEL,
         providerFallbackApiKey: FALLBACK_KEY,
+        providerFallbackBaseUrl: FALLBACK_BASE_URL,
+        providerFallbackModel: FALLBACK_MODEL,
         now: pinnedNow(pinnedTime),
       },
     );
@@ -420,7 +433,11 @@ test("controller: stored metadata does not contain raw input string (Phase B inv
     const outcome = await runRememberController(handle, rawText, {
       providerFetchImpl: fetchImpl,
       providerPrimaryApiKey: PRIMARY_KEY,
+      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+      providerPrimaryModel: PRIMARY_MODEL,
       providerFallbackApiKey: FALLBACK_KEY,
+      providerFallbackBaseUrl: FALLBACK_BASE_URL,
+      providerFallbackModel: FALLBACK_MODEL,
       now: pinnedNow(1_700_000_000_000),
     });
     assert.equal(outcome.status, "saved");
@@ -487,7 +504,11 @@ test("public remember tool result shape is unchanged with seam override (status,
       const r = await runRememberController(handle, "Some safe fact.", {
         providerFetchImpl: fetchImpl,
         providerPrimaryApiKey: PRIMARY_KEY,
+        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+        providerPrimaryModel: PRIMARY_MODEL,
         providerFallbackApiKey: FALLBACK_KEY,
+        providerFallbackBaseUrl: FALLBACK_BASE_URL,
+        providerFallbackModel: FALLBACK_MODEL,
         now: pinnedNow(1_700_000_000_000),
       });
       assert.equal(r.status, "saved");
@@ -598,7 +619,11 @@ test("controller: derivedAt is the value the controller passed via options.now",
     const outcome = await runRememberController(handle, "Some safe fact.", {
       providerFetchImpl: fetchImpl,
       providerPrimaryApiKey: PRIMARY_KEY,
+      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+      providerPrimaryModel: PRIMARY_MODEL,
       providerFallbackApiKey: FALLBACK_KEY,
+      providerFallbackBaseUrl: FALLBACK_BASE_URL,
+      providerFallbackModel: FALLBACK_MODEL,
       now: pinnedNow(t),
     });
     assert.equal(outcome.status, "saved");
@@ -628,7 +653,11 @@ test("controller: pre-existing active rows are not state-transitioned by a new i
       const r1 = await runRememberController(handle, "First safe fact.", {
         providerFetchImpl: fetchImpl,
         providerPrimaryApiKey: PRIMARY_KEY,
+        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+        providerPrimaryModel: PRIMARY_MODEL,
         providerFallbackApiKey: FALLBACK_KEY,
+        providerFallbackBaseUrl: FALLBACK_BASE_URL,
+        providerFallbackModel: FALLBACK_MODEL,
         now: pinnedNow(1),
       });
       assert.equal(r1.status, "saved");
@@ -646,7 +675,11 @@ test("controller: pre-existing active rows are not state-transitioned by a new i
       const r2 = await runRememberController(handle, "Second safe fact.", {
         providerFetchImpl: fetchImpl,
         providerPrimaryApiKey: PRIMARY_KEY,
+        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+        providerPrimaryModel: PRIMARY_MODEL,
         providerFallbackApiKey: FALLBACK_KEY,
+        providerFallbackBaseUrl: FALLBACK_BASE_URL,
+        providerFallbackModel: FALLBACK_MODEL,
         now: pinnedNow(2),
       });
       assert.equal(r2.status, "saved");
@@ -681,7 +714,11 @@ test("controller: after seam override reset, the seam returns the MVP empty list
     const r = await runRememberController(handle, "Some safe fact.", {
       providerFetchImpl: fetchImpl,
       providerPrimaryApiKey: PRIMARY_KEY,
+      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+      providerPrimaryModel: PRIMARY_MODEL,
       providerFallbackApiKey: FALLBACK_KEY,
+      providerFallbackBaseUrl: FALLBACK_BASE_URL,
+      providerFallbackModel: FALLBACK_MODEL,
     });
     assert.equal(r.status, "saved");
     if (r.status !== "saved") throw new Error("unreachable");
@@ -840,7 +877,11 @@ test("controller: olderVariantsOf is non-empty when a related memory is an earli
         {
           providerFetchImpl: fetchImpl,
           providerPrimaryApiKey: PRIMARY_KEY,
+          providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+          providerPrimaryModel: PRIMARY_MODEL,
           providerFallbackApiKey: FALLBACK_KEY,
+          providerFallbackBaseUrl: FALLBACK_BASE_URL,
+          providerFallbackModel: FALLBACK_MODEL,
           now: pinnedNow(1_700_000_000_000),
         },
       );
@@ -882,7 +923,11 @@ test("controller: olderVariantsOf is non-empty when a related memory is an earli
       {
         providerFetchImpl: fetchImpl,
         providerPrimaryApiKey: PRIMARY_KEY,
+        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+        providerPrimaryModel: PRIMARY_MODEL,
         providerFallbackApiKey: FALLBACK_KEY,
+        providerFallbackBaseUrl: FALLBACK_BASE_URL,
+        providerFallbackModel: FALLBACK_MODEL,
         now: pinnedNow(pinnedTime),
       },
     );
@@ -1016,7 +1061,11 @@ test("controller: malformed related-memory id is skipped, not coerced to -1 and 
     const outcome = await runRememberController(handle, "Some safe fact.", {
       providerFetchImpl: fetchImpl,
       providerPrimaryApiKey: PRIMARY_KEY,
+      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+      providerPrimaryModel: PRIMARY_MODEL,
       providerFallbackApiKey: FALLBACK_KEY,
+      providerFallbackBaseUrl: FALLBACK_BASE_URL,
+      providerFallbackModel: FALLBACK_MODEL,
       now: pinnedNow(1_700_000_000_000),
     });
     assert.equal(outcome.status, "saved");

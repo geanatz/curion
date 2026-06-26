@@ -26,9 +26,6 @@ import {
   analyzeMemoryWithFallback,
   loadAdapterConfig,
   resolveAdapterProviderId,
-  COMPARISON_NIM_MODEL,
-  DEFAULT_PRIMARY_BASE_URL,
-  DEFAULT_PRIMARY_MODEL,
   type MemoryAnalysisResult,
 } from "../src/providers/memory-analysis.ts";
 import { PUBLIC_TOOL_NAMES, buildServer } from "../src/server.ts";
@@ -106,14 +103,18 @@ function withCleanEnv<T>(
 }
 
 const ENV_KEYS = [
-  "CURION_PROVIDER_PRIMARY_KEY",
-  "MINIMAX_API_KEY",
-  "CURION_PROVIDER_FALLBACK_KEY",
-  "NVIDIA_NIM_API_KEY",
-  "CURION_MINIMAX_BASE_URL",
-  "CURION_MINIMAX_MODEL",
-  "CURION_NIM_BASE_URL",
-  "CURION_NIM_FALLBACK_MODEL",
+  "CURION_PRIMARY_API_KEY",
+  "CURION_FALLBACK_API_KEY",
+  "CURION_PRIMARY_BASE_URL",
+  "CURION_PRIMARY_MODEL",
+  "CURION_PRIMARY_PROVIDER_LABEL",
+  "CURION_PRIMARY_STRICT_JSON",
+  "CURION_PRIMARY_API_FORMAT",
+  "CURION_FALLBACK_BASE_URL",
+  "CURION_FALLBACK_MODEL",
+  "CURION_FALLBACK_PROVIDER_LABEL",
+  "CURION_FALLBACK_STRICT_JSON",
+  "CURION_FALLBACK_API_FORMAT",
   "CURION_ADAPTER_TIMEOUT_MS",
   "CURION_ADAPTER_MAX_TOKENS",
 ];
@@ -122,59 +123,60 @@ const ENV_KEYS = [
 // Defaults / config
 // ---------------------------------------------------------------------------
 
-test("adapter: loadAdapterConfig returns the documented defaults (NVIDIA-only primary, no default fallback)", () => {
+test("adapter: loadAdapterConfig returns empty slots when no env vars are set (no hardcoded defaults)", () => {
   return withCleanEnv(ENV_KEYS, () => {
     const cfg = loadAdapterConfig();
-    // Primary: NVIDIA NIM with gpt-oss-120b. This is the
-    // default under the NVIDIA-only stance.
-    assert.equal(cfg.primaryBaseUrl, DEFAULT_PRIMARY_BASE_URL);
-    assert.equal(cfg.primaryBaseUrl, "https://integrate.api.nvidia.com/v1");
-    assert.equal(cfg.primaryModel, DEFAULT_PRIMARY_MODEL);
-    assert.equal(cfg.primaryModel, "openai/gpt-oss-120b");
-    // Fallback: UNCONFIGURED. No provider is hardcoded into the
-    // fallback slot by default. The architecture keeps the slot
-    // for opt-in but does not default to MiniMax.
+    // No hardcoded defaults: all provider-specific fields are empty
+    // when no env vars are set.
+    assert.equal(cfg.primaryBaseUrl, "");
+    assert.equal(cfg.primaryModel, "");
+    assert.equal(cfg.primaryProviderLabel, "");
+    assert.equal(cfg.primaryStrictJson, false);
+    assert.equal(cfg.primaryApiFormat, "openai-compatible");
     assert.equal(cfg.fallbackBaseUrl, "");
     assert.equal(cfg.fallbackModel, "");
+    assert.equal(cfg.fallbackProviderLabel, "");
+    assert.equal(cfg.fallbackStrictJson, false);
+    assert.equal(cfg.fallbackApiFormat, "openai-compatible");
+    assert.equal(cfg.primaryApiKey, "");
+    assert.equal(cfg.fallbackApiKey, "");
     assert.equal(typeof cfg.timeoutMs, "number");
     assert.equal(cfg.timeoutMs, 30_000);
     assert.equal(typeof cfg.maxTokens, "number");
     assert.equal(cfg.maxTokens, 1024);
-    // The comparison NIM model is a known constant; it is not
-    // assigned to any slot by default.
-    assert.notEqual(cfg.fallbackModel, COMPARISON_NIM_MODEL);
-    assert.equal(COMPARISON_NIM_MODEL, "meta/llama-3.3-70b-instruct");
   });
 });
 
-test("adapter: loadAdapterConfig maps canonical env-var aliases to NVIDIA-only primary, MiniMax fallback", () => {
+test("adapter: loadAdapterConfig maps role-based env vars correctly", () => {
   return withCleanEnv(ENV_KEYS, () => {
-    // NVIDIA_NIM_API_KEY alone -> primaryApiKey. The primary
-    // slot IS the NIM slot under the NVIDIA-only stance, so the
-    // NIM key lands there.
-    process.env.NVIDIA_NIM_API_KEY = "nvapi-test-primary";
+    // CURION_PRIMARY_API_KEY alone -> primaryApiKey.
+    process.env.CURION_PRIMARY_API_KEY = "sk-test-primary";
     let cfg = loadAdapterConfig();
-    assert.equal(cfg.primaryApiKey, "nvapi-test-primary");
+    assert.equal(cfg.primaryApiKey, "sk-test-primary");
     assert.equal(cfg.fallbackApiKey, "");
 
-    // MINIMAX_API_KEY alone -> fallbackApiKey. The fallback
-    // slot is the only place the MiniMax key can land.
-    process.env.MINIMAX_API_KEY = "sk-cp-test-fallback";
+    // CURION_FALLBACK_API_KEY alone -> fallbackApiKey.
+    process.env.CURION_FALLBACK_API_KEY = "sk-test-fallback";
     cfg = loadAdapterConfig();
-    assert.equal(cfg.primaryApiKey, "nvapi-test-primary");
-    assert.equal(cfg.fallbackApiKey, "sk-cp-test-fallback");
+    assert.equal(cfg.primaryApiKey, "sk-test-primary");
+    assert.equal(cfg.fallbackApiKey, "sk-test-fallback");
 
-    // CURION_PROVIDER_PRIMARY_KEY overrides NVIDIA_NIM_API_KEY.
-    process.env.CURION_PROVIDER_PRIMARY_KEY = "role-primary";
+    // CURION_PRIMARY_BASE_URL and CURION_PRIMARY_MODEL are read.
+    process.env.CURION_PRIMARY_BASE_URL = "https://api.example.com/v1";
+    process.env.CURION_PRIMARY_MODEL = "my-model";
     cfg = loadAdapterConfig();
-    assert.equal(cfg.primaryApiKey, "role-primary");
-    assert.equal(cfg.fallbackApiKey, "sk-cp-test-fallback");
+    assert.equal(cfg.primaryBaseUrl, "https://api.example.com/v1");
+    assert.equal(cfg.primaryModel, "my-model");
 
-    // CURION_PROVIDER_FALLBACK_KEY overrides MINIMAX_API_KEY.
-    process.env.CURION_PROVIDER_FALLBACK_KEY = "role-fallback";
+    // CURION_PRIMARY_PROVIDER_LABEL is used when set.
+    process.env.CURION_PRIMARY_PROVIDER_LABEL = "my-provider";
     cfg = loadAdapterConfig();
-    assert.equal(cfg.primaryApiKey, "role-primary");
-    assert.equal(cfg.fallbackApiKey, "role-fallback");
+    assert.equal(cfg.primaryProviderLabel, "my-provider");
+
+    // CURION_PRIMARY_STRICT_JSON=true sets primaryStrictJson.
+    process.env.CURION_PRIMARY_STRICT_JSON = "true";
+    cfg = loadAdapterConfig();
+    assert.equal(cfg.primaryStrictJson, true);
   });
 });
 
@@ -182,22 +184,18 @@ test("adapter: loadAdapterConfig treats whitespace-only env values as missing", 
   return withCleanEnv(ENV_KEYS, () => {
     // Set every env var to a whitespace-only placeholder. None of
     // these should be treated as configured values.
-    process.env.CURION_PROVIDER_PRIMARY_KEY = "   ";
-    process.env.MINIMAX_API_KEY = "\t\n  ";
-    process.env.CURION_PROVIDER_FALLBACK_KEY = "  \n";
-    process.env.NVIDIA_NIM_API_KEY = " ";
-    process.env.CURION_NIM_BASE_URL = "  ";
-    process.env.CURION_NIM_FALLBACK_MODEL = "   ";
-    process.env.CURION_MINIMAX_BASE_URL = "  ";
-    process.env.CURION_MINIMAX_MODEL = "   ";
+    process.env.CURION_PRIMARY_API_KEY = "   ";
+    process.env.CURION_FALLBACK_API_KEY = "\t\n  ";
+    process.env.CURION_PRIMARY_BASE_URL = "  ";
+    process.env.CURION_PRIMARY_MODEL = "   ";
+    process.env.CURION_FALLBACK_BASE_URL = "  ";
+    process.env.CURION_FALLBACK_MODEL = "   ";
     const cfg = loadAdapterConfig();
-    // Primary built-in defaults are still used (NIM).
-    assert.equal(cfg.primaryBaseUrl, DEFAULT_PRIMARY_BASE_URL);
-    assert.equal(cfg.primaryModel, DEFAULT_PRIMARY_MODEL);
-    // Fallback stays empty even with whitespace-only env vars.
+    // All slots stay empty when env vars are whitespace-only.
+    assert.equal(cfg.primaryBaseUrl, "");
+    assert.equal(cfg.primaryModel, "");
     assert.equal(cfg.fallbackBaseUrl, "");
     assert.equal(cfg.fallbackModel, "");
-    // And both keys must be empty so the adapter returns missing-config.
     assert.equal(cfg.primaryApiKey, "");
     assert.equal(cfg.fallbackApiKey, "");
   });
@@ -205,11 +203,13 @@ test("adapter: loadAdapterConfig treats whitespace-only env values as missing", 
 
 test("adapter: loadAdapterConfig trims surrounding whitespace from env values", () => {
   return withCleanEnv(ENV_KEYS, () => {
-    process.env.CURION_PROVIDER_PRIMARY_KEY = `  ${PRIMARY_KEY}\n`;
-    process.env.CURION_NIM_BASE_URL = ` ${DEFAULT_PRIMARY_BASE_URL} `;
+    process.env.CURION_PRIMARY_API_KEY = `  ${PRIMARY_KEY}\n`;
+    process.env.CURION_PRIMARY_BASE_URL = ` https://api.example.com/v1 `;
+    process.env.CURION_PRIMARY_MODEL = ` my-model `;
     const cfg = loadAdapterConfig();
     assert.equal(cfg.primaryApiKey, PRIMARY_KEY);
-    assert.equal(cfg.primaryBaseUrl, DEFAULT_PRIMARY_BASE_URL);
+    assert.equal(cfg.primaryBaseUrl, "https://api.example.com/v1");
+    assert.equal(cfg.primaryModel, "my-model");
   });
 });
 
@@ -219,53 +219,110 @@ test("adapter: loadAdapterConfig treats whitespace-only overrides as missing", (
     primaryBaseUrl: "  ",
     primaryModel: "\t",
   });
-  // Whitespace-only overrides fall through to env/defaults; with
-  // env clean, defaults are used.
+  // Whitespace-only overrides fall through to empty; no hardcoded defaults.
   assert.equal(cfg.primaryApiKey, "");
-  assert.equal(cfg.primaryBaseUrl, DEFAULT_PRIMARY_BASE_URL);
-  assert.equal(cfg.primaryModel, DEFAULT_PRIMARY_MODEL);
+  assert.equal(cfg.primaryBaseUrl, "");
+  assert.equal(cfg.primaryModel, "");
 });
 
-test("adapter: missing MiniMax key does not make the default config look broken", () => {
-  // Regression coverage: under the NVIDIA-only stance, the
-  // default config (no env vars, no overrides) must be a valid
-  // single-engine configuration. The fallback slot is
-  // intentionally empty; this is not a missing-config error
-  // and not a broken config.
+test("adapter: no hardcoded defaults - empty env yields empty slots", () => {
+  // Regression coverage: with no env vars set and no overrides,
+  // all provider-specific slots are empty. This is the correct
+  // "no provider configured" state, not a broken config.
   return withCleanEnv(ENV_KEYS, () => {
     const cfg = loadAdapterConfig();
-    // Primary slot is fully populated.
-    assert.notEqual(cfg.primaryBaseUrl, "");
-    assert.notEqual(cfg.primaryModel, "");
-    // Fallback slot is empty (no provider hardcoded).
+    // All slots are empty.
+    assert.equal(cfg.primaryBaseUrl, "");
+    assert.equal(cfg.primaryModel, "");
     assert.equal(cfg.fallbackBaseUrl, "");
     assert.equal(cfg.fallbackModel, "");
-    // With a primary key only (and no fallback key), the
-    // adapter is configured for a single engine.
+    // API format defaults to openai-compatible.
+    assert.equal(cfg.primaryApiFormat, "openai-compatible");
+    assert.equal(cfg.fallbackApiFormat, "openai-compatible");
+    // Adapter does not throw on empty config.
     const r = (() => {
       try {
-        // Just structural: confirm loadAdapterConfig did not
-        // throw and the shape is what the adapter expects.
         return { ok: true, cfg };
       } catch (e) {
         return { ok: false, err: e };
       }
     })();
-    assert.equal(r.ok, true, "loadAdapterConfig must not throw on default NVIDIA-only config");
-    // resolveAdapterProviderId for the default primary URL is
-    // "nvidia-nim" (not "minimax"), so the operator-visible
-    // labels match the endpoint.
-    assert.equal(resolveAdapterProviderId(cfg.primaryBaseUrl), "nvidia-nim");
-    // An empty fallback URL resolves to "unknown" — exactly the
-    // honest label we want for an unconfigured slot.
-    assert.equal(resolveAdapterProviderId(cfg.fallbackBaseUrl), "unknown");
+    assert.equal(r.ok, true, "loadAdapterConfig must not throw on empty config");
+    // resolveAdapterProviderId for empty URL returns "custom".
+    assert.equal(resolveAdapterProviderId(cfg.primaryBaseUrl), "custom");
+    assert.equal(resolveAdapterProviderId(cfg.fallbackBaseUrl), "custom");
   });
+});
+
+test("adapter: CURION_PRIMARY_API_FORMAT=anthropic sets primaryApiFormat and defaults baseUrl to api.anthropic.com", () => {
+  return withCleanEnv(ENV_KEYS, () => {
+    process.env.CURION_PRIMARY_API_KEY = "sk-ant-test";
+    process.env.CURION_PRIMARY_API_FORMAT = "anthropic";
+    process.env.CURION_PRIMARY_MODEL = "claude-sonnet-4-5";
+    const cfg = loadAdapterConfig();
+    assert.equal(cfg.primaryApiFormat, "anthropic");
+    assert.equal(cfg.primaryBaseUrl, "https://api.anthropic.com");
+    assert.equal(cfg.primaryModel, "claude-sonnet-4-5");
+    assert.equal(cfg.primaryApiKey, "sk-ant-test");
+    // openai-compatible baseUrl is NOT overridden when apiFormat is anthropic.
+  });
+});
+
+test("adapter: CURION_PRIMARY_API_FORMAT=anthropic with explicit baseUrl respects the override", () => {
+  return withCleanEnv(ENV_KEYS, () => {
+    process.env.CURION_PRIMARY_API_KEY = "sk-ant-test";
+    process.env.CURION_PRIMARY_API_FORMAT = "anthropic";
+    process.env.CURION_PRIMARY_BASE_URL = "https://api.anthropic.com/v1";
+    process.env.CURION_PRIMARY_MODEL = "claude-sonnet-4-5";
+    const cfg = loadAdapterConfig();
+    assert.equal(cfg.primaryApiFormat, "anthropic");
+    assert.equal(cfg.primaryBaseUrl, "https://api.anthropic.com/v1");
+  });
+});
+
+test("adapter: CURION_FALLBACK_API_FORMAT=anthropic sets fallbackApiFormat and defaults baseUrl", () => {
+  return withCleanEnv(ENV_KEYS, () => {
+    process.env.CURION_FALLBACK_API_KEY = "sk-ant-fallback";
+    process.env.CURION_FALLBACK_API_FORMAT = "anthropic";
+    process.env.CURION_FALLBACK_MODEL = "claude-haiku-4-5";
+    const cfg = loadAdapterConfig();
+    assert.equal(cfg.fallbackApiFormat, "anthropic");
+    assert.equal(cfg.fallbackBaseUrl, "https://api.anthropic.com");
+    assert.equal(cfg.fallbackModel, "claude-haiku-4-5");
+  });
+});
+
+test("adapter: apiFormat=anthropic does not override explicit baseUrl override", () => {
+  return withCleanEnv(ENV_KEYS, () => {
+    const cfg = loadAdapterConfig({
+      primaryApiFormat: "anthropic",
+      primaryBaseUrl: "https://custom.anthropic-compatible.example.com",
+      primaryModel: "claude-sonnet-4-5",
+      primaryApiKey: "sk-test",
+    });
+    assert.equal(cfg.primaryApiFormat, "anthropic");
+    assert.equal(cfg.primaryBaseUrl, "https://custom.anthropic-compatible.example.com");
+  });
+});
+
+test("adapter: unknown API format value defaults to openai-compatible", () => {
+  return withCleanEnv(ENV_KEYS, () => {
+    process.env.CURION_PRIMARY_API_FORMAT = "not-a-real-format";
+    const cfg = loadAdapterConfig();
+    assert.equal(cfg.primaryApiFormat, "openai-compatible");
+  });
+});
+
+test("adapter: resolveAdapterProviderId returns anthropic for anthropic base URL", () => {
+  assert.equal(resolveAdapterProviderId("https://api.anthropic.com"), "anthropic");
+  assert.equal(resolveAdapterProviderId("https://api.anthropic.com/v1"), "anthropic");
+  assert.equal(resolveAdapterProviderId("https://context.prod.my-anthropic.internal"), "anthropic");
 });
 
 test("adapter: whitespace-only primary key in env -> typed missing-config (no http calls)", async () => {
   return withCleanEnv(ENV_KEYS, async () => {
-    process.env.CURION_PROVIDER_PRIMARY_KEY = "   ";
-    process.env.CURION_PROVIDER_FALLBACK_KEY = "  \t  ";
+    process.env.CURION_PRIMARY_API_KEY = "   ";
+    process.env.CURION_FALLBACK_API_KEY = "  \t  ";
     const log: Array<{ url: string; body: string }> = [];
     const fetchImpl = scriptedFetch(
       [() => okChatResponse(VALID_JSON)],
@@ -902,42 +959,28 @@ test("adapter: no key values appear in serialized failure results", async () => 
   }
 });
 
-test("adapter: uses documented NVIDIA-only defaults when env is unset", async () => {
+test("adapter: no defaults - env unset yields empty slots and provider_error without baseUrl/model", async () => {
   return withCleanEnv(ENV_KEYS, async () => {
     const log: Array<{ url: string; body: string }> = [];
     const fetchImpl = scriptedFetch([() => okChatResponse(VALID_JSON)], log);
     const r = await analyzeMemoryWithFallback("hello", undefined, {
       primaryApiKey: PRIMARY_KEY,
-      // No baseUrl/model overrides -> adapter uses defaults.
+      // No baseUrl/model overrides and no env vars -> adapter has empty config.
       fetchImpl,
     });
-    assert.equal(r.ok, true);
-    if (r.ok) {
-      // Default primary is NVIDIA NIM; provider id follows the
-      // URL and is "nvidia-nim".
-      assert.equal(r.providerUsed, "nvidia-nim");
-      assert.equal(r.modelUsed, "openai/gpt-oss-120b");
+    // Without baseUrl/model, the adapter cannot make a call.
+    assert.equal(r.ok, false);
+    if (!r.ok) {
+      assert.equal(r.kind, "all-providers-failed");
     }
-    // Default NIM base URL must be present in the request URL.
-    assert.match(
-      log[0]!.url,
-      /^https:\/\/integrate\.api\.nvidia\.com\/v1\/chat\/completions/,
-    );
-    // The model field in the body must be the documented default.
-    const body = JSON.parse(log[0]!.body);
-    assert.equal(body.model, "openai/gpt-oss-120b");
-    assert.equal(body.response_format?.type, "json_object");
-    assert.equal(body.temperature, 0);
+    assert.equal(log.length, 0, "no http calls when baseUrl/model is missing");
   });
 });
 
-test("adapter: env override CURION_NIM_FALLBACK_MODEL switches primary model id (NIM is primary under NVIDIA-only)", async () => {
-  // Under the NVIDIA-only stance, the env-var
-  // `CURION_NIM_FALLBACK_MODEL` (preserved name) feeds the
-  // primary slot. The operator can still override the primary
-  // model id via the same env var.
+test("adapter: env override CURION_PRIMARY_MODEL switches primary model id", async () => {
   return withCleanEnv(ENV_KEYS, async () => {
-    process.env.CURION_NIM_FALLBACK_MODEL = COMPARISON_NIM_MODEL;
+    process.env.CURION_PRIMARY_MODEL = "custom-model";
+    process.env.CURION_PRIMARY_BASE_URL = "https://api.example.com/v1";
     const log: Array<{ url: string; body: string }> = [];
     const fetchImpl = scriptedFetch(
       [() => okChatResponse(VALID_JSON)],
@@ -949,22 +992,19 @@ test("adapter: env override CURION_NIM_FALLBACK_MODEL switches primary model id 
     });
     assert.equal(r.ok, true);
     if (r.ok) {
-      assert.equal(r.modelUsed, COMPARISON_NIM_MODEL);
+      assert.equal(r.modelUsed, "custom-model");
     }
     const body = JSON.parse(log[0]!.body);
-    assert.equal(body.model, COMPARISON_NIM_MODEL);
+    assert.equal(body.model, "custom-model");
   });
 });
 
-test("adapter: env override CURION_MINIMAX_BASE_URL feeds the (opt-in) fallback slot", async () => {
-  // The MiniMax env vars are recognised only as the fallback-
-  // slot override path. With a fallback key + the MiniMax base
-  // URL + the MiniMax model, the fallback is configured. With
-  // no MiniMax env vars, the fallback stays unconfigured (the
-  // NVIDIA-only default).
+test("adapter: env override CURION_FALLBACK_BASE_URL and CURION_FALLBACK_MODEL feeds the fallback slot", async () => {
   return withCleanEnv(ENV_KEYS, async () => {
-    process.env.CURION_MINIMAX_BASE_URL = "https://api.minimax.io/v1";
-    process.env.CURION_MINIMAX_MODEL = "MiniMax-M3";
+    process.env.CURION_PRIMARY_BASE_URL = "https://primary.example.com/v1";
+    process.env.CURION_PRIMARY_MODEL = "primary-model";
+    process.env.CURION_FALLBACK_BASE_URL = "https://api.example.com/v1";
+    process.env.CURION_FALLBACK_MODEL = "fallback-model";
     const log: Array<{ url: string; body: string }> = [];
     const fetchImpl = scriptedFetch(
       [
@@ -981,25 +1021,25 @@ test("adapter: env override CURION_MINIMAX_BASE_URL feeds the (opt-in) fallback 
     assert.equal(r.ok, true);
     if (r.ok) {
       assert.equal(r.fallbackUsed, true);
-      // URL-derived id for the MiniMax host is "minimax".
-      assert.equal(r.providerUsed, "minimax");
-      assert.equal(r.modelUsed, "MiniMax-M3");
+      // URL-derived id for the example.com host is "custom".
+      assert.equal(r.providerUsed, "custom");
+      assert.equal(r.modelUsed, "fallback-model");
     }
     const body = JSON.parse(log[1]!.body);
-    assert.equal(body.model, "MiniMax-M3");
+    assert.equal(body.model, "fallback-model");
     assert.match(
       log[1]!.url,
-      /^https:\/\/api\.minimax\.io\/v1\/chat\/completions/,
+      /^https:\/\/api\.example\.com\/v1\/chat\/completions/,
     );
   });
 });
 
-test("adapter: missing CURION_MINIMAX_BASE_URL / CURION_MINIMAX_MODEL / MINIMAX_API_KEY leaves fallback slot empty", async () => {
-  // Regression coverage for the NVIDIA-only stance: with no
-  // MiniMax env vars set and no overrides, the fallback slot
-  // must be EMPTY (not defaulted to MiniMax). The adapter
-  // must NOT make a fallback HTTP call.
+test("adapter: missing CURION_FALLBACK_BASE_URL / CURION_FALLBACK_MODEL / CURION_FALLBACK_API_KEY leaves fallback slot empty", async () => {
+  // With no fallback env vars set and no overrides, the fallback slot
+  // must be EMPTY. The adapter must NOT make a fallback HTTP call.
   return withCleanEnv(ENV_KEYS, async () => {
+    process.env.CURION_PRIMARY_BASE_URL = "https://primary.example.com/v1";
+    process.env.CURION_PRIMARY_MODEL = "primary-model";
     const cfg = loadAdapterConfig();
     assert.equal(cfg.fallbackBaseUrl, "");
     assert.equal(cfg.fallbackModel, "");

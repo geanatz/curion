@@ -125,7 +125,13 @@ function safeAnalysis(opts: {
 }
 
 const PRIMARY_KEY = "sk-primary-test-not-real-12345";
-const FALLBACK_KEY = "nvapi-fallback-test-not-real-12345";
+const FALLBACK_KEY = "sk-fallback-test-not-real-12345";
+// Explicit provider config: base URL contains "nvidia" so provider
+// label is "nvidia-nim", model is the test primary model.
+const PRIMARY_BASE_URL = "https://api.nvidia.example.com/v1";
+const PRIMARY_MODEL = "test/model-primary";
+const FALLBACK_BASE_URL = "https://api.fallback.example/v1";
+const FALLBACK_MODEL = "test/model-fallback";
 
 // ---------------------------------------------------------------------------
 // 1. Safe input -> stored; raw input is NOT in the persisted record
@@ -142,7 +148,11 @@ test("remember: safe input is stored; raw input is not persisted", async () => {
     const outcome = await runRememberController(handle, rawText, {
       providerFetchImpl: fetchImpl,
       providerPrimaryApiKey: PRIMARY_KEY,
+      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+      providerPrimaryModel: PRIMARY_MODEL,
       providerFallbackApiKey: FALLBACK_KEY,
+      providerFallbackBaseUrl: FALLBACK_BASE_URL,
+      providerFallbackModel: FALLBACK_MODEL,
     });
     assert.equal(outcome.status, "saved");
     if (outcome.status !== "saved") throw new Error("unreachable");
@@ -157,10 +167,9 @@ test("remember: safe input is stored; raw input is not persisted", async () => {
     assert.ok(rec.id > 0);
     assert.equal(typeof rec.memoryContent, "string");
     assert.ok(rec.memoryContent.length > 0);
-    // Under the NVIDIA-only stance, the default primary is
-    // NVIDIA NIM; the provider id follows the URL.
+    // Provider label is derived from PRIMARY_BASE_URL (contains "nvidia" -> "nvidia-nim").
     assert.equal(rec.providerId, "nvidia-nim");
-    assert.equal(rec.modelId, "openai/gpt-oss-120b");
+    assert.equal(rec.modelId, PRIMARY_MODEL);
     assert.ok(rec.confidence !== null && rec.confidence > 0);
     assert.equal(rec.state, "active");
     assert.ok(["fact", "decision", "preference", "context", "conflict", "reference", "policy", "constraint", "finding"].includes(rec.kind));
@@ -209,7 +218,11 @@ test("remember: unsafe secret input is rejected before any provider call", async
     const outcome = await runRememberController(handle, rawText, {
       providerFetchImpl: fetchImpl,
       providerPrimaryApiKey: PRIMARY_KEY,
+      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+      providerPrimaryModel: PRIMARY_MODEL,
       providerFallbackApiKey: FALLBACK_KEY,
+      providerFallbackBaseUrl: FALLBACK_BASE_URL,
+      providerFallbackModel: FALLBACK_MODEL,
     });
     assert.equal(outcome.status, "rejected");
     if (outcome.status !== "rejected") throw new Error("unreachable");
@@ -239,7 +252,11 @@ test("remember: vague junk is rejected before any provider call", async () => {
     const outcome = await runRememberController(handle, "asdf", {
       providerFetchImpl: fetchImpl,
       providerPrimaryApiKey: PRIMARY_KEY,
+      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+      providerPrimaryModel: PRIMARY_MODEL,
       providerFallbackApiKey: FALLBACK_KEY,
+      providerFallbackBaseUrl: FALLBACK_BASE_URL,
+      providerFallbackModel: FALLBACK_MODEL,
     });
     assert.equal(outcome.status, "rejected");
     if (outcome.status !== "rejected") throw new Error("unreachable");
@@ -259,7 +276,11 @@ test("remember: empty / whitespace-only input is rejected before any provider ca
     const outcome = await runRememberController(handle, "   \n  \t  ", {
       providerFetchImpl: fetchImpl,
       providerPrimaryApiKey: PRIMARY_KEY,
+      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+      providerPrimaryModel: PRIMARY_MODEL,
       providerFallbackApiKey: FALLBACK_KEY,
+      providerFallbackBaseUrl: FALLBACK_BASE_URL,
+      providerFallbackModel: FALLBACK_MODEL,
     });
     assert.equal(outcome.status, "rejected");
     assert.equal(calls.length, 0);
@@ -281,7 +302,11 @@ test("remember: low provider confidence returns clarification_needed and stores 
     const outcome = await runRememberController(handle, "Some input that confuses the model.", {
       providerFetchImpl: fetchImpl,
       providerPrimaryApiKey: PRIMARY_KEY,
+      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+      providerPrimaryModel: PRIMARY_MODEL,
       providerFallbackApiKey: FALLBACK_KEY,
+      providerFallbackBaseUrl: FALLBACK_BASE_URL,
+      providerFallbackModel: FALLBACK_MODEL,
     });
     assert.equal(outcome.status, "clarification_needed");
     if (outcome.status !== "clarification_needed") throw new Error("unreachable");
@@ -302,7 +327,11 @@ test("remember: confidence exactly at threshold is accepted", async () => {
     const outcome = await runRememberController(handle, "Some input.", {
       providerFetchImpl: fetchImpl,
       providerPrimaryApiKey: PRIMARY_KEY,
+      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+      providerPrimaryModel: PRIMARY_MODEL,
       providerFallbackApiKey: FALLBACK_KEY,
+      providerFallbackBaseUrl: FALLBACK_BASE_URL,
+      providerFallbackModel: FALLBACK_MODEL,
       confidenceThreshold: 0.5,
     });
     assert.equal(outcome.status, "saved");
@@ -322,7 +351,11 @@ test("remember: provider hard failure returns provider_error and stores nothing"
     const outcome = await runRememberController(handle, "Some input.", {
       providerFetchImpl: fetchImpl,
       providerPrimaryApiKey: PRIMARY_KEY,
+      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+      providerPrimaryModel: PRIMARY_MODEL,
       providerFallbackApiKey: FALLBACK_KEY,
+      providerFallbackBaseUrl: FALLBACK_BASE_URL,
+      providerFallbackModel: FALLBACK_MODEL,
     });
     // Either primary failed and fallback also failed (all-providers-failed),
     // or primary failed and no fallback configured. Both surface as
@@ -350,7 +383,11 @@ test("remember: mixed safe+sensitive input is rejected; secret fragment is not s
     const outcome = await runRememberController(handle, rawText, {
       providerFetchImpl: fetchImpl,
       providerPrimaryApiKey: PRIMARY_KEY,
+      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+      providerPrimaryModel: PRIMARY_MODEL,
       providerFallbackApiKey: FALLBACK_KEY,
+      providerFallbackBaseUrl: FALLBACK_BASE_URL,
+      providerFallbackModel: FALLBACK_MODEL,
     });
     assert.equal(outcome.status, "rejected");
     if (outcome.status !== "rejected") throw new Error("unreachable");
@@ -462,7 +499,11 @@ test("persisted record: has summary, provider, model, confidence, state, kind", 
     const outcome = await runRememberController(handle, "We decided to use Postgres 16.", {
       providerFetchImpl: fetchImpl,
       providerPrimaryApiKey: PRIMARY_KEY,
+      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+      providerPrimaryModel: PRIMARY_MODEL,
       providerFallbackApiKey: FALLBACK_KEY,
+      providerFallbackBaseUrl: FALLBACK_BASE_URL,
+      providerFallbackModel: FALLBACK_MODEL,
     });
     assert.equal(outcome.status, "saved");
     if (outcome.status !== "saved") throw new Error("unreachable");
@@ -473,10 +514,9 @@ test("persisted record: has summary, provider, model, confidence, state, kind", 
       .get(outcome.record.id) as Record<string, unknown>;
     assert.equal(typeof row.summary, "string");
     assert.ok((row.summary as string).length > 0);
-    // Under the NVIDIA-only stance, the default primary is
-    // NVIDIA NIM; the provider id follows the URL.
+    // Provider label is derived from PRIMARY_BASE_URL (contains "nvidia" -> "nvidia-nim").
     assert.equal(row.provider_id, "nvidia-nim");
-    assert.equal(row.model_id, "openai/gpt-oss-120b");
+    assert.equal(row.model_id, PRIMARY_MODEL);
     assert.equal(typeof row.confidence, "number");
     assert.equal(row.state, "active");
     assert.equal(row.kind, "decision");
@@ -494,7 +534,11 @@ test("controller: maps unknown provider classification to 'finding' fallback kin
     const outcome = await runRememberController(handle, "Some input.", {
       providerFetchImpl: fetchImpl,
       providerPrimaryApiKey: PRIMARY_KEY,
+      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+      providerPrimaryModel: PRIMARY_MODEL,
       providerFallbackApiKey: FALLBACK_KEY,
+      providerFallbackBaseUrl: FALLBACK_BASE_URL,
+      providerFallbackModel: FALLBACK_MODEL,
     });
     assert.equal(outcome.status, "saved");
     if (outcome.status !== "saved") throw new Error("unreachable");
@@ -513,7 +557,11 @@ test("controller: classification 'policy' persists as kind policy", async () => 
     const outcome = await runRememberController(handle, "We always use Postgres for primary storage.", {
       providerFetchImpl: fetchImpl,
       providerPrimaryApiKey: PRIMARY_KEY,
+      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+      providerPrimaryModel: PRIMARY_MODEL,
       providerFallbackApiKey: FALLBACK_KEY,
+      providerFallbackBaseUrl: FALLBACK_BASE_URL,
+      providerFallbackModel: FALLBACK_MODEL,
     });
     assert.equal(outcome.status, "saved");
     if (outcome.status !== "saved") throw new Error("unreachable");
@@ -532,7 +580,11 @@ test("controller: Hermes-style 'policy' classified response maps to policy", asy
     const outcome = await runRememberController(handle, "Policy: all API calls must timeout after 30s.", {
       providerFetchImpl: fetchImpl,
       providerPrimaryApiKey: PRIMARY_KEY,
+      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+      providerPrimaryModel: PRIMARY_MODEL,
       providerFallbackApiKey: FALLBACK_KEY,
+      providerFallbackBaseUrl: FALLBACK_BASE_URL,
+      providerFallbackModel: FALLBACK_MODEL,
     });
     assert.equal(outcome.status, "saved");
     if (outcome.status !== "saved") throw new Error("unreachable");
@@ -552,7 +604,11 @@ test("controller: policy aliases (user-policy/project-policy/rule) map to policy
       const outcome = await runRememberController(handle, `Standing instruction: ${label}`, {
         providerFetchImpl: fetchImpl,
         providerPrimaryApiKey: PRIMARY_KEY,
+        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+        providerPrimaryModel: PRIMARY_MODEL,
         providerFallbackApiKey: FALLBACK_KEY,
+        providerFallbackBaseUrl: FALLBACK_BASE_URL,
+        providerFallbackModel: FALLBACK_MODEL,
       });
       assert.equal(outcome.status, "saved", `label '${label}' should save`);
       if (outcome.status !== "saved") throw new Error("unreachable");
@@ -572,7 +628,11 @@ test("controller: classification 'constraint' persists as kind constraint", asyn
     const outcome = await runRememberController(handle, "Never exceed 5000 requests per minute.", {
       providerFetchImpl: fetchImpl,
       providerPrimaryApiKey: PRIMARY_KEY,
+      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+      providerPrimaryModel: PRIMARY_MODEL,
       providerFallbackApiKey: FALLBACK_KEY,
+      providerFallbackBaseUrl: FALLBACK_BASE_URL,
+      providerFallbackModel: FALLBACK_MODEL,
     });
     assert.equal(outcome.status, "saved");
     if (outcome.status !== "saved") throw new Error("unreachable");
@@ -592,7 +652,11 @@ test("controller: constraint aliases (project-constraint/requirement/limitation/
       const outcome = await runRememberController(handle, `Hard limit: ${label}`, {
         providerFetchImpl: fetchImpl,
         providerPrimaryApiKey: PRIMARY_KEY,
+        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+        providerPrimaryModel: PRIMARY_MODEL,
         providerFallbackApiKey: FALLBACK_KEY,
+        providerFallbackBaseUrl: FALLBACK_BASE_URL,
+        providerFallbackModel: FALLBACK_MODEL,
       });
       assert.equal(outcome.status, "saved", `label '${label}' should save`);
       if (outcome.status !== "saved") throw new Error("unreachable");
@@ -622,7 +686,11 @@ test("remember: a provider summary that is entirely a secret fragment is rejecte
     const outcome = await runRememberController(handle, "Some input.", {
       providerFetchImpl: fetchImpl,
       providerPrimaryApiKey: PRIMARY_KEY,
+      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+      providerPrimaryModel: PRIMARY_MODEL,
       providerFallbackApiKey: FALLBACK_KEY,
+      providerFallbackBaseUrl: FALLBACK_BASE_URL,
+      providerFallbackModel: FALLBACK_MODEL,
     });
     assert.equal(outcome.status, "rejected");
     if (outcome.status !== "rejected") throw new Error("unreachable");
@@ -650,7 +718,11 @@ test("remember: a provider summary with a secret embedded in real text is redact
     const outcome = await runRememberController(handle, "Some input.", {
       providerFetchImpl: fetchImpl,
       providerPrimaryApiKey: PRIMARY_KEY,
+      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+      providerPrimaryModel: PRIMARY_MODEL,
       providerFallbackApiKey: FALLBACK_KEY,
+      providerFallbackBaseUrl: FALLBACK_BASE_URL,
+      providerFallbackModel: FALLBACK_MODEL,
     });
     assert.equal(outcome.status, "saved");
     if (outcome.status !== "saved") throw new Error("unreachable");
@@ -682,7 +754,11 @@ test("storage: re-running initStorage does not duplicate columns and preserves e
     const outcome = await runRememberController(handle, "Hello world", {
       providerFetchImpl: fetchImpl,
       providerPrimaryApiKey: PRIMARY_KEY,
+      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+      providerPrimaryModel: PRIMARY_MODEL,
       providerFallbackApiKey: FALLBACK_KEY,
+      providerFallbackBaseUrl: FALLBACK_BASE_URL,
+      providerFallbackModel: FALLBACK_MODEL,
     });
     assert.equal(outcome.status, "saved");
     if (outcome.status !== "saved") throw new Error("unreachable");

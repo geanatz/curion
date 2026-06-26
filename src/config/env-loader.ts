@@ -20,13 +20,19 @@ import path from "node:path";
 
 /** Names of env vars whose values MUST never be logged. */
 export const SECRET_ENV_VARS: readonly string[] = [
+  // Canonical role-based names.
+  "CURION_PRIMARY_API_KEY",
+  "CURION_FALLBACK_API_KEY",
+  // Legacy role-based aliases (backward compat).
   "CURION_PROVIDER_PRIMARY_KEY",
-  "MINIMAX_API_KEY",
   "CURION_PROVIDER_FALLBACK_KEY",
-  "NVIDIA_NIM_API_KEY",
+  // Prototype harness keys.
   "CURION_PROTOTYPE_PRIMARY_KEY",
   "CURION_PROTOTYPE_FALLBACK_KEY",
+  // Third-party provider keys.
   "GROQ_API_KEY",
+  "MINIMAX_API_KEY",
+  "NVIDIA_NIM_API_KEY",
 ];
 
 const SECRET_SET: Set<string> = new Set(SECRET_ENV_VARS);
@@ -166,27 +172,10 @@ export function loadDotEnv(options: LoadDotEnvOptions = {}): LoadDotEnvResult {
  * only their presence is reported. Use `redactValue` on any
  * caller-side log path.
  *
- * Note on the prototype runner vs the production adapter:
- * the prototype CLI is a comparison harness that exercises
- * multiple engines against the same fixture corpus. It is
- * therefore more permissive about the primary/fallback alias
- * mapping than the production adapter:
- *
- *   - `hasPrimaryKey` is true if EITHER
- *     `CURION_PROVIDER_PRIMARY_KEY` OR `MINIMAX_API_KEY` is set.
- *     The prototype runner treats MiniMax as the historical
- *     primary candidate; this preserves the historical alias
- *     for operators who already have `MINIMAX_API_KEY` in their
- *     `.env`.
- *   - `hasFallbackKey` is true if EITHER
- *     `CURION_PROVIDER_FALLBACK_KEY` OR `NVIDIA_NIM_API_KEY` is
- *     set.
- *
- * The production adapter in `src/providers/memory-analysis.ts`
- * uses a different mapping (NVIDIA NIM is primary by default;
- * the fallback slot is empty by default). The prototype runner
- * deliberately keeps the legacy alias mapping so existing
- * `.env` files keep working as a comparison harness.
+ * The prototype runner is a comparison harness that exercises
+ * multiple engines against the same fixture corpus. It uses
+ * role-based primary/fallback config plus optional Groq for
+ * prototype/benchmark comparisons.
  */
 export interface PrototypeConfig {
   /** True if a primary provider key is available. */
@@ -224,12 +213,11 @@ export interface PrototypeConfig {
   dotenvKeys: string[];
 }
 
-// Per the NVIDIA-only stance, the prototype runner is the
-// only place where MiniMax has a real role: it is a
-// (separately configured) fallback candidate. The defaults
-// below are still the published MiniMax values because the
-// prototype CLI compares multiple engines; they are NOT the
-// production adapter's defaults.
+// Prototype runner defaults for comparison harness.
+// These are NOT production adapter defaults — the production
+// adapter has no built-in provider defaults and requires
+// explicit configuration via CURION_PRIMARY_* and
+// CURION_FALLBACK_* env vars.
 const DEFAULT_MINIMAX_BASE_URL = "https://api.minimax.io/v1";
 const DEFAULT_MINIMAX_MODEL = "MiniMax-M3";
 const DEFAULT_NIM_BASE_URL = "https://integrate.api.nvidia.com/v1";
@@ -259,14 +247,14 @@ export function loadPrototypeConfig(
 ): PrototypeConfig {
   const loaded = loadDotEnv(options);
   return {
-    // Legacy alias mapping preserved for the prototype runner:
-    // `MINIMAX_API_KEY` is the historical primary candidate.
-    // The production adapter uses a different mapping
-    // (see `src/providers/memory-analysis.ts`).
+    // Prototype uses role-based primary/fallback keys plus
+    // legacy aliases for backward compatibility.
     hasPrimaryKey:
+      Boolean(process.env.CURION_PRIMARY_API_KEY) ||
       Boolean(process.env.CURION_PROVIDER_PRIMARY_KEY) ||
       Boolean(process.env.MINIMAX_API_KEY),
     hasFallbackKey:
+      Boolean(process.env.CURION_FALLBACK_API_KEY) ||
       Boolean(process.env.CURION_PROVIDER_FALLBACK_KEY) ||
       Boolean(process.env.NVIDIA_NIM_API_KEY),
     minimaxBaseUrl:

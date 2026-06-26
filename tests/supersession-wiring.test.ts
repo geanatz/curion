@@ -99,6 +99,11 @@ function safeAnalysis(opts: {
 
 const PRIMARY_KEY = "sk-primary-test-not-real-12345";
 const FALLBACK_KEY = "nvapi-fallback-test-not-real-12345";
+// Explicit provider config: neutral URLs resolve to "custom" label.
+const PRIMARY_BASE_URL = "https://api.example.com/v1";
+const PRIMARY_MODEL = "test/model-primary";
+const FALLBACK_BASE_URL = "https://api.fallback.example/v1";
+const FALLBACK_MODEL = "test/model-fallback";
 
 function pinnedNow(t: number): () => number {
   return () => t;
@@ -129,7 +134,11 @@ test("controller supersession: new row carries supersedes, old row carries super
         {
           providerFetchImpl: fetchImpl,
           providerPrimaryApiKey: PRIMARY_KEY,
+          providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+          providerPrimaryModel: PRIMARY_MODEL,
           providerFallbackApiKey: FALLBACK_KEY,
+          providerFallbackBaseUrl: FALLBACK_BASE_URL,
+          providerFallbackModel: FALLBACK_MODEL,
           now: pinnedNow(1_700_000_000_000),
         },
       );
@@ -166,7 +175,11 @@ test("controller supersession: new row carries supersedes, old row carries super
       {
         providerFetchImpl: fetchImpl,
         providerPrimaryApiKey: PRIMARY_KEY,
+        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+        providerPrimaryModel: PRIMARY_MODEL,
         providerFallbackApiKey: FALLBACK_KEY,
+        providerFallbackBaseUrl: FALLBACK_BASE_URL,
+        providerFallbackModel: FALLBACK_MODEL,
         now: pinnedNow(pinnedTime),
       },
     );
@@ -239,7 +252,11 @@ test("controller supersession: superseded old row stays active", async () => {
       await runRememberController(handle, "Local dev database decision.", {
         providerFetchImpl: fetchImpl,
         providerPrimaryApiKey: PRIMARY_KEY,
+        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+        providerPrimaryModel: PRIMARY_MODEL,
         providerFallbackApiKey: FALLBACK_KEY,
+        providerFallbackBaseUrl: FALLBACK_BASE_URL,
+        providerFallbackModel: FALLBACK_MODEL,
         now: pinnedNow(1),
       });
     }
@@ -266,7 +283,11 @@ test("controller supersession: superseded old row stays active", async () => {
     await runRememberController(handle, "Local dev stack update.", {
       providerFetchImpl: fetchImpl,
       providerPrimaryApiKey: PRIMARY_KEY,
+      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+      providerPrimaryModel: PRIMARY_MODEL,
       providerFallbackApiKey: FALLBACK_KEY,
+      providerFallbackBaseUrl: FALLBACK_BASE_URL,
+      providerFallbackModel: FALLBACK_MODEL,
       now: pinnedNow(2),
     });
 
@@ -310,7 +331,11 @@ test("controller supersession: recall demotion ranks current above superseded st
       await runRememberController(handle, "Embedding provider decision.", {
         providerFetchImpl: fetchImpl,
         providerPrimaryApiKey: PRIMARY_KEY,
+        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+        providerPrimaryModel: PRIMARY_MODEL,
         providerFallbackApiKey: FALLBACK_KEY,
+        providerFallbackBaseUrl: FALLBACK_BASE_URL,
+        providerFallbackModel: FALLBACK_MODEL,
         now: pinnedNow(1_700_000_000_000),
       });
     }
@@ -337,7 +362,11 @@ test("controller supersession: recall demotion ranks current above superseded st
     await runRememberController(handle, "Switch embedding provider.", {
       providerFetchImpl: fetchImpl,
       providerPrimaryApiKey: PRIMARY_KEY,
+      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+      providerPrimaryModel: PRIMARY_MODEL,
       providerFallbackApiKey: FALLBACK_KEY,
+      providerFallbackBaseUrl: FALLBACK_BASE_URL,
+      providerFallbackModel: FALLBACK_MODEL,
       now: pinnedNow(1_700_000_000_001),
     });
 
@@ -366,8 +395,12 @@ test("controller supersession: recall demotion ranks current above superseded st
       "minimax embeddings",
       {
         providerFetchImpl: recallFetch,
-        providerPrimaryApiKey: "sk-test",
-        providerFallbackApiKey: "sk-fallback",
+        providerPrimaryApiKey: PRIMARY_KEY,
+        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+        providerPrimaryModel: PRIMARY_MODEL,
+        providerFallbackApiKey: FALLBACK_KEY,
+        providerFallbackBaseUrl: FALLBACK_BASE_URL,
+        providerFallbackModel: FALLBACK_MODEL,
         relevanceThreshold: 0.05,
         topK: 10,
       },
@@ -413,7 +446,11 @@ test("controller supersession: supersession-only block is persisted (no conflict
       await runRememberController(handle, "Cache decision.", {
         providerFetchImpl: fetchImpl,
         providerPrimaryApiKey: PRIMARY_KEY,
+        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+        providerPrimaryModel: PRIMARY_MODEL,
         providerFallbackApiKey: FALLBACK_KEY,
+        providerFallbackBaseUrl: FALLBACK_BASE_URL,
+        providerFallbackModel: FALLBACK_MODEL,
         now: pinnedNow(1),
       });
     }
@@ -440,7 +477,11 @@ test("controller supersession: supersession-only block is persisted (no conflict
     const outcome = await runRememberController(handle, "Update cache approach.", {
       providerFetchImpl: fetchImpl,
       providerPrimaryApiKey: PRIMARY_KEY,
+      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+      providerPrimaryModel: PRIMARY_MODEL,
       providerFallbackApiKey: FALLBACK_KEY,
+      providerFallbackBaseUrl: FALLBACK_BASE_URL,
+      providerFallbackModel: FALLBACK_MODEL,
       now: pinnedNow(2),
     });
 
@@ -484,7 +525,11 @@ test("controller supersession: new memory can supersede multiple related memorie
       const r = await runRememberController(handle, `Memory ${id}.`, {
         providerFetchImpl: fetchImpl,
         providerPrimaryApiKey: PRIMARY_KEY,
+        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+        providerPrimaryModel: PRIMARY_MODEL,
         providerFallbackApiKey: FALLBACK_KEY,
+        providerFallbackBaseUrl: FALLBACK_BASE_URL,
+        providerFallbackModel: FALLBACK_MODEL,
         now: pinnedNow(1_700_000_000_000 + id),
       });
       assert.equal(r.status, "saved");
@@ -518,7 +563,11 @@ test("controller supersession: new memory can supersede multiple related memorie
     const outcome = await runRememberController(handle, "Switch embeddings.", {
       providerFetchImpl: fetchImpl,
       providerPrimaryApiKey: PRIMARY_KEY,
+      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+      providerPrimaryModel: PRIMARY_MODEL,
       providerFallbackApiKey: FALLBACK_KEY,
+      providerFallbackBaseUrl: FALLBACK_BASE_URL,
+      providerFallbackModel: FALLBACK_MODEL,
       now: pinnedNow(1_700_000_000_003),
     });
 
@@ -582,7 +631,11 @@ test("controller supersession: missing old row is safe no-op (no crash)", async 
     const outcome = await runRememberController(handle, "Switch.", {
       providerFetchImpl: fetchImpl,
       providerPrimaryApiKey: PRIMARY_KEY,
+      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+      providerPrimaryModel: PRIMARY_MODEL,
       providerFallbackApiKey: FALLBACK_KEY,
+      providerFallbackBaseUrl: FALLBACK_BASE_URL,
+      providerFallbackModel: FALLBACK_MODEL,
       now: pinnedNow(1),
     });
 
@@ -630,7 +683,11 @@ test("controller supersession: no supersession language → no supersedes on new
       await runRememberController(handle, "DB decision.", {
         providerFetchImpl: fetchImpl,
         providerPrimaryApiKey: PRIMARY_KEY,
+        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+        providerPrimaryModel: PRIMARY_MODEL,
         providerFallbackApiKey: FALLBACK_KEY,
+        providerFallbackBaseUrl: FALLBACK_BASE_URL,
+        providerFallbackModel: FALLBACK_MODEL,
         now: pinnedNow(1),
       });
     }
@@ -658,7 +715,11 @@ test("controller supersession: no supersession language → no supersedes on new
     const outcome = await runRememberController(handle, "Upgrade Postgres.", {
       providerFetchImpl: fetchImpl,
       providerPrimaryApiKey: PRIMARY_KEY,
+      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+      providerPrimaryModel: PRIMARY_MODEL,
       providerFallbackApiKey: FALLBACK_KEY,
+      providerFallbackBaseUrl: FALLBACK_BASE_URL,
+      providerFallbackModel: FALLBACK_MODEL,
       now: pinnedNow(2),
     });
 
@@ -706,7 +767,11 @@ test("controller supersession: supersedes and conflictsWith can coexist on new r
       await runRememberController(handle, "MiniMax embedding decision.", {
         providerFetchImpl: fetchImpl,
         providerPrimaryApiKey: PRIMARY_KEY,
+        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+        providerPrimaryModel: PRIMARY_MODEL,
         providerFallbackApiKey: FALLBACK_KEY,
+        providerFallbackBaseUrl: FALLBACK_BASE_URL,
+        providerFallbackModel: FALLBACK_MODEL,
         now: pinnedNow(1),
       });
     }
@@ -740,7 +805,11 @@ test("controller supersession: supersedes and conflictsWith can coexist on new r
     const outcome = await runRememberController(handle, "Switch embeddings.", {
       providerFetchImpl: fetchImpl,
       providerPrimaryApiKey: PRIMARY_KEY,
+      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+      providerPrimaryModel: PRIMARY_MODEL,
       providerFallbackApiKey: FALLBACK_KEY,
+      providerFallbackBaseUrl: FALLBACK_BASE_URL,
+      providerFallbackModel: FALLBACK_MODEL,
       now: pinnedNow(2),
     });
 
@@ -785,7 +854,11 @@ test("controller supersession: back-patch appends to existing supersededBy array
       await runRememberController(handle, "MiniMax decision.", {
         providerFetchImpl: fetchImpl,
         providerPrimaryApiKey: PRIMARY_KEY,
+        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+        providerPrimaryModel: PRIMARY_MODEL,
         providerFallbackApiKey: FALLBACK_KEY,
+        providerFallbackBaseUrl: FALLBACK_BASE_URL,
+        providerFallbackModel: FALLBACK_MODEL,
         now: pinnedNow(1),
       });
     }
@@ -831,7 +904,11 @@ test("controller supersession: back-patch appends to existing supersededBy array
     await runRememberController(handle, "Switch.", {
       providerFetchImpl: fetchImpl,
       providerPrimaryApiKey: PRIMARY_KEY,
+      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+      providerPrimaryModel: PRIMARY_MODEL,
       providerFallbackApiKey: FALLBACK_KEY,
+      providerFallbackBaseUrl: FALLBACK_BASE_URL,
+      providerFallbackModel: FALLBACK_MODEL,
       now: pinnedNow(2),
     });
 
@@ -876,7 +953,11 @@ test("controller supersession: public message does not reveal supersession metad
       await runRememberController(handle, "DB fact.", {
         providerFetchImpl: fetchImpl,
         providerPrimaryApiKey: PRIMARY_KEY,
+        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+        providerPrimaryModel: PRIMARY_MODEL,
         providerFallbackApiKey: FALLBACK_KEY,
+        providerFallbackBaseUrl: FALLBACK_BASE_URL,
+        providerFallbackModel: FALLBACK_MODEL,
         now: pinnedNow(1),
       });
     }
@@ -902,7 +983,11 @@ test("controller supersession: public message does not reveal supersession metad
     const outcome = await runRememberController(handle, "Switch DB.", {
       providerFetchImpl: fetchImpl,
       providerPrimaryApiKey: PRIMARY_KEY,
+      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+      providerPrimaryModel: PRIMARY_MODEL,
       providerFallbackApiKey: FALLBACK_KEY,
+      providerFallbackBaseUrl: FALLBACK_BASE_URL,
+      providerFallbackModel: FALLBACK_MODEL,
       now: pinnedNow(2),
     });
 
@@ -968,7 +1053,11 @@ test("controller supersession: fresh same-topic old policy is superseded even wh
       await runRememberController(handle, `NVIDIA NIM embedding fact ${i}.`, {
         providerFetchImpl: fetchImpl,
         providerPrimaryApiKey: PRIMARY_KEY,
+        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+        providerPrimaryModel: PRIMARY_MODEL,
         providerFallbackApiKey: FALLBACK_KEY,
+        providerFallbackBaseUrl: FALLBACK_BASE_URL,
+        providerFallbackModel: FALLBACK_MODEL,
         now: pinnedNow(1_700_000_000_000 + i),
       });
     }
@@ -999,7 +1088,11 @@ test("controller supersession: fresh same-topic old policy is superseded even wh
         {
           providerFetchImpl: fetchImpl,
           providerPrimaryApiKey: PRIMARY_KEY,
+          providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+          providerPrimaryModel: PRIMARY_MODEL,
           providerFallbackApiKey: FALLBACK_KEY,
+          providerFallbackBaseUrl: FALLBACK_BASE_URL,
+          providerFallbackModel: FALLBACK_MODEL,
           now: pinnedNow(1_700_000_000_010),
         },
       );
@@ -1041,7 +1134,11 @@ test("controller supersession: fresh same-topic old policy is superseded even wh
         {
           providerFetchImpl: fetchImpl,
           providerPrimaryApiKey: PRIMARY_KEY,
+          providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+          providerPrimaryModel: PRIMARY_MODEL,
           providerFallbackApiKey: FALLBACK_KEY,
+          providerFallbackBaseUrl: FALLBACK_BASE_URL,
+          providerFallbackModel: FALLBACK_MODEL,
           now: pinnedNow(1_700_000_000_011),
         },
       );
@@ -1101,7 +1198,11 @@ test("controller supersession: no false positive supersession for unrelated old 
       await runRememberController(handle, "Database decision.", {
         providerFetchImpl: fetchImpl,
         providerPrimaryApiKey: PRIMARY_KEY,
+        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+        providerPrimaryModel: PRIMARY_MODEL,
         providerFallbackApiKey: FALLBACK_KEY,
+        providerFallbackBaseUrl: FALLBACK_BASE_URL,
+        providerFallbackModel: FALLBACK_MODEL,
         now: pinnedNow(1),
       });
     }
@@ -1126,7 +1227,11 @@ test("controller supersession: no false positive supersession for unrelated old 
         {
           providerFetchImpl: fetchImpl,
           providerPrimaryApiKey: PRIMARY_KEY,
+          providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+          providerPrimaryModel: PRIMARY_MODEL,
           providerFallbackApiKey: FALLBACK_KEY,
+          providerFallbackBaseUrl: FALLBACK_BASE_URL,
+          providerFallbackModel: FALLBACK_MODEL,
           now: pinnedNow(2),
         },
       );

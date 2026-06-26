@@ -25,27 +25,19 @@
  *     The recall MVP does not store recall queries or provider
  *     responses.
  *
- * Defaults (NVIDIA-only stance, per current product decision):
- *   - primary:    NVIDIA NIM `openai/gpt-oss-120b` at
- *                 `https://integrate.api.nvidia.com/v1`
- *   - fallback:   unconfigured by default. The architecture
- *                 keeps the primary+fallback slot so an operator
- *                 can opt in to a second engine via env vars or
- *                 per-call overrides, but Curion's default
- *                 runtime assumes ONE configured engine.
+ * Provider configuration (role-based, no vendor defaults):
+ *   - Primary: CURION_PRIMARY_API_KEY, CURION_PRIMARY_BASE_URL,
+ *     CURION_PRIMARY_MODEL, CURION_PRIMARY_PROVIDER_LABEL (optional)
+ *   - Fallback: CURION_FALLBACK_API_KEY, CURION_FALLBACK_BASE_URL,
+ *     CURION_FALLBACK_MODEL, CURION_FALLBACK_PROVIDER_LABEL (optional)
  *
- * Tradeoff: the previous "NVIDIA NIM primary + MiniMax M3
- * fallback" config gave a second engine for resilience. The
- * NVIDIA-only stance trades that off for a simpler, single-
- * engine runtime; when the primary is down the adapter returns
- * `all-providers-failed` rather than silently routing to a
- * different vendor. A future Groq-based fallback (or any
- * second engine) can be enabled by setting
- * `CURION_PROVIDER_FALLBACK_KEY` plus the matching base-URL
- * and model env vars.
+ * If no provider is configured, the adapter returns
+ * `missing-config` without making any HTTP call. There are no
+ * built-in defaults — the operator must explicitly configure
+ * at least one provider.
  *
  * Fallback policy:
- *   - Primary (NVIDIA NIM `openai/gpt-oss-120b`) is tried first.
+ *   - Primary is tried first.
  *   - If primary returns a hard failure (auth / network / timeout /
  *     5xx / missing-config), the adapter restarts the synthesis
  *     on the fallback provider, when a fallback key AND a
@@ -71,34 +63,18 @@ import {
   type ChatMessage,
   type ProviderError,
 } from "./http-client.js";
+import { anthropicChatCompletion } from "./anthropic.js";
 
 // ---------------------------------------------------------------------------
-// Defaults (mirror the memory-analysis adapter; keep them stable)
-//
-// The constants are role-named (PRIMARY / FALLBACK) rather than
-// provider-named because the orchestration order is what
-// `synthesizeRecallWithFallback` actually depends on. The env-var
-// overrides remain provider-named (`CURION_NIM_*` feeds the primary
-// slot; `CURION_MINIMAX_*` is recognised as the fallback-slot
-// override path) so the `loadRecallAdapterConfig` mapping below is
-// the single source of truth for "which provider sits in which
-// role".
-//
-// Per the NVIDIA-only stance, the default primary IS NVIDIA NIM
-// and the default fallback is empty. The architecture keeps the
-// fallback slot (so an operator can opt in), but no provider is
-// hardcoded into the fallback by default. The fallback slot is
-// only "configured" when the operator has set a key AND a base
-// URL AND a model — any of those missing leaves the slot empty.
+// Defaults
 // ---------------------------------------------------------------------------
-
-/** Default primary provider base URL (NVIDIA NIM, OpenAI-compatible). */
-export const RECALL_DEFAULT_PRIMARY_BASE_URL = "https://integrate.api.nvidia.com/v1";
-/** Default primary provider model id (`openai/gpt-oss-120b` on NIM). */
-export const RECALL_DEFAULT_PRIMARY_MODEL = "openai/gpt-oss-120b";
-/**
- * Default per-request timeout in ms.
- */
+//
+// No provider is hardcoded. The operator must configure at least
+// one provider via the CURION_PRIMARY_* env vars. The fallback
+// slot is empty by default (opt-in via CURION_FALLBACK_*).
+//
+// Generic adapter knobs:
+/** Default per-request timeout in ms. */
 export const RECALL_DEFAULT_TIMEOUT_MS = 30_000;
 /** Default per-request max output tokens. */
 export const RECALL_DEFAULT_MAX_TOKENS = 512;
@@ -108,15 +84,37 @@ export const RECALL_DEFAULT_MAX_TOKENS = 512;
 // ---------------------------------------------------------------------------
 
 /**
+ * API format for a provider slot.
+ *
+ * `"openai-compatible"` — use the OpenAI-compatible /chat/completions
+ * endpoint with raw HTTP (the existing path).
+ *
+ * `"anthropic"` — use the official Anthropic SDK / Messages API.
+ * System prompts are sent as a top-level `system` field rather
+ * than a `role: "system"` message. The base URL defaults to
+ * `https://api.anthropic.com` when apiFormat is `anthropic` and no
+ * base URL override is supplied.
+ */
+export type RecallApiFormat = "openai-compatible" | "anthropic";
+
+/**
  * Provider id the recall synthesis adapter can target.
  *
- * `"unknown"` is reserved for the case where the configured base URL
- * does not match any provider we recognize (e.g. a custom NIM-
- * compatible proxy whose host does not contain "nvidia" or "minimax").
- * Callers can branch on it the same way they branch on the named
- * values; it is informational, not an error condition.
+ * `"custom"` is reserved for the case where the configured base URL
+ * does not match any provider we recognize. Callers can branch on it
+ * the same way they branch on the named values; it is informational,
+ * not an error condition.
  */
-export type RecallProviderId = "minimax" | "nvidia-nim" | "unknown";
+export type RecallProviderId =
+  | "openai"
+  | "anthropic"
+  | "groq"
+  | "openrouter"
+  | "ollama"
+  | "lmstudio"
+  | "nvidia-nim"
+  | "minimax"
+  | "custom";
 
 /**
  * A safe memory entry handed to the synthesis adapter.
@@ -159,6 +157,10 @@ export interface RecallSynthesisOptions {
   fetchImpl?: typeof fetch;
   /** Skip the fallback. */
   disableFallback?: boolean;
+  /** Override primary API format. */
+  primaryApiFormat?: RecallApiFormat;
+  /** Override fallback API format. */
+  fallbackApiFormat?: RecallApiFormat;
 }
 
 /** Successful synthesis result. */
@@ -198,8 +200,12 @@ export type RecallSynthesisResult =
 export interface RecallAdapterConfig {
   primaryBaseUrl: string;
   primaryModel: string;
+  primaryProviderLabel: string;
+  primaryApiFormat: RecallApiFormat;
   fallbackBaseUrl: string;
   fallbackModel: string;
+  fallbackProviderLabel: string;
+  fallbackApiFormat: RecallApiFormat;
   primaryApiKey: string;
   fallbackApiKey: string;
   timeoutMs: number;
@@ -231,52 +237,81 @@ function pickTrimmedString(...candidates: string[]): string {
 }
 
 /**
+ * Parse an API format string. Returns "openai-compatible" for any
+ * unrecognized value so that missing env vars default to the
+ * safe backwards-compatible behavior.
+ */
+function readRecallApiFormat(name: string): RecallApiFormat {
+  const raw = readTrimmedString(name);
+  if (raw === "anthropic") return "anthropic";
+  return "openai-compatible";
+}
+
+/**
  * Resolve recall-synthesis adapter config from env. Uses the same
- * env vars as the analysis adapter for symmetry, plus the recall-
- * specific overrides. Returns trimmed strings; whitespace-only
- * values are treated as absent.
+ * role-based env vars as the analysis adapter. Returns trimmed
+ * strings; whitespace-only values are treated as absent.
  *
- * Per the NVIDIA-only stance, the fallback slot is empty by
- * default: `fallbackBaseUrl` and `fallbackModel` are EMPTY
- * unless the operator has set `CURION_MINIMAX_BASE_URL` /
- * `CURION_MINIMAX_MODEL`. The fallback call is only attempted
- * when the operator has configured all three (key + URL + model).
+ * No provider is hardcoded. The primary slot is populated from
+ * CURION_PRIMARY_BASE_URL, CURION_PRIMARY_MODEL, and
+ * CURION_PRIMARY_API_KEY. If any of these is missing, the slot
+ * is empty. The fallback slot is empty by default and is
+ * populated only when all three CURION_FALLBACK_* vars are set.
+ *
+ * When apiFormat is "anthropic" and no base URL is provided,
+ * the default is https://api.anthropic.com (Anthropic's official
+ * endpoint). This is not a hardcoded provider default — the base
+ * URL is part of the API format specification.
  */
 export function loadRecallAdapterConfig(
   overrides: Partial<RecallAdapterConfig> = {},
 ): RecallAdapterConfig {
+  const primaryApiFormat = overrides.primaryApiFormat
+    ?? readRecallApiFormat("CURION_PRIMARY_API_FORMAT");
+  const fallbackApiFormat = overrides.fallbackApiFormat
+    ?? readRecallApiFormat("CURION_FALLBACK_API_FORMAT");
+
+  const primaryBaseUrlCandidate = pickTrimmedString(
+    overrides.primaryBaseUrl ?? "",
+    readTrimmedString("CURION_PRIMARY_BASE_URL"),
+  );
+  const fallbackBaseUrlCandidate = pickTrimmedString(
+    overrides.fallbackBaseUrl ?? "",
+    readTrimmedString("CURION_FALLBACK_BASE_URL"),
+  );
+
   return {
-    primaryBaseUrl: pickTrimmedString(
-      overrides.primaryBaseUrl ?? "",
-      readTrimmedString("CURION_NIM_BASE_URL"),
-      RECALL_DEFAULT_PRIMARY_BASE_URL,
-    ),
+    primaryBaseUrl: primaryApiFormat === "anthropic" && !primaryBaseUrlCandidate
+      ? "https://api.anthropic.com"
+      : primaryBaseUrlCandidate,
     primaryModel: pickTrimmedString(
       overrides.primaryModel ?? "",
-      readTrimmedString("CURION_NIM_FALLBACK_MODEL"),
-      RECALL_DEFAULT_PRIMARY_MODEL,
+      readTrimmedString("CURION_PRIMARY_MODEL"),
     ),
-    // Fallback slot: unconfigured by default. An operator who
-    // wants a second engine sets `CURION_MINIMAX_BASE_URL` and
-    // `CURION_MINIMAX_MODEL` (and the matching key). With no
-    // env var and no override, the slot stays empty.
-    fallbackBaseUrl: pickTrimmedString(
-      overrides.fallbackBaseUrl ?? "",
-      readTrimmedString("CURION_MINIMAX_BASE_URL"),
+    primaryProviderLabel: pickTrimmedString(
+      overrides.primaryProviderLabel ?? "",
+      readTrimmedString("CURION_PRIMARY_PROVIDER_LABEL"),
     ),
+    primaryApiFormat,
+    fallbackBaseUrl: fallbackApiFormat === "anthropic" && !fallbackBaseUrlCandidate
+      ? "https://api.anthropic.com"
+      : fallbackBaseUrlCandidate,
     fallbackModel: pickTrimmedString(
       overrides.fallbackModel ?? "",
-      readTrimmedString("CURION_MINIMAX_MODEL"),
+      readTrimmedString("CURION_FALLBACK_MODEL"),
     ),
+    fallbackProviderLabel: pickTrimmedString(
+      overrides.fallbackProviderLabel ?? "",
+      readTrimmedString("CURION_FALLBACK_PROVIDER_LABEL"),
+    ),
+    fallbackApiFormat,
     primaryApiKey: pickTrimmedString(
       overrides.primaryApiKey ?? "",
-      readTrimmedString("CURION_PROVIDER_PRIMARY_KEY"),
-      readTrimmedString("NVIDIA_NIM_API_KEY"),
+      readTrimmedString("CURION_PRIMARY_API_KEY"),
     ),
     fallbackApiKey: pickTrimmedString(
       overrides.fallbackApiKey ?? "",
-      readTrimmedString("CURION_PROVIDER_FALLBACK_KEY"),
-      readTrimmedString("MINIMAX_API_KEY"),
+      readTrimmedString("CURION_FALLBACK_API_KEY"),
     ),
     timeoutMs: overrides.timeoutMs ?? readNumber(
       "CURION_ADAPTER_TIMEOUT_MS",
@@ -300,9 +335,15 @@ export function loadRecallAdapterConfig(
 // base URL itself instead of being hardcoded at each call site.
 //
 // Recognized hosts (case-insensitive substring match):
-//   - "nvidia"   -> "nvidia-nim"   (NVIDIA NIM, OpenAI-compatible)
-//   - "minimax"  -> "minimax"      (MiniMax, OpenAI-compatible)
-//   - otherwise  -> "unknown"      (custom / unrecognised endpoint)
+//   - "anthropic"  -> "anthropic"
+//   - "openai"     -> "openai"
+//   - "groq"       -> "groq"
+//   - "openrouter" -> "openrouter"
+//   - "ollama"     -> "ollama"
+//   - "lmstudio"   -> "lmstudio"
+//   - "nvidia"     -> "nvidia-nim"
+//   - "minimax"    -> "minimax"
+//   - otherwise    -> "custom"
 //
 // This means swapping the primary/fallback base URLs in the
 // future (or overriding them via env vars or MCP tool options)
@@ -314,14 +355,19 @@ export function loadRecallAdapterConfig(
  * Derive a `RecallProviderId` from the base URL the request will
  * actually be sent to. The match is intentionally a case-
  * insensitive substring on the host portion so that env-style
- * overrides like `https://my.nvidia.proxy.example/v1` still
- * resolve to `"nvidia-nim"`.
+ * overrides still resolve correctly.
  */
 function resolveRecallProviderId(baseUrl: string): RecallProviderId {
   const url = (baseUrl ?? "").toLowerCase();
+  if (url.includes("anthropic")) return "anthropic";
+  if (url.includes("openai")) return "openai";
+  if (url.includes("groq")) return "groq";
+  if (url.includes("openrouter")) return "openrouter";
+  if (url.includes("ollama")) return "ollama";
+  if (url.includes("lmstudio")) return "lmstudio";
   if (url.includes("nvidia")) return "nvidia-nim";
   if (url.includes("minimax")) return "minimax";
-  return "unknown";
+  return "custom";
 }
 
 // ---------------------------------------------------------------------------
@@ -427,6 +473,12 @@ export async function synthesizeRecallWithFallback(
       : {}),
     ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
     ...(options.maxTokens !== undefined ? { maxTokens: options.maxTokens } : {}),
+    ...(options.primaryApiFormat !== undefined
+      ? { primaryApiFormat: options.primaryApiFormat }
+      : {}),
+    ...(options.fallbackApiFormat !== undefined
+      ? { fallbackApiFormat: options.fallbackApiFormat }
+      : {}),
   });
 
   if (!cfg.primaryApiKey && !cfg.fallbackApiKey) {
@@ -434,7 +486,7 @@ export async function synthesizeRecallWithFallback(
       ok: false,
       kind: "missing-config",
       message:
-        "synthesizeRecallWithFallback: no provider api key configured (set CURION_PROVIDER_PRIMARY_KEY or CURION_PROVIDER_FALLBACK_KEY)",
+        "synthesizeRecallWithFallback: no provider api key configured (set CURION_PRIMARY_API_KEY or CURION_FALLBACK_API_KEY)",
       httpCalls: 0,
     };
   }
@@ -443,7 +495,8 @@ export async function synthesizeRecallWithFallback(
   // The primary provider id is derived from `cfg.primaryBaseUrl`
   // so the label in `providerLabel` / `providerUsed` / error
   // messages always matches the endpoint the request is sent to.
-  const primaryProvider = resolveRecallProviderId(cfg.primaryBaseUrl);
+  const primaryProvider: RecallProviderId = (cfg.primaryProviderLabel as RecallProviderId)
+    || resolveRecallProviderId(cfg.primaryBaseUrl);
   const primaryResult = cfg.primaryApiKey
     ? await runSynthesisCall({
         provider: primaryProvider,
@@ -455,6 +508,7 @@ export async function synthesizeRecallWithFallback(
         query,
         memories,
         fetchImpl: options.fetchImpl,
+        apiFormat: cfg.primaryApiFormat,
       })
     : {
         ok: false as const,
@@ -489,12 +543,11 @@ export async function synthesizeRecallWithFallback(
     };
   }
 
-  // Under the NVIDIA-only stance, the fallback slot is empty by
-  // default (no base URL, no model, no key). The slot is only
-  // usable when the operator has explicitly configured all three
-  // (key + URL + model). If the slot is empty for any reason —
-  // no key, no URL, or no model — we surface
-  // `all-providers-failed` and do NOT make a second HTTP call.
+  // The fallback slot is empty by default (no base URL, no model,
+  // no key). The slot is only usable when the operator has
+  // explicitly configured all three (key + URL + model). If the
+  // slot is empty for any reason, we surface `all-providers-failed`
+  // and do NOT make a second HTTP call.
   if (!cfg.fallbackApiKey || !cfg.fallbackBaseUrl || !cfg.fallbackModel) {
     return {
       ok: false,
@@ -511,8 +564,10 @@ export async function synthesizeRecallWithFallback(
   // Same derivation rule as the primary: the label follows the
   // base URL, so a swapped or overridden fallback URL still
   // produces a label that matches the actual endpoint.
+  const fallbackProvider: RecallProviderId = (cfg.fallbackProviderLabel as RecallProviderId)
+    || resolveRecallProviderId(cfg.fallbackBaseUrl);
   const fallbackResult = await runSynthesisCall({
-    provider: resolveRecallProviderId(cfg.fallbackBaseUrl),
+    provider: fallbackProvider,
     baseUrl: cfg.fallbackBaseUrl,
     model: cfg.fallbackModel,
     apiKey: cfg.fallbackApiKey,
@@ -521,6 +576,7 @@ export async function synthesizeRecallWithFallback(
     query,
     memories,
     fetchImpl: options.fetchImpl,
+    apiFormat: cfg.fallbackApiFormat,
   });
 
   if (fallbackResult.ok) {
@@ -576,6 +632,7 @@ interface RunSynthesisArgs {
   query: string;
   memories: ReadonlyArray<RecallMemoryInput>;
   fetchImpl: typeof fetch | undefined;
+  apiFormat: RecallApiFormat;
 }
 
 async function runSynthesisCall(
@@ -593,32 +650,64 @@ async function runSynthesisCall(
     },
   ];
 
-  const r = await chatCompletion(
-    {
-      model: args.model,
-      messages,
-      temperature: 0,
-      // No response_format hint: we want plain text.
-      maxTokens: args.maxTokens,
-    },
-    {
-      baseUrl: args.baseUrl,
-      apiKey: args.apiKey,
-      timeoutMs: args.timeoutMs,
-      ...(args.fetchImpl ? { fetchImpl: args.fetchImpl } : {}),
-      providerLabel: `${args.provider}/${args.model}#recall`,
-    },
-  );
+  const isAnthropic = args.apiFormat === "anthropic";
+  const providerLabel = `${args.provider}/${args.model}#recall`;
 
-  if (!r.ok) {
-    return {
-      ok: false,
-      message: `${args.provider}: hard failure (${r.error.kind}): ${r.error.message}`,
-      lastError: r.error,
-      httpCalls: 1,
-    };
+  let answer: string;
+  let latencyMs: number;
+
+  if (isAnthropic) {
+    const r = await anthropicChatCompletion(
+      {
+        model: args.model,
+        messages,
+        maxTokens: args.maxTokens,
+        fetchImpl: args.fetchImpl,
+        baseUrl: args.baseUrl,
+        apiKey: args.apiKey,
+        timeoutMs: args.timeoutMs,
+      },
+      providerLabel,
+    );
+    if (!r.ok) {
+      return {
+        ok: false,
+        message: `${args.provider}: hard failure (${r.error.kind}): ${r.error.message}`,
+        lastError: r.error,
+        httpCalls: 1,
+      };
+    }
+    answer = r.result.response.content;
+    latencyMs = r.result.response.latencyMs;
+  } else {
+    const r = await chatCompletion(
+      {
+        model: args.model,
+        messages,
+        temperature: 0,
+        // No response_format hint: we want plain text.
+        maxTokens: args.maxTokens,
+      },
+      {
+        baseUrl: args.baseUrl,
+        apiKey: args.apiKey,
+        timeoutMs: args.timeoutMs,
+        ...(args.fetchImpl ? { fetchImpl: args.fetchImpl } : {}),
+        providerLabel,
+      },
+    );
+    if (!r.ok) {
+      return {
+        ok: false,
+        message: `${args.provider}: hard failure (${r.error.kind}): ${r.error.message}`,
+        lastError: r.error,
+        httpCalls: 1,
+      };
+    }
+    answer = r.response.content;
+    latencyMs = r.response.latencyMs;
   }
-  const answer = r.response.content;
+
   if (typeof answer !== "string" || answer.trim().length === 0) {
     return {
       ok: false,
@@ -631,7 +720,7 @@ async function runSynthesisCall(
     answer,
     provider: args.provider,
     model: args.model,
-    latencyMs: r.response.latencyMs,
+    latencyMs,
     httpCalls: 1,
   };
 }

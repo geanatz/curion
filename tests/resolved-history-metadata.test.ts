@@ -150,6 +150,11 @@ function safeAnalysis(opts: {
 
 const PRIMARY_KEY = "sk-primary-test-not-real-12345";
 const FALLBACK_KEY = "nvapi-fallback-test-not-real-12345";
+// Explicit provider config: neutral URLs -> "custom" label.
+const PRIMARY_BASE_URL = "https://api.example.com/v1";
+const PRIMARY_MODEL = "test/model-primary";
+const FALLBACK_BASE_URL = "https://api.fallback.example/v1";
+const FALLBACK_MODEL = "test/model-fallback";
 
 function pinnedNow(t: number): () => number {
   return () => t;
@@ -484,7 +489,11 @@ test("controller: new writes use DERIVED_SCHEMA_VERSION (ccm-draft-2)", async ()
     const outcome = await runRememberController(handle, "Some safe fact.", {
       providerFetchImpl: fetchImpl,
       providerPrimaryApiKey: PRIMARY_KEY,
+      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+      providerPrimaryModel: PRIMARY_MODEL,
       providerFallbackApiKey: FALLBACK_KEY,
+      providerFallbackBaseUrl: FALLBACK_BASE_URL,
+      providerFallbackModel: FALLBACK_MODEL,
       now: pinnedNow(1_700_000_000_000),
     });
     assert.equal(outcome.status, "saved");
@@ -833,7 +842,11 @@ test("public recall output: does NOT expose derivedSchemaVersion, ccm-draft-1, c
       const out = await runRecallController(handle, "What database does the project use?", {
         providerFetchImpl: fetchImpl,
         providerPrimaryApiKey: PRIMARY_KEY,
+        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+        providerPrimaryModel: PRIMARY_MODEL,
         providerFallbackApiKey: FALLBACK_KEY,
+        providerFallbackBaseUrl: FALLBACK_BASE_URL,
+        providerFallbackModel: FALLBACK_MODEL,
       });
       assert.equal(out.status, "answered");
       if (out.status !== "answered") throw new Error("unreachable");
@@ -1088,7 +1101,11 @@ test("recall controller: sourceIds and answer field shape are byte-equal pre-Pha
       const out = await runRecallController(handle, "hosting platform production", {
         providerFetchImpl: fetchImpl,
         providerPrimaryApiKey: PRIMARY_KEY,
+        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+        providerPrimaryModel: PRIMARY_MODEL,
         providerFallbackApiKey: FALLBACK_KEY,
+        providerFallbackBaseUrl: FALLBACK_BASE_URL,
+        providerFallbackModel: FALLBACK_MODEL,
       });
       assert.equal(out.status, "answered");
       if (out.status !== "answered") throw new Error("unreachable");

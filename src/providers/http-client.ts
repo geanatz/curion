@@ -65,9 +65,7 @@ export interface ChatMessage {
  *     strict JSON-Schema constrained response. Implemented as
  *     `response_format: { type: "json_schema", json_schema: { ... } }`
  *     with `strict: true`. Not all providers support this; callers
- *     must only send it to providers that advertise support
- *     (e.g. Groq for `openai/gpt-oss-120b`). The runner uses
- *     this for Groq only.
+ *     must only send it to providers that advertise support.
  */
 export type ChatResponseFormat =
   | "json_object"

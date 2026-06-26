@@ -33,6 +33,18 @@ import {
 import { DEMOTION_FACTOR } from "../src/retrieval/superseded-demotion.ts";
 
 // ---------------------------------------------------------------------------
+// Provider config (neutral URLs -> "custom" label; explicit params to avoid
+// env-based fallback that would cause provider_error in tests)
+// ---------------------------------------------------------------------------
+
+const PRIMARY_KEY = "sk-primary-test-not-real-12345";
+const FALLBACK_KEY = "sk-fallback-test-not-real-12345";
+const PRIMARY_BASE_URL = "https://api.example.com/v1";
+const PRIMARY_MODEL = "test/model-primary";
+const FALLBACK_BASE_URL = "https://api.fallback.example/v1";
+const FALLBACK_MODEL = "test/model-fallback";
+
+// ---------------------------------------------------------------------------
 // Storage helpers
 // ---------------------------------------------------------------------------
 
@@ -196,8 +208,12 @@ test("recall: A supersedes B -> B demoted below A (supersedes path)", async () =
     const { trace, stages } = makeInMemoryTraceContext();
     const out = await runRecallController(handle, "Postgres database", {
       providerFetchImpl: fetchImpl,
-      providerPrimaryApiKey: "sk-test",
-      providerFallbackApiKey: "sk-fallback",
+      providerPrimaryApiKey: PRIMARY_KEY,
+      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+      providerPrimaryModel: PRIMARY_MODEL,
+      providerFallbackApiKey: FALLBACK_KEY,
+      providerFallbackBaseUrl: FALLBACK_BASE_URL,
+      providerFallbackModel: FALLBACK_MODEL,
       trace,
       relevanceThreshold: 0.05,
       topK: 10,
@@ -265,8 +281,12 @@ test("recall: stale supersededBy current -> stale demoted (supersededBy path)", 
     const { fetchImpl } = scriptFetch();
     const out = await runRecallController(handle, "Postgres database", {
       providerFetchImpl: fetchImpl,
-      providerPrimaryApiKey: "sk-test",
-      providerFallbackApiKey: "sk-fallback",
+      providerPrimaryApiKey: PRIMARY_KEY,
+      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+      providerPrimaryModel: PRIMARY_MODEL,
+      providerFallbackApiKey: FALLBACK_KEY,
+      providerFallbackBaseUrl: FALLBACK_BASE_URL,
+      providerFallbackModel: FALLBACK_MODEL,
       relevanceThreshold: 0.05,
       topK: 10,
     });
@@ -299,8 +319,12 @@ test("recall: supersedes target not in candidate list -> no demotion (safe ignor
     const { fetchImpl } = scriptFetch();
     const out = await runRecallController(handle, "Postgres database", {
       providerFetchImpl: fetchImpl,
-      providerPrimaryApiKey: "sk-test",
-      providerFallbackApiKey: "sk-fallback",
+      providerPrimaryApiKey: PRIMARY_KEY,
+      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+      providerPrimaryModel: PRIMARY_MODEL,
+      providerFallbackApiKey: FALLBACK_KEY,
+      providerFallbackBaseUrl: FALLBACK_BASE_URL,
+      providerFallbackModel: FALLBACK_MODEL,
       relevanceThreshold: 0.05,
       topK: 10,
     });
@@ -330,8 +354,12 @@ test("recall: supersededBy referrer not in candidate list -> stale not demoted",
     const { fetchImpl } = scriptFetch();
     const out = await runRecallController(handle, "Postgres database", {
       providerFetchImpl: fetchImpl,
-      providerPrimaryApiKey: "sk-test",
-      providerFallbackApiKey: "sk-fallback",
+      providerPrimaryApiKey: PRIMARY_KEY,
+      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+      providerPrimaryModel: PRIMARY_MODEL,
+      providerFallbackApiKey: FALLBACK_KEY,
+      providerFallbackBaseUrl: FALLBACK_BASE_URL,
+      providerFallbackModel: FALLBACK_MODEL,
       relevanceThreshold: 0.05,
       topK: 10,
     });
@@ -367,8 +395,12 @@ test("recall: self-supersession (A supersedes A) -> safely ignored, no crash", a
     const { fetchImpl } = scriptFetch();
     const out = await runRecallController(handle, "Postgres database", {
       providerFetchImpl: fetchImpl,
-      providerPrimaryApiKey: "sk-test",
-      providerFallbackApiKey: "sk-fallback",
+      providerPrimaryApiKey: PRIMARY_KEY,
+      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+      providerPrimaryModel: PRIMARY_MODEL,
+      providerFallbackApiKey: FALLBACK_KEY,
+      providerFallbackBaseUrl: FALLBACK_BASE_URL,
+      providerFallbackModel: FALLBACK_MODEL,
       relevanceThreshold: 0.05,
       topK: 10,
     });
@@ -399,8 +431,12 @@ test("recall: self-supersededBy (A supersededBy A) -> safely ignored, no crash",
     const { fetchImpl } = scriptFetch();
     const out = await runRecallController(handle, "Postgres database", {
       providerFetchImpl: fetchImpl,
-      providerPrimaryApiKey: "sk-test",
-      providerFallbackApiKey: "sk-fallback",
+      providerPrimaryApiKey: PRIMARY_KEY,
+      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+      providerPrimaryModel: PRIMARY_MODEL,
+      providerFallbackApiKey: FALLBACK_KEY,
+      providerFallbackBaseUrl: FALLBACK_BASE_URL,
+      providerFallbackModel: FALLBACK_MODEL,
       relevanceThreshold: 0.05,
       topK: 10,
     });
@@ -440,8 +476,12 @@ test("recall: duplicate supersedes entries -> no crash, correct demotion", async
     const { fetchImpl } = scriptFetch();
     const out = await runRecallController(handle, "Postgres database", {
       providerFetchImpl: fetchImpl,
-      providerPrimaryApiKey: "sk-test",
-      providerFallbackApiKey: "sk-fallback",
+      providerPrimaryApiKey: PRIMARY_KEY,
+      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+      providerPrimaryModel: PRIMARY_MODEL,
+      providerFallbackApiKey: FALLBACK_KEY,
+      providerFallbackBaseUrl: FALLBACK_BASE_URL,
+      providerFallbackModel: FALLBACK_MODEL,
       relevanceThreshold: 0.05,
       topK: 10,
     });
@@ -484,8 +524,12 @@ test("recall: unrelated candidates preserve lexical order when no supersession a
     const { fetchImpl } = scriptFetch();
     const out = await runRecallController(handle, "Postgres database", {
       providerFetchImpl: fetchImpl,
-      providerPrimaryApiKey: "sk-test",
-      providerFallbackApiKey: "sk-fallback",
+      providerPrimaryApiKey: PRIMARY_KEY,
+      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+      providerPrimaryModel: PRIMARY_MODEL,
+      providerFallbackApiKey: FALLBACK_KEY,
+      providerFallbackBaseUrl: FALLBACK_BASE_URL,
+      providerFallbackModel: FALLBACK_MODEL,
       relevanceThreshold: 0.05,
       topK: 10,
     });
@@ -534,8 +578,12 @@ test("recall: stale with higher raw score still demoted below current", async ()
     const { fetchImpl } = scriptFetch();
     const out = await runRecallController(handle, "Postgres database", {
       providerFetchImpl: fetchImpl,
-      providerPrimaryApiKey: "sk-test",
-      providerFallbackApiKey: "sk-fallback",
+      providerPrimaryApiKey: PRIMARY_KEY,
+      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+      providerPrimaryModel: PRIMARY_MODEL,
+      providerFallbackApiKey: FALLBACK_KEY,
+      providerFallbackBaseUrl: FALLBACK_BASE_URL,
+      providerFallbackModel: FALLBACK_MODEL,
       relevanceThreshold: 0.05,
       topK: 10,
     });
@@ -575,8 +623,12 @@ test("recall: no demotions -> trace emits compact count (no demotions array)", a
     const { trace, stages } = makeInMemoryTraceContext();
     const out = await runRecallController(handle, "Postgres", {
       providerFetchImpl: fetchImpl,
-      providerPrimaryApiKey: "sk-test",
-      providerFallbackApiKey: "sk-fallback",
+      providerPrimaryApiKey: PRIMARY_KEY,
+      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+      providerPrimaryModel: PRIMARY_MODEL,
+      providerFallbackApiKey: FALLBACK_KEY,
+      providerFallbackBaseUrl: FALLBACK_BASE_URL,
+      providerFallbackModel: FALLBACK_MODEL,
       trace,
       relevanceThreshold: 0.05,
       topK: 10,
@@ -622,8 +674,12 @@ test("recall: malformed supersedes (non-array) -> safely ignored, no crash", asy
     const { fetchImpl } = scriptFetch();
     const out = await runRecallController(handle, "Postgres", {
       providerFetchImpl: fetchImpl,
-      providerPrimaryApiKey: "sk-test",
-      providerFallbackApiKey: "sk-fallback",
+      providerPrimaryApiKey: PRIMARY_KEY,
+      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+      providerPrimaryModel: PRIMARY_MODEL,
+      providerFallbackApiKey: FALLBACK_KEY,
+      providerFallbackBaseUrl: FALLBACK_BASE_URL,
+      providerFallbackModel: FALLBACK_MODEL,
       relevanceThreshold: 0.05,
       topK: 10,
     });
@@ -658,8 +714,12 @@ test("recall: missing metadata relationship block -> treated as no relationship"
     const { fetchImpl } = scriptFetch();
     const out = await runRecallController(handle, "Postgres", {
       providerFetchImpl: fetchImpl,
-      providerPrimaryApiKey: "sk-test",
-      providerFallbackApiKey: "sk-fallback",
+      providerPrimaryApiKey: PRIMARY_KEY,
+      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
+      providerPrimaryModel: PRIMARY_MODEL,
+      providerFallbackApiKey: FALLBACK_KEY,
+      providerFallbackBaseUrl: FALLBACK_BASE_URL,
+      providerFallbackModel: FALLBACK_MODEL,
       relevanceThreshold: 0.05,
       topK: 10,
     });

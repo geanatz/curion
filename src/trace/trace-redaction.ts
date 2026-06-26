@@ -68,7 +68,7 @@ const SECRET_VALUE_PATTERNS: ReadonlyArray<RegExp> = [
   /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g,
   // Google API key
   /\bAIza[A-Za-z0-9_\-]{30,}\b/g,
-  // NVIDIA NIM key
+  // NVIDIA NIM key prefix (nvapi-...)
   /\bnvapi-[A-Za-z0-9_\-]{20,}\b/g,
   // Generic bearer / authorization header value
   /\bbearer\s+[A-Za-z0-9._\-+/=]{20,}\b/gi,
@@ -82,8 +82,8 @@ const SECRET_VALUE_PATTERNS: ReadonlyArray<RegExp> = [
  * Object keys whose VALUES should be redacted regardless of the
  * value's content. Matched case-insensitively. The list is
  * conservative: when in doubt, redact. Common credential and
- * identity fields from HTTP headers, OAuth, JWT, and the
- * OpenAI / Anthropic / NIM / Groq wire formats.
+ * identity fields from HTTP headers, OAuth, JWT, and common
+ * OpenAI-compatible API wire formats.
  */
 const SENSITIVE_KEY_PATTERNS: ReadonlyArray<RegExp> = [
   /^api[_-]?key$/i,
