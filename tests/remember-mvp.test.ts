@@ -1096,6 +1096,12 @@ test("safety fixtures: all required classes are present (no regression)", () => 
     "vague-junk",
     "self-conflict",
     "mixed-safe-sensitive",
+    // Hardening pass (clarification-field-redesign followup):
+    // the new classes carry clarification_needed and route
+    // to the `clarify` persistence verdict (no row written,
+    // ask the user).
+    "vague-memory",
+    "replacement-correction",
   ]);
   for (const f of SAFETY_FIXTURES) {
     assert.ok(required.has(f.class), `missing class: ${f.class}`);

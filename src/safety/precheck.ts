@@ -87,7 +87,24 @@ export type SafetyClass =
   | "mixed-safe-sensitive"
   | "prompt-injection"
   | "unsafe-preference"
-  | "self-conflict";
+  | "self-conflict"
+  // Hardening pass (clarification-field-redesign followup):
+  //   - "vague-memory"          — input references an unspecified past
+  //                                decision / discussion (e.g. "the thing
+  //                                we decided earlier"). Carries
+  //                                clarification_needed so the user can
+  //                                supply the actual memory.
+  //   - "replacement-correction" — input asserts a direct
+  //                                correction / replacement of one
+  //                                named thing by another (e.g.
+  //                                "Postgres, not SQLite"). Temporal
+  //                                change ("used SQLite before, but
+  //                                now uses Postgres") is intentionally
+  //                                NOT matched here — the existing
+  //                                `self-conflict` detector handles
+  //                                temporal pivots.
+  | "vague-memory"
+  | "replacement-correction";
 
 /** Outcome of the pre-check. */
 export interface SafetyCheckResult {
@@ -478,6 +495,181 @@ function sharesTopicToken(a: string, b: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Vague-memory patterns (hardening pass)
+// ---------------------------------------------------------------------------
+//
+// The existing `vague-junk` detector handles short / low-signal inputs
+// (length < 4, single-char repeated, no letters, single repeated token,
+// 1-5 letter word salad). It does NOT handle inputs that LOOK like a
+// normal memory-verb sentence but use a demonstrative + vague noun
+// as the head of the phrase (e.g. "Remember the thing we decided
+// earlier.") — those are syntactically meaningful but underspecified.
+//
+// Conservative pattern set. Each pattern is anchored on a distinctive
+// structure so that ordinary project documentation that happens to
+// mention a "decision" or "point" is not flagged.
+//
+// The detector fires on:
+//
+//   1. Memory verb + demonstrative + vague noun + (optional past-tense
+//      decision verb + optional temporal qualifier), with no concrete
+//      content noun after the vague noun. Examples that match:
+//        - "Remember the thing we decided earlier."
+//        - "Save what we agreed on."
+//        - "Note the decision we made."
+//   2. Demonstrative + vague noun + past-tense decision verb. The
+//      sentence is a request to recall an unspecified past item.
+//        - "The thing we decided earlier is important."
+//        - "That point we discussed should be remembered."
+//
+// It does NOT fire on:
+//
+//   - Concrete content: "Remember the Postgres migration decision."
+//     (the noun after "the" is `Postgres migration decision`, not the
+//     bare vague noun alone).
+//   - Declarations without a memory verb and without a "we decided"
+//     past-tense decision verb: "The thing about Postgres is fast."
+//     (no past-tense decision verb follows the vague noun).
+//   - Valid temporal facts: "Curion used SQLite before, but now uses
+//     Postgres." (handled separately by `self-conflict`).
+const VAGUE_MEMORY_PATTERNS: ReadonlyArray<RegExp> = [
+  // Memory verb + (optional demonstrative) + vague noun. The
+  // vague noun is the *last* token the memory verb governs
+  // before an end-of-sentence / line break, so a sentence like
+  // "Remember the thing about Postgres" still escapes — the
+  // memory verb governs a full noun phrase, not just the bare
+  // noun.
+  /\b(?:remember|save|store|note|keep|log|record|write)\s+(?:the\s+|that\s+|this\s+|those\s+|these\s+)?(?:thing|things|stuff|something|everything)\s*(?:[.!?]|$)/i,
+  // Memory verb + (optional demonstrative) + vague decision
+  // noun + past-tense decision verb (e.g. "we made",
+  // "we discussed"). The "decision / point / idea / plan /
+  // agreement / choice / rule" noun is followed by a past-tense
+  // decision verb referencing an unspecified past item.
+  /\b(?:remember|save|store|note|keep|log|record|write)\s+(?:the\s+|that\s+|this\s+)?(?:decision|point|idea|plan|agreement|choice|rule)\s+(?:we|i|you|they|we'd|they'd)\s+(?:made|discussed|agreed|talked\s+about|chose|picked|decided|set|settled\s+on)\b/i,
+  // Memory verb + relative pronoun "what/whatever/whichever" +
+  // past-tense decision verb. The relative pronoun is a
+  // placeholder for an unspecified antecedent. Examples that
+  // match:
+  //   - "Save what we agreed on."
+  //   - "Note whatever we decided."
+  //   - "Remember whichever we chose."
+  /\b(?:remember|save|store|note|keep|log|record|write)\s+(?:what|whatever|whichever)\s+(?:we|i|you|they|we'd|they'd)\s+(?:discussed|agreed|talked\s+about|mentioned|decided|chose|picked|made|settled\s+on)\b/i,
+  // Demonstrative + vague noun + past-tense decision verb. The
+  // sentence asserts an unspecified past item ("the thing we
+  // discussed", "that point we agreed on"). The pattern requires
+  // the demonstrative+vague-noun to be directly followed (no
+  // concrete content in between) by the past-tense decision
+  // verb phrase.
+  /\b(?:the|that|this|those|these)\s+(?:thing|things|stuff|something|everything)\s+(?:we|i|you|they|we'd|they'd)\s+(?:discussed|agreed|talked\s+about|mentioned|decided|chose|picked|made|settled\s+on)\b/i,
+];
+
+interface VagueMemoryHit {
+  /** Stable label for the rule that triggered detection. */
+  label: string;
+}
+
+/**
+ * Run a narrow, deterministic vague-memory check. Returns a hit
+ * when the input is dominated by demonstrative + vague-noun
+ * references with no concrete content.
+ *
+ * Conservative: only fires on the explicit
+ * "remember/save/store/note/keep/log the X we VERB-ed" pattern and
+ * the "the/that/this X we VERB-ed" pattern. Does NOT fire on
+ * concrete content ("the Postgres migration decision") or on
+ * declarations without a past-tense decision verb ("the thing
+ * about X is Y").
+ */
+function detectVagueMemory(text: string): VagueMemoryHit | null {
+  for (const re of VAGUE_MEMORY_PATTERNS) {
+    // Defensive: clone per-call so module-level regexes cannot
+    // accumulate `lastIndex` between calls.
+    const r = new RegExp(re.source, re.flags.includes("g") ? re.flags : re.flags + "g");
+    if (r.test(text)) {
+      return { label: "placeholder-reference" };
+    }
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Replacement / correction patterns (hardening pass)
+// ---------------------------------------------------------------------------
+//
+// The existing `self-conflict` detector handles temporal pivots
+// ("X. Actually, Y" / "previously X. Now Y" / stacked-tech-claim
+// "X but actually Y"). It does NOT handle direct, single-sentence
+// corrections like "Curion uses Postgres, not SQLite." — those are
+// not temporal pivots, they are explicit one-shot replacements.
+//
+// Conservative pattern set. Each pattern is anchored on a distinctive
+// correction marker so that ordinary comparative / preference
+// language does NOT trip:
+//
+//   1. `, not <Word>` (or `, but not <Word>` / `, and not <Word>`) —
+//      a comma-then-correction structure. The word after "not"
+//      must be a noun-shaped token (3+ chars, capitalized or
+//      lowercase, optionally preceded by `the/a/an`). Examples
+//      that match:
+//        - "Curion uses Postgres, not SQLite."
+//        - "Use the SDK, not the old client library."
+//        - "Postgres, not SQLite, is the primary store."
+//   2. `instead of <word>` — explicit replacement phrase. Match.
+//   3. `rather than <word>` — explicit replacement phrase. Match.
+//   4. `(not <word>...)` — parenthetical correction. Match.
+//
+// It does NOT fire on:
+//
+//   - Temporal pivots: "We used SQLite before, but now use Postgres."
+//     (no `, not`, no `instead of`, no `rather than`, no
+//     parenthetical).
+//   - Negative statements without a comma: "Postgres is not SQLite."
+//     ("not" is not preceded by a comma + demonstrative structure).
+//   - Comparatives without replacement: "Postgres is faster than
+//     SQLite." ("faster than", not "rather than").
+const REPLACEMENT_CORRECTION_PATTERNS: ReadonlyArray<RegExp> = [
+  // Comma + optional "but"/"and" + "not" + (optional article) +
+  // word. The word after "not" must be 3+ chars to avoid false
+  // fires on short adverbs ("not yet", "not now", "not quite").
+  // The optional `but/and` covers ", but not X" / ", and not X".
+  /,\s*(?:but\s+|and\s+)?not\s+(?:the\s+|a\s+|an\s+)?[A-Za-z]\w{2,}\b/,
+  // "instead of <word>"
+  /\binstead\s+of\s+\w/i,
+  // "rather than <word>"
+  /\brather\s+than\s+\w/i,
+  // "(not <word>...)" parenthetical
+  /\(\s*not\s+\w[\w\s-]*\)/,
+];
+
+interface ReplacementCorrectionHit {
+  /** Stable label for the rule that triggered detection. */
+  label: string;
+}
+
+/**
+ * Run a narrow, deterministic replacement / correction check.
+ * Returns a hit when the input asserts a direct, single-sentence
+ * correction or replacement of one named thing by another.
+ *
+ * Conservative: only fires on the four explicit replacement
+ * markers (`, not X` / `instead of X` / `rather than X` /
+ * `(not X)`). Does NOT fire on temporal pivots (handled by
+ * `self-conflict`), bare negations ("X is not Y"), or
+ * comparatives ("faster than X").
+ */
+function detectReplacementCorrection(
+  text: string,
+): ReplacementCorrectionHit | null {
+  for (const re of REPLACEMENT_CORRECTION_PATTERNS) {
+    const r = new RegExp(re.source, re.flags.includes("g") ? re.flags : re.flags + "g");
+    if (r.test(text)) {
+      return { label: "explicit-replacement" };
+    }
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -611,6 +803,42 @@ export function classifyInput(rawInput: string): SafetyCheckResult {
     return {
       class: "self-conflict",
       reason: `input contains self-conflicting project facts (${conflict.label})`,
+      containsSecret: false,
+      looksLikeDump: false,
+      looksLikeJunk: false,
+    };
+  }
+
+  // --- vague-memory (placeholder references) -----------------------
+  // Hardening pass: an input like "Remember the thing we decided
+  // earlier." references an unspecified past decision. The
+  // `looksLikeJunk` detector does not catch these — they are
+  // syntactically meaningful but underspecified. Reject before
+  // the provider so we don't store an ambiguous memory.
+  const vagueMemory = detectVagueMemory(trimmed);
+  if (vagueMemory) {
+    return {
+      class: "vague-memory",
+      reason: `input is dominated by vague placeholder references (${vagueMemory.label})`,
+      containsSecret: false,
+      looksLikeDump: false,
+      looksLikeJunk: false,
+    };
+  }
+
+  // --- replacement-correction (explicit one-shot replacement) ------
+  // Hardening pass: an input like "Curion uses Postgres, not
+  // SQLite." asserts a direct replacement. The user-stated
+  // preference is "do not assume" — the agent should ask for
+  // the single canonical fact rather than store either half
+  // independently. Temporal pivots ("used X before, but now
+  // Y") are intentionally NOT matched here; they are handled
+  // by the `self-conflict` detector above.
+  const replacement = detectReplacementCorrection(trimmed);
+  if (replacement) {
+    return {
+      class: "replacement-correction",
+      reason: `input asserts a direct correction / replacement (${replacement.label})`,
       containsSecret: false,
       looksLikeDump: false,
       looksLikeJunk: false,

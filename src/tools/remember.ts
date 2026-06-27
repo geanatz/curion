@@ -41,6 +41,7 @@ import {
   type RememberOutcome,
 } from "../controller/remember-controller.js";
 import type { Clarification } from "./remember-structured-content.js";
+import { buildRememberStructuredContent } from "./remember-projection.js";
 import {
   initStorage,
   closeStorage,
@@ -270,7 +271,18 @@ export async function handleRemember(input: unknown): Promise<RememberResult> {
       // The handler returned a result, so the run is `ok` (the
       // handler itself did not throw). The provider_error status
       // is captured in the persisted tool.output event.
-      trace.recordOutput(result);
+      //
+      // Hardening pass: the trace `tool.output` payload is the
+      // user-approved public structured shape
+      // (`buildRememberStructuredContent`), not the internal
+      // `RememberResult` (which carries `memoryId`, `memoryKind`,
+      // `modelId`, `safetyClass`, etc.). The server still
+      // receives the same full result and projects it through
+      // the same helper for its on-the-wire
+      // `structuredContent`; we just persist the public shape
+      // here so the trace DB never carries internal ids / model
+      // metadata / safety class strings.
+      trace.recordOutput(buildRememberStructuredContent(result));
       trace.finish("ok");
       return result;
     } finally {
@@ -290,7 +302,18 @@ export async function handleRemember(input: unknown): Promise<RememberResult> {
     }
 
     const result = formatOutcome(outcome);
-    trace.recordOutput(result);
+    // Hardening pass: the trace `tool.output` payload is the
+    // user-approved public structured shape
+    // (`buildRememberStructuredContent`), not the internal
+    // `RememberResult`. The server still receives the same
+    // full result and projects it through the same helper for
+    // its on-the-wire `structuredContent`; we just persist
+    // the public shape here so the trace DB never carries
+    // internal ids / model metadata / safety class strings /
+    // the public `message` field. The trace lifecycle
+    // (input -> output -> finish) and the non-fatal error
+    // contract are preserved.
+    trace.recordOutput(buildRememberStructuredContent(result));
     trace.finish("ok");
     return result;
   } catch (err) {

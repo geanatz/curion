@@ -94,6 +94,7 @@ import {
   type RecallOutcome,
 } from "../controller/recall-controller.js";
 import type { Clarification } from "./remember-structured-content.js";
+import { buildRecallStructuredContent } from "./recall-projection.js";
 import {
   initStorage,
   closeStorage,
@@ -987,7 +988,18 @@ export async function handleRecall(input: unknown): Promise<RecallResult> {
       // The handler returned a result, so the run is `ok` (the
       // handler itself did not throw). The provider_error status
       // is captured in the persisted tool.output event.
-      trace.recordOutput(result);
+      //
+      // Hardening pass: the trace `tool.output` payload is the
+      // user-approved public structured shape
+      // (`buildRecallStructuredContent`), not the internal
+      // `RecallResult` (which carries `sourceIds`, `notes`,
+      // `safetyClass`, etc.). The server still receives the
+      // same full result and projects it through the same
+      // helper for its on-the-wire `structuredContent`; we
+      // just persist the public shape here so the trace DB
+      // never carries internal memory ids / safety class
+      // strings / the public `message` field.
+      trace.recordOutput(buildRecallStructuredContent(result));
       trace.finish("ok");
       return result;
     } finally {
@@ -1102,7 +1114,19 @@ export async function handleRecall(input: unknown): Promise<RecallResult> {
       }
     }
 
-    trace.recordOutput(result);
+    // Hardening pass: the trace `tool.output` payload is the
+    // user-approved public structured shape
+    // (`buildRecallStructuredContent`), not the internal
+    // `RecallResult`. The server still receives the same
+    // full result and projects it through the same helper
+    // for its on-the-wire `structuredContent`; we just
+    // persist the public shape here so the trace DB never
+    // carries internal memory ids (`sourceIds`),
+    // `safetyClass` strings, the public `message` field,
+    // or the note `Note:` prefix. The trace lifecycle
+    // (input -> stage events -> output -> finish) and the
+    // non-fatal error contract are preserved.
+    trace.recordOutput(buildRecallStructuredContent(result));
     trace.finish("ok");
     return result;
   } catch (err) {

@@ -259,6 +259,40 @@ export async function runRememberController(
       },
     };
   }
+  if (safety.class === "vague-memory") {
+    // Hardening pass: the input is dominated by demonstrative +
+    // vague-noun references with no concrete content. We cannot
+    // tell what the user wants us to remember, so we ask them to
+    // supply the actual memory. The provider is NOT called.
+    return {
+      status: "rejected",
+      reason:
+        "input is dominated by vague placeholder references; please resubmit the concrete fact you want remembered",
+      safetyClass: "vague-memory",
+      clarification_needed: {
+        question:
+          "Your message references an unspecified past decision or discussion. What concrete memory should I store?",
+      },
+    };
+  }
+  if (safety.class === "replacement-correction") {
+    // Hardening pass: the input asserts a direct correction
+    // ("Postgres, not SQLite") that replaces one named thing
+    // with another. The user-stated preference is "do not
+    // assume" — we ask the agent to confirm the single
+    // canonical fact and whether to replace older related
+    // memories. The provider is NOT called.
+    return {
+      status: "rejected",
+      reason:
+        "input asserts a direct correction / replacement; please resubmit the single canonical fact and confirm whether to replace older related memories",
+      safetyClass: "replacement-correction",
+      clarification_needed: {
+        question:
+          "Your message asserts one fact replacing another (for example 'X, not Y'). Which is the single canonical fact, and should I replace older related memories with it?",
+      },
+    };
+  }
 
   // -- 2. Related-memory lookup (placeholder seam) --------------------
   const { memories: related } = findRelatedMemories(storage, {

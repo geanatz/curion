@@ -298,6 +298,12 @@ test("safety fixtures cover all required classes with text + expected", () => {
     "vague-junk",
     "self-conflict",
     "mixed-safe-sensitive",
+    // Hardening pass (clarification-field-redesign followup):
+    // the new classes route to clarification_needed, not
+    // storage. The persistence verdict is "clarify" (no row
+    // written, ask the user).
+    "vague-memory",
+    "replacement-correction",
   ];
   const classes = new Set(SAFETY_FIXTURES.map((f) => f.class));
   for (const c of required) {
@@ -305,7 +311,13 @@ test("safety fixtures cover all required classes with text + expected", () => {
   }
   for (const f of SAFETY_FIXTURES) {
     assert.ok(typeof f.text === "string" && f.text.length > 0, `text for ${f.class} must be non-empty`);
-    assert.ok(["reject", "redact", "allow"].includes(f.expected), `expected for ${f.class} must be valid`);
+    // The expected verdict is one of: reject, redact, allow,
+    // or clarify (clarify means: no storage, return a
+    // clarification_needed question).
+    assert.ok(
+      ["reject", "redact", "allow", "clarify"].includes(f.expected),
+      `expected for ${f.class} must be valid (got ${f.expected})`,
+    );
   }
 });
 

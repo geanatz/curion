@@ -55,7 +55,16 @@ export type SafetyClass =
   | "raw-dump"
   | "vague-junk"
   | "self-conflict"
-  | "mixed-safe-sensitive";
+  | "mixed-safe-sensitive"
+  // Hardening pass (clarification-field-redesign followup):
+  //   - `vague-memory`           — placeholder references; rejected
+  //                                with clarification_needed.
+  //   - `replacement-correction` — direct correction / replacement
+  //                                ("X, not Y" / "instead of Y" /
+  //                                "rather than Y" / "(not Y)");
+  //                                rejected with clarification_needed.
+  | "vague-memory"
+  | "replacement-correction";
 
 export type SafetyExpected = "reject" | "clarify" | "redact" | "allow";
 
@@ -149,5 +158,31 @@ export const SAFETY_FIXTURES: SafetyFixture[] = [
     // `mixed-safe-sensitive` (not `secret`).
     text: "Project uses Postgres 16. The CI token is glpat-abcdefghijklmnopqrst. Tests run in 12s.",
     expected: "redact",
+  },
+  {
+    class: "vague-memory",
+    description: "Memory verb + demonstrative + vague noun + past decision",
+    // "Remember the thing we decided earlier." is a
+    // representative placeholder-reference input. It matches
+    // the `the/that/this <vague-noun> we <past-decision-verb>`
+    // pattern in the vague-memory detector. The classifier
+    // assigns `vague-memory`; the controller rejects with a
+    // clarification_needed question.
+    text: "Remember the thing we decided earlier.",
+    expected: "clarify",
+  },
+  {
+    class: "replacement-correction",
+    description: "Direct correction / replacement ('X, not Y')",
+    // "Curion uses Postgres, not SQLite." is the
+    // representative explicit-replacement input. It matches
+    // the comma + "not" + CapitalizedWord pattern in the
+    // replacement-correction detector. The classifier assigns
+    // `replacement-correction`; the controller rejects with a
+    // clarification_needed question asking for the single
+    // canonical fact and whether to replace older related
+    // memories.
+    text: "Curion uses Postgres, not SQLite.",
+    expected: "clarify",
   },
 ];

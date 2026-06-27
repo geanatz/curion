@@ -425,13 +425,35 @@ test("remember: creates a trace run + tool.input + tool.output events without ch
       const inputPayload = events[0]?.payload as { text: string };
       assert.equal(inputPayload.text, rawText);
 
-      // The output event carries the full public
-      // RememberResult. The relevant fields round-trip.
-      const outputPayload = events[1]?.payload as RememberResult;
+      // Hardening pass: the output event carries the
+      // user-approved public structured shape (NOT the full
+      // internal `RememberResult`). The trace must NOT include
+      // `safetyClass`, `memoryId`, `modelId`, `memoryKind`,
+      // or the public `message` field. The shape is the
+      // same `RememberStructuredContent` the server emits on
+      // the wire.
+      const outputPayload = events[1]?.payload as Record<string, unknown>;
       assert.equal(outputPayload.status, "rejected");
-      assert.equal(outputPayload.safetyClass, "vague-junk");
-      assert.equal(typeof outputPayload.message, "string");
-      assert.ok((outputPayload.message ?? "").length > 0);
+      assert.equal(typeof outputPayload.reason, "string");
+      assert.ok((outputPayload.reason as string).length > 0);
+      // No internal fields on the trace payload.
+      for (const forbidden of [
+        "safetyClass",
+        "memoryId",
+        "memoryKind",
+        "modelId",
+        "providerId",
+        "message",
+        "summary",
+        "kind",
+        "confidence",
+      ]) {
+        assert.equal(
+          forbidden in outputPayload,
+          false,
+          `trace tool.output payload must not include '${forbidden}'; got ${JSON.stringify(outputPayload)}`,
+        );
+      }
     } finally {
       resetRememberStorageProvider();
     }
@@ -490,9 +512,33 @@ test("recall: creates a trace run + tool.input + tool.output events without chan
       const inputPayload = events[0]?.payload as { text: string };
       assert.equal(inputPayload.text, query);
 
-      const outputPayload = events[3]?.payload as RecallResult;
+      // Hardening pass: the output event carries the
+      // user-approved public structured shape (NOT the full
+      // internal `RecallResult`). The trace must NOT include
+      // `sourceIds`, `safetyClass`, `notes`, `answer`,
+      // `summaries`, or the public `message` field. The
+      // shape is the same `RecallStructuredContent` the
+      // server emits on the wire.
+      const outputPayload = events[3]?.payload as Record<string, unknown>;
       assert.equal(outputPayload.status, "no_memory");
-      assert.equal(typeof outputPayload.message, "string");
+      // No internal fields on the trace payload.
+      for (const forbidden of [
+        "safetyClass",
+        "sourceIds",
+        "memoryId",
+        "memoryIds",
+        "notes",
+        "answer",
+        "summaries",
+        "coverage",
+        "message",
+      ]) {
+        assert.equal(
+          forbidden in outputPayload,
+          false,
+          `trace tool.output payload must not include '${forbidden}'; got ${JSON.stringify(outputPayload)}`,
+        );
+      }
     } finally {
       resetListRegisteredProjectsStub();
       resetRecallStorageProvider();

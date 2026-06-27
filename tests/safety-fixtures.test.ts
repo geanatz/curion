@@ -22,6 +22,12 @@ const EXPECTED_CLASSES: SafetyClass[] = [
   "vague-junk",
   "self-conflict",
   "mixed-safe-sensitive",
+  // Hardening pass (clarification-field-redesign followup).
+  // The new classes carry `clarification_needed` and are
+  // expected to route to the `clarify` persistence verdict
+  // (no storage, ask the user).
+  "vague-memory",
+  "replacement-correction",
 ];
 
 test("every expected safety class is covered", () => {
