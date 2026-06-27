@@ -406,7 +406,7 @@ test("remember: unsafe-preference is rejected before any provider call; no rows 
 // 6. E2E — controller routes self-conflict to rejected with clarification BEFORE provider
 // ---------------------------------------------------------------------------
 
-test("remember: self-conflict returns rejected with clarification before any provider call; no rows persisted", async () => {
+test("remember: self-conflict returns rejected with clarification_needed before any provider call; no rows persisted", async () => {
   const { tmp, handle } = mkStorage();
   try {
     const { fetchImpl, calls } = scriptFetch(() => okChatResponse(safeAnalysis()));
@@ -417,8 +417,8 @@ test("remember: self-conflict returns rejected with clarification before any pro
     });
     assert.equal(outcome.status, "rejected");
     if (outcome.status !== "rejected") throw new Error("unreachable");
-    assert.ok(outcome.clarification, "rejected outcome must have clarification for self-conflict");
-    assert.match(outcome.clarification!.question, /which one|canonical/i);
+    assert.ok(outcome.clarification_needed, "rejected outcome must have clarification_needed for self-conflict");
+    assert.match(outcome.clarification_needed!.question, /which one|canonical/i);
     assert.equal(calls.length, 0, "provider must not be called for self-conflict");
     const rows = handle.db.prepare("SELECT COUNT(*) AS c FROM memories").get() as { c: number };
     assert.equal(rows.c, 0);
@@ -653,8 +653,8 @@ test("tool: handleRemember short-circuits for prompt-injection, unsafe-preferenc
           "The database uses Postgres 16. Actually, no — the database uses MySQL 8 because of legacy support.",
       });
       assert.equal(r3.status, "rejected");
-      assert.equal(typeof r3.clarification, "object");
-      assert.ok((r3.clarification?.question ?? "").length > 0);
+      assert.equal(typeof r3.clarification_needed, "object");
+      assert.ok((r3.clarification_needed?.question ?? "").length > 0);
     } finally {
       resetStorageProvider();
     }

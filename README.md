@@ -24,7 +24,7 @@ npm run build
 # Configure your OpenAI-compatible provider (required for remember + recall)
 export CURION_PRIMARY_API_KEY=sk-...
 export CURION_PRIMARY_BASE_URL=https://api.openai.com/v1
-export CURION_PRIMARY_MODEL=gpt-4o
+export CURION_PRIMARY_MODEL=gpt-5.5
 
 # Start the MCP server (stdio — stdout is MCP protocol only, logs go stderr)
 ./dist/index.js
@@ -177,9 +177,9 @@ Each tool returns a `text` content block (human-readable prose) and a
 
 ```typescript
 { status: "answered",     answer: string, notes?: string }
-{ status: "weak_match",   summaries: string[], coverage: { topScore: number, supportingCount: number }, clarification?: Clarification }
-{ status: "no_memory",   clarification?: Clarification }
-{ status: "rejected",     reason: string, clarification?: Clarification }
+{ status: "weak_match",   summaries: string[], coverage: { topScore: number, supportingCount: number }, clarification_needed?: ClarificationNeeded }
+{ status: "no_memory",   clarification_needed?: ClarificationNeeded }
+{ status: "rejected",     reason: string, clarification_needed?: ClarificationNeeded }
 { status: "provider_error", reason: string }
 ```
 
@@ -187,16 +187,16 @@ Each tool returns a `text` content block (human-readable prose) and a
 
 ```typescript
 { status: "saved",              summary: string, kind: string, confidence?: number }
-{ status: "rejected",           reason: string, clarification?: Clarification }
+{ status: "rejected",           reason: string, clarification_needed?: ClarificationNeeded }
 { status: "provider_error",      reason: string }
 ```
 
-### Clarification object
+### `clarification_needed` object
 
-When present, `clarification` indicates user-intent uncertainty (not a provider error). The `question` is a concise user-facing prompt; `suggestions` is an optional rephrase hint list.
+When present on a user-intent-uncertainty status (`rejected`, `no_memory`, `weak_match`), the agent must ask the user the `question` verbatim. `suggestions` is an optional rephrase-hint list, present only when useful; suggestions are aids, never assumptions. `provider_error` never carries `clarification_needed`.
 
 ```typescript
-{ reason: string, question: string, suggestions?: string[] }
+{ question: string, suggestions?: string[] }
 ```
 
 ## Build and test

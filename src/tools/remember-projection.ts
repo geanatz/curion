@@ -4,10 +4,10 @@
  * The `formatOutcome` function in `src/tools/remember.ts`
  * produces the tool-layer `RememberResult` (with `message`,
  * `memoryId`, `memoryKind`, `modelId`, `confidence`,
- * `summary`, `safetyClass`, `clarification`, etc.). The MCP
- * `text` content block and the MCP `structuredContent` are
- * derived from that result by this module. The projection is
- * the single place where the user-approved wire shape is
+ * `summary`, `safetyClass`, `clarification_needed`, etc.).
+ * The MCP `text` content block and the MCP `structuredContent`
+ * are derived from that result by this module. The projection
+ * is the single place where the user-approved wire shape is
  * enforced:
  *
  *   - The on-the-wire `text` for the `saved` case is
@@ -49,9 +49,9 @@ export function buildRememberPublicText(result: RememberResult): string {
  * Build the per-status `structuredContent` for the `remember`
  * tool.
  *
- * User-approved shape (Phase clean-structured-tool-responses):
+ * User-approved shape (Phase clarification-field-redesign):
  *   - `saved`               -> { status, summary, kind, confidence? }
- *   - `rejected`            -> { status, reason, clarification? }
+ *   - `rejected`            -> { status, reason, clarification_needed? }
  *   - `provider_error`      -> { status, reason }
  *
  * The `summary` is the controller-normalized provider
@@ -67,10 +67,10 @@ export function buildRememberPublicText(result: RememberResult): string {
  * confidence X.XX): ..."). Stripping it would be a needless
  * regression.
  *
- * The `clarification` field appears on `rejected` when the
- * input had self-conflicting or low-confidence signals that
- * could be resolved with a rephrase. Provider errors never
- * carry clarification.
+ * The `clarification_needed` field appears on `rejected` when
+ * the input had self-conflicting or low-confidence signals
+ * that could be resolved with a rephrase. Provider errors
+ * never carry `clarification_needed`.
  */
 export function buildRememberStructuredContent(
   result: RememberResult,
@@ -93,8 +93,8 @@ export function buildRememberStructuredContent(
     case "rejected": {
       const reason = stripRejectedPrefix(result.message);
       const out: RememberStructuredContent = { status: "rejected", reason };
-      if (result.clarification) {
-        out.clarification = result.clarification;
+      if (result.clarification_needed) {
+        out.clarification_needed = result.clarification_needed;
       }
       return out;
     }

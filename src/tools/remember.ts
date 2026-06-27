@@ -7,11 +7,14 @@
  *     storage arguments.
  *
  * MVP vertical slice (Narrow `remember(text)`):
- *   - Returns one of four outcomes: `saved`, `rejected`,
- *     `clarification_needed`, `provider_error`. The public
- *     response shape is stable: a `text` content block carrying a
- *     short human-readable message and, when applicable, the saved
- *     memory id + summary.
+ *   - Returns one of three statuses: `saved`, `rejected`,
+ *     `provider_error`. The public response shape is stable: a
+ *     `text` content block carrying a short human-readable
+ *     message and, when applicable, the saved memory id +
+ *     summary. The optional `clarification_needed` field on
+ *     `rejected` carries a user-facing prompt and optional
+ *     rephrase hints when the input had self-conflicting or
+ *     low-confidence signals.
  *   - Raw input is never persisted. The controller stores only the
  *     provider-normalized summary + metadata.
  *   - The raw input is passed by reference to the controller; it is
@@ -59,7 +62,7 @@ import { loadEnv } from "../config/env.js";
 
 export const REMEMBER_TOOL_NAME = "remember" as const;
 export const REMEMBER_TOOL_DESCRIPTION =
-  "Store a piece of project memory. Returns saved, rejected, or provider_error. If rejected with a clarification object, do not guess — ask the user the clarification.question and optionally suggest the clarification.suggestions.";
+  "Store a piece of project memory. Returns saved, rejected, or provider_error. If rejected with clarification_needed, do not guess — ask the user the clarification_needed.question; suggestions are optional aids, not assumptions.";
 
 export interface RememberInput {
   text: string;
@@ -121,9 +124,15 @@ export interface RememberResult {
   /**
    * Clarification object, when `status === "rejected"` and the
    * rejection was due to user-intent uncertainty (self-conflict,
-   * low confidence). Provider errors never carry clarification.
+   * low confidence). Provider errors never carry
+   * `clarification_needed`.
+   *
+   * The wire field name is `clarification_needed` (the agent
+   * asks the user `question` when present; `suggestions` are
+   * optional rephrase hints). The internal field name on
+   * `RememberResult` is renamed to match for consistency.
    */
-  clarification?: Clarification;
+  clarification_needed?: Clarification;
 }
 
 /**
@@ -321,7 +330,7 @@ function formatOutcome(outcome: RememberOutcome): RememberResult {
         status: "rejected",
         message: `Rejected: ${outcome.reason}`,
         safetyClass: outcome.safetyClass,
-        clarification: outcome.clarification,
+        clarification_needed: outcome.clarification_needed,
       };
     case "provider_error":
       return {

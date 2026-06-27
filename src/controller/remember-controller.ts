@@ -57,14 +57,15 @@ import type { Clarification } from "../tools/remember-structured-content.js";
 /** Public outcome of the controller. */
 export type RememberOutcome =
   | { status: "saved"; record: MemoryRecord; message: string }
-  | { status: "rejected"; reason: string; safetyClass: string; clarification?: Clarification }
+  | { status: "rejected"; reason: string; safetyClass: string; clarification_needed?: Clarification }
   | { status: "provider_error"; reason: string };
 
 /** Controller options. Most fields have safe defaults. */
 export interface RememberControllerOptions {
   /**
    * Confidence threshold below which the controller returns
-   * `rejected` with `clarification` instead of saving. Default `0.5`.
+   * `rejected` with `clarification_needed` instead of saving.
+   * Default `0.5`.
    */
   confidenceThreshold?: number;
   /**
@@ -252,8 +253,7 @@ export async function runRememberController(
       reason:
         "input contains opposing project facts; please resubmit the single canonical fact",
       safetyClass: "self-conflict",
-      clarification: {
-        reason: safety.reason,
+      clarification_needed: {
         question:
           "The input contains two opposing project facts. Which one should be stored: the first statement or the revised one? Please reply with the single canonical fact.",
       },
@@ -329,8 +329,7 @@ export async function runRememberController(
       status: "rejected",
       reason: `provider confidence ${confidence.toFixed(2)} is below threshold ${confidenceThreshold.toFixed(2)}`,
       safetyClass: "low-confidence",
-      clarification: {
-        reason: `provider confidence ${confidence.toFixed(2)} is below threshold ${confidenceThreshold.toFixed(2)}`,
+      clarification_needed: {
         question,
       },
     };

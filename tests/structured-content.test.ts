@@ -2,11 +2,11 @@
  * Clean `structuredContent` regression tests for the public
  * MCP tools (`remember`, `recall`).
  *
- * Phase clean-structured-tool-responses: the server now
- * exposes a `structuredContent` payload on every tool
- * response (in addition to the on-the-wire `text` content
- * block). The `structuredContent` shape is the user-approved
- * discriminated union:
+ * Phase clarification-field-redesign: the server now exposes
+ * a `structuredContent` payload on every tool response (in
+ * addition to the on-the-wire `text` content block). The
+ * `structuredContent` shape is the user-approved discriminated
+ * union:
  *
  *   recall.answered:            { status: "answered", answer: string, notes?: string[] }
  *   recall.no_memory:           { status: "no_memory" }
@@ -15,8 +15,12 @@
  *
  *   remember.saved:             { status: "saved", summary: string, kind: string, confidence?: number }
  *   remember.rejected:          { status: "rejected", reason: string }
- *   remember.clarification_needed: { status: "clarification_needed", question: string }
  *   remember.provider_error:    { status: "provider_error", reason: string }
+ *
+ * `clarification_needed` is an OPTIONAL FIELD on user-intent
+ * uncertainty statuses (`rejected`, `no_memory`, `weak_match`).
+ * It is NEVER a status itself and NEVER appears on
+ * `provider_error`.
  *
  * Hard rules (this suite pins them):
  *   1. The `structuredContent` MUST NOT include a `message`
@@ -43,8 +47,7 @@
  *      filter / provider / debug / storage knobs).
  *   8. The server's `outputSchema` (the JSON schema exposed
  *      in the tool list) MUST include the discriminator
- *      `status` field with all four valid values for each
- *      tool.
+ *      `status` field with all valid values for each tool.
  *
  * The tests drive the real McpServer tool callbacks (not
  * just the internal `handleRecall` / `handleRemember`
@@ -1004,6 +1007,12 @@ test("remember structuredContent: rejected -> { status: 'rejected', reason }", a
       // No id fields.
       assert.equal("memoryId" in sc, false);
       assert.equal("modelId" in sc, false);
+      // No `clarification` field (the wire field name is
+      // `clarification_needed`, and the field is absent on
+      // vague-junk rejection — only self-conflict /
+      // low-confidence rejections carry it).
+      assert.equal("clarification" in sc, false);
+      assert.equal("clarification_needed" in sc, false);
       // Validate against the schema.
       const parsed = REMEMBER_STRUCTURED_CONTENT_SCHEMA.safeParse(sc);
       assert.ok(parsed.success, `schema validation failed: ${parsed.error}`);
@@ -1154,13 +1163,13 @@ test("remember structuredContent: saved with null confidence -> no confidence ke
   }
 });
 
-test("remember structuredContent: rejected with clarification -> { status, reason, clarification }", async () => {
+test("remember structuredContent: rejected with clarification_needed -> { status, reason, clarification_needed }", async () => {
   const { tmp, handle } = mkStorage();
   try {
     setRememberStorageProvider(() => ({ handle, ownsHandle: false }));
     try {
       // Drive the projection helper directly for the
-      // rejected-with-clarification path. (The remember tool's
+      // rejected-with-clarification_needed path. (The remember tool's
       // public callback does not expose a knob to force
       // the controller's clarification branch without a
       // scripted provider; the projection helper is the
@@ -1173,18 +1182,17 @@ test("remember structuredContent: rejected with clarification -> { status, reaso
         status: "rejected",
         message: "Rejected: provider confidence 0.30 is below threshold 0.50",
         safetyClass: "low-confidence",
-        clarification: {
-          reason: "provider confidence 0.30 is below threshold 0.50",
+        clarification_needed: {
           question: "Is this a fact? Please rephrase or confirm so I can store it accurately.",
           suggestions: ["Confirm it as a fact", "Rephrase with more context"],
         },
       });
       assert.equal(sc.status, "rejected");
       assert.equal(typeof sc.reason, "string");
-      assert.equal(typeof sc.clarification, "object");
-      assert.equal(sc.clarification!.question, "Is this a fact? Please rephrase or confirm so I can store it accurately.");
-      assert.equal(Array.isArray(sc.clarification!.suggestions), true);
-      assert.equal(sc.clarification!.suggestions!.length, 2);
+      assert.equal(typeof sc.clarification_needed, "object");
+      assert.equal(sc.clarification_needed!.question, "Is this a fact? Please rephrase or confirm so I can store it accurately.");
+      assert.equal(Array.isArray(sc.clarification_needed!.suggestions), true);
+      assert.equal(sc.clarification_needed!.suggestions!.length, 2);
       // No summary / kind / confidence on rejected.
       assert.equal("summary" in sc, false);
       assert.equal("kind" in sc, false);
@@ -1224,6 +1232,9 @@ test("remember structuredContent: provider_error -> { status, reason }", async (
       assert.equal("kind" in sc, false);
       assert.equal("confidence" in sc, false);
       assert.equal("question" in sc, false);
+      // provider_error MUST NOT carry clarification_needed.
+      assert.equal("clarification_needed" in sc, false);
+      assert.equal("clarification" in sc, false);
       const parsed = REMEMBER_STRUCTURED_CONTENT_SCHEMA.safeParse(sc);
       assert.ok(parsed.success, `schema validation failed: ${parsed.error}`);
     } finally {

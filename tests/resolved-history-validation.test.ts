@@ -474,7 +474,7 @@ const ALLOWED_PUBLIC_KEYS = new Set([
   "sourceIds",
   "safetyClass",
   "source",
-  "clarification",
+  "clarification_needed",
   "notes",
   "summaries",
   "coverage",

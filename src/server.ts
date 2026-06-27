@@ -12,13 +12,18 @@
  * `src/tools/remember-structured-content.ts`). No other tools,
  * resources, or prompts are registered.
  *
- * Phase clean-structured-tool-responses: the wire surface now
- * exposes `structuredContent` for both tools, in addition to
- * the on-the-wire `text` content block. The `text` content
- * block is the existing calm-prose form; the `structuredContent`
- * is the clean discriminated shape (no `message` field, no
- * memory ids, no `Note:` prefix, no model / provider metadata,
- * no raw input).
+ * Phase clarification-field-redesign: the wire surface exposes
+ * `structuredContent` for both tools, in addition to the
+ * on-the-wire `text` content block. The `text` content block is
+ * the existing calm-prose form; the `structuredContent` is the
+ * clean discriminated shape (no `message` field, no memory ids,
+ * no `Note:` prefix, no model / provider metadata, no raw input).
+ *
+ * The optional `clarification_needed` field on
+ * `structuredContent` (on `rejected`, `no_memory`, `weak_match`)
+ * carries the user-facing prompt for the agent to ask the user.
+ * `clarification_needed` is a field, NOT a status, and never
+ * appears on `provider_error`.
  *
  * Public input contract (unchanged):
  *   - exactly one `text` parameter (string), required, non-empty

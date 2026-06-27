@@ -51,7 +51,7 @@ function stripNotePrefix(note: string): string {
 /**
  * Build the per-status public `text` for the `recall` tool.
  *
- * User-approved rule (Phase clean-structured-tool-responses):
+ * User-approved rule (Phase clarification-field-redesign):
  *   - `answered` with notes: notes (without `Note:` prefix)
  *     joined with a blank line, then a blank line, then the
  *     synthesized answer.
@@ -91,11 +91,11 @@ export function buildRecallPublicText(result: RecallResult): string {
  * Build the per-status `structuredContent` for the `recall`
  * tool.
  *
- * User-approved shape (Phase clean-structured-tool-responses):
+ * User-approved shape (Phase clarification-field-redesign):
  *   - `answered`          -> { status, answer, notes?, source? }
- *   - `weak_match`        -> { status, summaries, coverage, clarification? }
- *   - `no_memory`         -> { status, clarification? }
- *   - `rejected`          -> { status, reason, clarification? }
+ *   - `weak_match`        -> { status, summaries, coverage, clarification_needed? }
+ *   - `no_memory`         -> { status, clarification_needed? }
+ *   - `rejected`          -> { status, reason, clarification_needed? }
  *   - `provider_error`    -> { status, reason }
  *
  * The `reason` field is the redacted, non-echoing reason from
@@ -107,10 +107,14 @@ export function buildRecallPublicText(result: RecallResult): string {
  * top-score and the supporting candidate count. No memory
  * ids are included in any shape.
  *
- * The `clarification` field appears on `no_memory`,
+ * The `clarification_needed` field appears on `no_memory`,
  * `weak_match`, and `rejected` when the controller detected
  * user-intent uncertainty that could be resolved with a
- * rephrase. Provider errors never carry clarification.
+ * rephrase. Provider errors never carry `clarification_needed`.
+ * The `reason` field on the parent is the agent-facing
+ * explanation for WHY `clarification_needed` is set; the
+ * `clarification_needed.question` is the user-facing prompt
+ * the agent asks the user verbatim.
  */
 export function buildRecallStructuredContent(
   result: RecallResult,
@@ -149,15 +153,15 @@ export function buildRecallStructuredContent(
           supportingCount: coverage.supportingCount,
         },
       };
-      if (result.clarification) {
-        out.clarification = result.clarification;
+      if (result.clarification_needed) {
+        out.clarification_needed = result.clarification_needed;
       }
       return out;
     }
     case "no_memory": {
       const out: RecallStructuredContent = { status: "no_memory" };
-      if (result.clarification) {
-        out.clarification = result.clarification;
+      if (result.clarification_needed) {
+        out.clarification_needed = result.clarification_needed;
       }
       return out;
     }
@@ -166,8 +170,8 @@ export function buildRecallStructuredContent(
       // "Rejected: " prefix to extract the `reason`.
       const reason = stripRejectedPrefix(result.message);
       const out: RecallStructuredContent = { status: "rejected", reason };
-      if (result.clarification) {
-        out.clarification = result.clarification;
+      if (result.clarification_needed) {
+        out.clarification_needed = result.clarification_needed;
       }
       return out;
     }

@@ -148,7 +148,7 @@ export type RecallOutcome =
        */
       internalResolvedHistory?: ResolvedHistorySignal;
     }
-  | { status: "no_memory"; clarification?: Clarification }
+  | { status: "no_memory"; clarification_needed?: Clarification }
   | {
       /**
        * Refusal-with-thin-match reroute. The synthesis LLM
@@ -180,9 +180,9 @@ export type RecallOutcome =
       status: "weak_match";
       summaries: string[];
       coverage: { topScore: number; supportingCount: number };
-      clarification?: Clarification;
+      clarification_needed?: Clarification;
     }
-  | { status: "rejected"; reason: string; safetyClass: string; clarification?: Clarification }
+  | { status: "rejected"; reason: string; safetyClass: string; clarification_needed?: Clarification }
   | { status: "provider_error"; reason: string };
 
 /** Controller options. Most fields have safe defaults. */
@@ -487,8 +487,7 @@ export async function runRecallController(
     if (isVagueQuery(query)) {
       return {
         status: "no_memory",
-        clarification: {
-          reason: "query is vague or underspecified; no memories matched",
+        clarification_needed: {
           question:
             "Could you be more specific about what you're looking for? For example, what topic or project was this about?",
         },
@@ -677,8 +676,7 @@ export async function runRecallController(
         // Add clarification when coverage suggests competing/conflicting
         // candidates or very weak match quality.
         if (suggestsCompetingCandidates(topScore, supportingCount)) {
-          out.clarification = {
-            reason: "query matched multiple memories with low confidence; synthesis LLM declined to answer",
+          out.clarification_needed = {
             question:
               "I found several related memories but wasn't confident synthesizing an answer. Could you rephrase your question or be more specific about what you're looking for?",
           };
@@ -692,8 +690,7 @@ export async function runRecallController(
       if (isVagueQuery(query)) {
         return {
           status: "no_memory",
-          clarification: {
-            reason: "query is vague or underspecified; no memories matched",
+          clarification_needed: {
             question:
               "Could you be more specific about what you're looking for? For example, what topic or project was this about?",
           },

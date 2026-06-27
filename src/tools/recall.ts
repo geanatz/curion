@@ -137,7 +137,7 @@ import { loadEnv } from "../config/env.js";
 
 export const RECALL_TOOL_NAME = "recall" as const;
 export const RECALL_TOOL_DESCRIPTION =
-  "Retrieve relevant project memory. Returns a synthesized answer from stored memories, or 'No relevant memory found.'. If the result contains a clarification object (on no_memory, weak_match, or rejected), do not guess — ask the user the clarification.question and optionally suggest clarification.suggestions.";
+  "Retrieve relevant project memory. Returns a synthesized answer from stored memories, or 'No relevant memory found.'. If the result contains clarification_needed (on no_memory, weak_match, or rejected), do not guess — ask the user the clarification_needed.question; suggestions are optional aids, not assumptions.";
 
 export const NO_RELEVANT_MEMORY = "No relevant memory found.";
 
@@ -262,9 +262,14 @@ export interface RecallResult {
    * Clarification object, when `status === "no_memory"`,
    * `status === "weak_match"`, or `status === "rejected"` and
    * the outcome was due to user-intent uncertainty. Provider
-   * errors never carry clarification.
+   * errors never carry `clarification_needed`.
+   *
+   * The wire field name is `clarification_needed` (the agent
+   * asks the user `question` when present; `suggestions` are
+   * optional rephrase hints). The internal field name on
+   * `RecallResult` is renamed to match for consistency.
    */
-  clarification?: Clarification;
+  clarification_needed?: Clarification;
 }
 
 export interface StorageProviderHandle {
@@ -1167,7 +1172,7 @@ function formatOutcome(outcome: RecallOutcome): RecallResult {
       return {
         status: "no_memory",
         message: NO_RELEVANT_MEMORY,
-        clarification: outcome.clarification,
+        clarification_needed: outcome.clarification_needed,
       };
     case "weak_match":
       // Refusal-with-thin-match: the synthesis LLM declined
@@ -1186,14 +1191,14 @@ function formatOutcome(outcome: RecallOutcome): RecallResult {
         message: WEAK_MATCH_PUBLIC_MESSAGE,
         summaries: [...outcome.summaries],
         coverage: { ...outcome.coverage },
-        clarification: outcome.clarification,
+        clarification_needed: outcome.clarification_needed,
       };
     case "rejected":
       return {
         status: "rejected",
         message: `Rejected: ${outcome.reason}`,
         safetyClass: outcome.safetyClass,
-        clarification: outcome.clarification,
+        clarification_needed: outcome.clarification_needed,
       };
     case "provider_error":
       return {
