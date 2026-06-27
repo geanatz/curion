@@ -450,7 +450,6 @@ function lexicalNegationSignal(
       const bHasNeg = hasNegationMarker(b.memoryContent);
       // Asymmetric negation: exactly one side negates.
       if (aHasNeg === bHasNeg) continue;
-      if (!aHasNeg && !bHasNeg) continue; // unreachable; defensive
       const overlap = jaccard(aTokens, bTokens);
       // High overlap is required; below 0.6 we cannot claim
       // the two summaries are even talking about the same

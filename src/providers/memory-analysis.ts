@@ -107,6 +107,7 @@ import {
   MEMORY_ANALYSIS_JSON_SCHEMA,
   type MemoryAnalysis,
 } from "./structured-output.js";
+import { loadRoleConfig, type AdapterRoleConfig } from "./env-helpers.js";
 
 // ---------------------------------------------------------------------------
 // Defaults
@@ -365,68 +366,11 @@ export type MemoryAnalysisResult = AdapterSuccess | AdapterFailure;
 // Config resolution (env-only, no dotenv discovery)
 // ---------------------------------------------------------------------------
 
-export interface AdapterConfig {
-  primaryBaseUrl: string;
-  primaryModel: string;
-  primaryProviderLabel: string;
-  primaryApiFormat: ApiFormat;
-  primaryStrictJson: boolean;
-  fallbackBaseUrl: string;
-  fallbackModel: string;
-  fallbackProviderLabel: string;
-  fallbackApiFormat: ApiFormat;
-  fallbackStrictJson: boolean;
-  primaryApiKey: string;
-  fallbackApiKey: string;
-  timeoutMs: number;
-  maxTokens: number;
-}
-
-function readNumber(name: string, fallback: number): number {
-  const raw = process.env[name];
-  if (raw === undefined || raw === "") return fallback;
-  const n = Number.parseInt(raw, 10);
-  return Number.isFinite(n) && n > 0 ? n : fallback;
-}
-
-/**
- * Read an env var and trim it. Whitespace-only values are treated
- * as missing and return `""` so the caller can fall through to the
- * next candidate / default. The returned value is trimmed.
- */
-function readTrimmedString(name: string): string {
-  const v = process.env[name];
-  if (typeof v !== "string") return "";
-  const trimmed = v.trim();
-  return trimmed.length > 0 ? trimmed : "";
-}
-
-/**
- * Pick the first non-empty string from the candidates. Strings
- * that are empty or whitespace-only are treated as "absent" so
- * callers can pass `""` (or `"   "`) from an unset / blank env
- * var and still get the next candidate or fallback default.
- * Returned values are trimmed.
- */
-function pickTrimmedString(...candidates: string[]): string {
-  for (const c of candidates) {
-    if (typeof c === "string") {
-      const trimmed = c.trim();
-      if (trimmed.length > 0) return trimmed;
-    }
-  }
-  return "";
-}
-
-/**
- * Parse an API format string. Returns "openai-compatible" for any
- * unrecognized value so that missing env vars default to the
- * safe backwards-compatible behavior.
- */
-function readApiFormat(name: string): ApiFormat {
-  const raw = readTrimmedString(name);
-  if (raw === "anthropic") return "anthropic";
-  return "openai-compatible";
+export interface AdapterConfig extends AdapterRoleConfig {
+  // The shared `AdapterRoleConfig` already declares every field.
+  // `AdapterConfig` is kept as a distinct exported name so external
+  // callers (controllers, tests) that imported it by name continue
+  // to work after the shared helper extraction.
 }
 
 /**
@@ -465,70 +409,19 @@ function readApiFormat(name: string): ApiFormat {
 export function loadAdapterConfig(
   overrides: Partial<AdapterConfig> = {},
 ): AdapterConfig {
-  const primaryApiFormat = overrides.primaryApiFormat
-    ?? readApiFormat("CURION_PRIMARY_API_FORMAT");
-  const fallbackApiFormat = overrides.fallbackApiFormat
-    ?? readApiFormat("CURION_FALLBACK_API_FORMAT");
-
-  // Base URL defaults for the Anthropic API format.
-  const primaryBaseUrlCandidate = pickTrimmedString(
-    overrides.primaryBaseUrl ?? "",
-    readTrimmedString("CURION_PRIMARY_BASE_URL"),
-  );
-  const fallbackBaseUrlCandidate = pickTrimmedString(
-    overrides.fallbackBaseUrl ?? "",
-    readTrimmedString("CURION_FALLBACK_BASE_URL"),
-  );
-
-  const cfg: AdapterConfig = {
-    primaryBaseUrl: primaryApiFormat === "anthropic" && !primaryBaseUrlCandidate
-      ? "https://api.anthropic.com"
-      : primaryBaseUrlCandidate,
-    primaryModel: pickTrimmedString(
-      overrides.primaryModel ?? "",
-      readTrimmedString("CURION_PRIMARY_MODEL"),
-    ),
-    primaryProviderLabel: pickTrimmedString(
-      overrides.primaryProviderLabel ?? "",
-      readTrimmedString("CURION_PRIMARY_PROVIDER_LABEL"),
-    ),
-    primaryApiFormat,
-    primaryStrictJson: overrides.primaryStrictJson ?? (
-      process.env.CURION_PRIMARY_STRICT_JSON === "true"
-    ),
-    fallbackBaseUrl: fallbackApiFormat === "anthropic" && !fallbackBaseUrlCandidate
-      ? "https://api.anthropic.com"
-      : fallbackBaseUrlCandidate,
-    fallbackModel: pickTrimmedString(
-      overrides.fallbackModel ?? "",
-      readTrimmedString("CURION_FALLBACK_MODEL"),
-    ),
-    fallbackProviderLabel: pickTrimmedString(
-      overrides.fallbackProviderLabel ?? "",
-      readTrimmedString("CURION_FALLBACK_PROVIDER_LABEL"),
-    ),
-    fallbackApiFormat,
-    fallbackStrictJson: overrides.fallbackStrictJson ?? (
-      process.env.CURION_FALLBACK_STRICT_JSON === "true"
-    ),
-    primaryApiKey: pickTrimmedString(
-      overrides.primaryApiKey ?? "",
-      readTrimmedString("CURION_PRIMARY_API_KEY"),
-    ),
-    fallbackApiKey: pickTrimmedString(
-      overrides.fallbackApiKey ?? "",
-      readTrimmedString("CURION_FALLBACK_API_KEY"),
-    ),
-    timeoutMs: overrides.timeoutMs ?? readNumber(
-      "CURION_ADAPTER_TIMEOUT_MS",
-      DEFAULT_ADAPTER_TIMEOUT_MS,
-    ),
-    maxTokens: overrides.maxTokens ?? readNumber(
-      "CURION_ADAPTER_MAX_TOKENS",
-      DEFAULT_ADAPTER_MAX_TOKENS,
-    ),
-  };
-  return cfg;
+  const cfg = loadRoleConfig({
+    defaults: {
+      timeoutMs: DEFAULT_ADAPTER_TIMEOUT_MS,
+      maxTokens: DEFAULT_ADAPTER_MAX_TOKENS,
+    },
+    strictJson: true,
+    overrides,
+  });
+  // The shared `AdapterRoleConfig` `primaryApiFormat` /
+  // `fallbackApiFormat` literal union is structurally identical
+  // to the locally-exported `ApiFormat` type, so this widening
+  // cast preserves the public return-type contract.
+  return cfg as AdapterConfig;
 }
 
 // ---------------------------------------------------------------------------

@@ -64,6 +64,7 @@ import {
   type ProviderError,
 } from "./http-client.js";
 import { anthropicChatCompletion } from "./anthropic.js";
+import { loadRoleConfig } from "./env-helpers.js";
 
 // ---------------------------------------------------------------------------
 // Defaults
@@ -212,41 +213,6 @@ export interface RecallAdapterConfig {
   maxTokens: number;
 }
 
-function readNumber(name: string, fallback: number): number {
-  const raw = process.env[name];
-  if (raw === undefined || raw === "") return fallback;
-  const n = Number.parseInt(raw, 10);
-  return Number.isFinite(n) && n > 0 ? n : fallback;
-}
-
-function readTrimmedString(name: string): string {
-  const v = process.env[name];
-  if (typeof v !== "string") return "";
-  const trimmed = v.trim();
-  return trimmed.length > 0 ? trimmed : "";
-}
-
-function pickTrimmedString(...candidates: string[]): string {
-  for (const c of candidates) {
-    if (typeof c === "string") {
-      const trimmed = c.trim();
-      if (trimmed.length > 0) return trimmed;
-    }
-  }
-  return "";
-}
-
-/**
- * Parse an API format string. Returns "openai-compatible" for any
- * unrecognized value so that missing env vars default to the
- * safe backwards-compatible behavior.
- */
-function readRecallApiFormat(name: string): RecallApiFormat {
-  const raw = readTrimmedString(name);
-  if (raw === "anthropic") return "anthropic";
-  return "openai-compatible";
-}
-
 /**
  * Resolve recall-synthesis adapter config from env. Uses the same
  * role-based env vars as the analysis adapter. Returns trimmed
@@ -266,61 +232,34 @@ function readRecallApiFormat(name: string): RecallApiFormat {
 export function loadRecallAdapterConfig(
   overrides: Partial<RecallAdapterConfig> = {},
 ): RecallAdapterConfig {
-  const primaryApiFormat = overrides.primaryApiFormat
-    ?? readRecallApiFormat("CURION_PRIMARY_API_FORMAT");
-  const fallbackApiFormat = overrides.fallbackApiFormat
-    ?? readRecallApiFormat("CURION_FALLBACK_API_FORMAT");
-
-  const primaryBaseUrlCandidate = pickTrimmedString(
-    overrides.primaryBaseUrl ?? "",
-    readTrimmedString("CURION_PRIMARY_BASE_URL"),
-  );
-  const fallbackBaseUrlCandidate = pickTrimmedString(
-    overrides.fallbackBaseUrl ?? "",
-    readTrimmedString("CURION_FALLBACK_BASE_URL"),
-  );
-
+  const full = loadRoleConfig({
+    defaults: {
+      timeoutMs: RECALL_DEFAULT_TIMEOUT_MS,
+      maxTokens: RECALL_DEFAULT_MAX_TOKENS,
+    },
+    // The recall role never uses strict JSON; the shared helper
+    // gates the strict-JSON env vars behind this flag so the
+    // returned values stay `false` regardless of the env.
+    strictJson: false,
+    overrides,
+  });
+  // The shared helper returns the full role config (including
+  // the strict-JSON fields the recall role does not use). Strip
+  // them here so the public return shape is unchanged from the
+  // pre-refactor `RecallAdapterConfig`.
   return {
-    primaryBaseUrl: primaryApiFormat === "anthropic" && !primaryBaseUrlCandidate
-      ? "https://api.anthropic.com"
-      : primaryBaseUrlCandidate,
-    primaryModel: pickTrimmedString(
-      overrides.primaryModel ?? "",
-      readTrimmedString("CURION_PRIMARY_MODEL"),
-    ),
-    primaryProviderLabel: pickTrimmedString(
-      overrides.primaryProviderLabel ?? "",
-      readTrimmedString("CURION_PRIMARY_PROVIDER_LABEL"),
-    ),
-    primaryApiFormat,
-    fallbackBaseUrl: fallbackApiFormat === "anthropic" && !fallbackBaseUrlCandidate
-      ? "https://api.anthropic.com"
-      : fallbackBaseUrlCandidate,
-    fallbackModel: pickTrimmedString(
-      overrides.fallbackModel ?? "",
-      readTrimmedString("CURION_FALLBACK_MODEL"),
-    ),
-    fallbackProviderLabel: pickTrimmedString(
-      overrides.fallbackProviderLabel ?? "",
-      readTrimmedString("CURION_FALLBACK_PROVIDER_LABEL"),
-    ),
-    fallbackApiFormat,
-    primaryApiKey: pickTrimmedString(
-      overrides.primaryApiKey ?? "",
-      readTrimmedString("CURION_PRIMARY_API_KEY"),
-    ),
-    fallbackApiKey: pickTrimmedString(
-      overrides.fallbackApiKey ?? "",
-      readTrimmedString("CURION_FALLBACK_API_KEY"),
-    ),
-    timeoutMs: overrides.timeoutMs ?? readNumber(
-      "CURION_ADAPTER_TIMEOUT_MS",
-      RECALL_DEFAULT_TIMEOUT_MS,
-    ),
-    maxTokens: overrides.maxTokens ?? readNumber(
-      "CURION_ADAPTER_MAX_TOKENS",
-      RECALL_DEFAULT_MAX_TOKENS,
-    ),
+    primaryBaseUrl: full.primaryBaseUrl,
+    primaryModel: full.primaryModel,
+    primaryProviderLabel: full.primaryProviderLabel,
+    primaryApiFormat: full.primaryApiFormat,
+    fallbackBaseUrl: full.fallbackBaseUrl,
+    fallbackModel: full.fallbackModel,
+    fallbackProviderLabel: full.fallbackProviderLabel,
+    fallbackApiFormat: full.fallbackApiFormat,
+    primaryApiKey: full.primaryApiKey,
+    fallbackApiKey: full.fallbackApiKey,
+    timeoutMs: full.timeoutMs,
+    maxTokens: full.maxTokens,
   };
 }
 

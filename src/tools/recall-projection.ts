@@ -29,6 +29,7 @@
 
 import type { RecallResult } from "./recall.js";
 import type { RecallStructuredContent } from "./recall-structured-content.js";
+import { stripRejectedPrefix, stripProviderErrorPrefix } from "./message-prefix.js";
 
 /**
  * Strip the literal `Note:` prefix (and a single leading space)
@@ -180,18 +181,4 @@ export function buildRecallStructuredContent(
       return { status: "provider_error", reason };
     }
   }
-}
-
-function stripRejectedPrefix(message: string): string {
-  if (typeof message !== "string") return "";
-  if (message.startsWith("Rejected: ")) return message.slice("Rejected: ".length);
-  return message;
-}
-
-function stripProviderErrorPrefix(message: string): string {
-  if (typeof message !== "string") return "";
-  if (message.startsWith("Provider error: ")) {
-    return message.slice("Provider error: ".length);
-  }
-  return message;
 }

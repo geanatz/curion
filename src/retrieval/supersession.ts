@@ -386,7 +386,6 @@ export function detectSupersession(
       hasExplicitSupersession,
       rawInputText,
       candidate.memoryContent,
-      other.memoryContent,
       overlap,
     );
     if (result === null) continue;
@@ -453,7 +452,6 @@ function scanForSupersessionPhrasing(
   hasExplicitSupersession: boolean,
   rawInputText: string | undefined,
   candidateText: string,
-  _otherText: string,
   overlap: number,
 ): { polarity: 1 | -1; confidence: number } | null {
   // Only use rawInputText for phrase detection if it has explicit supersession

@@ -28,8 +28,6 @@ export interface CurionEnv {
    * Env: CURION_FALLBACK_API_KEY.
    */
   fallbackKey?: string;
-  /** Project root override. Default: process.cwd(). */
-  projectRoot?: string;
   /** Enable semantic retrieval. Default: false (lexical only). */
   semanticEnabled?: boolean;
   /** Allow remote model download for semantic embedder. Default: true. */
@@ -53,7 +51,6 @@ export function loadEnv(): CurionEnv {
     logLevel: readLevel(),
     primaryKey: process.env.CURION_PRIMARY_API_KEY,
     fallbackKey: process.env.CURION_FALLBACK_API_KEY,
-    projectRoot: process.env.CURION_PROJECT_ROOT,
     // Semantic retrieval config (off by default).
     semanticEnabled: process.env.CURION_SEMANTIC_ENABLED === "1",
     semanticAllowRemote: process.env.CURION_SEMANTIC_ALLOW_REMOTE !== "0",

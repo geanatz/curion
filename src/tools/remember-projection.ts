@@ -30,6 +30,7 @@
 
 import type { RememberResult } from "./remember.js";
 import type { RememberStructuredContent } from "./remember-structured-content.js";
+import { stripRejectedPrefix, stripProviderErrorPrefix } from "./message-prefix.js";
 
 /**
  * Build the per-status public `text` for the `remember` tool.
@@ -103,18 +104,4 @@ export function buildRememberStructuredContent(
       return { status: "provider_error", reason };
     }
   }
-}
-
-function stripRejectedPrefix(message: string): string {
-  if (typeof message !== "string") return "";
-  if (message.startsWith("Rejected: ")) return message.slice("Rejected: ".length);
-  return message;
-}
-
-function stripProviderErrorPrefix(message: string): string {
-  if (typeof message !== "string") return "";
-  if (message.startsWith("Provider error: ")) {
-    return message.slice("Provider error: ".length);
-  }
-  return message;
 }
