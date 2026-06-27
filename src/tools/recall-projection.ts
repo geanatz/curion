@@ -92,10 +92,10 @@ export function buildRecallPublicText(result: RecallResult): string {
  * tool.
  *
  * User-approved shape (Phase clean-structured-tool-responses):
- *   - `answered`          -> { status, answer, notes? }
- *   - `weak_match`        -> { status, summaries, coverage }
- *   - `no_memory`         -> { status }
- *   - `rejected`          -> { status, reason }
+ *   - `answered`          -> { status, answer, notes?, source? }
+ *   - `weak_match`        -> { status, summaries, coverage, clarification? }
+ *   - `no_memory`         -> { status, clarification? }
+ *   - `rejected`          -> { status, reason, clarification? }
  *   - `provider_error`    -> { status, reason }
  *
  * The `reason` field is the redacted, non-echoing reason from
@@ -106,6 +106,11 @@ export function buildRecallPublicText(result: RecallResult): string {
  * reference); the `coverage` block carries the raw lexical
  * top-score and the supporting candidate count. No memory
  * ids are included in any shape.
+ *
+ * The `clarification` field appears on `no_memory`,
+ * `weak_match`, and `rejected` when the controller detected
+ * user-intent uncertainty that could be resolved with a
+ * rephrase. Provider errors never carry clarification.
  */
 export function buildRecallStructuredContent(
   result: RecallResult,
@@ -136,7 +141,7 @@ export function buildRecallStructuredContent(
         topScore: 0,
         supportingCount: 0,
       };
-      return {
+      const out: RecallStructuredContent = {
         status: "weak_match",
         summaries: [...summaries],
         coverage: {
@@ -144,14 +149,27 @@ export function buildRecallStructuredContent(
           supportingCount: coverage.supportingCount,
         },
       };
+      if (result.clarification) {
+        out.clarification = result.clarification;
+      }
+      return out;
     }
-    case "no_memory":
-      return { status: "no_memory" };
+    case "no_memory": {
+      const out: RecallStructuredContent = { status: "no_memory" };
+      if (result.clarification) {
+        out.clarification = result.clarification;
+      }
+      return out;
+    }
     case "rejected": {
       // The public `message` is "Rejected: <reason>". Strip the
       // "Rejected: " prefix to extract the `reason`.
       const reason = stripRejectedPrefix(result.message);
-      return { status: "rejected", reason };
+      const out: RecallStructuredContent = { status: "rejected", reason };
+      if (result.clarification) {
+        out.clarification = result.clarification;
+      }
+      return out;
     }
     case "provider_error": {
       const reason = stripProviderErrorPrefix(result.message);

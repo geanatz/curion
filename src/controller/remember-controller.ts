@@ -48,6 +48,7 @@ import {
   type StorageHandle,
 } from "../storage/storage.js";
 import { logger } from "../logging/logger.js";
+import type { Clarification } from "../tools/remember-structured-content.js";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -56,15 +57,14 @@ import { logger } from "../logging/logger.js";
 /** Public outcome of the controller. */
 export type RememberOutcome =
   | { status: "saved"; record: MemoryRecord; message: string }
-  | { status: "rejected"; reason: string; safetyClass: string }
-  | { status: "clarification_needed"; question: string; reason: string }
+  | { status: "rejected"; reason: string; safetyClass: string; clarification?: Clarification }
   | { status: "provider_error"; reason: string };
 
 /** Controller options. Most fields have safe defaults. */
 export interface RememberControllerOptions {
   /**
    * Confidence threshold below which the controller returns
-   * `clarification_needed` instead of saving. Default `0.5`.
+   * `rejected` with `clarification` instead of saving. Default `0.5`.
    */
   confidenceThreshold?: number;
   /**
@@ -248,10 +248,15 @@ export async function runRememberController(
   }
   if (safety.class === "self-conflict") {
     return {
-      status: "clarification_needed",
-      reason: safety.reason,
-      question:
-        "The input contains two opposing project facts. Which one should be stored: the first statement or the revised one? Please reply with the single canonical fact.",
+      status: "rejected",
+      reason:
+        "input contains opposing project facts; please resubmit the single canonical fact",
+      safetyClass: "self-conflict",
+      clarification: {
+        reason: safety.reason,
+        question:
+          "The input contains two opposing project facts. Which one should be stored: the first statement or the revised one? Please reply with the single canonical fact.",
+      },
     };
   }
 
@@ -316,13 +321,18 @@ export async function runRememberController(
 
   // -- 5. Confidence gate --------------------------------------------
   if (confidence < confidenceThreshold) {
+    const question =
+      classification && classification.length > 0
+        ? `Is this a ${classification}? Please rephrase or confirm so I can store it accurately.`
+        : "Could you rephrase or add a bit more context so I can store this accurately?";
     return {
-      status: "clarification_needed",
+      status: "rejected",
       reason: `provider confidence ${confidence.toFixed(2)} is below threshold ${confidenceThreshold.toFixed(2)}`,
-      question:
-        classification && classification.length > 0
-          ? `Is this a ${classification}? Please rephrase or confirm so I can store it accurately.`
-          : "Could you rephrase or add a bit more context so I can store this accurately?",
+      safetyClass: "low-confidence",
+      clarification: {
+        reason: `provider confidence ${confidence.toFixed(2)} is below threshold ${confidenceThreshold.toFixed(2)}`,
+        question,
+      },
     };
   }
 

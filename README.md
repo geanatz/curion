@@ -156,7 +156,7 @@ Store a piece of project memory.
 Runs a local safety pre-check, the provider adapter for analysis, controller
 validation, and persistence. **Raw input is never persisted.**
 
-**Statuses:** `saved` | `rejected` | `clarification_needed` | `provider_error`
+**Statuses:** `saved` | `rejected` | `provider_error`
 
 ### `recall(text: string)`
 
@@ -177,9 +177,9 @@ Each tool returns a `text` content block (human-readable prose) and a
 
 ```typescript
 { status: "answered",     answer: string, notes?: string }
-{ status: "weak_match",   summaries: string[], coverage: { topScore: number, supportingCount: number } }
-{ status: "no_memory" }
-{ status: "rejected",     reason: string }
+{ status: "weak_match",   summaries: string[], coverage: { topScore: number, supportingCount: number }, clarification?: Clarification }
+{ status: "no_memory",   clarification?: Clarification }
+{ status: "rejected",     reason: string, clarification?: Clarification }
 { status: "provider_error", reason: string }
 ```
 
@@ -187,9 +187,16 @@ Each tool returns a `text` content block (human-readable prose) and a
 
 ```typescript
 { status: "saved",              summary: string, kind: string, confidence?: number }
-{ status: "rejected",           reason: string }
-{ status: "clarification_needed", question: string }
+{ status: "rejected",           reason: string, clarification?: Clarification }
 { status: "provider_error",      reason: string }
+```
+
+### Clarification object
+
+When present, `clarification` indicates user-intent uncertainty (not a provider error). The `question` is a concise user-facing prompt; `suggestions` is an optional rephrase hint list.
+
+```typescript
+{ reason: string, question: string, suggestions?: string[] }
 ```
 
 ## Build and test

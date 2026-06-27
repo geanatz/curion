@@ -2,10 +2,10 @@
  * Public MCP `structuredContent` schema for the `recall` tool.
  *
  * User-approved shape (Phase clean-structured-tool-responses):
- *   - answered:            { status: "answered", answer: string, notes?: string[] }
- *   - weak_match:          { status: "weak_match", summaries: string[], coverage: { topScore: number, supportingCount: number } }
- *   - no_memory:           { status: "no_memory" }
- *   - rejected:            { status: "rejected", reason: string }
+ *   - answered:            { status: "answered", answer: string, notes?: string[], source?: "local"|"cross_project" }
+ *   - weak_match:          { status: "weak_match", summaries: string[], coverage: { topScore: number, supportingCount: number }, clarification?: Clarification }
+ *   - no_memory:           { status: "no_memory", clarification?: Clarification }
+ *   - rejected:            { status: "rejected", reason: string, clarification?: Clarification }
  *   - provider_error:      { status: "provider_error", reason: string }
  *
  * Rules:
@@ -30,6 +30,9 @@
  *     strips the prefix.
  *   - No model / provider metadata.
  *   - No raw input.
+ *   - Clarification appears only on user-intent-uncertainty
+ *     outcomes (no_memory, weak_match, rejected with rephrase
+ *     potential). Provider errors never carry clarification.
  *
  * Schema note: the MCP SDK's `normalizeObjectSchema` only
  * recognizes Zod v3 object schemas (it reads `.shape`). A Zod
@@ -45,6 +48,7 @@
  * caught at validation time.
  */
 import { z } from "zod";
+import { CLARIFICATION_SCHEMA } from "./remember-structured-content.js";
 
 /** The set of valid `status` values for the `recall` tool. */
 export const RECALL_STATUS_VALUES = [
@@ -85,6 +89,8 @@ export const RECALL_STRUCTURED_CONTENT_SCHEMA = z
         supportingCount: z.number(),
       })
       .optional(),
+    // no_memory / weak_match / rejected: optional clarification
+    clarification: CLARIFICATION_SCHEMA.optional(),
     // rejected / provider_error
     reason: z.string().optional(),
   })

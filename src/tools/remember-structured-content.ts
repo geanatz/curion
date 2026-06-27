@@ -3,8 +3,7 @@
  *
  * User-approved shape (Phase clean-structured-tool-responses):
  *   - saved:               { status: "saved", summary: string, kind: string, confidence?: number }
- *   - rejected:            { status: "rejected", reason: string }
- *   - clarification_needed:{ status: "clarification_needed", question: string }
+ *   - rejected:            { status: "rejected", reason: string, clarification?: Clarification }
  *   - provider_error:      { status: "provider_error", reason: string }
  *
  * Rules:
@@ -27,11 +26,33 @@
  */
 import { z } from "zod";
 
+/**
+ * Structured clarification object for user-intent uncertainty.
+ *
+ * Appears on `rejected` outcomes when the input has ambiguous,
+ * self-conflicting, or low-confidence signals that could be
+ * resolved with a rephrase. Provider/system errors never carry
+ * clarification.
+ *
+ * The `reason` field is agent-facing context (why clarification
+ * is needed); `question` is a concise user-facing prompt; and
+ * `suggestions` is an optional list of concrete rephrase hints.
+ */
+export const CLARIFICATION_SCHEMA = z
+  .object({
+    reason: z.string(),
+    question: z.string(),
+    suggestions: z.array(z.string()).optional(),
+  })
+  .strict();
+
+/** TypeScript type for the clarification object. */
+export type Clarification = z.infer<typeof CLARIFICATION_SCHEMA>;
+
 /** The set of valid `status` values for the `remember` tool. */
 export const REMEMBER_STATUS_VALUES = [
   "saved",
   "rejected",
-  "clarification_needed",
   "provider_error",
 ] as const;
 export type RememberStatusValue = (typeof REMEMBER_STATUS_VALUES)[number];
@@ -52,10 +73,10 @@ export const REMEMBER_STRUCTURED_CONTENT_SCHEMA = z
     summary: z.string().optional(),
     kind: z.string().optional(),
     confidence: z.number().optional(),
-    // rejected / provider_error
+    // rejected
     reason: z.string().optional(),
-    // clarification_needed
-    question: z.string().optional(),
+    clarification: CLARIFICATION_SCHEMA.optional(),
+    // provider_error (no clarification)
   })
   .strict();
 

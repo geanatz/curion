@@ -37,6 +37,7 @@ import {
   runRememberController,
   type RememberOutcome,
 } from "../controller/remember-controller.js";
+import type { Clarification } from "./remember-structured-content.js";
 import {
   initStorage,
   closeStorage,
@@ -58,7 +59,7 @@ import { loadEnv } from "../config/env.js";
 
 export const REMEMBER_TOOL_NAME = "remember" as const;
 export const REMEMBER_TOOL_DESCRIPTION =
-  "Store a piece of project memory. Returns a saved / rejected / clarification_needed / provider_error outcome.";
+  "Store a piece of project memory. Returns saved, rejected, or provider_error. If rejected with a clarification object, do not guess — ask the user the clarification.question and optionally suggest the clarification.suggestions.";
 
 export interface RememberInput {
   text: string;
@@ -117,8 +118,12 @@ export interface RememberResult {
   summary?: string;
   /** Safety class, when `status === "rejected"`. */
   safetyClass?: string;
-  /** Clarification question, when `status === "clarification_needed"`. */
-  question?: string;
+  /**
+   * Clarification object, when `status === "rejected"` and the
+   * rejection was due to user-intent uncertainty (self-conflict,
+   * low confidence). Provider errors never carry clarification.
+   */
+  clarification?: Clarification;
 }
 
 /**
@@ -316,12 +321,7 @@ function formatOutcome(outcome: RememberOutcome): RememberResult {
         status: "rejected",
         message: `Rejected: ${outcome.reason}`,
         safetyClass: outcome.safetyClass,
-      };
-    case "clarification_needed":
-      return {
-        status: "clarification_needed",
-        message: outcome.question,
-        question: outcome.question,
+        clarification: outcome.clarification,
       };
     case "provider_error":
       return {

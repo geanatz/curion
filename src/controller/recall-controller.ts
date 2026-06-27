@@ -39,6 +39,7 @@
  */
 
 import { classifyInput } from "../safety/precheck.js";
+import type { Clarification } from "../tools/remember-structured-content.js";
 import {
   listActiveMemorySummaries,
   listActiveMemoryRelationshipBlocks,
@@ -147,7 +148,7 @@ export type RecallOutcome =
        */
       internalResolvedHistory?: ResolvedHistorySignal;
     }
-  | { status: "no_memory" }
+  | { status: "no_memory"; clarification?: Clarification }
   | {
       /**
        * Refusal-with-thin-match reroute. The synthesis LLM
@@ -179,8 +180,9 @@ export type RecallOutcome =
       status: "weak_match";
       summaries: string[];
       coverage: { topScore: number; supportingCount: number };
+      clarification?: Clarification;
     }
-  | { status: "rejected"; reason: string; safetyClass: string }
+  | { status: "rejected"; reason: string; safetyClass: string; clarification?: Clarification }
   | { status: "provider_error"; reason: string };
 
 /** Controller options. Most fields have safe defaults. */
@@ -481,6 +483,17 @@ export async function runRecallController(
   // so semantic can recover memories that lexical threshold filtered out.
   if (finalRanked.length === 0) {
     logger.debug("recall: no relevant memory; skipping provider call");
+    // Add clarification for obviously vague/underspecified queries.
+    if (isVagueQuery(query)) {
+      return {
+        status: "no_memory",
+        clarification: {
+          reason: "query is vague or underspecified; no memories matched",
+          question:
+            "Could you be more specific about what you're looking for? For example, what topic or project was this about?",
+        },
+      };
+    }
     return { status: "no_memory" };
   }
 
@@ -651,18 +664,41 @@ export async function runRecallController(
         logger.debug(
           "recall: provider answer was a refusal; rerouting to weak_match",
         );
-        return {
+        const topScore = finalRanked[0]!.score;
+        const supportingCount = finalRanked.length;
+        const out: RecallOutcome = {
           status: "weak_match",
           summaries: topSummaries.slice(0, 3).map((s) => s.memoryContent),
           coverage: {
-            topScore: finalRanked[0]!.score,
-            supportingCount: finalRanked.length,
+            topScore,
+            supportingCount,
           },
         };
+        // Add clarification when coverage suggests competing/conflicting
+        // candidates or very weak match quality.
+        if (suggestsCompetingCandidates(topScore, supportingCount)) {
+          out.clarification = {
+            reason: "query matched multiple memories with low confidence; synthesis LLM declined to answer",
+            question:
+              "I found several related memories but wasn't confident synthesizing an answer. Could you rephrase your question or be more specific about what you're looking for?",
+          };
+        }
+        return out;
       }
       logger.debug(
         "recall: provider answer was a refusal; rerouting to no_memory",
       );
+      // Also check if the query is vague for the no_memory fallback.
+      if (isVagueQuery(query)) {
+        return {
+          status: "no_memory",
+          clarification: {
+            reason: "query is vague or underspecified; no memories matched",
+            question:
+              "Could you be more specific about what you're looking for? For example, what topic or project was this about?",
+          },
+        };
+      }
       return { status: "no_memory" };
     }
     logger.debug(
@@ -1259,4 +1295,81 @@ function buildMatchText(s: SafeMemorySummary): string {
       ? ` ${s.tags.join(" ")}`
       : "";
   return `${s.memoryContent}${tagPart}`;
+}
+
+// ---------------------------------------------------------------------------
+// Clarification helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Heuristic: is the query obviously vague or underspecified?
+ *
+ * Conservative: fires only on short, generic-reference-only
+ * queries that are extremely likely to be underspecified.
+ * Does NOT fire on queries that are short but contentful
+ * (e.g. "API design", "meeting notes").
+ *
+ * The heuristic:
+ *   - 3 or fewer tokens AND
+ *   - all tokens are generic reference words (not specific content)
+ *
+ * Generic reference words: pure deictics (it, this, that, its,
+ * their), articles (the, a, an), vague nouns (thing, stuff,
+ * something, anything, everything), or question words that are
+ * likely refrences (what, which) when the query is very short.
+ */
+function isVagueQuery(query: string): boolean {
+  if (typeof query !== "string") return false;
+  const trimmed = query.trim();
+  if (trimmed.length === 0) return false;
+
+  // Tokenize: split on whitespace, strip punctuation for the check
+  const tokens = trimmed
+    .toLowerCase()
+    .split(/\s+/)
+    .map((t) => t.replace(/^[^\w]+|[^\w]+$/g, "")) // strip leading/trailing non-word chars
+    .filter((t) => t.length > 0);
+
+  // Must be 3 or fewer tokens to be considered "short"
+  if (tokens.length > 3) return false;
+
+  // Generic reference word set
+  const genericWords = new Set([
+    "it", "its", "this", "that", "these", "those",
+    "the", "a", "an",
+    "thing", "things", "stuff", "something", "everything", "nothing",
+    "what", "which", "who", "where", "when", "why", "how",
+    "there", "here",
+    "last", "next", "previous", "earlier", "later",
+    "some", "any", "all", "none", "no",
+  ]);
+
+  // Every token must be a generic word (no content term)
+  return tokens.every((t) => genericWords.has(t));
+}
+
+/**
+ * Heuristic: does the weak_match coverage suggest competing/conflicting
+ * candidates?
+ *
+ * Conservative: fires when the top score is very low (suggesting
+ * weak match quality) OR when there are multiple candidates with
+ * similar scores (competing matches).
+ *
+ * A topScore below 0.1 is a strong signal the query doesn't match
+ * anything well. A supportingCount >= 3 with a narrow score gap
+ * between top and rest suggests ambiguity about which memory is
+ * actually relevant.
+ */
+function suggestsCompetingCandidates(
+  topScore: number,
+  supportingCount: number,
+): boolean {
+  // Very low top score: query doesn't match anything well
+  if (topScore < 0.1) return true;
+
+  // Multiple candidates with similar scores (competing interpretations)
+  if (supportingCount >= 3 && topScore < 0.3) return true;
+
+  return false;
 }

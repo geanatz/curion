@@ -93,6 +93,7 @@ import {
   runRecallController,
   type RecallOutcome,
 } from "../controller/recall-controller.js";
+import type { Clarification } from "./remember-structured-content.js";
 import {
   initStorage,
   closeStorage,
@@ -136,7 +137,7 @@ import { loadEnv } from "../config/env.js";
 
 export const RECALL_TOOL_NAME = "recall" as const;
 export const RECALL_TOOL_DESCRIPTION =
-  "Retrieve relevant project memory. Returns a synthesized answer from stored memories, or 'No relevant memory found.'.";
+  "Retrieve relevant project memory. Returns a synthesized answer from stored memories, or 'No relevant memory found.'. If the result contains a clarification object (on no_memory, weak_match, or rejected), do not guess — ask the user the clarification.question and optionally suggest clarification.suggestions.";
 
 export const NO_RELEVANT_MEMORY = "No relevant memory found.";
 
@@ -257,6 +258,13 @@ export interface RecallResult {
    * cross-project evidence was found.
    */
   source?: "local" | "cross_project";
+  /**
+   * Clarification object, when `status === "no_memory"`,
+   * `status === "weak_match"`, or `status === "rejected"` and
+   * the outcome was due to user-intent uncertainty. Provider
+   * errors never carry clarification.
+   */
+  clarification?: Clarification;
 }
 
 export interface StorageProviderHandle {
@@ -1159,6 +1167,7 @@ function formatOutcome(outcome: RecallOutcome): RecallResult {
       return {
         status: "no_memory",
         message: NO_RELEVANT_MEMORY,
+        clarification: outcome.clarification,
       };
     case "weak_match":
       // Refusal-with-thin-match: the synthesis LLM declined
@@ -1177,12 +1186,14 @@ function formatOutcome(outcome: RecallOutcome): RecallResult {
         message: WEAK_MATCH_PUBLIC_MESSAGE,
         summaries: [...outcome.summaries],
         coverage: { ...outcome.coverage },
+        clarification: outcome.clarification,
       };
     case "rejected":
       return {
         status: "rejected",
         message: `Rejected: ${outcome.reason}`,
         safetyClass: outcome.safetyClass,
+        clarification: outcome.clarification,
       };
     case "provider_error":
       return {

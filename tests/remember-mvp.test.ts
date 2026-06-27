@@ -290,10 +290,10 @@ test("remember: empty / whitespace-only input is rejected before any provider ca
 });
 
 // ---------------------------------------------------------------------------
-// 4. Provider clarification result -> clarification_needed; nothing stored
+// 4. Provider clarification result -> rejected with clarification; nothing stored
 // ---------------------------------------------------------------------------
 
-test("remember: low provider confidence returns clarification_needed and stores nothing", async () => {
+test("remember: low provider confidence returns rejected with clarification and stores nothing", async () => {
   const { tmp, handle } = mkStorage();
   try {
     const { fetchImpl } = scriptFetch(() =>
@@ -308,9 +308,10 @@ test("remember: low provider confidence returns clarification_needed and stores 
       providerFallbackBaseUrl: FALLBACK_BASE_URL,
       providerFallbackModel: FALLBACK_MODEL,
     });
-    assert.equal(outcome.status, "clarification_needed");
-    if (outcome.status !== "clarification_needed") throw new Error("unreachable");
-    assert.match(outcome.question, /rephrase|confirm|context/i);
+    assert.equal(outcome.status, "rejected");
+    if (outcome.status !== "rejected") throw new Error("unreachable");
+    assert.ok(outcome.clarification, "rejected outcome must have clarification");
+    assert.match(outcome.clarification!.question, /rephrase|confirm|context/i);
     const rows = handle.db.prepare("SELECT COUNT(*) AS c FROM memories").get() as { c: number };
     assert.equal(rows.c, 0);
   } finally {

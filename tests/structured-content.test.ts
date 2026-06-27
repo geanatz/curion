@@ -355,7 +355,6 @@ test("server: remember tool outputSchema exposes the user-approved discriminated
     .slice()
     .sort();
   assert.deepEqual(statusValues, [
-    "clarification_needed",
     "provider_error",
     "rejected",
     "saved",
@@ -1155,13 +1154,13 @@ test("remember structuredContent: saved with null confidence -> no confidence ke
   }
 });
 
-test("remember structuredContent: clarification_needed -> { status, question }", async () => {
+test("remember structuredContent: rejected with clarification -> { status, reason, clarification }", async () => {
   const { tmp, handle } = mkStorage();
   try {
     setRememberStorageProvider(() => ({ handle, ownsHandle: false }));
     try {
       // Drive the projection helper directly for the
-      // clarification_needed path. (The remember tool's
+      // rejected-with-clarification path. (The remember tool's
       // public callback does not expose a knob to force
       // the controller's clarification branch without a
       // scripted provider; the projection helper is the
@@ -1171,15 +1170,22 @@ test("remember structuredContent: clarification_needed -> { status, question }",
         "../src/tools/remember-projection.ts"
       );
       const sc = buildRememberStructuredContent({
-        status: "clarification_needed",
-        message: "What kind of memory is this?",
-        question: "What kind of memory is this?",
+        status: "rejected",
+        message: "Rejected: provider confidence 0.30 is below threshold 0.50",
+        safetyClass: "low-confidence",
+        clarification: {
+          reason: "provider confidence 0.30 is below threshold 0.50",
+          question: "Is this a fact? Please rephrase or confirm so I can store it accurately.",
+          suggestions: ["Confirm it as a fact", "Rephrase with more context"],
+        },
       });
-      assert.equal(sc.status, "clarification_needed");
-      assert.equal(typeof sc.question, "string");
-      assert.equal(sc.question, "What kind of memory is this?");
-      // No reason / summary / kind / confidence.
-      assert.equal("reason" in sc, false);
+      assert.equal(sc.status, "rejected");
+      assert.equal(typeof sc.reason, "string");
+      assert.equal(typeof sc.clarification, "object");
+      assert.equal(sc.clarification!.question, "Is this a fact? Please rephrase or confirm so I can store it accurately.");
+      assert.equal(Array.isArray(sc.clarification!.suggestions), true);
+      assert.equal(sc.clarification!.suggestions!.length, 2);
+      // No summary / kind / confidence on rejected.
       assert.equal("summary" in sc, false);
       assert.equal("kind" in sc, false);
       assert.equal("confidence" in sc, false);
