@@ -1,0 +1,18 @@
+{
+  "all": true,
+  "include": ["src/**/*.ts"],
+  "exclude": [
+    "src/benchmark/**",
+    "src/prototype/**",
+    "src/index.ts",
+    "**/*.d.ts"
+  ],
+  "reporter": ["text", "text-summary", "html", "lcov"],
+  "reports-dir": "coverage",
+  "skip-full": false,
+  "check-coverage": false,
+  "clean": true,
+  "exclude-after-remap": false,
+  "src": "src",
+  "wrapper-length": 0
+}

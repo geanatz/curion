@@ -40,9 +40,10 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "prepublishOnly": "npm run build && npm test",
-    "test": "node --import tsx --test tests/*.test.ts",
+    "test": "node --import tsx --test tests/*.test.ts --test 'tests/diagnostics/*.test.ts'",
     "test:contracts": "node --import tsx --test tests/contracts.test.ts",
     "test:e2e": "node --import tsx --test tests/mcp-stdio-e2e.test.ts",
+    "test:coverage": "c8 --reporter=text --reporter=text-summary --reporter=html --reporter=lcov node --import tsx --test tests/*.test.ts --test 'tests/diagnostics/*.test.ts'",
     "start": "node dist/index.js",
     "clean": "rm -rf dist",
     "prototype": "tsx src/prototype/runner.ts",
@@ -166,9 +167,10 @@
     "@huggingface/transformers": "^3.8.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.10.0",
+    "c8": "^11.0.0",
+    "fast-check": "^4.8.0",
     "tsx": "^4.20.0",
     "typescript": "^5.7.2",
-    "@biomejs/biome": "^1.9.4",
-    "c8": "^11.0.0"
+    "@biomejs/biome": "^1.9.4"
   }
 }
