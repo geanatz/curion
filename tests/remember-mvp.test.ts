@@ -27,13 +27,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 
 import { runRememberController } from "../src/controller/remember-controller.ts";
 import {
   initStorage,
-  closeStorage,
   insertMemoryRecord,
   type StorageHandle,
 } from "../src/storage/storage.ts";
@@ -54,91 +51,31 @@ import {
   setListRegisteredProjectsStub,
   resetListRegisteredProjectsStub,
 } from "../src/config/registry.ts";
+import {
+  TEST_PRIMARY_KEY,
+  TEST_FALLBACK_KEY,
+  TEST_PRIMARY_BASE_URL,
+  TEST_PRIMARY_MODEL,
+  TEST_FALLBACK_BASE_URL,
+  TEST_FALLBACK_MODEL,
+} from "./shared-test-provider.ts";
+import {
+  scriptFetch,
+  okChatResponse,
+  safeAnalysis,
+} from "./_helpers/provider-stub.ts";
+import { mkStorage, rmStorage } from "./_helpers/test-storage.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/** Create a temp project dir + storage handle. Caller closes handle + cleans dir. */
-function mkStorage(): { tmp: string; handle: StorageHandle } {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-mvp-rm-"));
-  const handle = initStorage({ projectRoot: tmp });
-  return { tmp, handle };
-}
-
-function rmStorage(tmp: string, handle: StorageHandle): void {
-  try {
-    handle.db.close();
-  } catch {
-    // ignore
-  }
-  fs.rmSync(tmp, { recursive: true, force: true });
-}
-
-/** A scripted `fetch` that serves a single canned response. */
-function scriptFetch(responder: () => Response): {
-  fetchImpl: typeof fetch;
-  calls: Array<{ url: string; body: string }>;
-} {
-  const calls: Array<{ url: string; body: string }> = [];
-  const fetchImpl: typeof fetch = async (input, init) => {
-    const url = typeof input === "string" ? input : (input as URL).toString();
-    let body = "";
-    if (init && typeof init === "object" && "body" in init && init.body) {
-      body = String(init.body);
-    }
-    calls.push({ url, body });
-    return responder();
-  };
-  return { fetchImpl, calls };
-}
-
-function okChatResponse(content: string): Response {
-  return new Response(
-    JSON.stringify({
-      id: "x",
-      model: "m",
-      choices: [{ message: { role: "assistant", content } }],
-    }),
-    { status: 200, headers: { "content-type": "application/json" } },
-  );
-}
-
-function httpErrorResponse(status: number, text = "boom"): Response {
-  return new Response(text, { status });
-}
-
-/** A valid, safe analysis payload the provider would return. */
-function safeAnalysis(opts: {
-  summary?: string;
-  confidence?: number;
-  classification?: string;
-  tags?: string[];
-} = {}): string {
-  return JSON.stringify({
-    summary: opts.summary ?? "The project uses Postgres 16 for the primary store.",
-    confidence: opts.confidence ?? 0.82,
-    tags: opts.tags ?? ["postgres", "storage"],
-    entities: [{ name: "Postgres", kind: "database" }],
-    classification: opts.classification ?? "fact",
-  });
-}
-
-const PRIMARY_KEY = "sk-primary-test-not-real-12345";
-const FALLBACK_KEY = "sk-fallback-test-not-real-12345";
-// Explicit provider config: base URL contains "nvidia" so provider
-// label is "nvidia-nim", model is the test primary model.
-const PRIMARY_BASE_URL = "https://api.nvidia.example.com/v1";
-const PRIMARY_MODEL = "test/model-primary";
-const FALLBACK_BASE_URL = "https://api.fallback.example/v1";
-const FALLBACK_MODEL = "test/model-fallback";
 
 // ---------------------------------------------------------------------------
 // 1. Safe input -> stored; raw input is NOT in the persisted record
 // ---------------------------------------------------------------------------
 
 test("remember: safe input is stored; raw input is not persisted", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-mvp-rm-");
   try {
     const { fetchImpl, calls } = scriptFetch(() =>
       okChatResponse(safeAnalysis()),
@@ -147,12 +84,12 @@ test("remember: safe input is stored; raw input is not persisted", async () => {
       "We picked Postgres 16 for the primary data store because of better JSON support.";
     const outcome = await runRememberController(handle, rawText, {
       providerFetchImpl: fetchImpl,
-      providerPrimaryApiKey: PRIMARY_KEY,
-      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-      providerPrimaryModel: PRIMARY_MODEL,
-      providerFallbackApiKey: FALLBACK_KEY,
-      providerFallbackBaseUrl: FALLBACK_BASE_URL,
-      providerFallbackModel: FALLBACK_MODEL,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
     });
     assert.equal(outcome.status, "saved");
     if (outcome.status !== "saved") throw new Error("unreachable");
@@ -167,9 +104,9 @@ test("remember: safe input is stored; raw input is not persisted", async () => {
     assert.ok(rec.id > 0);
     assert.equal(typeof rec.memoryContent, "string");
     assert.ok(rec.memoryContent.length > 0);
-    // Provider label is derived from PRIMARY_BASE_URL (contains "nvidia" -> "nvidia-nim").
-    assert.equal(rec.providerId, "nvidia-nim");
-    assert.equal(rec.modelId, PRIMARY_MODEL);
+    // Provider label is derived from TEST_PRIMARY_BASE_URL.
+    assert.equal(rec.providerId, "custom");
+    assert.equal(rec.modelId, TEST_PRIMARY_MODEL);
     assert.ok(rec.confidence !== null && rec.confidence > 0);
     assert.equal(rec.state, "active");
     assert.ok(["fact", "decision", "preference", "context", "conflict", "reference", "policy", "constraint", "finding"].includes(rec.kind));
@@ -206,7 +143,7 @@ test("remember: safe input is stored; raw input is not persisted", async () => {
 // ---------------------------------------------------------------------------
 
 test("remember: unsafe secret input is rejected before any provider call", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-mvp-rm-");
   try {
     const { fetchImpl, calls } = scriptFetch(() =>
       okChatResponse(safeAnalysis()),
@@ -217,12 +154,12 @@ test("remember: unsafe secret input is rejected before any provider call", async
     const rawText = "AKIAIOSFODNN7EXAMPLE";
     const outcome = await runRememberController(handle, rawText, {
       providerFetchImpl: fetchImpl,
-      providerPrimaryApiKey: PRIMARY_KEY,
-      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-      providerPrimaryModel: PRIMARY_MODEL,
-      providerFallbackApiKey: FALLBACK_KEY,
-      providerFallbackBaseUrl: FALLBACK_BASE_URL,
-      providerFallbackModel: FALLBACK_MODEL,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
     });
     assert.equal(outcome.status, "rejected");
     if (outcome.status !== "rejected") throw new Error("unreachable");
@@ -244,19 +181,19 @@ test("remember: unsafe secret input is rejected before any provider call", async
 // ---------------------------------------------------------------------------
 
 test("remember: vague junk is rejected before any provider call", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-mvp-rm-");
   try {
     const { fetchImpl, calls } = scriptFetch(() =>
       okChatResponse(safeAnalysis()),
     );
     const outcome = await runRememberController(handle, "asdf", {
       providerFetchImpl: fetchImpl,
-      providerPrimaryApiKey: PRIMARY_KEY,
-      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-      providerPrimaryModel: PRIMARY_MODEL,
-      providerFallbackApiKey: FALLBACK_KEY,
-      providerFallbackBaseUrl: FALLBACK_BASE_URL,
-      providerFallbackModel: FALLBACK_MODEL,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
     });
     assert.equal(outcome.status, "rejected");
     if (outcome.status !== "rejected") throw new Error("unreachable");
@@ -268,19 +205,19 @@ test("remember: vague junk is rejected before any provider call", async () => {
 });
 
 test("remember: empty / whitespace-only input is rejected before any provider call", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-mvp-rm-");
   try {
     const { fetchImpl, calls } = scriptFetch(() =>
       okChatResponse(safeAnalysis()),
     );
     const outcome = await runRememberController(handle, "   \n  \t  ", {
       providerFetchImpl: fetchImpl,
-      providerPrimaryApiKey: PRIMARY_KEY,
-      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-      providerPrimaryModel: PRIMARY_MODEL,
-      providerFallbackApiKey: FALLBACK_KEY,
-      providerFallbackBaseUrl: FALLBACK_BASE_URL,
-      providerFallbackModel: FALLBACK_MODEL,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
     });
     assert.equal(outcome.status, "rejected");
     assert.equal(calls.length, 0);
@@ -294,19 +231,19 @@ test("remember: empty / whitespace-only input is rejected before any provider ca
 // ---------------------------------------------------------------------------
 
 test("remember: low provider confidence returns rejected with clarification_needed and stores nothing", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-mvp-rm-");
   try {
     const { fetchImpl } = scriptFetch(() =>
       okChatResponse(safeAnalysis({ confidence: 0.3, summary: "Vague guess." })),
     );
     const outcome = await runRememberController(handle, "Some input that confuses the model.", {
       providerFetchImpl: fetchImpl,
-      providerPrimaryApiKey: PRIMARY_KEY,
-      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-      providerPrimaryModel: PRIMARY_MODEL,
-      providerFallbackApiKey: FALLBACK_KEY,
-      providerFallbackBaseUrl: FALLBACK_BASE_URL,
-      providerFallbackModel: FALLBACK_MODEL,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
     });
     assert.equal(outcome.status, "rejected");
     if (outcome.status !== "rejected") throw new Error("unreachable");
@@ -320,19 +257,19 @@ test("remember: low provider confidence returns rejected with clarification_need
 });
 
 test("remember: confidence exactly at threshold is accepted", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-mvp-rm-");
   try {
     const { fetchImpl } = scriptFetch(() =>
       okChatResponse(safeAnalysis({ confidence: 0.5, summary: "Borderline confidence but valid." })),
     );
     const outcome = await runRememberController(handle, "Some input.", {
       providerFetchImpl: fetchImpl,
-      providerPrimaryApiKey: PRIMARY_KEY,
-      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-      providerPrimaryModel: PRIMARY_MODEL,
-      providerFallbackApiKey: FALLBACK_KEY,
-      providerFallbackBaseUrl: FALLBACK_BASE_URL,
-      providerFallbackModel: FALLBACK_MODEL,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
       confidenceThreshold: 0.5,
     });
     assert.equal(outcome.status, "saved");
@@ -346,17 +283,17 @@ test("remember: confidence exactly at threshold is accepted", async () => {
 // ---------------------------------------------------------------------------
 
 test("remember: provider hard failure returns provider_error and stores nothing", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-mvp-rm-");
   try {
     const { fetchImpl } = scriptFetch(() => httpErrorResponse(503, "service down"));
     const outcome = await runRememberController(handle, "Some input.", {
       providerFetchImpl: fetchImpl,
-      providerPrimaryApiKey: PRIMARY_KEY,
-      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-      providerPrimaryModel: PRIMARY_MODEL,
-      providerFallbackApiKey: FALLBACK_KEY,
-      providerFallbackBaseUrl: FALLBACK_BASE_URL,
-      providerFallbackModel: FALLBACK_MODEL,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
     });
     // Either primary failed and fallback also failed (all-providers-failed),
     // or primary failed and no fallback configured. Both surface as
@@ -374,7 +311,7 @@ test("remember: provider hard failure returns provider_error and stores nothing"
 // ---------------------------------------------------------------------------
 
 test("remember: mixed safe+sensitive input is rejected; secret fragment is not stored", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-mvp-rm-");
   try {
     const { fetchImpl, calls } = scriptFetch(() =>
       okChatResponse(safeAnalysis()),
@@ -383,12 +320,12 @@ test("remember: mixed safe+sensitive input is rejected; secret fragment is not s
       "Project uses Postgres 16. The CI token is glpat-abcdefghijklmnopqrst. Tests run in 12s.";
     const outcome = await runRememberController(handle, rawText, {
       providerFetchImpl: fetchImpl,
-      providerPrimaryApiKey: PRIMARY_KEY,
-      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-      providerPrimaryModel: PRIMARY_MODEL,
-      providerFallbackApiKey: FALLBACK_KEY,
-      providerFallbackBaseUrl: FALLBACK_BASE_URL,
-      providerFallbackModel: FALLBACK_MODEL,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
     });
     assert.equal(outcome.status, "rejected");
     if (outcome.status !== "rejected") throw new Error("unreachable");
@@ -462,7 +399,7 @@ test("recall handler: no memories -> no_memory placeholder", async () => {
 // ---------------------------------------------------------------------------
 
 test("storage: memories table never has a raw/original text column", () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-mvp-rm-");
   try {
     const cols = handle.db.prepare("PRAGMA table_info(memories)").all() as Array<{ name: string }>;
     const names = cols.map((c) => c.name);
@@ -492,19 +429,19 @@ test("storage: memories table never has a raw/original text column", () => {
 // ---------------------------------------------------------------------------
 
 test("persisted record: has summary, provider, model, confidence, state, kind", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-mvp-rm-");
   try {
     const { fetchImpl } = scriptFetch(() =>
       okChatResponse(safeAnalysis({ classification: "decision" })),
     );
     const outcome = await runRememberController(handle, "We decided to use Postgres 16.", {
       providerFetchImpl: fetchImpl,
-      providerPrimaryApiKey: PRIMARY_KEY,
-      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-      providerPrimaryModel: PRIMARY_MODEL,
-      providerFallbackApiKey: FALLBACK_KEY,
-      providerFallbackBaseUrl: FALLBACK_BASE_URL,
-      providerFallbackModel: FALLBACK_MODEL,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
     });
     assert.equal(outcome.status, "saved");
     if (outcome.status !== "saved") throw new Error("unreachable");
@@ -515,9 +452,9 @@ test("persisted record: has summary, provider, model, confidence, state, kind", 
       .get(outcome.record.id) as Record<string, unknown>;
     assert.equal(typeof row.summary, "string");
     assert.ok((row.summary as string).length > 0);
-    // Provider label is derived from PRIMARY_BASE_URL (contains "nvidia" -> "nvidia-nim").
-    assert.equal(row.provider_id, "nvidia-nim");
-    assert.equal(row.model_id, PRIMARY_MODEL);
+    // Provider label is derived from TEST_PRIMARY_BASE_URL.
+    assert.equal(row.provider_id, "custom");
+    assert.equal(row.model_id, TEST_PRIMARY_MODEL);
     assert.equal(typeof row.confidence, "number");
     assert.equal(row.state, "active");
     assert.equal(row.kind, "decision");
@@ -527,19 +464,19 @@ test("persisted record: has summary, provider, model, confidence, state, kind", 
 });
 
 test("controller: maps unknown provider classification to 'finding' fallback kind", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-mvp-rm-");
   try {
     const { fetchImpl } = scriptFetch(() =>
       okChatResponse(safeAnalysis({ classification: "totally-unknown-thing" })),
     );
     const outcome = await runRememberController(handle, "Some input.", {
       providerFetchImpl: fetchImpl,
-      providerPrimaryApiKey: PRIMARY_KEY,
-      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-      providerPrimaryModel: PRIMARY_MODEL,
-      providerFallbackApiKey: FALLBACK_KEY,
-      providerFallbackBaseUrl: FALLBACK_BASE_URL,
-      providerFallbackModel: FALLBACK_MODEL,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
     });
     assert.equal(outcome.status, "saved");
     if (outcome.status !== "saved") throw new Error("unreachable");
@@ -550,19 +487,19 @@ test("controller: maps unknown provider classification to 'finding' fallback kin
 });
 
 test("controller: classification 'policy' persists as kind policy", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-mvp-rm-");
   try {
     const { fetchImpl } = scriptFetch(() =>
       okChatResponse(safeAnalysis({ classification: "policy" })),
     );
     const outcome = await runRememberController(handle, "We always use Postgres for primary storage.", {
       providerFetchImpl: fetchImpl,
-      providerPrimaryApiKey: PRIMARY_KEY,
-      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-      providerPrimaryModel: PRIMARY_MODEL,
-      providerFallbackApiKey: FALLBACK_KEY,
-      providerFallbackBaseUrl: FALLBACK_BASE_URL,
-      providerFallbackModel: FALLBACK_MODEL,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
     });
     assert.equal(outcome.status, "saved");
     if (outcome.status !== "saved") throw new Error("unreachable");
@@ -573,19 +510,19 @@ test("controller: classification 'policy' persists as kind policy", async () => 
 });
 
 test("controller: Hermes-style 'policy' classified response maps to policy", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-mvp-rm-");
   try {
     const { fetchImpl } = scriptFetch(() =>
       okChatResponse(safeAnalysis({ classification: "policy" })),
     );
     const outcome = await runRememberController(handle, "Policy: all API calls must timeout after 30s.", {
       providerFetchImpl: fetchImpl,
-      providerPrimaryApiKey: PRIMARY_KEY,
-      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-      providerPrimaryModel: PRIMARY_MODEL,
-      providerFallbackApiKey: FALLBACK_KEY,
-      providerFallbackBaseUrl: FALLBACK_BASE_URL,
-      providerFallbackModel: FALLBACK_MODEL,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
     });
     assert.equal(outcome.status, "saved");
     if (outcome.status !== "saved") throw new Error("unreachable");
@@ -596,7 +533,7 @@ test("controller: Hermes-style 'policy' classified response maps to policy", asy
 });
 
 test("controller: policy aliases (user-policy/project-policy/rule) map to policy", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-mvp-rm-");
   try {
     for (const label of ["user-policy", "project-policy", "rule", "standing-rule", "operating-rule"]) {
       const { fetchImpl } = scriptFetch(() =>
@@ -604,12 +541,12 @@ test("controller: policy aliases (user-policy/project-policy/rule) map to policy
       );
       const outcome = await runRememberController(handle, `Standing instruction: ${label}`, {
         providerFetchImpl: fetchImpl,
-        providerPrimaryApiKey: PRIMARY_KEY,
-        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-        providerPrimaryModel: PRIMARY_MODEL,
-        providerFallbackApiKey: FALLBACK_KEY,
-        providerFallbackBaseUrl: FALLBACK_BASE_URL,
-        providerFallbackModel: FALLBACK_MODEL,
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+        providerPrimaryModel: TEST_PRIMARY_MODEL,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
+        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+        providerFallbackModel: TEST_FALLBACK_MODEL,
       });
       assert.equal(outcome.status, "saved", `label '${label}' should save`);
       if (outcome.status !== "saved") throw new Error("unreachable");
@@ -621,19 +558,19 @@ test("controller: policy aliases (user-policy/project-policy/rule) map to policy
 });
 
 test("controller: classification 'constraint' persists as kind constraint", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-mvp-rm-");
   try {
     const { fetchImpl } = scriptFetch(() =>
       okChatResponse(safeAnalysis({ classification: "constraint" })),
     );
     const outcome = await runRememberController(handle, "Never exceed 5000 requests per minute.", {
       providerFetchImpl: fetchImpl,
-      providerPrimaryApiKey: PRIMARY_KEY,
-      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-      providerPrimaryModel: PRIMARY_MODEL,
-      providerFallbackApiKey: FALLBACK_KEY,
-      providerFallbackBaseUrl: FALLBACK_BASE_URL,
-      providerFallbackModel: FALLBACK_MODEL,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
     });
     assert.equal(outcome.status, "saved");
     if (outcome.status !== "saved") throw new Error("unreachable");
@@ -644,7 +581,7 @@ test("controller: classification 'constraint' persists as kind constraint", asyn
 });
 
 test("controller: constraint aliases (project-constraint/requirement/limitation/boundary/hard-limit) map to constraint", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-mvp-rm-");
   try {
     for (const label of ["project-constraint", "requirement", "limitation", "boundary", "hard-limit"]) {
       const { fetchImpl } = scriptFetch(() =>
@@ -652,12 +589,12 @@ test("controller: constraint aliases (project-constraint/requirement/limitation/
       );
       const outcome = await runRememberController(handle, `Hard limit: ${label}`, {
         providerFetchImpl: fetchImpl,
-        providerPrimaryApiKey: PRIMARY_KEY,
-        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-        providerPrimaryModel: PRIMARY_MODEL,
-        providerFallbackApiKey: FALLBACK_KEY,
-        providerFallbackBaseUrl: FALLBACK_BASE_URL,
-        providerFallbackModel: FALLBACK_MODEL,
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+        providerPrimaryModel: TEST_PRIMARY_MODEL,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
+        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+        providerFallbackModel: TEST_FALLBACK_MODEL,
       });
       assert.equal(outcome.status, "saved", `label '${label}' should save`);
       if (outcome.status !== "saved") throw new Error("unreachable");
@@ -674,7 +611,7 @@ test("controller: constraint aliases (project-constraint/requirement/limitation/
 // ---------------------------------------------------------------------------
 
 test("remember: a provider summary that is entirely a secret fragment is rejected", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-mvp-rm-");
   try {
     // The provider returns a summary that IS the secret, with no
     // surrounding safe text. After redaction the summary is empty,
@@ -686,12 +623,12 @@ test("remember: a provider summary that is entirely a secret fragment is rejecte
     );
     const outcome = await runRememberController(handle, "Some input.", {
       providerFetchImpl: fetchImpl,
-      providerPrimaryApiKey: PRIMARY_KEY,
-      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-      providerPrimaryModel: PRIMARY_MODEL,
-      providerFallbackApiKey: FALLBACK_KEY,
-      providerFallbackBaseUrl: FALLBACK_BASE_URL,
-      providerFallbackModel: FALLBACK_MODEL,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
     });
     assert.equal(outcome.status, "rejected");
     if (outcome.status !== "rejected") throw new Error("unreachable");
@@ -704,7 +641,7 @@ test("remember: a provider summary that is entirely a secret fragment is rejecte
 });
 
 test("remember: a provider summary with a secret embedded in real text is redacted but still saved", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-mvp-rm-");
   try {
     const leakySummary =
       "The CI uses a token; the project uses Postgres 16 for the primary store.";
@@ -718,12 +655,12 @@ test("remember: a provider summary with a secret embedded in real text is redact
     );
     const outcome = await runRememberController(handle, "Some input.", {
       providerFetchImpl: fetchImpl,
-      providerPrimaryApiKey: PRIMARY_KEY,
-      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-      providerPrimaryModel: PRIMARY_MODEL,
-      providerFallbackApiKey: FALLBACK_KEY,
-      providerFallbackBaseUrl: FALLBACK_BASE_URL,
-      providerFallbackModel: FALLBACK_MODEL,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
     });
     assert.equal(outcome.status, "saved");
     if (outcome.status !== "saved") throw new Error("unreachable");
@@ -746,7 +683,7 @@ test("remember: a provider summary with a secret embedded in real text is redact
 // ---------------------------------------------------------------------------
 
 test("storage: re-running initStorage does not duplicate columns and preserves existing rows", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-mvp-rm-");
   try {
     // Insert one record through the controller.
     const { fetchImpl } = scriptFetch(() =>
@@ -754,12 +691,12 @@ test("storage: re-running initStorage does not duplicate columns and preserves e
     );
     const outcome = await runRememberController(handle, "Hello world", {
       providerFetchImpl: fetchImpl,
-      providerPrimaryApiKey: PRIMARY_KEY,
-      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-      providerPrimaryModel: PRIMARY_MODEL,
-      providerFallbackApiKey: FALLBACK_KEY,
-      providerFallbackBaseUrl: FALLBACK_BASE_URL,
-      providerFallbackModel: FALLBACK_MODEL,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
     });
     assert.equal(outcome.status, "saved");
     if (outcome.status !== "saved") throw new Error("unreachable");
@@ -799,7 +736,7 @@ test("storage: re-running initStorage does not duplicate columns and preserves e
 // ---------------------------------------------------------------------------
 
 test("tool: handleRemember returns a structured result with one of the four statuses", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-mvp-rm-");
   try {
     setStorageProvider(() => ({ handle, ownsHandle: false }));
     try {
@@ -883,7 +820,7 @@ test("redactSummary: redacts secret-shaped substrings and preserves safe text", 
 // ---------------------------------------------------------------------------
 
 test("related-memory seam: returns empty list with a stable reason on empty store", () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-mvp-rm-");
   try {
     const out = findRelatedMemories(handle, { text: "anything" });
     assert.deepEqual(out.memories, []);
@@ -895,7 +832,7 @@ test("related-memory seam: returns empty list with a stable reason on empty stor
 });
 
 test("related-memory seam: returns top lexical related memories from active records", () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-mvp-rm-");
   try {
     // Seed three active memories. The ranker uses lexical overlap
     // on the `summary` column (read back as `memoryContent`); the
@@ -962,7 +899,7 @@ test("related-memory seam: returns top lexical related memories from active reco
 });
 
 test("related-memory seam: respects the default topK of 5", () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-mvp-rm-");
   try {
     // Seed 8 active memories that all share a strong overlap with
     // the query. The default topK is 5, so the result must have
@@ -993,7 +930,7 @@ test("related-memory seam: respects the default topK of 5", () => {
 });
 
 test("related-memory seam: respects an explicit topK override", () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-mvp-rm-");
   try {
     for (let i = 0; i < 6; i++) {
       insertMemoryRecord(handle, {
@@ -1018,7 +955,7 @@ test("related-memory seam: respects an explicit topK override", () => {
 });
 
 test("related-memory seam: ignores superseded/invalidated memories (active only)", () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-mvp-rm-");
   try {
     // Insert one active Postgres row (must appear) and one
     // superseded Postgres row (must NOT appear). The MVP V1
@@ -1059,7 +996,7 @@ test("related-memory seam: ignores superseded/invalidated memories (active only)
 });
 
 test("related-memory seam: returns empty when query has no lexical overlap with stored memories", () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-mvp-rm-");
   try {
     insertMemoryRecord(handle, {
       kind: "preference",

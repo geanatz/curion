@@ -29,6 +29,9 @@ import {
   type MemoryAnalysisResult,
 } from "../src/providers/memory-analysis.ts";
 import { PUBLIC_TOOL_NAMES, buildServer } from "../src/server.ts";
+import { withCleanEnv } from "./_helpers/env.ts";
+import { TEST_ENV_KEYS, TEST_PRIMARY_KEY, TEST_FALLBACK_KEY } from "./shared-test-provider.ts";
+import { okChatResponse } from "./_helpers/provider-stub.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -59,17 +62,6 @@ function scriptedFetch(
   return f;
 }
 
-function okChatResponse(content: string): Response {
-  return new Response(
-    JSON.stringify({
-      id: "x",
-      model: "m",
-      choices: [{ message: { role: "assistant", content } }],
-    }),
-    { status: 200, headers: { "content-type": "application/json" } },
-  );
-}
-
 function httpErrorResponse(status: number, text = "boom"): Response {
   return new Response(text, { status });
 }
@@ -82,41 +74,18 @@ const VALID_JSON = JSON.stringify({
   classification: "project-context",
 });
 
-const PRIMARY_KEY = "sk-primary-test-not-real-12345";
-const FALLBACK_KEY = "nvapi-fallback-test-not-real-12345";
-
-/** Save and restore a fixed set of env vars around a test body. */
-function withCleanEnv<T>(
-  keys: string[],
-  fn: () => Promise<T> | T,
-): Promise<T> | T {
-  const before: Record<string, string | undefined> = {};
-  for (const k of keys) before[k] = process.env[k];
-  for (const k of keys) delete process.env[k];
-  return Promise.resolve(fn()).finally(() => {
-    for (const k of keys) {
-      const v = before[k];
-      if (v === undefined) delete process.env[k];
-      else process.env[k] = v;
-    }
-  });
-}
-
-const ENV_KEYS = [
-  "CURION_PRIMARY_API_KEY",
-  "CURION_FALLBACK_API_KEY",
-  "CURION_PRIMARY_BASE_URL",
-  "CURION_PRIMARY_MODEL",
-  "CURION_PRIMARY_PROVIDER_LABEL",
+/**
+ * The provider-adapter env keys are the shared `TEST_ENV_KEYS`
+ * (canonical role-based names + legacy vendor aliases) plus
+ * four adapter-specific format / strict-json knobs that the
+ * generic provider contract does not own.
+ */
+const ENV_KEYS: readonly string[] = [
+  ...TEST_ENV_KEYS,
   "CURION_PRIMARY_STRICT_JSON",
   "CURION_PRIMARY_API_FORMAT",
-  "CURION_FALLBACK_BASE_URL",
-  "CURION_FALLBACK_MODEL",
-  "CURION_FALLBACK_PROVIDER_LABEL",
   "CURION_FALLBACK_STRICT_JSON",
   "CURION_FALLBACK_API_FORMAT",
-  "CURION_ADAPTER_TIMEOUT_MS",
-  "CURION_ADAPTER_MAX_TOKENS",
 ];
 
 // ---------------------------------------------------------------------------
@@ -203,11 +172,11 @@ test("adapter: loadAdapterConfig treats whitespace-only env values as missing", 
 
 test("adapter: loadAdapterConfig trims surrounding whitespace from env values", () => {
   return withCleanEnv(ENV_KEYS, () => {
-    process.env.CURION_PRIMARY_API_KEY = `  ${PRIMARY_KEY}\n`;
+    process.env.CURION_PRIMARY_API_KEY = `  ${TEST_PRIMARY_KEY}\n`;
     process.env.CURION_PRIMARY_BASE_URL = ` https://api.example.com/v1 `;
     process.env.CURION_PRIMARY_MODEL = ` my-model `;
     const cfg = loadAdapterConfig();
-    assert.equal(cfg.primaryApiKey, PRIMARY_KEY);
+    assert.equal(cfg.primaryApiKey, TEST_PRIMARY_KEY);
     assert.equal(cfg.primaryBaseUrl, "https://api.example.com/v1");
     assert.equal(cfg.primaryModel, "my-model");
   });
@@ -348,8 +317,8 @@ test("adapter: primary success returns adapter result with no fallback", async (
   const log: Array<{ url: string; body: string }> = [];
   const fetchImpl = scriptedFetch([() => okChatResponse(VALID_JSON)], log);
   const r = await analyzeMemoryWithFallback("hello world", undefined, {
-    primaryApiKey: PRIMARY_KEY,
-    fallbackApiKey: FALLBACK_KEY,
+    primaryApiKey: TEST_PRIMARY_KEY,
+    fallbackApiKey: TEST_FALLBACK_KEY,
     // Use NIM-style URLs so the URL-derived provider id matches
     // the operator-visible labels. The adapter derives the id
     // from the base URL, not from a hardcoded string.
@@ -376,8 +345,8 @@ test("adapter: primary success returns adapter result with no fallback", async (
   assert.equal(log.length, 1);
   assert.match(log[0]!.url, /^https:\/\/primary\.nvidia\.test\/v1\/chat\/completions/);
   // Request body must not include the API key.
-  assert.ok(!log[0]!.body.includes(PRIMARY_KEY));
-  assert.ok(!log[0]!.body.includes(FALLBACK_KEY));
+  assert.ok(!log[0]!.body.includes(TEST_PRIMARY_KEY));
+  assert.ok(!log[0]!.body.includes(TEST_FALLBACK_KEY));
 });
 
 // ---------------------------------------------------------------------------
@@ -394,8 +363,8 @@ test("adapter: primary hard failure (500) falls back to secondary provider", asy
     log,
   );
   const r = await analyzeMemoryWithFallback("hello world", undefined, {
-    primaryApiKey: PRIMARY_KEY,
-    fallbackApiKey: FALLBACK_KEY,
+    primaryApiKey: TEST_PRIMARY_KEY,
+    fallbackApiKey: TEST_FALLBACK_KEY,
     // NIM-style primary; explicit MiniMax-style fallback.
     primaryBaseUrl: "https://primary.nvidia.test/v1",
     primaryModel: "primary-model",
@@ -434,8 +403,8 @@ test("adapter: primary invalid JSON triggers one repair on the same provider, no
     log,
   );
   const r = await analyzeMemoryWithFallback("hello world", undefined, {
-    primaryApiKey: PRIMARY_KEY,
-    fallbackApiKey: FALLBACK_KEY,
+    primaryApiKey: TEST_PRIMARY_KEY,
+    fallbackApiKey: TEST_FALLBACK_KEY,
     primaryBaseUrl: "https://primary.nvidia.test/v1",
     primaryModel: "primary-model",
     fallbackBaseUrl: "https://fallback.minimax.test/v1",
@@ -472,8 +441,8 @@ test("adapter: primary invalid JSON + failed repair falls back to secondary prov
     log,
   );
   const r = await analyzeMemoryWithFallback("hello world", undefined, {
-    primaryApiKey: PRIMARY_KEY,
-    fallbackApiKey: FALLBACK_KEY,
+    primaryApiKey: TEST_PRIMARY_KEY,
+    fallbackApiKey: TEST_FALLBACK_KEY,
     primaryBaseUrl: "https://primary.nvidia.test/v1",
     primaryModel: "primary-model",
     fallbackBaseUrl: "https://fallback.minimax.test/v1",
@@ -511,8 +480,8 @@ test("adapter: both providers failing returns a typed all-providers-failed resul
     log,
   );
   const r = await analyzeMemoryWithFallback("hello world", undefined, {
-    primaryApiKey: PRIMARY_KEY,
-    fallbackApiKey: FALLBACK_KEY,
+    primaryApiKey: TEST_PRIMARY_KEY,
+    fallbackApiKey: TEST_FALLBACK_KEY,
     primaryBaseUrl: "https://primary.nvidia.test/v1",
     primaryModel: "p",
     fallbackBaseUrl: "https://fallback.minimax.test/v1",
@@ -525,8 +494,8 @@ test("adapter: both providers failing returns a typed all-providers-failed resul
     assert.equal(typeof r.message, "string");
     assert.ok(r.message.length > 0);
     // No key values in the message.
-    assert.ok(!r.message.includes(PRIMARY_KEY));
-    assert.ok(!r.message.includes(FALLBACK_KEY));
+    assert.ok(!r.message.includes(TEST_PRIMARY_KEY));
+    assert.ok(!r.message.includes(TEST_FALLBACK_KEY));
     // Last error is the fallback's hard failure.
     assert.equal(r.lastError?.kind, "server");
     // 1 primary hard fail + 1 fallback hard fail = 2 calls.
@@ -554,8 +523,8 @@ test("adapter: both providers with invalid structured output (4 calls) returns t
     log,
   );
   const r = await analyzeMemoryWithFallback("hello world", undefined, {
-    primaryApiKey: PRIMARY_KEY,
-    fallbackApiKey: FALLBACK_KEY,
+    primaryApiKey: TEST_PRIMARY_KEY,
+    fallbackApiKey: TEST_FALLBACK_KEY,
     primaryBaseUrl: "https://primary.nvidia.test/v1",
     primaryModel: "p",
     fallbackBaseUrl: "https://fallback.minimax.test/v1",
@@ -595,7 +564,7 @@ test("adapter: no API key configured returns typed missing-config (no http calls
     if (!r.ok) {
       assert.equal(r.kind, "missing-config");
       assert.equal(r.httpCalls, 0);
-      assert.ok(!r.message.includes(PRIMARY_KEY));
+      assert.ok(!r.message.includes(TEST_PRIMARY_KEY));
     }
     assert.equal(log.length, 0, "no http calls when neither key is configured");
   });
@@ -608,7 +577,7 @@ test("adapter: only primary key configured, primary hard-fails -> all-providers-
     log,
   );
   const r = await analyzeMemoryWithFallback("hello world", undefined, {
-    primaryApiKey: PRIMARY_KEY,
+    primaryApiKey: TEST_PRIMARY_KEY,
     primaryBaseUrl: "https://primary.nvidia.test/v1",
     primaryModel: "p",
     fetchImpl,
@@ -639,7 +608,7 @@ test("adapter: NVIDIA-only default (no fallback configured) on primary hard-fail
       log,
     );
     const r = await analyzeMemoryWithFallback("hello world", undefined, {
-      primaryApiKey: PRIMARY_KEY,
+      primaryApiKey: TEST_PRIMARY_KEY,
       // No fallback key, no fallback URL, no fallback model.
       // The default config under the NVIDIA-only stance has an
       // empty fallback slot.
@@ -681,8 +650,8 @@ test("adapter: success result exposes providerUsed / modelUsed / fallbackUsed an
     "hello world",
     undefined,
     {
-      primaryApiKey: PRIMARY_KEY,
-      fallbackApiKey: FALLBACK_KEY,
+      primaryApiKey: TEST_PRIMARY_KEY,
+      fallbackApiKey: TEST_FALLBACK_KEY,
       primaryBaseUrl: "https://primary.nvidia.test/v1",
       primaryModel: "primary-model",
       fallbackBaseUrl: "https://fallback.minimax.test/v1",
@@ -703,8 +672,8 @@ test("adapter: success result exposes providerUsed / modelUsed / fallbackUsed an
   }
   // The serialized result must not contain any API key value.
   const serialized = JSON.stringify(r);
-  assert.ok(!serialized.includes(PRIMARY_KEY), "primary key leaked");
-  assert.ok(!serialized.includes(FALLBACK_KEY), "fallback key leaked");
+  assert.ok(!serialized.includes(TEST_PRIMARY_KEY), "primary key leaked");
+  assert.ok(!serialized.includes(TEST_FALLBACK_KEY), "fallback key leaked");
 });
 
 test("adapter: result never echoes the input text", async () => {
@@ -712,7 +681,7 @@ test("adapter: result never echoes the input text", async () => {
   const log: Array<{ url: string; body: string }> = [];
   const fetchImpl = scriptedFetch([() => okChatResponse(VALID_JSON)], log);
   const r = await analyzeMemoryWithFallback(secretInput, undefined, {
-    primaryApiKey: PRIMARY_KEY,
+    primaryApiKey: TEST_PRIMARY_KEY,
     primaryBaseUrl: "https://primary.nvidia.test/v1",
     primaryModel: "p",
     fetchImpl,
@@ -752,7 +721,7 @@ test("adapter: invalid input returns typed invalid-input (no http call)", async 
   const fetchImpl = scriptedFetch([() => okChatResponse(VALID_JSON)], log);
   for (const bad of ["", "   "]) {
     const r = await analyzeMemoryWithFallback(bad, undefined, {
-      primaryApiKey: PRIMARY_KEY,
+      primaryApiKey: TEST_PRIMARY_KEY,
       fetchImpl,
     });
     assert.equal(r.ok, false);
@@ -778,8 +747,8 @@ test("adapter: disableRepair forces fallback on parse failure (no repair attempt
     log,
   );
   const r = await analyzeMemoryWithFallback("hello", undefined, {
-    primaryApiKey: PRIMARY_KEY,
-    fallbackApiKey: FALLBACK_KEY,
+    primaryApiKey: TEST_PRIMARY_KEY,
+    fallbackApiKey: TEST_FALLBACK_KEY,
     primaryBaseUrl: "https://primary.nvidia.test/v1",
     primaryModel: "p",
     fallbackBaseUrl: "https://fallback.minimax.test/v1",
@@ -809,7 +778,7 @@ test("adapter: repair prompt does not echo the original input text", async () =>
   );
   const secretInput = "TOP-SECRET-INPUT-DO-NOT-LEAK";
   await analyzeMemoryWithFallback(secretInput, undefined, {
-    primaryApiKey: PRIMARY_KEY,
+    primaryApiKey: TEST_PRIMARY_KEY,
     primaryBaseUrl: "https://primary.nvidia.test/v1",
     primaryModel: "p",
     fetchImpl,
@@ -841,7 +810,7 @@ test("adapter: relatedMemories are included in the initial prompt only (not the 
     { id: 42, memoryContent: "prior context summary", kind: "memory" },
   ];
   await analyzeMemoryWithFallback("hello", related, {
-    primaryApiKey: PRIMARY_KEY,
+    primaryApiKey: TEST_PRIMARY_KEY,
     primaryBaseUrl: "https://primary.nvidia.test/v1",
     primaryModel: "p",
     fetchImpl,
@@ -864,7 +833,7 @@ test("adapter: related-memory prompt rendering is prose-only (no #id, includes m
     { id: 11, memoryContent: "The team prefers dark mode in the dashboard" },
   ];
   await analyzeMemoryWithFallback("hello", related, {
-    primaryApiKey: PRIMARY_KEY,
+    primaryApiKey: TEST_PRIMARY_KEY,
     primaryBaseUrl: "https://primary.nvidia.test/v1",
     primaryModel: "p",
     fetchImpl,
@@ -906,7 +875,7 @@ test("adapter: related-memory prompt includes memoryContent when related is non-
     { id: 99, memoryContent: "Render was the previous hosting platform" },
   ];
   await analyzeMemoryWithFallback("hello", related, {
-    primaryApiKey: PRIMARY_KEY,
+    primaryApiKey: TEST_PRIMARY_KEY,
     primaryBaseUrl: "https://primary.nvidia.test/v1",
     primaryModel: "p",
     fetchImpl,
@@ -943,8 +912,8 @@ test("adapter: no key values appear in serialized failure results", async () => 
     log,
   );
   const r = await analyzeMemoryWithFallback("hello world", undefined, {
-    primaryApiKey: PRIMARY_KEY,
-    fallbackApiKey: FALLBACK_KEY,
+    primaryApiKey: TEST_PRIMARY_KEY,
+    fallbackApiKey: TEST_FALLBACK_KEY,
     primaryBaseUrl: "https://primary.nvidia.test/v1",
     primaryModel: "p",
     fallbackBaseUrl: "https://fallback.minimax.test/v1",
@@ -954,8 +923,8 @@ test("adapter: no key values appear in serialized failure results", async () => 
   assert.equal(r.ok, false);
   if (!r.ok) {
     const serialized = JSON.stringify(r);
-    assert.ok(!serialized.includes(PRIMARY_KEY));
-    assert.ok(!serialized.includes(FALLBACK_KEY));
+    assert.ok(!serialized.includes(TEST_PRIMARY_KEY));
+    assert.ok(!serialized.includes(TEST_FALLBACK_KEY));
   }
 });
 
@@ -964,7 +933,7 @@ test("adapter: no defaults - env unset yields empty slots and provider_error wit
     const log: Array<{ url: string; body: string }> = [];
     const fetchImpl = scriptedFetch([() => okChatResponse(VALID_JSON)], log);
     const r = await analyzeMemoryWithFallback("hello", undefined, {
-      primaryApiKey: PRIMARY_KEY,
+      primaryApiKey: TEST_PRIMARY_KEY,
       // No baseUrl/model overrides and no env vars -> adapter has empty config.
       fetchImpl,
     });
@@ -987,7 +956,7 @@ test("adapter: env override CURION_PRIMARY_MODEL switches primary model id", asy
       log,
     );
     const r = await analyzeMemoryWithFallback("hello", undefined, {
-      primaryApiKey: PRIMARY_KEY,
+      primaryApiKey: TEST_PRIMARY_KEY,
       fetchImpl,
     });
     assert.equal(r.ok, true);
@@ -1014,8 +983,8 @@ test("adapter: env override CURION_FALLBACK_BASE_URL and CURION_FALLBACK_MODEL f
       log,
     );
     const r = await analyzeMemoryWithFallback("hello", undefined, {
-      primaryApiKey: PRIMARY_KEY,
-      fallbackApiKey: FALLBACK_KEY,
+      primaryApiKey: TEST_PRIMARY_KEY,
+      fallbackApiKey: TEST_FALLBACK_KEY,
       fetchImpl,
     });
     assert.equal(r.ok, true);
@@ -1054,7 +1023,7 @@ test("adapter: missing CURION_FALLBACK_BASE_URL / CURION_FALLBACK_MODEL / CURION
       log,
     );
     const r = await analyzeMemoryWithFallback("hello", undefined, {
-      primaryApiKey: PRIMARY_KEY,
+      primaryApiKey: TEST_PRIMARY_KEY,
       fetchImpl,
     });
     assert.equal(r.ok, false);

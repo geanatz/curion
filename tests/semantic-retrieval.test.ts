@@ -15,8 +15,6 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 
 // ---------------------------------------------------------------------------
 // Imports from production modules (NOT benchmark)
@@ -33,8 +31,6 @@ import {
   getEmbedding,
   getEmbeddingsForMemories,
   deleteEmbedding,
-  initStorage,
-  closeStorage,
   insertMemoryRecord,
   type StorageHandle,
   type EmbeddingRecord,
@@ -54,24 +50,15 @@ import {
 // Helpers
 // ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function mkStorage(): { tmp: string; handle: StorageHandle } {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-semantic-test-"));
-  const handle = initStorage({ projectRoot: tmp });
-  return { tmp, handle };
-}
-
-function rmStorage(tmp: string, handle: StorageHandle): void {
-  try {
-    handle.db.close();
-  } catch {
-    // ignore
-  }
-  fs.rmSync(tmp, { recursive: true, force: true });
-}
+import { mkStorage, rmStorage } from "./_helpers/test-storage.ts";
+import {
+  TEST_PRIMARY_KEY,
+  TEST_FALLBACK_KEY,
+  TEST_PRIMARY_BASE_URL,
+  TEST_PRIMARY_MODEL,
+  TEST_FALLBACK_BASE_URL,
+  TEST_FALLBACK_MODEL,
+} from "./shared-test-provider.ts";
 
 function insertTestMemory(
   handle: StorageHandle,
@@ -444,14 +431,6 @@ test("embedOnRemember: uses provided modelId in metadata", async () => {
 // ---------------------------------------------------------------------------
 // Recall controller semantic integration tests
 // ---------------------------------------------------------------------------
-
-const TEST_PRIMARY_KEY = "sk-primary-test-not-real-12345";
-const TEST_FALLBACK_KEY = "sk-fallback-test-not-real-12345";
-// Explicit provider config: neutral URLs -> "custom" label.
-const TEST_PRIMARY_BASE_URL = "https://api.example.com/v1";
-const TEST_PRIMARY_MODEL = "test/model-primary";
-const TEST_FALLBACK_BASE_URL = "https://api.fallback.example/v1";
-const TEST_FALLBACK_MODEL = "test/model-fallback";
 
 /** Scripted fetch for tests that need to call the synthesis provider. */
 function makeScriptedFetch(content: string): typeof fetch {

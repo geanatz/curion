@@ -27,14 +27,11 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { runRememberController } from "../src/controller/remember-controller.ts";
 import {
-  initStorage,
   type StorageHandle,
 } from "../src/storage/storage.ts";
 import {
@@ -54,25 +51,19 @@ import {
 } from "../src/config/registry.ts";
 import { buildServer, PUBLIC_TOOL_NAMES } from "../src/server.ts";
 import { classifyInput } from "../src/safety/precheck.ts";
+import {
+  TEST_PRIMARY_KEY,
+  TEST_FALLBACK_KEY,
+  TEST_PRIMARY_BASE_URL,
+  TEST_PRIMARY_MODEL,
+  TEST_FALLBACK_BASE_URL,
+  TEST_FALLBACK_MODEL,
+} from "./shared-test-provider.ts";
+import { mkStorage, rmStorage } from "./_helpers/test-storage.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function mkStorage(): { tmp: string; handle: StorageHandle } {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-safety-"));
-  const handle = initStorage({ projectRoot: tmp });
-  return { tmp, handle };
-}
-
-function rmStorage(tmp: string, handle: StorageHandle): void {
-  try {
-    handle.db.close();
-  } catch {
-    // ignore
-  }
-  fs.rmSync(tmp, { recursive: true, force: true });
-}
 
 function scriptFetch(responder: () => Response): {
   fetchImpl: typeof fetch;
@@ -112,14 +103,6 @@ function safeAnalysis(): string {
   });
 }
 
-const PRIMARY_KEY = "sk-primary-test-not-real-12345";
-const FALLBACK_KEY = "nvapi-fallback-test-not-real-12345";
-// Explicit provider config: neutral URLs -> "custom" label.
-const PRIMARY_BASE_URL = "https://api.example.com/v1";
-const PRIMARY_MODEL = "test/model-primary";
-const FALLBACK_BASE_URL = "https://api.fallback.example/v1";
-const FALLBACK_MODEL = "test/model-fallback";
-
 interface RunOpts {
   fetchImpl: typeof fetch;
   text: string;
@@ -129,12 +112,12 @@ interface RunOpts {
 async function runController(handle: StorageHandle, opts: RunOpts) {
   return runRememberController(handle, opts.text, {
     providerFetchImpl: opts.fetchImpl,
-    providerPrimaryApiKey: PRIMARY_KEY,
-    providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-    providerPrimaryModel: PRIMARY_MODEL,
-    providerFallbackApiKey: FALLBACK_KEY,
-    providerFallbackBaseUrl: FALLBACK_BASE_URL,
-    providerFallbackModel: FALLBACK_MODEL,
+    providerPrimaryApiKey: TEST_PRIMARY_KEY,
+    providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+    providerPrimaryModel: TEST_PRIMARY_MODEL,
+    providerFallbackApiKey: TEST_FALLBACK_KEY,
+    providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+    providerFallbackModel: TEST_FALLBACK_MODEL,
     confidenceThreshold: opts.confidenceThreshold,
   });
 }
@@ -365,7 +348,7 @@ test("classifyInput: HTTP header block is detected as raw-dump", () => {
 // ---------------------------------------------------------------------------
 
 test("remember: prompt-injection is rejected before any provider call; no rows persisted", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-safety-");
   try {
     const { fetchImpl, calls } = scriptFetch(() => okChatResponse(safeAnalysis()));
     const outcome = await runController(handle, {
@@ -384,7 +367,7 @@ test("remember: prompt-injection is rejected before any provider call; no rows p
 });
 
 test("remember: unsafe-preference is rejected before any provider call; no rows persisted", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-safety-");
   try {
     const { fetchImpl, calls } = scriptFetch(() => okChatResponse(safeAnalysis()));
     const outcome = await runController(handle, {
@@ -407,7 +390,7 @@ test("remember: unsafe-preference is rejected before any provider call; no rows 
 // ---------------------------------------------------------------------------
 
 test("remember: self-conflict returns rejected with clarification_needed before any provider call; no rows persisted", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-safety-");
   try {
     const { fetchImpl, calls } = scriptFetch(() => okChatResponse(safeAnalysis()));
     const outcome = await runController(handle, {
@@ -432,7 +415,7 @@ test("remember: self-conflict returns rejected with clarification_needed before 
 // ---------------------------------------------------------------------------
 
 test("remember: mixed safe+sensitive is rejected before any provider call; secret fragment never stored", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-safety-");
   try {
     const { fetchImpl, calls } = scriptFetch(() => okChatResponse(safeAnalysis()));
     const secret = "glpat-abcdefghijklmnopqrst";
@@ -458,7 +441,7 @@ test("remember: mixed safe+sensitive is rejected before any provider call; secre
 // ---------------------------------------------------------------------------
 
 test("remember: pure secret input is rejected before any provider call; no rows persisted", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-safety-");
   try {
     const { fetchImpl, calls } = scriptFetch(() => okChatResponse(safeAnalysis()));
     const outcome = await runController(handle, {
@@ -481,7 +464,7 @@ test("remember: pure secret input is rejected before any provider call; no rows 
 // ---------------------------------------------------------------------------
 
 test("remember: safe input is stored with provider-normalized summary; raw input not in DB", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-safety-");
   try {
     const { fetchImpl, calls } = scriptFetch(() => okChatResponse(safeAnalysis()));
     const rawText =
@@ -492,9 +475,9 @@ test("remember: safe input is stored with provider-normalized summary; raw input
     assert.equal(calls.length, 1, "provider should be called exactly once for safe input");
     const rec = outcome.record;
     assert.ok(rec.id > 0);
-    // Provider label is derived from PRIMARY_BASE_URL (neutral URL -> "custom").
+    // Provider label is derived from TEST_PRIMARY_BASE_URL (neutral URL -> "custom").
     assert.equal(rec.providerId, "custom");
-    assert.equal(rec.modelId, PRIMARY_MODEL);
+    assert.equal(rec.modelId, TEST_PRIMARY_MODEL);
     assert.equal(rec.state, "active");
     assert.equal(rec.kind, "fact");
     assert.ok((rec.confidence ?? 0) > 0);
@@ -525,7 +508,7 @@ test("remember: safe input is stored with provider-normalized summary; raw input
 // ---------------------------------------------------------------------------
 
 test("DB scan: unsafe cases do not persist raw input or secret fragments in any string column", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-safety-");
   try {
     const { fetchImpl } = scriptFetch(() => okChatResponse(safeAnalysis()));
     const cases: Array<{ text: string; forbidden: string }> = [
@@ -593,7 +576,7 @@ test("DB scan: unsafe cases do not persist raw input or secret fragments in any 
 // ---------------------------------------------------------------------------
 
 test("remember: raw-dump input is rejected before any provider call; reason mentions summarization", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-safety-");
   try {
     const { fetchImpl, calls } = scriptFetch(() => okChatResponse(safeAnalysis()));
     const headers = [
@@ -627,7 +610,7 @@ test("remember: raw-dump input is rejected before any provider call; reason ment
 // ---------------------------------------------------------------------------
 
 test("tool: handleRemember short-circuits for prompt-injection, unsafe-preference, and self-conflict", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-safety-");
   try {
     setStorageProvider(() => ({ handle, ownsHandle: false }));
     try {
@@ -671,7 +654,7 @@ test("tool: handleRemember short-circuits for prompt-injection, unsafe-preferenc
 // ---------------------------------------------------------------------------
 
 test("logging: unsafe input (secret + mixed) does not echo raw text or secret fragments to stderr", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-safety-");
   let captured = "";
   const origWrite = process.stderr.write.bind(process.stderr);
   // Buffer stderr. We restore in finally.
@@ -822,7 +805,7 @@ test("recall handler: safe / unsafe input both surface no_memory with no relevan
   // and fail with `provider_error` (the test env does not source
   // `.env`). Use an empty isolated storage so the recall pipeline
   // short-circuits on the no-candidates path for both inputs.
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-safety-");
   try {
     setRecallStorageProvider(() => ({ handle, ownsHandle: false }));
     setListRegisteredProjectsStub(() => []);
@@ -845,7 +828,7 @@ test("recall handler: safe / unsafe input both surface no_memory with no relevan
 });
 
 test("storage: memories table never has a raw/original text column", () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-safety-");
   try {
     const cols = handle.db.prepare("PRAGMA table_info(memories)").all() as Array<{ name: string }>;
     const names = cols.map((c) => c.name);
@@ -880,7 +863,7 @@ test("storage: memories table never has a raw/original text column", () => {
 // ---------------------------------------------------------------------------
 
 test("remember: input that contains BOTH a secret and injection-style language is rejected before any provider call", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-safety-");
   try {
     const { fetchImpl, calls } = scriptFetch(() => okChatResponse(safeAnalysis()));
     // Contains BOTH a secret AND injection-style language. The
@@ -903,7 +886,7 @@ test("remember: input that contains BOTH a secret and injection-style language i
 });
 
 test("remember: input that is dominated by a secret is classified as secret (not mixed-safe-sensitive)", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-safety-");
   try {
     const { fetchImpl, calls } = scriptFetch(() => okChatResponse(safeAnalysis()));
     // Bare credential plus a short description: non-secret

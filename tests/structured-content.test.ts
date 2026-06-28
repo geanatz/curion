@@ -58,9 +58,6 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 
 import { buildServer, PUBLIC_TOOL_NAMES } from "../src/server.ts";
 import {
@@ -78,7 +75,6 @@ import {
   resetStorageProvider as resetRecallStorageProvider,
 } from "../src/tools/recall.ts";
 import {
-  initStorage,
   insertMemoryRecord,
   type StorageHandle,
   type MemoryRecord,
@@ -89,65 +85,24 @@ import {
   setListRegisteredProjectsStub,
   resetListRegisteredProjectsStub,
 } from "../src/config/registry.ts";
+import {
+  TEST_PRIMARY_KEY,
+  TEST_FALLBACK_KEY,
+  TEST_PRIMARY_BASE_URL,
+  TEST_PRIMARY_MODEL,
+  TEST_FALLBACK_BASE_URL,
+  TEST_FALLBACK_MODEL,
+} from "./shared-test-provider.ts";
+import {
+  scriptFetch,
+  okChatResponse,
+  safeAnalysis,
+} from "./_helpers/provider-stub.ts";
+import { mkStorage, rmStorage } from "./_helpers/test-storage.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function mkStorage(): { tmp: string; handle: StorageHandle } {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-sc-"));
-  const handle = initStorage({ projectRoot: tmp });
-  return { tmp, handle };
-}
-
-function rmStorage(tmp: string, handle: StorageHandle): void {
-  try {
-    handle.db.close();
-  } catch {
-    // ignore
-  }
-  fs.rmSync(tmp, { recursive: true, force: true });
-}
-
-function scriptFetch(responder: () => Response): {
-  fetchImpl: typeof fetch;
-} {
-  const fetchImpl: typeof fetch = async () => responder();
-  return { fetchImpl };
-}
-
-function okChatResponse(content: string): Response {
-  return new Response(
-    JSON.stringify({
-      id: "x",
-      model: "m",
-      choices: [{ message: { role: "assistant", content } }],
-    }),
-    { status: 200, headers: { "content-type": "application/json" } },
-  );
-}
-
-function safeAnalysis(opts: {
-  summary?: string;
-  confidence?: number;
-  classification?: string;
-} = {}): string {
-  return JSON.stringify({
-    summary: opts.summary ?? "The project uses Postgres 16 for the primary store.",
-    confidence: opts.confidence ?? 0.82,
-    tags: ["postgres", "storage"],
-    entities: [{ name: "Postgres", kind: "database" }],
-    classification: opts.classification ?? "fact",
-  });
-}
-
-const PRIMARY_KEY = "sk-primary-test-not-real-12345";
-const FALLBACK_KEY = "nvapi-fallback-test-not-real-12345";
-// Explicit provider config: neutral URLs resolve to "custom" label.
-const PRIMARY_BASE_URL = "https://api.example.com/v1";
-const PRIMARY_MODEL = "test/model-primary";
-const FALLBACK_BASE_URL = "https://api.fallback.example/v1";
-const FALLBACK_MODEL = "test/model-fallback";
 
 /**
  * Drive the actual McpServer tool callback for a given tool
@@ -238,12 +193,12 @@ async function projectRecallWireFormat(
 }> {
   const outcome = await runRecallController(handle, text, {
     providerFetchImpl: fetchImpl,
-    providerPrimaryApiKey: PRIMARY_KEY,
-    providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-    providerPrimaryModel: PRIMARY_MODEL,
-    providerFallbackApiKey: FALLBACK_KEY,
-    providerFallbackBaseUrl: FALLBACK_BASE_URL,
-    providerFallbackModel: FALLBACK_MODEL,
+    providerPrimaryApiKey: TEST_PRIMARY_KEY,
+    providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+    providerPrimaryModel: TEST_PRIMARY_MODEL,
+    providerFallbackApiKey: TEST_FALLBACK_KEY,
+    providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+    providerFallbackModel: TEST_FALLBACK_MODEL,
   });
   // Mirror the tool layer's `formatOutcome` for the
   // `answered` case. The other cases (no_memory /
@@ -400,7 +355,7 @@ test("structuredContent: never includes a `message` field (any status, any tool)
   // invariant is checked exhaustively. The `no_memory` /
   // `rejected` / `provider_error` paths are reachable via
   // the public tool callbacks (no network required).
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-sc-");
   try {
     setRecallStorageProvider(() => ({ handle, ownsHandle: false }));
     try {
@@ -451,7 +406,7 @@ const FORBIDDEN_ID_FIELDS = [
 ];
 
 test("structuredContent: never includes a memory id or model/provider metadata field", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-sc-");
   try {
     // Pre-seed several relevant memories for the recall
     // path. The numeric id is small (1) for the first row
@@ -493,12 +448,12 @@ test("structuredContent: never includes a memory id or model/provider metadata f
       "What database does the project use?",
       {
         providerFetchImpl: fetchImpl,
-        providerPrimaryApiKey: PRIMARY_KEY,
-        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-        providerPrimaryModel: PRIMARY_MODEL,
-        providerFallbackApiKey: FALLBACK_KEY,
-        providerFallbackBaseUrl: FALLBACK_BASE_URL,
-        providerFallbackModel: FALLBACK_MODEL,
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+        providerPrimaryModel: TEST_PRIMARY_MODEL,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
+        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+        providerFallbackModel: TEST_FALLBACK_MODEL,
       },
     );
     assert.equal(recallOut.status, "answered");
@@ -560,7 +515,7 @@ test("structuredContent: never includes a memory id or model/provider metadata f
 // ---------------------------------------------------------------------------
 
 test("structuredContent.notes: plain strings, no Note: prefix, no type/severity, no ids", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-sc-");
   try {
     // Seed two rows with mutual `conflictsWith` pointers
     // above the detector's threshold. The detector fires
@@ -687,7 +642,7 @@ test("structuredContent.notes: plain strings, no Note: prefix, no type/severity,
 });
 
 test("structuredContent.notes (resolved-history): plain strings, no Note: prefix, no type/severity, no ids", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-sc-");
   try {
     // Seed a resolved-history pair: row 1 has the
     // `previous` marker, row 2 has `replaced`. The
@@ -757,7 +712,7 @@ test("structuredContent.notes (resolved-history): plain strings, no Note: prefix
 // ---------------------------------------------------------------------------
 
 test("on-the-wire text fallback (recall.answered with notes): no Note: prefix, no #N id reference", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-sc-");
   try {
     // Seed two rows with a mutual `conflictsWith` pointer so
     // the detector fires.
@@ -844,7 +799,7 @@ test("on-the-wire text fallback (recall.answered with notes): no Note: prefix, n
 });
 
 test("on-the-wire text fallback (recall.answered without notes): just the answer", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-sc-");
   try {
     insertMemoryRecord(handle, {
       kind: "fact",
@@ -889,7 +844,7 @@ test("on-the-wire text fallback (recall.answered without notes): just the answer
 // ---------------------------------------------------------------------------
 
 test("recall structuredContent: no_memory -> { status: 'no_memory' }", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-sc-");
   try {
     setRecallStorageProvider(() => ({ handle, ownsHandle: false }));
     setListRegisteredProjectsStub(() => []);
@@ -910,7 +865,7 @@ test("recall structuredContent: no_memory -> { status: 'no_memory' }", async () 
 });
 
 test("recall structuredContent: rejected -> { status: 'rejected', reason }", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-sc-");
   try {
     setRecallStorageProvider(() => ({ handle, ownsHandle: false }));
     try {
@@ -941,7 +896,7 @@ test("recall structuredContent: rejected -> { status: 'rejected', reason }", asy
 });
 
 test("recall structuredContent: answered without notes -> { status: 'answered', answer }", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-sc-");
   try {
     insertMemoryRecord(handle, {
       kind: "fact",
@@ -985,7 +940,7 @@ test("recall structuredContent: answered without notes -> { status: 'answered', 
 // ---------------------------------------------------------------------------
 
 test("remember structuredContent: rejected -> { status: 'rejected', reason }", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-sc-");
   try {
     setRememberStorageProvider(() => ({ handle, ownsHandle: false }));
     try {
@@ -1025,7 +980,7 @@ test("remember structuredContent: rejected -> { status: 'rejected', reason }", a
 });
 
 test("remember structuredContent: saved -> { status: 'saved', summary, kind, confidence }", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-sc-");
   try {
     setRememberStorageProvider(() => ({ handle, ownsHandle: false }));
     try {
@@ -1062,12 +1017,12 @@ test("remember structuredContent: saved -> { status: 'saved', summary, kind, con
         "The team picked Postgres 16 for the primary store.",
         {
           providerFetchImpl: fetchImpl,
-          providerPrimaryApiKey: PRIMARY_KEY,
-          providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-          providerPrimaryModel: PRIMARY_MODEL,
-          providerFallbackApiKey: FALLBACK_KEY,
-          providerFallbackBaseUrl: FALLBACK_BASE_URL,
-          providerFallbackModel: FALLBACK_MODEL,
+          providerPrimaryApiKey: TEST_PRIMARY_KEY,
+          providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+          providerPrimaryModel: TEST_PRIMARY_MODEL,
+          providerFallbackApiKey: TEST_FALLBACK_KEY,
+          providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+          providerFallbackModel: TEST_FALLBACK_MODEL,
         },
       );
       assert.equal(controllerOut.status, "saved");
@@ -1133,7 +1088,7 @@ test("remember structuredContent: saved with null confidence -> no confidence ke
   // Confidence is optional in the structuredContent; we
   // assert it is omitted (not serialized as `null` or `0`)
   // when the controller's record carries `confidence: null`.
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-sc-");
   try {
     setRememberStorageProvider(() => ({ handle, ownsHandle: false }));
     try {
@@ -1164,7 +1119,7 @@ test("remember structuredContent: saved with null confidence -> no confidence ke
 });
 
 test("remember structuredContent: rejected with clarification_needed -> { status, reason, clarification_needed }", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-sc-");
   try {
     setRememberStorageProvider(() => ({ handle, ownsHandle: false }));
     try {
@@ -1208,7 +1163,7 @@ test("remember structuredContent: rejected with clarification_needed -> { status
 });
 
 test("remember structuredContent: provider_error -> { status, reason }", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-sc-");
   try {
     setRememberStorageProvider(() => ({ handle, ownsHandle: false }));
     try {

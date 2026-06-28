@@ -54,10 +54,6 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import url from "node:url";
 
 import {
   buildPersistedMetadata,
@@ -68,10 +64,7 @@ import {
   type RelationshipMetadataFields,
 } from "../src/retrieval/relationship.ts";
 import {
-  initStorage,
-  closeStorage,
   listActiveMemoryRelationshipBlocks,
-  type StorageHandle,
   type MemoryRelationshipBlockRow,
 } from "../src/storage/storage.ts";
 import { runRememberController } from "../src/controller/remember-controller.ts";
@@ -85,76 +78,24 @@ import {
   resetRelatedMemoriesImpl,
 } from "../src/retrieval/seam.ts";
 import type { SafeMemorySummary } from "../src/storage/storage.ts";
+import {
+  TEST_PRIMARY_KEY,
+  TEST_FALLBACK_KEY,
+  TEST_PRIMARY_BASE_URL,
+  TEST_PRIMARY_MODEL,
+  TEST_FALLBACK_BASE_URL,
+  TEST_FALLBACK_MODEL,
+} from "./shared-test-provider.ts";
+import {
+  scriptFetch,
+  okChatResponse,
+  safeAnalysis,
+} from "./_helpers/provider-stub.ts";
+import { mkStorage, rmStorage } from "./_helpers/test-storage.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function mkStorage(): { tmp: string; handle: StorageHandle } {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-mcp-pi-"));
-  const handle = initStorage({ projectRoot: tmp });
-  return { tmp, handle };
-}
-
-function rmStorage(tmp: string, handle: StorageHandle): void {
-  try {
-    handle.db.close();
-  } catch {
-    // ignore
-  }
-  fs.rmSync(tmp, { recursive: true, force: true });
-}
-
-function scriptFetch(responder: () => Response): {
-  fetchImpl: typeof fetch;
-  calls: Array<{ url: string; body: string }>;
-} {
-  const calls: Array<{ url: string; body: string }> = [];
-  const fetchImpl: typeof fetch = async (input, init) => {
-    const url = typeof input === "string" ? input : (input as URL).toString();
-    let body = "";
-    if (init && typeof init === "object" && "body" in init && init.body) {
-      body = String(init.body);
-    }
-    calls.push({ url, body });
-    return responder();
-  };
-  return { fetchImpl, calls };
-}
-
-function okChatResponse(content: string): Response {
-  return new Response(
-    JSON.stringify({
-      id: "x",
-      model: "m",
-      choices: [{ message: { role: "assistant", content } }],
-    }),
-    { status: 200, headers: { "content-type": "application/json" } },
-  );
-}
-
-function safeAnalysis(opts: {
-  summary?: string;
-  confidence?: number;
-  classification?: string;
-  tags?: string[];
-} = {}): string {
-  return JSON.stringify({
-    summary: opts.summary ?? "The project uses Postgres 16 for the primary store.",
-    confidence: opts.confidence ?? 0.82,
-    tags: opts.tags ?? ["postgres", "storage"],
-    entities: [{ name: "Postgres", kind: "database" }],
-    classification: opts.classification ?? "fact",
-  });
-}
-
-const PRIMARY_KEY = "sk-primary-test-not-real-12345";
-const FALLBACK_KEY = "nvapi-fallback-test-not-real-12345";
-// Explicit provider config: neutral URLs -> "custom" label.
-const PRIMARY_BASE_URL = "https://api.example.com/v1";
-const PRIMARY_MODEL = "test/model-primary";
-const FALLBACK_BASE_URL = "https://api.fallback.example/v1";
-const FALLBACK_MODEL = "test/model-fallback";
 
 function pinnedNow(t: number): () => number {
   return () => t;
@@ -455,7 +396,7 @@ test("hasMeaningfulRelationshipData: supersedes is now considered meaningful (Ph
 // ---------------------------------------------------------------------------
 
 test("controller: new writes use DERIVED_SCHEMA_VERSION (ccm-draft-2)", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-mcp-pi-");
   try {
     setRelatedMemoriesImpl(() => ({
       memories: [
@@ -488,12 +429,12 @@ test("controller: new writes use DERIVED_SCHEMA_VERSION (ccm-draft-2)", async ()
     );
     const outcome = await runRememberController(handle, "Some safe fact.", {
       providerFetchImpl: fetchImpl,
-      providerPrimaryApiKey: PRIMARY_KEY,
-      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-      providerPrimaryModel: PRIMARY_MODEL,
-      providerFallbackApiKey: FALLBACK_KEY,
-      providerFallbackBaseUrl: FALLBACK_BASE_URL,
-      providerFallbackModel: FALLBACK_MODEL,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
       now: pinnedNow(1_700_000_000_000),
     });
     assert.equal(outcome.status, "saved");
@@ -525,7 +466,7 @@ test("controller: new writes use DERIVED_SCHEMA_VERSION (ccm-draft-2)", async ()
 // ---------------------------------------------------------------------------
 
 test("listActiveMemoryRelationshipBlocks: round-trips ccm-draft-2 rows with the new fields", () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-mcp-pi-");
   try {
     // Insert a row that carries the Phase I fields on its
     // relationship block. Use raw SQL so we can write a
@@ -574,7 +515,7 @@ test("listActiveMemoryRelationshipBlocks: round-trips ccm-draft-2 rows with the 
 });
 
 test("listActiveMemoryRelationshipBlocks: legacy ccm-draft-1 rows project safe defaults", () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-mcp-pi-");
   try {
     // Insert a legacy row (Phase A shape, no Phase I
     // fields). The reader must project safe defaults
@@ -623,7 +564,7 @@ test("listActiveMemoryRelationshipBlocks: rows without a relationship key projec
   // Pre-Phase-B row shape (no `relationship` key at
   // all). The reader must project safe defaults for
   // BOTH the conservative and Phase I fields.
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-mcp-pi-");
   try {
     handle.db
       .prepare(
@@ -658,7 +599,7 @@ test("listActiveMemoryRelationshipBlocks: rows without a relationship key projec
 });
 
 test("listActiveMemoryRelationshipBlocks: missing / malformed metadata returns safe defaults and does not throw", () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-mcp-pi-");
   try {
     // Malformed JSON in the metadata column.
     handle.db
@@ -776,7 +717,7 @@ test("listActiveMemoryRelationshipBlocks: missing / malformed metadata returns s
 // ---------------------------------------------------------------------------
 
 test("public recall output: does NOT expose derivedSchemaVersion, ccm-draft-1, ccm-draft-2, supersedes, supersededBy, resolvedAt", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-mcp-pi-");
   try {
     // Seed two active memories with Phase I pass-through
     // relationship blocks. The lexical ranker will keep
@@ -841,12 +782,12 @@ test("public recall output: does NOT expose derivedSchemaVersion, ccm-draft-1, c
       );
       const out = await runRecallController(handle, "What database does the project use?", {
         providerFetchImpl: fetchImpl,
-        providerPrimaryApiKey: PRIMARY_KEY,
-        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-        providerPrimaryModel: PRIMARY_MODEL,
-        providerFallbackApiKey: FALLBACK_KEY,
-        providerFallbackBaseUrl: FALLBACK_BASE_URL,
-        providerFallbackModel: FALLBACK_MODEL,
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+        providerPrimaryModel: TEST_PRIMARY_MODEL,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
+        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+        providerFallbackModel: TEST_FALLBACK_MODEL,
       });
       assert.equal(out.status, "answered");
       if (out.status !== "answered") throw new Error("unreachable");
@@ -889,7 +830,7 @@ test("public recall output: does NOT expose derivedSchemaVersion, ccm-draft-1, c
 });
 
 test("public recall output: no_memory / rejected / provider_error paths are unchanged", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-mcp-pi-");
   try {
     // Seed one active memory so the provider path is
     // actually exercised (an empty storage short-circuits
@@ -913,15 +854,15 @@ test("public recall output: no_memory / rejected / provider_error paths are unch
       // no_memory
       const r1 = await runRecallController(handle, "When is the company picnic?", {
         providerFetchImpl: fetchImpl,
-        providerPrimaryApiKey: PRIMARY_KEY,
-        providerFallbackApiKey: FALLBACK_KEY,
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
       });
       assert.equal(r1.status, "no_memory");
       // rejected (secret-shaped query)
       const r2 = await runRecallController(handle, "AKIAIOSFODNN7EXAMPLE", {
         providerFetchImpl: fetchImpl,
-        providerPrimaryApiKey: PRIMARY_KEY,
-        providerFallbackApiKey: FALLBACK_KEY,
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
       });
       assert.equal(r2.status, "rejected");
       if (r2.status === "rejected") {
@@ -947,8 +888,8 @@ test("public recall output: no_memory / rejected / provider_error paths are unch
       const errFetch = scriptFetch(() => new Response("boom", { status: 500 }));
       const r3 = await runRecallController(handle, "primary store", {
         providerFetchImpl: errFetch.fetchImpl,
-        providerPrimaryApiKey: PRIMARY_KEY,
-        providerFallbackApiKey: FALLBACK_KEY,
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
       });
       assert.equal(r3.status, "provider_error");
       if (r3.status === "provider_error") {
@@ -1050,7 +991,7 @@ test("recall controller: sourceIds and answer field shape are byte-equal pre-Pha
   // resolved-history note is prefixed; both source ids
   // remain listed. This is the spec §2.3 "older memories
   // remain retrievable" invariant at the surface level.
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-mcp-pi-");
   try {
     handle.db
       .prepare(
@@ -1100,12 +1041,12 @@ test("recall controller: sourceIds and answer field shape are byte-equal pre-Pha
       // the detector to see them).
       const out = await runRecallController(handle, "hosting platform production", {
         providerFetchImpl: fetchImpl,
-        providerPrimaryApiKey: PRIMARY_KEY,
-        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-        providerPrimaryModel: PRIMARY_MODEL,
-        providerFallbackApiKey: FALLBACK_KEY,
-        providerFallbackBaseUrl: FALLBACK_BASE_URL,
-        providerFallbackModel: FALLBACK_MODEL,
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+        providerPrimaryModel: TEST_PRIMARY_MODEL,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
+        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+        providerFallbackModel: TEST_FALLBACK_MODEL,
       });
       assert.equal(out.status, "answered");
       if (out.status !== "answered") throw new Error("unreachable");

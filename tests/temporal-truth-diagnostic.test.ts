@@ -71,6 +71,7 @@ import { BENCHMARK_QUERIES } from "../src/benchmark/queries.js";
 import type { BenchmarkQuery } from "../src/benchmark/queries.js";
 import { evaluateQuery, type QueryEval } from "../src/benchmark/metrics.js";
 import { PUBLIC_TOOL_NAMES } from "../src/server.js";
+import { walkTs } from "./_helpers/fs-walk.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -677,7 +678,7 @@ test("temporal-truth-diagnostic: production source tree does NOT import the diag
     if (!fs.existsSync(dir)) continue;
     const files = walkTs(dir);
     for (const f of files) {
-      const text = fs.readFileSync(f, "utf8");
+      const text = fs.readFileSync(path.join(dir, f), "utf8");
       assert.ok(
         !text.includes("temporal-truth-diagnostic"),
         `production source ${f} must not import the diagnostic module`,
@@ -685,23 +686,6 @@ test("temporal-truth-diagnostic: production source tree does NOT import the diag
     }
   }
 });
-
-/**
- * Walk a directory recursively and return all .ts files
- * (excluding .d.ts). Synchronous, internal helper.
- */
-function walkTs(dir: string): string[] {
-  const out: string[] = [];
-  for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
-    const full = path.join(dir, ent.name);
-    if (ent.isDirectory()) {
-      out.push(...walkTs(full));
-    } else if (ent.isFile() && full.endsWith(".ts") && !full.endsWith(".d.ts")) {
-      out.push(full);
-    }
-  }
-  return out;
-}
 
 // ---------------------------------------------------------------------------
 // 8. Public MCP API unchanged

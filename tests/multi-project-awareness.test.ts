@@ -9,8 +9,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 
 import {
   readProjectConfig,
@@ -19,35 +17,16 @@ import {
   setProjectPrivate,
   resolveProjectConfigPath,
 } from "../src/config/project-config.ts";
-import {
-  initStorage,
-  closeStorage,
-  insertMemoryRecord,
-  type StorageHandle,
-} from "../src/storage/storage.ts";
+import { insertMemoryRecord } from "../src/storage/storage.ts";
 import {
   setStorageProvider,
   resetStorageProvider,
 } from "../src/tools/remember.ts";
+import { mkStorage, rmStorage } from "./_helpers/test-storage.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function mkStorage(): { tmp: string; handle: StorageHandle } {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-multi-project-"));
-  const handle = initStorage({ projectRoot: tmp });
-  return { tmp, handle };
-}
-
-function rmStorage(tmp: string, handle: StorageHandle): void {
-  try {
-    handle.db.close();
-  } catch {
-    // ignore
-  }
-  fs.rmSync(tmp, { recursive: true, force: true });
-}
 
 // ---------------------------------------------------------------------------
 // Project config tests
@@ -62,7 +41,7 @@ test("project config: resolveProjectConfigPath returns correct path", () => {
 });
 
 test("project config: readProjectConfig returns non-private for missing file", () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-multi-project-");
   try {
     const config = readProjectConfig(tmp);
     assert.equal(config.isPrivate, false);
@@ -73,7 +52,7 @@ test("project config: readProjectConfig returns non-private for missing file", (
 });
 
 test("project config: readProjectConfig returns non-private for malformed JSON", () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-multi-project-");
   try {
     const configPath = resolveProjectConfigPath(tmp);
     fs.writeFileSync(configPath, "not json{", "utf-8");
@@ -85,7 +64,7 @@ test("project config: readProjectConfig returns non-private for malformed JSON",
 });
 
 test("project config: readProjectConfig returns non-private for non-object JSON", () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-multi-project-");
   try {
     const configPath = resolveProjectConfigPath(tmp);
     fs.writeFileSync(configPath, '"string only"', "utf-8");
@@ -97,7 +76,7 @@ test("project config: readProjectConfig returns non-private for non-object JSON"
 });
 
 test("project config: readProjectConfig returns non-private when isPrivate missing", () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-multi-project-");
   try {
     const configPath = resolveProjectConfigPath(tmp);
     fs.writeFileSync(configPath, JSON.stringify({ version: 1 }), "utf-8");
@@ -109,7 +88,7 @@ test("project config: readProjectConfig returns non-private when isPrivate missi
 });
 
 test("project config: readProjectConfig returns isPrivate=true when set", () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-multi-project-");
   try {
     const configPath = resolveProjectConfigPath(tmp);
     fs.writeFileSync(
@@ -125,7 +104,7 @@ test("project config: readProjectConfig returns isPrivate=true when set", () => 
 });
 
 test("project config: writeProjectConfig persists config", () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-multi-project-");
   try {
     writeProjectConfig(tmp, { version: 1, isPrivate: true });
     const config = readProjectConfig(tmp);
@@ -136,7 +115,7 @@ test("project config: writeProjectConfig persists config", () => {
 });
 
 test("project config: isProjectPrivate returns false for missing config", () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-multi-project-");
   try {
     assert.equal(isProjectPrivate(tmp), false);
   } finally {
@@ -145,7 +124,7 @@ test("project config: isProjectPrivate returns false for missing config", () => 
 });
 
 test("project config: isProjectPrivate returns true when configured", () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-multi-project-");
   try {
     setProjectPrivate(tmp, true);
     assert.equal(isProjectPrivate(tmp), true);
@@ -155,7 +134,7 @@ test("project config: isProjectPrivate returns true when configured", () => {
 });
 
 test("project config: setProjectPrivate creates config if missing", () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-multi-project-");
   try {
     setProjectPrivate(tmp, true);
     const configPath = resolveProjectConfigPath(tmp);
@@ -168,7 +147,7 @@ test("project config: setProjectPrivate creates config if missing", () => {
 });
 
 test("project config: isProjectPrivate returns false after setting to false", () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-multi-project-");
   try {
     setProjectPrivate(tmp, true);
     assert.equal(isProjectPrivate(tmp), true);
@@ -184,7 +163,7 @@ test("project config: isProjectPrivate returns false after setting to false", ()
 // ---------------------------------------------------------------------------
 
 test("storage: memories table has no raw/original text column", () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-multi-project-");
   try {
     const cols = handle.db
       .prepare("PRAGMA table_info(memories)")
@@ -212,8 +191,8 @@ test("storage: memories table has no raw/original text column", () => {
 });
 
 test("storage: different projects have isolated SQLite files", () => {
-  const { tmp: proj1, handle: handle1 } = mkStorage();
-  const { tmp: proj2, handle: handle2 } = mkStorage();
+  const { tmp: proj1, handle: handle1 } = mkStorage("curion-multi-project-");
+  const { tmp: proj2, handle: handle2 } = mkStorage("curion-multi-project-");
   try {
     // Insert 2 memories in proj1.
     insertMemoryRecord(handle1, {
@@ -307,8 +286,8 @@ test("privacy: private project config is not readable by other projects", () => 
   // This is a conceptual test: a private project is marked with config.
   // The config file lives in the project's .curion/ directory, which
   // is gitignored and per-project. Other projects cannot read it.
-  const { tmp: proj1, handle: handle1 } = mkStorage();
-  const { tmp: proj2, handle: handle2 } = mkStorage();
+  const { tmp: proj1, handle: handle1 } = mkStorage("curion-multi-project-");
+  const { tmp: proj2, handle: handle2 } = mkStorage("curion-multi-project-");
   try {
     // Set proj1 as private.
     setProjectPrivate(proj1, true);
@@ -357,7 +336,7 @@ test("privacy: private project config is not readable by other projects", () => 
 // ---------------------------------------------------------------------------
 
 test("lexical: rankLexical is deterministic and threshold-based", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-multi-project-");
   try {
     insertMemoryRecord(handle, {
       kind: "fact",

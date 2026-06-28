@@ -77,6 +77,7 @@ import {
 } from "../src/benchmark/retrieval-runner.ts";
 import { aggregateMetrics } from "../src/benchmark/metrics.ts";
 import { PUBLIC_TOOL_NAMES } from "../src/server.ts";
+import { walkTs } from "./_helpers/fs-walk.ts";
 
 // ---------------------------------------------------------------------------
 // 1. rrfContribution: pure math helper
@@ -615,18 +616,6 @@ test("hybrid variant: only the benchmark runner imports the hybrid module", () =
     path.join("benchmark", "held-out-validation.ts"),
     path.join("benchmark", "variants", "hybrid.ts"),
   ]);
-  function walk(dir: string): string[] {
-    const out: string[] = [];
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        out.push(...walk(full));
-      } else if (entry.name.endsWith(".ts")) {
-        out.push(full);
-      }
-    }
-    return out;
-  }
   // Files that legitimately define their own RRF helper (kept
   // self-contained per the brief); they must be excluded from
   // the symbol-usage check so the guard stays focused on actual
@@ -634,10 +623,9 @@ test("hybrid variant: only the benchmark runner imports the hybrid module", () =
   const selfContainedFiles = new Set<string>([
     path.join("retrieval", "semantic", "score.ts"),
   ]);
-  for (const file of walk(root)) {
-    const rel = path.relative(root, file);
-    if (allowedImporters.has(rel)) continue;
-    const src = fs.readFileSync(file, "utf8");
+  for (const file of walkTs(root, { excludeDts: false })) {
+    if (allowedImporters.has(file)) continue;
+    const src = fs.readFileSync(path.join(root, file), "utf8");
     const importsHybridModule =
       src.includes("from \"./hybrid\"") ||
       src.includes("from \"./hybrid.js\"") ||
@@ -647,7 +635,7 @@ test("hybrid variant: only the benchmark runner imports the hybrid module", () =
     // also a leak — except for self-contained production files
     // that define their own RRF helper copy.
     const usesHybridSymbol =
-      (!selfContainedFiles.has(rel) &&
+      (!selfContainedFiles.has(file) &&
         (src.match(/\brankHybrid\b/) !== null ||
           src.match(/\brankHybridAsLexical\b/) !== null ||
           src.match(/\bfuseRankings\b/) !== null ||
@@ -656,11 +644,11 @@ test("hybrid variant: only the benchmark runner imports the hybrid module", () =
           src.match(/\bHybridRankingOptions\b/) !== null));
     assert.ok(
       !importsHybridModule,
-      `unexpected import of hybrid module in ${rel}`,
+      `unexpected import of hybrid module in ${file}`,
     );
     assert.ok(
       !usesHybridSymbol,
-      `unexpected hybrid symbol usage in ${rel}`,
+      `unexpected hybrid symbol usage in ${file}`,
     );
   }
 });

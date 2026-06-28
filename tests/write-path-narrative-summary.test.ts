@@ -33,13 +33,18 @@ import {
   analyzeMemoryWithFallback,
   type MemoryAnalysisResult,
 } from "../src/providers/memory-analysis.ts";
+import {
+  TEST_PRIMARY_KEY,
+  TEST_FALLBACK_KEY,
+  TEST_PRIMARY_BASE_URL,
+  TEST_PRIMARY_MODEL,
+  TEST_FALLBACK_BASE_URL,
+  TEST_FALLBACK_MODEL,
+} from "./shared-test-provider.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers (mirror the pattern used in tests/provider-adapter.test.ts)
 // ---------------------------------------------------------------------------
-
-const PRIMARY_KEY = "sk-primary-test-not-real-12345";
-const FALLBACK_KEY = "nvapi-fallback-test-not-real-12345";
 
 /**
  * A `fetch` stub that serves a scripted list of responses, one per
@@ -93,8 +98,8 @@ async function runOnce(
   const log: Array<{ url: string; body: string }> = [];
   const fetchImpl = scriptedFetch([() => okChatResponse(VALID_JSON)], log);
   const result = await analyzeMemoryWithFallback(text, undefined, {
-    primaryApiKey: PRIMARY_KEY,
-    fallbackApiKey: FALLBACK_KEY,
+    primaryApiKey: TEST_PRIMARY_KEY,
+    fallbackApiKey: TEST_FALLBACK_KEY,
     primaryBaseUrl: "https://primary.test/v1",
     primaryModel: "primary-model",
     fallbackBaseUrl: "https://fallback.test/v1",
@@ -202,8 +207,8 @@ test("write-path prompt: empty / pure-procedural input -> invalid-input, no http
   const log: Array<{ url: string; body: string }> = [];
   const fetchImpl = scriptedFetch([() => okChatResponse(VALID_JSON)], log);
   const result = await analyzeMemoryWithFallback("   ", undefined, {
-    primaryApiKey: PRIMARY_KEY,
-    fallbackApiKey: FALLBACK_KEY,
+    primaryApiKey: TEST_PRIMARY_KEY,
+    fallbackApiKey: TEST_FALLBACK_KEY,
     primaryBaseUrl: "https://primary.test/v1",
     primaryModel: "primary-model",
     fallbackBaseUrl: "https://fallback.test/v1",

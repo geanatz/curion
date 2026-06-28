@@ -33,6 +33,16 @@ import {
   RECALL_DEFAULT_MAX_TOKENS,
   type RecallMemoryInput,
 } from "../src/providers/recall-synthesis.ts";
+import { withCleanEnv } from "./_helpers/env.ts";
+import {
+  TEST_ENV_KEYS,
+  TEST_PRIMARY_KEY,
+  TEST_FALLBACK_KEY,
+  TEST_PRIMARY_BASE_URL,
+  TEST_PRIMARY_MODEL,
+  TEST_FALLBACK_BASE_URL,
+  TEST_FALLBACK_MODEL,
+} from "./shared-test-provider.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -75,51 +85,8 @@ function httpErrorResponse(status: number, text = "boom"): Response {
 
 // Test with explicit generic provider config (no vendor defaults).
 // These are neutral values; the provider label is derived from the base URL.
-const PRIMARY_KEY = "sk-test-primary-not-real-12345";
-const FALLBACK_KEY = "sk-test-fallback-not-real-12345";
-const PRIMARY_BASE_URL = "https://api.example.com/v1";
-const PRIMARY_MODEL = "test/provider-model-primary";
-const FALLBACK_BASE_URL = "https://api.fallback.example/v1";
-const FALLBACK_MODEL = "test/provider-model-fallback";
 
-const ENV_KEYS = [
-  // Generic role-based keys (the new canonical names).
-  "CURION_PRIMARY_API_KEY",
-  "CURION_FALLBACK_API_KEY",
-  "CURION_PRIMARY_BASE_URL",
-  "CURION_PRIMARY_MODEL",
-  "CURION_FALLBACK_BASE_URL",
-  "CURION_FALLBACK_MODEL",
-  "CURION_PRIMARY_PROVIDER_LABEL",
-  "CURION_FALLBACK_PROVIDER_LABEL",
-  "CURION_ADAPTER_TIMEOUT_MS",
-  "CURION_ADAPTER_MAX_TOKENS",
-  // Legacy aliases - kept for backward-compat tests only.
-  "CURION_PROVIDER_PRIMARY_KEY",
-  "MINIMAX_API_KEY",
-  "CURION_PROVIDER_FALLBACK_KEY",
-  "NVIDIA_NIM_API_KEY",
-  "CURION_NIM_BASE_URL",
-  "CURION_NIM_FALLBACK_MODEL",
-  "CURION_MINIMAX_BASE_URL",
-  "CURION_MINIMAX_MODEL",
-];
-
-function withCleanEnv<T>(
-  keys: string[],
-  fn: () => Promise<T> | T,
-): Promise<T> | T {
-  const before: Record<string, string | undefined> = {};
-  for (const k of keys) before[k] = process.env[k];
-  for (const k of keys) delete process.env[k];
-  return Promise.resolve(fn()).finally(() => {
-    for (const k of keys) {
-      const v = before[k];
-      if (v === undefined) delete process.env[k];
-      else process.env[k] = v;
-    }
-  });
-}
+const ENV_KEYS: readonly string[] = TEST_ENV_KEYS;
 
 // Phase 1 internal naming cleanup: `RecallMemoryInput` is an
 // internal TS type whose field is now `memoryContent`. The
@@ -192,9 +159,9 @@ test("recall: primary hard-fail with no fallback configured -> all-providers-fai
       "q",
       SAMPLE_MEMORIES,
       {
-        primaryApiKey: PRIMARY_KEY,
-        primaryBaseUrl: PRIMARY_BASE_URL,
-        primaryModel: PRIMARY_MODEL,
+        primaryApiKey: TEST_PRIMARY_KEY,
+        primaryBaseUrl: TEST_PRIMARY_BASE_URL,
+        primaryModel: TEST_PRIMARY_MODEL,
         fetchImpl,
       },
     );
@@ -261,7 +228,7 @@ test("recall: primary success with explicit config returns correct provider labe
   const log: Array<{ url: string; body: string }> = [];
   const fetchImpl = scriptedFetch(
     [
-      () => okChatResponse("The project uses Postgres 16 for the primary store.", PRIMARY_MODEL),
+      () => okChatResponse("The project uses Postgres 16 for the primary store.", TEST_PRIMARY_MODEL),
     ],
     log,
   );
@@ -269,36 +236,36 @@ test("recall: primary success with explicit config returns correct provider labe
     "What database does the project use?",
     SAMPLE_MEMORIES,
     {
-      primaryApiKey: PRIMARY_KEY,
-      primaryBaseUrl: PRIMARY_BASE_URL,
-      primaryModel: PRIMARY_MODEL,
-      fallbackApiKey: FALLBACK_KEY,
-      fallbackBaseUrl: FALLBACK_BASE_URL,
-      fallbackModel: FALLBACK_MODEL,
+      primaryApiKey: TEST_PRIMARY_KEY,
+      primaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      primaryModel: TEST_PRIMARY_MODEL,
+      fallbackApiKey: TEST_FALLBACK_KEY,
+      fallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      fallbackModel: TEST_FALLBACK_MODEL,
       fetchImpl,
     },
   );
   assert.equal(r.ok, true);
   if (r.ok) {
     assert.equal(r.fallbackUsed, false);
-    // Provider label is "custom" because PRIMARY_BASE_URL ("https://api.example.com")
+    // Provider label is "custom" because TEST_PRIMARY_BASE_URL ("https://api.example.com")
     // doesn't match any known host (openai, groq, nvidia, minimax, etc.).
     assert.equal(r.providerUsed, "custom");
-    assert.equal(r.modelUsed, PRIMARY_MODEL);
+    assert.equal(r.modelUsed, TEST_PRIMARY_MODEL);
     assert.equal(r.httpCalls, 1);
   }
   // Exactly one HTTP call, going to the configured primary base URL.
   assert.equal(log.length, 1);
   assert.match(
     log[0]!.url,
-    new RegExp(`^${PRIMARY_BASE_URL}/chat/completions`),
+    new RegExp(`^${TEST_PRIMARY_BASE_URL}/chat/completions`),
     "primary call must go to the configured primary endpoint",
   );
   const body = JSON.parse(log[0]!.body);
-  assert.equal(body.model, PRIMARY_MODEL);
+  assert.equal(body.model, TEST_PRIMARY_MODEL);
   // Keys must not leak into the request body.
-  assert.ok(!log[0]!.body.includes(PRIMARY_KEY));
-  assert.ok(!log[0]!.body.includes(FALLBACK_KEY));
+  assert.ok(!log[0]!.body.includes(TEST_PRIMARY_KEY));
+  assert.ok(!log[0]!.body.includes(TEST_FALLBACK_KEY));
 });
 
 // ---------------------------------------------------------------------------
@@ -321,9 +288,9 @@ test("recall: regression - primary 401 error label is derived from base URL, not
     "What database does the project use?",
     SAMPLE_MEMORIES,
     {
-      primaryApiKey: PRIMARY_KEY,
-      primaryBaseUrl: PRIMARY_BASE_URL,
-      primaryModel: PRIMARY_MODEL,
+      primaryApiKey: TEST_PRIMARY_KEY,
+      primaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      primaryModel: TEST_PRIMARY_MODEL,
       fetchImpl,
     },
   );
@@ -332,11 +299,11 @@ test("recall: regression - primary 401 error label is derived from base URL, not
     assert.equal(r.kind, "all-providers-failed");
     assert.equal(r.httpCalls, 1);
     assert.ok(r.lastError, "lastError should be present");
-    // Provider label must be derived from PRIMARY_BASE_URL, which
+    // Provider label must be derived from TEST_PRIMARY_BASE_URL, which
     // is "https://api.example.com" -> "custom".
     assert.match(
       r.lastError!.message,
-      /custom\/test\/provider-model-primary#recall: auth failed \(HTTP 401\)/,
+      new RegExp(`custom\\/${TEST_PRIMARY_MODEL}#recall: auth failed \\(HTTP 401\\)`),
       "primary error message must use the actual primary endpoint label derived from base URL",
     );
     // The top-level message also must not echo a wrong vendor label.
@@ -347,7 +314,7 @@ test("recall: regression - primary 401 error label is derived from base URL, not
   }
   // The request must have gone to the configured primary base URL.
   assert.equal(log.length, 1);
-  assert.match(log[0]!.url, new RegExp(`^${PRIMARY_BASE_URL}/`));
+  assert.match(log[0]!.url, new RegExp(`^${TEST_PRIMARY_BASE_URL}/`));
 });
 
 // ---------------------------------------------------------------------------
@@ -364,7 +331,7 @@ test("recall: primary hard failure falls back to configured fallback provider", 
       () =>
         okChatResponse(
           "The project uses Postgres 16 for the primary store.",
-          FALLBACK_MODEL,
+          TEST_FALLBACK_MODEL,
         ),
     ],
     log,
@@ -373,31 +340,31 @@ test("recall: primary hard failure falls back to configured fallback provider", 
     "What database does the project use?",
     SAMPLE_MEMORIES,
     {
-      primaryApiKey: PRIMARY_KEY,
-      primaryBaseUrl: PRIMARY_BASE_URL,
-      primaryModel: PRIMARY_MODEL,
-      fallbackApiKey: FALLBACK_KEY,
-      fallbackBaseUrl: FALLBACK_BASE_URL,
-      fallbackModel: FALLBACK_MODEL,
+      primaryApiKey: TEST_PRIMARY_KEY,
+      primaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      primaryModel: TEST_PRIMARY_MODEL,
+      fallbackApiKey: TEST_FALLBACK_KEY,
+      fallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      fallbackModel: TEST_FALLBACK_MODEL,
       fetchImpl,
     },
   );
   assert.equal(r.ok, true);
   if (r.ok) {
     assert.equal(r.fallbackUsed, true);
-    // Provider label is "custom" because FALLBACK_BASE_URL doesn't match known hosts.
+    // Provider label is "custom" because TEST_FALLBACK_BASE_URL doesn't match known hosts.
     assert.equal(r.providerUsed, "custom");
-    assert.equal(r.modelUsed, FALLBACK_MODEL);
+    assert.equal(r.modelUsed, TEST_FALLBACK_MODEL);
     assert.equal(r.httpCalls, 2);
     // The answer must come from the fallback response.
     assert.match(r.answer, /Postgres/);
   }
   // Call 1 -> primary (500). Call 2 -> fallback (200).
   assert.equal(log.length, 2);
-  assert.match(log[0]!.url, new RegExp(`^${PRIMARY_BASE_URL}/`));
-  assert.match(log[1]!.url, new RegExp(`^${FALLBACK_BASE_URL}/`));
+  assert.match(log[0]!.url, new RegExp(`^${TEST_PRIMARY_BASE_URL}/`));
+  assert.match(log[1]!.url, new RegExp(`^${TEST_FALLBACK_BASE_URL}/`));
   const fallbackBody = JSON.parse(log[1]!.body);
-  assert.equal(fallbackBody.model, FALLBACK_MODEL);
+  assert.equal(fallbackBody.model, TEST_FALLBACK_MODEL);
 });
 
 // ---------------------------------------------------------------------------
@@ -417,12 +384,12 @@ test("recall: both providers fail -> error message uses the actual endpoint labe
     "What database does the project use?",
     SAMPLE_MEMORIES,
     {
-      primaryApiKey: PRIMARY_KEY,
-      primaryBaseUrl: PRIMARY_BASE_URL,
-      primaryModel: PRIMARY_MODEL,
-      fallbackApiKey: FALLBACK_KEY,
-      fallbackBaseUrl: FALLBACK_BASE_URL,
-      fallbackModel: FALLBACK_MODEL,
+      primaryApiKey: TEST_PRIMARY_KEY,
+      primaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      primaryModel: TEST_PRIMARY_MODEL,
+      fallbackApiKey: TEST_FALLBACK_KEY,
+      fallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      fallbackModel: TEST_FALLBACK_MODEL,
       fetchImpl,
     },
   );
@@ -431,8 +398,8 @@ test("recall: both providers fail -> error message uses the actual endpoint labe
     assert.equal(r.kind, "all-providers-failed");
     assert.equal(r.httpCalls, 2);
     // Both base URLs contain "example" so both resolve to "custom" provider.
-    const primaryLabel = `custom/${PRIMARY_MODEL}#recall`;
-    const fallbackLabel = `custom/${FALLBACK_MODEL}#recall`;
+    const primaryLabel = `custom/${TEST_PRIMARY_MODEL}#recall`;
+    const fallbackLabel = `custom/${TEST_FALLBACK_MODEL}#recall`;
     // The message should reference each slot's actual label.
     assert.ok(
       r.message.includes(primaryLabel) || r.message.includes(`primary=${primaryLabel.split("/")[0]}`),
@@ -448,8 +415,8 @@ test("recall: both providers fail -> error message uses the actual endpoint labe
   }
   // First call -> primary. Second -> fallback.
   assert.equal(log.length, 2);
-  assert.match(log[0]!.url, new RegExp(`^${PRIMARY_BASE_URL}/`));
-  assert.match(log[1]!.url, new RegExp(`^${FALLBACK_BASE_URL}/`));
+  assert.match(log[0]!.url, new RegExp(`^${TEST_PRIMARY_BASE_URL}/`));
+  assert.match(log[1]!.url, new RegExp(`^${TEST_FALLBACK_BASE_URL}/`));
 });
 
 // ---------------------------------------------------------------------------
@@ -471,9 +438,9 @@ test("recall: primary no-key message reflects the primary slot label (empty base
       // Only the fallback key is set; the primary slot has no key.
       // disableFallback=true keeps the primary's missing-config on
       // the surface so we can inspect the label directly.
-      fallbackApiKey: FALLBACK_KEY,
-      fallbackBaseUrl: FALLBACK_BASE_URL,
-      fallbackModel: FALLBACK_MODEL,
+      fallbackApiKey: TEST_FALLBACK_KEY,
+      fallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      fallbackModel: TEST_FALLBACK_MODEL,
       disableFallback: true,
       fetchImpl,
     },
@@ -519,8 +486,8 @@ test("recall: no api keys configured -> typed missing-config (no http calls)", a
       // also must not claim an endpoint-specific label since the
       // adapter short-circuits before consulting the URL).
       assert.match(r.message, /no provider api key configured/);
-      assert.ok(!r.message.includes(PRIMARY_KEY));
-      assert.ok(!r.message.includes(FALLBACK_KEY));
+      assert.ok(!r.message.includes(TEST_PRIMARY_KEY));
+      assert.ok(!r.message.includes(TEST_FALLBACK_KEY));
     }
     assert.equal(log.length, 0, "no http calls when neither key is configured");
   });
@@ -542,7 +509,7 @@ test("recall: custom primary URL containing 'nvidia' still resolves to nvidia-ni
     "q",
     SAMPLE_MEMORIES,
     {
-      primaryApiKey: PRIMARY_KEY,
+      primaryApiKey: TEST_PRIMARY_KEY,
       primaryBaseUrl: "https://my.nvidia.proxy.example/v1",
       primaryModel: "openai/gpt-oss-120b",
       fetchImpl,
@@ -570,10 +537,10 @@ test("recall: custom fallback URL containing 'minimax' still resolves to minimax
     "q",
     SAMPLE_MEMORIES,
     {
-      primaryApiKey: PRIMARY_KEY,
+      primaryApiKey: TEST_PRIMARY_KEY,
       primaryBaseUrl: "https://integrate.api.nvidia.com/v1",
       primaryModel: "openai/gpt-oss-120b",
-      fallbackApiKey: FALLBACK_KEY,
+      fallbackApiKey: TEST_FALLBACK_KEY,
       fallbackBaseUrl: "https://my.minimax.proxy.example/v1",
       fallbackModel: "MiniMax-M3",
       fetchImpl,
@@ -598,7 +565,7 @@ test("recall: serialized result never contains api key values", async () => {
   const fetchImpl = scriptedFetch(
     [
       () => httpErrorResponse(500, "primary down"),
-      () => okChatResponse("ok", FALLBACK_MODEL),
+      () => okChatResponse("ok", TEST_FALLBACK_MODEL),
     ],
     log,
   );
@@ -606,18 +573,18 @@ test("recall: serialized result never contains api key values", async () => {
     "What database does the project use?",
     SAMPLE_MEMORIES,
     {
-      primaryApiKey: PRIMARY_KEY,
-      primaryBaseUrl: PRIMARY_BASE_URL,
-      primaryModel: PRIMARY_MODEL,
-      fallbackApiKey: FALLBACK_KEY,
-      fallbackBaseUrl: FALLBACK_BASE_URL,
-      fallbackModel: FALLBACK_MODEL,
+      primaryApiKey: TEST_PRIMARY_KEY,
+      primaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      primaryModel: TEST_PRIMARY_MODEL,
+      fallbackApiKey: TEST_FALLBACK_KEY,
+      fallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      fallbackModel: TEST_FALLBACK_MODEL,
       fetchImpl,
     },
   );
   const serialized = JSON.stringify(r);
-  assert.ok(!serialized.includes(PRIMARY_KEY), "primary key leaked into result");
-  assert.ok(!serialized.includes(FALLBACK_KEY), "fallback key leaked into result");
+  assert.ok(!serialized.includes(TEST_PRIMARY_KEY), "primary key leaked into result");
+  assert.ok(!serialized.includes(TEST_FALLBACK_KEY), "fallback key leaked into result");
 });
 
 // ---------------------------------------------------------------------------
@@ -631,7 +598,7 @@ test("recall: empty query returns typed invalid-input (no http call)", async () 
     log,
   );
   const r = await synthesizeRecallWithFallback("", SAMPLE_MEMORIES, {
-    primaryApiKey: PRIMARY_KEY,
+    primaryApiKey: TEST_PRIMARY_KEY,
     fetchImpl,
   });
   assert.equal(r.ok, false);
@@ -649,7 +616,7 @@ test("recall: empty memories list returns typed invalid-input (no http call)", a
     log,
   );
   const r = await synthesizeRecallWithFallback("what?", [], {
-    primaryApiKey: PRIMARY_KEY,
+    primaryApiKey: TEST_PRIMARY_KEY,
     fetchImpl,
   });
   assert.equal(r.ok, false);
@@ -674,12 +641,12 @@ test("recall: disableFallback short-circuits the fallback on primary failure", a
     "q",
     SAMPLE_MEMORIES,
     {
-      primaryApiKey: PRIMARY_KEY,
-      primaryBaseUrl: PRIMARY_BASE_URL,
-      primaryModel: PRIMARY_MODEL,
-      fallbackApiKey: FALLBACK_KEY,
-      fallbackBaseUrl: FALLBACK_BASE_URL,
-      fallbackModel: FALLBACK_MODEL,
+      primaryApiKey: TEST_PRIMARY_KEY,
+      primaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      primaryModel: TEST_PRIMARY_MODEL,
+      fallbackApiKey: TEST_FALLBACK_KEY,
+      fallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      fallbackModel: TEST_FALLBACK_MODEL,
       fetchImpl,
       disableFallback: true,
     },
@@ -690,7 +657,7 @@ test("recall: disableFallback short-circuits the fallback on primary failure", a
     assert.equal(r.httpCalls, 1);
     assert.match(
       r.lastError!.message,
-      new RegExp(`custom\\/${PRIMARY_MODEL}#recall: auth failed \\(HTTP 401\\)`),
+      new RegExp(`custom\\/${TEST_PRIMARY_MODEL}#recall: auth failed \\(HTTP 401\\)`),
     );
   }
   assert.equal(log.length, 1, "no fallback call when disableFallback is true");
@@ -716,9 +683,9 @@ test("recall: regression gate - no hardcoded minimax/openai/gpt-oss-120b#recall 
     "q",
     SAMPLE_MEMORIES,
     {
-      primaryApiKey: PRIMARY_KEY,
-      primaryBaseUrl: PRIMARY_BASE_URL,
-      primaryModel: PRIMARY_MODEL,
+      primaryApiKey: TEST_PRIMARY_KEY,
+      primaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      primaryModel: TEST_PRIMARY_MODEL,
       fetchImpl,
     },
   );
@@ -796,9 +763,9 @@ test("recall: primary 200 with malformed content (no fallback configured) -> all
     "What database does the project use?",
     SAMPLE_MEMORIES,
     {
-      primaryApiKey: PRIMARY_KEY,
-      primaryBaseUrl: PRIMARY_BASE_URL,
-      primaryModel: PRIMARY_MODEL,
+      primaryApiKey: TEST_PRIMARY_KEY,
+      primaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      primaryModel: TEST_PRIMARY_MODEL,
       fetchImpl,
     },
   );
@@ -818,20 +785,20 @@ test("recall: primary 200 with malformed content (no fallback configured) -> all
   assert.equal(r.lastError!.reachedServer, true);
   assert.match(
     r.lastError!.message,
-    new RegExp(`custom\\/${PRIMARY_MODEL}#recall: response missing choices\\[0\\]\\.message\\.content`),
+    new RegExp(`custom\\/${TEST_PRIMARY_MODEL}#recall: response missing choices\\[0\\]\\.message\\.content`),
     "lastError must name the missing field and use the actual primary endpoint label",
   );
   // The top-level message must follow the documented shape.
   assert.match(
     r.message,
-    new RegExp(`^primary failed and no fallback configured: custom\\/${PRIMARY_MODEL}#recall: response missing choices\\[0\\]\\.message\\.content$`),
+    new RegExp(`^primary failed and no fallback configured: custom\\/${TEST_PRIMARY_MODEL}#recall: response missing choices\\[0\\]\\.message\\.content$`),
     "top-level message must follow the operator-visible shape",
   );
   // No fabricated answer.
   assert.ok(!r.message.includes("Postgres"));
   // Only the primary slot was called.
   assert.equal(log.length, 1);
-  assert.match(log[0]!.url, new RegExp(`^${PRIMARY_BASE_URL}/`));
+  assert.match(log[0]!.url, new RegExp(`^${TEST_PRIMARY_BASE_URL}/`));
 });
 
 test("recall: primary 200 with malformed content + fallback configured -> fallback recovers", async () => {
@@ -847,7 +814,7 @@ test("recall: primary 200 with malformed content + fallback configured -> fallba
       () =>
         okChatResponse(
           "The project uses Postgres 16 for the primary store.",
-          FALLBACK_MODEL,
+          TEST_FALLBACK_MODEL,
         ),
     ],
     log,
@@ -856,12 +823,12 @@ test("recall: primary 200 with malformed content + fallback configured -> fallba
     "What database does the project use?",
     SAMPLE_MEMORIES,
     {
-      primaryApiKey: PRIMARY_KEY,
-      primaryBaseUrl: PRIMARY_BASE_URL,
-      primaryModel: PRIMARY_MODEL,
-      fallbackApiKey: FALLBACK_KEY,
-      fallbackBaseUrl: FALLBACK_BASE_URL,
-      fallbackModel: FALLBACK_MODEL,
+      primaryApiKey: TEST_PRIMARY_KEY,
+      primaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      primaryModel: TEST_PRIMARY_MODEL,
+      fallbackApiKey: TEST_FALLBACK_KEY,
+      fallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      fallbackModel: TEST_FALLBACK_MODEL,
       fetchImpl,
     },
   );
@@ -869,17 +836,17 @@ test("recall: primary 200 with malformed content + fallback configured -> fallba
   if (!r.ok) return;
   assert.equal(r.fallbackUsed, true, "answer must come from the fallback");
   assert.equal(r.providerUsed, "custom");
-  assert.equal(r.modelUsed, FALLBACK_MODEL);
+  assert.equal(r.modelUsed, TEST_FALLBACK_MODEL);
   assert.equal(r.httpCalls, 2);
   // The synthesized answer is the fallback's, not a fabricated
   // echo of the primary's empty body.
   assert.match(r.answer, /Postgres 16/);
   // Call 1 -> primary (200 malformed). Call 2 -> fallback (200 ok).
   assert.equal(log.length, 2);
-  assert.match(log[0]!.url, new RegExp(`^${PRIMARY_BASE_URL}/`));
-  assert.match(log[1]!.url, new RegExp(`^${FALLBACK_BASE_URL}/`));
+  assert.match(log[0]!.url, new RegExp(`^${TEST_PRIMARY_BASE_URL}/`));
+  assert.match(log[1]!.url, new RegExp(`^${TEST_FALLBACK_BASE_URL}/`));
   const fallbackBody = JSON.parse(log[1]!.body);
-  assert.equal(fallbackBody.model, FALLBACK_MODEL);
+  assert.equal(fallbackBody.model, TEST_FALLBACK_MODEL);
 });
 
 test("recall: primary 200 with empty string content (no fallback) -> all-providers-failed", async () => {
@@ -901,7 +868,7 @@ test("recall: primary 200 with empty string content (no fallback) -> all-provide
       return new Response(
         JSON.stringify({
           id: "x",
-          model: PRIMARY_MODEL,
+          model: TEST_PRIMARY_MODEL,
           choices: [
             { message: { role: "assistant", content: "" } },
           ],
@@ -914,9 +881,9 @@ test("recall: primary 200 with empty string content (no fallback) -> all-provide
     "q",
     SAMPLE_MEMORIES,
     {
-      primaryApiKey: PRIMARY_KEY,
-      primaryBaseUrl: PRIMARY_BASE_URL,
-      primaryModel: PRIMARY_MODEL,
+      primaryApiKey: TEST_PRIMARY_KEY,
+      primaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      primaryModel: TEST_PRIMARY_MODEL,
       fetchImpl,
     },
   );
@@ -933,5 +900,5 @@ test("recall: primary 200 with empty string content (no fallback) -> all-provide
   );
   assert.equal(r.lastError, undefined);
   assert.equal(log.length, 1);
-  assert.match(log[0]!.url, new RegExp(`^${PRIMARY_BASE_URL}/`));
+  assert.match(log[0]!.url, new RegExp(`^${TEST_PRIMARY_BASE_URL}/`));
 });

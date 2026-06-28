@@ -87,70 +87,20 @@ import {
 } from "../src/config/registry.ts";
 import { runRememberController } from "../src/controller/remember-controller.ts";
 import { classifyInput } from "../src/safety/precheck.ts";
+import {
+  TEST_PRIMARY_KEY,
+  TEST_FALLBACK_KEY,
+  TEST_PRIMARY_BASE_URL,
+  TEST_PRIMARY_MODEL,
+  TEST_FALLBACK_BASE_URL,
+  TEST_FALLBACK_MODEL,
+} from "./shared-test-provider.ts";
+import { scriptFetch, okChatResponse, safeAnalysis } from "./_helpers/provider-stub.ts";
+import { mkStorage, rmStorage } from "./_helpers/test-storage.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function mkStorage(): { tmp: string; handle: StorageHandle } {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-hardening-"));
-  const handle = initStorage({ projectRoot: tmp });
-  return { tmp, handle };
-}
-
-function rmStorage(tmp: string, handle: StorageHandle): void {
-  try {
-    handle.db.close();
-  } catch {
-    // ignore
-  }
-  fs.rmSync(tmp, { recursive: true, force: true });
-}
-
-function scriptFetch(responder: () => Response): {
-  fetchImpl: typeof fetch;
-  calls: Array<{ url: string; body: string }>;
-} {
-  const calls: Array<{ url: string; body: string }> = [];
-  const fetchImpl: typeof fetch = async (input, init) => {
-    const url = typeof input === "string" ? input : (input as URL).toString();
-    let body = "";
-    if (init && typeof init === "object" && "body" in init && init.body) {
-      body = String(init.body);
-    }
-    calls.push({ url, body });
-    return responder();
-  };
-  return { fetchImpl, calls };
-}
-
-function okChatResponse(content: string): Response {
-  return new Response(
-    JSON.stringify({
-      id: "x",
-      model: "m",
-      choices: [{ message: { role: "assistant", content } }],
-    }),
-    { status: 200, headers: { "content-type": "application/json" } },
-  );
-}
-
-function safeAnalysis(): string {
-  return JSON.stringify({
-    summary: "The project uses Postgres 16 for the primary store.",
-    confidence: 0.82,
-    tags: ["postgres", "storage"],
-    entities: [{ name: "Postgres", kind: "database" }],
-    classification: "fact",
-  });
-}
-
-const PRIMARY_KEY = "sk-primary-test-not-real-12345";
-const FALLBACK_KEY = "nvapi-fallback-test-not-real-12345";
-const PRIMARY_BASE_URL = "https://api.example.com/v1";
-const PRIMARY_MODEL = "test/model-primary";
-const FALLBACK_BASE_URL = "https://api.fallback.example/v1";
-const FALLBACK_MODEL = "test/model-fallback";
 
 async function runController(handle: StorageHandle, opts: {
   fetchImpl: typeof fetch;
@@ -159,12 +109,12 @@ async function runController(handle: StorageHandle, opts: {
 }) {
   return runRememberController(handle, opts.text, {
     providerFetchImpl: opts.fetchImpl,
-    providerPrimaryApiKey: PRIMARY_KEY,
-    providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-    providerPrimaryModel: PRIMARY_MODEL,
-    providerFallbackApiKey: FALLBACK_KEY,
-    providerFallbackBaseUrl: FALLBACK_BASE_URL,
-    providerFallbackModel: FALLBACK_MODEL,
+    providerPrimaryApiKey: TEST_PRIMARY_KEY,
+    providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+    providerPrimaryModel: TEST_PRIMARY_MODEL,
+    providerFallbackApiKey: TEST_FALLBACK_KEY,
+    providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+    providerFallbackModel: TEST_FALLBACK_MODEL,
     confidenceThreshold: opts.confidenceThreshold,
   });
 }
@@ -195,7 +145,7 @@ function initTraceForTmp(tmp: string): { cleanup: () => void } {
 // ---------------------------------------------------------------------------
 
 test("remember: vague memory text is rejected with clarification_needed (no provider call)", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-hardening-");
   try {
     const { fetchImpl, calls } = scriptFetch(() => okChatResponse(safeAnalysis()));
     setRememberStorageProvider(() => ({ handle, ownsHandle: false }));
@@ -234,7 +184,7 @@ test("remember: vague memory text is rejected with clarification_needed (no prov
 });
 
 test("remember (controller): vague-memory classification returns rejected with clarification_needed (no provider call)", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-hardening-");
   try {
     const { fetchImpl, calls } = scriptFetch(() => okChatResponse(safeAnalysis()));
     const outcome = await runController(handle, {
@@ -305,7 +255,7 @@ test("classifyInput: concrete content does not trip vague-memory patterns", () =
 // ---------------------------------------------------------------------------
 
 test("remember: 'Curion uses Postgres, not SQLite.' is rejected with clarification_needed (no provider call)", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-hardening-");
   try {
     const { fetchImpl, calls } = scriptFetch(() => okChatResponse(safeAnalysis()));
     setRememberStorageProvider(() => ({ handle, ownsHandle: false }));
@@ -340,7 +290,7 @@ test("remember: 'Curion uses Postgres, not SQLite.' is rejected with clarificati
 });
 
 test("remember (controller): replacement-correction classification returns rejected with clarification_needed", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-hardening-");
   try {
     const { fetchImpl, calls } = scriptFetch(() => okChatResponse(safeAnalysis()));
     const outcome = await runController(handle, {
@@ -390,7 +340,7 @@ test("classifyInput: replacement-correction patterns are detected", () => {
 // ---------------------------------------------------------------------------
 
 test("remember: temporal valid text is NOT rejected by replacement-correction; falls through to safe", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-hardening-");
   try {
     const { fetchImpl, calls } = scriptFetch(() => okChatResponse(safeAnalysis()));
     setRememberStorageProvider(() => ({ handle, ownsHandle: false }));
@@ -484,12 +434,12 @@ test("trace: remember saved tool.output uses `kind` (not `memoryKind`) and carri
         "The team picked Postgres 16 for the primary store.",
         {
           providerFetchImpl: fetchImpl,
-          providerPrimaryApiKey: PRIMARY_KEY,
-          providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-          providerPrimaryModel: PRIMARY_MODEL,
-          providerFallbackApiKey: FALLBACK_KEY,
-          providerFallbackBaseUrl: FALLBACK_BASE_URL,
-          providerFallbackModel: FALLBACK_MODEL,
+          providerPrimaryApiKey: TEST_PRIMARY_KEY,
+          providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+          providerPrimaryModel: TEST_PRIMARY_MODEL,
+          providerFallbackApiKey: TEST_FALLBACK_KEY,
+          providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+          providerFallbackModel: TEST_FALLBACK_MODEL,
         },
       );
       assert.equal(controllerOut.status, "saved");

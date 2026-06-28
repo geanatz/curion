@@ -28,9 +28,6 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 
 import {
   initStorage,
@@ -38,25 +35,11 @@ import {
   insertMemoryRecord,
   type StorageHandle,
 } from "../src/storage/storage.ts";
+import { mkStorage, rmStorage } from "./_helpers/test-storage.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function mkStorage(): { tmp: string; handle: StorageHandle } {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-fts5-sync-"));
-  const handle = initStorage({ projectRoot: tmp });
-  return { tmp, handle };
-}
-
-function rmStorage(tmp: string, handle: StorageHandle): void {
-  try {
-    handle.db.close();
-  } catch {
-    // ignore
-  }
-  fs.rmSync(tmp, { recursive: true, force: true });
-}
 
 /**
  * Count the rows in `memories_fts` for a given `memory_id`. Uses
@@ -92,7 +75,7 @@ function ftsTerms(
 // ---------------------------------------------------------------------------
 
 test("FTS5 sync: INSERT trigger populates memories_fts with the summary", () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-fts5-sync-");
   try {
     // Use a distinctive word in the memory content so we can
     // verify the FTS5 tokenizer indexed it correctly. Phase 1
@@ -144,7 +127,7 @@ test("FTS5 sync: INSERT trigger populates memories_fts with the summary", () => 
 // ---------------------------------------------------------------------------
 
 test("FTS5 sync: UPDATE trigger refreshes memories_fts when summary changes", () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-fts5-sync-");
   try {
     // Insert with a distinctive original word. The TS object
     // literal uses `memoryContent`; the raw SQL UPDATE below
@@ -229,7 +212,7 @@ test("FTS5 sync: UPDATE trigger refreshes memories_fts when summary changes", ()
 // ---------------------------------------------------------------------------
 
 test("FTS5 sync: DELETE trigger removes the corresponding memories_fts row", () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-fts5-sync-");
   try {
     const record = insertMemoryRecord(handle, {
       kind: "fact",
@@ -271,7 +254,7 @@ test("FTS5 sync: DELETE trigger removes the corresponding memories_fts row", () 
 // ---------------------------------------------------------------------------
 
 test("FTS5 sync: initStorage creates the three sync triggers and backfills pre-existing rows", () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-fts5-sync-");
   try {
     // The three triggers must exist on a freshly initialized DB.
     const triggerRows = handle.db
@@ -354,7 +337,7 @@ test("FTS5 sync: initStorage creates the three sync triggers and backfills pre-e
       closeStorage(reopened);
     }
   } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
+    rmStorage(tmp, handle);
   }
 });
 
@@ -363,7 +346,7 @@ test("FTS5 sync: initStorage creates the three sync triggers and backfills pre-e
 // ---------------------------------------------------------------------------
 
 test("FTS5: listActiveMemorySummariesByFts5 retrieves all matched memories without an artificial cap", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-fts5-sync-");
   try {
     // Insert 75 memories, each with a unique distinctive term so
     // FTS5 can retrieve them individually.
@@ -413,7 +396,7 @@ test("FTS5: listActiveMemorySummariesByFts5 retrieves all matched memories witho
 });
 
 test("FTS5: listActiveMemorySummariesByFts5 returns empty for no-match query without throwing", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-fts5-sync-");
   try {
     // Insert a few memories.
     insertMemoryRecord(handle, {

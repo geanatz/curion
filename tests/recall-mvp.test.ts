@@ -23,14 +23,9 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 
 import { runRecallController } from "../src/controller/recall-controller.ts";
 import {
-  initStorage,
-  closeStorage,
   insertMemoryRecord,
   type StorageHandle,
   type MemoryRecord,
@@ -63,72 +58,23 @@ import {
   setListRegisteredProjectsStub,
   resetListRegisteredProjectsStub,
 } from "../src/config/registry.ts";
+import {
+  TEST_PRIMARY_KEY,
+  TEST_FALLBACK_KEY,
+  TEST_PRIMARY_BASE_URL,
+  TEST_PRIMARY_MODEL,
+  TEST_FALLBACK_BASE_URL,
+  TEST_FALLBACK_MODEL,
+} from "./shared-test-provider.ts";
+import { scriptFetch, okChatResponse, safeAnalysis } from "./_helpers/provider-stub.ts";
+import { mkStorage, rmStorage } from "./_helpers/test-storage.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function mkStorage(): { tmp: string; handle: StorageHandle } {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-recall-"));
-  const handle = initStorage({ projectRoot: tmp });
-  return { tmp, handle };
-}
-
-function rmStorage(tmp: string, handle: StorageHandle): void {
-  try {
-    handle.db.close();
-  } catch {
-    // ignore
-  }
-  fs.rmSync(tmp, { recursive: true, force: true });
-}
-
-/** Scripted fetch that returns a single canned response. */
-function scriptFetch(responder: () => Response): {
-  fetchImpl: typeof fetch;
-  calls: Array<{ url: string; body: string }>;
-} {
-  const calls: Array<{ url: string; body: string }> = [];
-  const fetchImpl: typeof fetch = async (input, init) => {
-    const url = typeof input === "string" ? input : (input as URL).toString();
-    let body = "";
-    if (init && typeof init === "object" && "body" in init && init.body) {
-      body = String(init.body);
-    }
-    calls.push({ url, body });
-    return responder();
-  };
-  return { fetchImpl, calls };
-}
-
-function okChatResponse(content: string): Response {
-  return new Response(
-    JSON.stringify({
-      id: "x",
-      model: "m",
-      choices: [{ message: { role: "assistant", content } }],
-    }),
-    { status: 200, headers: { "content-type": "application/json" } },
-  );
-}
-
 function httpErrorResponse(status: number, text = "boom"): Response {
   return new Response(text, { status });
-}
-
-function safeAnalysis(opts: {
-  summary?: string;
-  confidence?: number;
-  classification?: string;
-  tags?: string[];
-} = {}): string {
-  return JSON.stringify({
-    summary: opts.summary ?? "The project uses Postgres 16 for the primary store.",
-    confidence: opts.confidence ?? 0.82,
-    tags: opts.tags ?? ["postgres", "storage"],
-    entities: [{ name: "Postgres", kind: "database" }],
-    classification: opts.classification ?? "fact",
-  });
 }
 
 function insertSummary(
@@ -151,14 +97,6 @@ function insertSummary(
   });
 }
 
-const PRIMARY_KEY = "sk-primary-test-not-real-12345";
-const FALLBACK_KEY = "sk-fallback-test-not-real-12345";
-// Use generic test URLs/models; provider label is derived from base URL.
-const PRIMARY_BASE_URL = "https://api.example.com/v1";
-const PRIMARY_MODEL = "test/model-primary";
-const FALLBACK_BASE_URL = "https://api.fallback.example/v1";
-const FALLBACK_MODEL = "test/model-fallback";
-
 /** Run the recall controller with a scripted fetch and test keys. */
 function runRecall(handle: StorageHandle, opts: {
   text: string;
@@ -168,12 +106,12 @@ function runRecall(handle: StorageHandle, opts: {
 }) {
   return runRecallController(handle, opts.text, {
     providerFetchImpl: opts.fetchImpl,
-    providerPrimaryApiKey: PRIMARY_KEY,
-    providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-    providerPrimaryModel: PRIMARY_MODEL,
-    providerFallbackApiKey: FALLBACK_KEY,
-    providerFallbackBaseUrl: FALLBACK_BASE_URL,
-    providerFallbackModel: FALLBACK_MODEL,
+    providerPrimaryApiKey: TEST_PRIMARY_KEY,
+    providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+    providerPrimaryModel: TEST_PRIMARY_MODEL,
+    providerFallbackApiKey: TEST_FALLBACK_KEY,
+    providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+    providerFallbackModel: TEST_FALLBACK_MODEL,
     relevanceThreshold: opts.threshold,
     topK: opts.topK,
   });
@@ -184,7 +122,7 @@ function runRecall(handle: StorageHandle, opts: {
 // ---------------------------------------------------------------------------
 
 test("recall: no memories -> no_memory and no provider call", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-recall-");
   try {
     const { fetchImpl, calls } = scriptFetch(() =>
       okChatResponse("This should never be served."),
@@ -205,7 +143,7 @@ test("recall: no memories -> no_memory and no provider call", async () => {
 // ---------------------------------------------------------------------------
 
 test("recall: irrelevant memories -> no_memory and no provider call", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-recall-");
   try {
     // Use summaries that share zero content tokens with the
     // query. The lexical ranker is a token-overlap scorer; if a
@@ -243,7 +181,7 @@ test("recall: irrelevant memories -> no_memory and no provider call", async () =
 // ---------------------------------------------------------------------------
 
 test("recall: relevant memory -> provider called, synthesized answer returned", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-recall-");
   try {
     insertSummary(
       handle,
@@ -291,7 +229,7 @@ test("recall: relevant memory -> provider called, synthesized answer returned", 
 // ---------------------------------------------------------------------------
 
 test("recall: provider hard failure -> provider_error, no fabricated answer", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-recall-");
   try {
     insertSummary(
       handle,
@@ -328,7 +266,7 @@ test("recall: provider hard failure -> provider_error, no fabricated answer", as
 // ---------------------------------------------------------------------------
 
 test("recall: query with obvious secret -> rejected, no provider call, raw text not logged", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-recall-");
   try {
     insertSummary(
       handle,
@@ -404,7 +342,7 @@ test("recall: a pure-secret-only query is classified as `secret` (rejected)", as
   // context over 40 chars) is classified as `secret`, not
   // `mixed-safe-sensitive`. This is the case the original test
   // asserted, kept here as a focused unit-level check.
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-recall-");
   try {
     const { fetchImpl, calls } = scriptFetch(() =>
       okChatResponse("never served"),
@@ -427,7 +365,7 @@ test("recall: a pure-secret-only query is classified as `secret` (rejected)", as
 // ---------------------------------------------------------------------------
 
 test("recall: provider answer that is a secret -> provider_error, no unsafe public answer", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-recall-");
   try {
     insertSummary(
       handle,
@@ -459,7 +397,7 @@ test("recall: provider answer that is a secret -> provider_error, no unsafe publ
 });
 
 test("recall: provider answer that looks like a raw dump -> provider_error", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-recall-");
   try {
     insertSummary(
       handle,
@@ -485,7 +423,7 @@ test("recall: provider answer that looks like a raw dump -> provider_error", asy
 });
 
 test("recall: provider answer with a secret embedded in real text is redacted but still saved", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-recall-");
   try {
     insertSummary(
       handle,
@@ -561,7 +499,7 @@ test("recall tool: exposes exactly one text param", () => {
 // ---------------------------------------------------------------------------
 
 test("recall: public message is the synthesized answer (no citations / evidence / diagnostics)", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-recall-");
   try {
     insertSummary(
       handle,
@@ -602,7 +540,7 @@ test("recall: public message is the synthesized answer (no citations / evidence 
 // ---------------------------------------------------------------------------
 
 test("recall: synthesis prompt uses stored summaries, not raw input", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-recall-");
   try {
     const storedSummary =
       "The project uses Postgres 16 for the primary store. The office hallway has walnut flooring.";
@@ -621,8 +559,8 @@ test("recall: synthesis prompt uses stored summaries, not raw input", async () =
     const rememberFetch = scriptFetch(() => okChatResponse(safeAnalysis()));
     await runRememberController(handle, rawInput, {
       providerFetchImpl: rememberFetch.fetchImpl,
-      providerPrimaryApiKey: PRIMARY_KEY,
-      providerFallbackApiKey: FALLBACK_KEY,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
     });
     // Now run recall with a query. The synthesis request body
     // must include the stored summary and must NOT include the
@@ -662,7 +600,7 @@ test("recall: synthesis prompt uses stored summaries, not raw input", async () =
 // ---------------------------------------------------------------------------
 
 test("recall e2e: remember then recall via the tool layer with stubbed providers", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-recall-");
   try {
     setRememberStorageProvider(() => ({ handle, ownsHandle: false }));
     setRecallStorageProvider(() => ({ handle, ownsHandle: false }));
@@ -692,12 +630,12 @@ test("recall e2e: remember then recall via the tool layer with stubbed providers
       // with our scripted fetch.
       const outcome = await runRememberController(handle, rawInput, {
         providerFetchImpl: rememberFetch.fetchImpl,
-        providerPrimaryApiKey: PRIMARY_KEY,
-        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-        providerPrimaryModel: PRIMARY_MODEL,
-        providerFallbackApiKey: FALLBACK_KEY,
-        providerFallbackBaseUrl: FALLBACK_BASE_URL,
-        providerFallbackModel: FALLBACK_MODEL,
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+        providerPrimaryModel: TEST_PRIMARY_MODEL,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
+        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+        providerFallbackModel: TEST_FALLBACK_MODEL,
       });
       assert.equal(outcome.status, "saved");
       if (outcome.status !== "saved") throw new Error("unreachable");
@@ -727,12 +665,12 @@ test("recall e2e: remember then recall via the tool layer with stubbed providers
       // controlled e2e path the task allows.
       const out = await runRecallController(handle, "What database does the project use?", {
         providerFetchImpl: recallFetch.fetchImpl,
-        providerPrimaryApiKey: PRIMARY_KEY,
-        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-        providerPrimaryModel: PRIMARY_MODEL,
-        providerFallbackApiKey: FALLBACK_KEY,
-        providerFallbackBaseUrl: FALLBACK_BASE_URL,
-        providerFallbackModel: FALLBACK_MODEL,
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+        providerPrimaryModel: TEST_PRIMARY_MODEL,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
+        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+        providerFallbackModel: TEST_FALLBACK_MODEL,
       });
       assert.equal(out.status, "answered");
       if (out.status !== "answered") throw new Error("unreachable");
@@ -869,7 +807,7 @@ test("lexical: default threshold is 0.2 and rejects near-zero overlap", () => {
 // ---------------------------------------------------------------------------
 
 test("storage: listActiveMemorySummaries exposes only safe fields", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-recall-");
   try {
     insertSummary(handle, "We use Postgres 16 for the primary store.", {
       kind: "fact",
@@ -929,7 +867,7 @@ test("storage: listActiveMemorySummaries exposes only safe fields", async () => 
 // ---------------------------------------------------------------------------
 
 test("recall: query mixing safe content with a secret -> rejected, no provider", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-recall-");
   try {
     insertSummary(
       handle,
@@ -974,7 +912,7 @@ test("recall: a pure-secret query is classified as `secret` (rejected) — unit 
 // ---------------------------------------------------------------------------
 
 test("recall: <think>...</think> reasoning block is stripped from the public answer", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-recall-");
   try {
     insertSummary(
       handle,
@@ -1006,7 +944,7 @@ test("recall: <think>...</think> reasoning block is stripped from the public ans
 });
 
 test("recall: multiline + case-insensitive <THINK>...</THINK> block is stripped", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-recall-");
   try {
     insertSummary(
       handle,
@@ -1045,7 +983,7 @@ test("recall: multiline + case-insensitive <THINK>...</THINK> block is stripped"
 });
 
 test("recall: <thinking>...</thinking> block (low-cost variant) is stripped", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-recall-");
   try {
     insertSummary(
       handle,
@@ -1072,7 +1010,7 @@ test("recall: <thinking>...</thinking> block (low-cost variant) is stripped", as
 });
 
 test("recall: leading 'Reasoning:' block is stripped when followed by a blank line and visible answer", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-recall-");
   try {
     insertSummary(
       handle,
@@ -1103,7 +1041,7 @@ test("recall: leading 'Reasoning:' block is stripped when followed by a blank li
 });
 
 test("recall: provider answer that is only a think block -> provider_error, no unsafe empty answer", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-recall-");
   try {
     insertSummary(
       handle,
@@ -1133,7 +1071,7 @@ test("recall: provider answer that is only a think block -> provider_error, no u
 });
 
 test("recall: secret inside stripped think block does not appear in public answer, log, or storage", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-recall-");
   try {
     insertSummary(
       handle,
@@ -1207,7 +1145,7 @@ test("recall: secret inside stripped think block does not appear in public answe
 });
 
 test("recall: answer without a reasoning block is returned unchanged (no false-positive stripping)", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-recall-");
   try {
     insertSummary(
       handle,
@@ -1263,7 +1201,7 @@ test("recall: answer without a reasoning block is returned unchanged (no false-p
 // controller decides what to do with it.
 
 test("recall: live failure phrase 'I don't have a specific summary for session 2 in the available memories.' -> weak_match", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-recall-");
   try {
     insertSummary(
       handle,
@@ -1290,7 +1228,7 @@ test("recall: live failure phrase 'I don't have a specific summary for session 2
 });
 
 test("recall: original failure paraphrase 'I don't have specific details about that.' -> weak_match", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-recall-");
   try {
     insertSummary(
       handle,
@@ -1316,7 +1254,7 @@ test("recall: original failure paraphrase 'I don't have specific details about t
 });
 
 test("recall: article-gap variant with 'summary' and no qualifier -> weak_match", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-recall-");
   try {
     insertSummary(
       handle,
@@ -1340,7 +1278,7 @@ test("recall: article-gap variant with 'summary' and no qualifier -> weak_match"
 });
 
 test("recall: article-gap variant with 'entry' and 'any' qualifier -> weak_match", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-recall-");
   try {
     insertSummary(
       handle,
@@ -1366,7 +1304,7 @@ test("recall: article-gap variant with 'entry' and 'any' qualifier -> weak_match
 });
 
 test("recall: article-gap variant with 'note' and 'specific' qualifier -> weak_match", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-recall-");
   try {
     insertSummary(
       handle,
@@ -1392,7 +1330,7 @@ test("recall: article-gap variant with 'note' and 'specific' qualifier -> weak_m
 });
 
 test("recall: false-positive guard — 'I don't have the answer' substantive response must NOT be rerouted", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-recall-");
   try {
     insertSummary(
       handle,
@@ -1422,7 +1360,7 @@ test("recall: false-positive guard — 'I don't have the answer' substantive res
 });
 
 test("recall: false-positive guard — substantive answer that mentions memories naturally must NOT be rerouted", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-recall-");
   try {
     insertSummary(
       handle,
@@ -1449,7 +1387,7 @@ test("recall: false-positive guard — substantive answer that mentions memories
 });
 
 test("recall: false-positive guard — 'The memory does not contain X' substantive answer must NOT be rerouted", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-recall-");
   try {
     insertSummary(
       handle,
@@ -1478,7 +1416,7 @@ test("recall: false-positive guard — 'The memory does not contain X' substanti
 });
 
 test("recall: false-positive guard — 'There are no records of X' substantive answer must NOT be rerouted", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-recall-");
   try {
     insertSummary(
       handle,
@@ -1506,7 +1444,7 @@ test("recall: false-positive guard — 'There are no records of X' substantive a
 });
 
 test("recall: regression guard — secret-shaped provider answer still routes to provider_error (not no_memory)", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-recall-");
   try {
     insertSummary(
       handle,
@@ -1576,7 +1514,7 @@ test("recall: regression guard — secret-shaped provider answer still routes to
 //       `weak_match`.
 
 test("recall: weak_match (a) live failure phrase -> weak_match with coverage and summaries", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-recall-");
   try {
     insertSummary(
       handle,
@@ -1612,7 +1550,7 @@ test("recall: weak_match (a) live failure phrase -> weak_match with coverage and
 });
 
 test("recall: weak_match (b) original failure paraphrase -> weak_match with the same shape", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-recall-");
   try {
     insertSummary(
       handle,
@@ -1638,7 +1576,7 @@ test("recall: weak_match (b) original failure paraphrase -> weak_match with the 
 });
 
 test("recall: weak_match (c) strong-overlap control — substantive answer for '5 explorer subagents' must remain answered (regression guard)", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-recall-");
   try {
     // Store a summary that strongly overlaps the query.
     // The synthesis LLM is given this summary and returns a
@@ -1673,7 +1611,7 @@ test("recall: weak_match (c) strong-overlap control — substantive answer for '
 });
 
 test("recall: weak_match (d) zero-overlap query -> no_memory (unchanged: thin-match branch does not fire when the ranker finds nothing)", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-recall-");
   try {
     // Insert summaries that share zero content tokens with
     // the query. The lexical ranker returns zero hits, the
@@ -1712,7 +1650,7 @@ test("recall: weak_match (d) zero-overlap query -> no_memory (unchanged: thin-ma
 });
 
 test("recall: weak_match (e) structuredContent.weak_match shape — <= 3 summaries, coverage has both fields, no `message` field on the wire", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-recall-");
   try {
     // Drive the controller to produce a real weak_match
     // outcome, then route it through the wire-format
@@ -1745,12 +1683,12 @@ test("recall: weak_match (e) structuredContent.weak_match shape — <= 3 summari
     );
     const outcome = await runRecallController(handle, "session 2", {
       providerFetchImpl: fetchImpl,
-      providerPrimaryApiKey: PRIMARY_KEY,
-      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-      providerPrimaryModel: PRIMARY_MODEL,
-      providerFallbackApiKey: FALLBACK_KEY,
-      providerFallbackBaseUrl: FALLBACK_BASE_URL,
-      providerFallbackModel: FALLBACK_MODEL,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
     });
     assert.equal(outcome.status, "weak_match");
     if (outcome.status !== "weak_match") throw new Error("unreachable");
@@ -1828,7 +1766,7 @@ test("recall: weak_match (e) structuredContent.weak_match shape — <= 3 summari
 });
 
 test("recall: weak_match (f) regression — substantive answer (false-positive guard) still routes to answered, not weak_match", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-recall-");
   try {
     insertSummary(
       handle,
@@ -1877,7 +1815,7 @@ test("recall: weak_match (f) regression — substantive answer (false-positive g
 // text the tool layer exposes as the public `content[0].text`.
 
 test("recall: memory-id leak stripping — Memory #N is replaced with [memory] in the public text", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-recall-");
   try {
     insertSummary(
       handle,
@@ -1929,7 +1867,7 @@ test("recall: memory-id leak stripping — Memory #N is replaced with [memory] i
 });
 
 test("recall: memory-id leak stripping — bare #N and noun-prefixed #N are stripped", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-recall-");
   try {
     insertSummary(
       handle,
@@ -1984,7 +1922,7 @@ test("recall: memory-id leak stripping — bare #N and noun-prefixed #N are stri
 });
 
 test("recall: memory-id leak stripping — false-positive guard, URL with #fragment is preserved", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-recall-");
   try {
     insertSummary(
       handle,
@@ -2027,7 +1965,7 @@ test("recall: memory-id leak stripping — false-positive guard, URL with #fragm
 });
 
 test("recall: memory-id leak stripping — answers without id references are unchanged", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-recall-");
   try {
     insertSummary(
       handle,

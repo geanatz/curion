@@ -57,6 +57,7 @@ import {
 } from "../src/benchmark/retrieval-runner.ts";
 import { aggregateMetrics } from "../src/benchmark/metrics.ts";
 import { PUBLIC_TOOL_NAMES } from "../src/server.ts";
+import { walkTs } from "./_helpers/fs-walk.ts";
 
 // ---------------------------------------------------------------------------
 // 1. Embedder determinism
@@ -578,22 +579,9 @@ test("vector variant: only the benchmark runner imports the vector module", () =
     path.join("benchmark", "variants", "dense-vector.ts"),
     path.join("benchmark", "variants", "dense-embedder.ts"),
   ]);
-  function walk(dir: string): string[] {
-    const out: string[] = [];
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        out.push(...walk(full));
-      } else if (entry.name.endsWith(".ts")) {
-        out.push(full);
-      }
-    }
-    return out;
-  }
-  for (const file of walk(root)) {
-    const rel = path.relative(root, file);
-    if (allowedImporters.has(rel)) continue;
-    const src = fs.readFileSync(file, "utf8");
+  for (const file of walkTs(root, { excludeDts: false })) {
+    if (allowedImporters.has(file)) continue;
+    const src = fs.readFileSync(path.join(root, file), "utf8");
     const importsVectorModule =
       src.includes("from \"./vector\"") ||
       src.includes("from \"./vector.js\"") ||
@@ -608,11 +596,11 @@ test("vector variant: only the benchmark runner imports the vector module", () =
       src.match(/\bembedHashedBagOfWords\b/) !== null;
     assert.ok(
       !importsVectorModule,
-      `unexpected import of vector module in ${rel}`,
+      `unexpected import of vector module in ${file}`,
     );
     assert.ok(
       !usesVectorSymbol,
-      `unexpected vector symbol usage in ${rel}`,
+      `unexpected vector symbol usage in ${file}`,
     );
   }
 });

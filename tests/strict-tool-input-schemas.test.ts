@@ -36,14 +36,10 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 
 import { buildServer } from "../src/server.ts";
 import { REMEMBER_INPUT_SCHEMA } from "../src/tools/remember.ts";
 import { RECALL_INPUT_SCHEMA } from "../src/tools/recall.ts";
-import { initStorage, type StorageHandle } from "../src/storage/storage.ts";
 import {
   setStorageProvider as setRememberStorageProvider,
   resetStorageProvider as resetRememberStorageProvider,
@@ -52,6 +48,7 @@ import {
   setStorageProvider as setRecallStorageProvider,
   resetStorageProvider as resetRecallStorageProvider,
 } from "../src/tools/recall.ts";
+import { mkStorage, rmStorage } from "./_helpers/test-storage.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -134,21 +131,6 @@ async function callToolThroughServer(
       requestId: 1,
     },
   );
-}
-
-function mkStorage(): { tmp: string; handle: StorageHandle } {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-strict-"));
-  const handle = initStorage({ projectRoot: tmp });
-  return { tmp, handle };
-}
-
-function rmStorage(tmp: string, handle: StorageHandle): void {
-  try {
-    handle.db.close();
-  } catch {
-    // ignore
-  }
-  fs.rmSync(tmp, { recursive: true, force: true });
 }
 
 // ---------------------------------------------------------------------------
@@ -285,7 +267,7 @@ test("recall: RECALL_INPUT_SCHEMA accepts exactly one text property (no extras)"
 // ---------------------------------------------------------------------------
 
 test("remember: SDK input validation rejects extra keys and surfaces isError: true without invoking handler", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-strict-");
   try {
     setRememberStorageProvider(() => ({ handle, ownsHandle: false }));
     try {
@@ -327,7 +309,7 @@ test("remember: SDK input validation rejects extra keys and surfaces isError: tr
 });
 
 test("recall: SDK input validation rejects extra keys and surfaces isError: true without invoking handler", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-strict-");
   try {
     setRecallStorageProvider(() => ({ handle, ownsHandle: false }));
     try {
@@ -364,7 +346,7 @@ test("recall: SDK input validation rejects extra keys and surfaces isError: true
 // ---------------------------------------------------------------------------
 
 test("remember: SDK input validation accepts the well-formed { text } payload and the handler runs", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-strict-");
   try {
     setRememberStorageProvider(() => ({ handle, ownsHandle: false }));
     try {
@@ -392,7 +374,7 @@ test("remember: SDK input validation accepts the well-formed { text } payload an
 });
 
 test("recall: SDK input validation accepts the well-formed { text } payload and the handler runs", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-strict-");
   try {
     setRecallStorageProvider(() => ({ handle, ownsHandle: false }));
     try {

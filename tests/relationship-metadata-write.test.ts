@@ -39,16 +39,8 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 
 import { runRememberController } from "../src/controller/remember-controller.ts";
-import {
-  initStorage,
-  closeStorage,
-  type StorageHandle,
-} from "../src/storage/storage.ts";
 import { handleRemember } from "../src/tools/remember.ts";
 import { buildServer, PUBLIC_TOOL_NAMES } from "../src/server.ts";
 import {
@@ -61,76 +53,24 @@ import {
   DERIVED_SCHEMA_VERSION,
   type RelationshipMetadataFields,
 } from "../src/retrieval/relationship.ts";
+import {
+  TEST_PRIMARY_KEY,
+  TEST_FALLBACK_KEY,
+  TEST_PRIMARY_BASE_URL,
+  TEST_PRIMARY_MODEL,
+  TEST_FALLBACK_BASE_URL,
+  TEST_FALLBACK_MODEL,
+} from "./shared-test-provider.ts";
+import {
+  scriptFetch,
+  okChatResponse,
+  safeAnalysis,
+} from "./_helpers/provider-stub.ts";
+import { mkStorage, rmStorage } from "./_helpers/test-storage.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function mkStorage(): { tmp: string; handle: StorageHandle } {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-mcp-rb-"));
-  const handle = initStorage({ projectRoot: tmp });
-  return { tmp, handle };
-}
-
-function rmStorage(tmp: string, handle: StorageHandle): void {
-  try {
-    handle.db.close();
-  } catch {
-    // ignore
-  }
-  fs.rmSync(tmp, { recursive: true, force: true });
-}
-
-function scriptFetch(responder: () => Response): {
-  fetchImpl: typeof fetch;
-  calls: Array<{ url: string; body: string }>;
-} {
-  const calls: Array<{ url: string; body: string }> = [];
-  const fetchImpl: typeof fetch = async (input, init) => {
-    const url = typeof input === "string" ? input : (input as URL).toString();
-    let body = "";
-    if (init && typeof init === "object" && "body" in init && init.body) {
-      body = String(init.body);
-    }
-    calls.push({ url, body });
-    return responder();
-  };
-  return { fetchImpl, calls };
-}
-
-function okChatResponse(content: string): Response {
-  return new Response(
-    JSON.stringify({
-      id: "x",
-      model: "m",
-      choices: [{ message: { role: "assistant", content } }],
-    }),
-    { status: 200, headers: { "content-type": "application/json" } },
-  );
-}
-
-function safeAnalysis(opts: {
-  summary?: string;
-  confidence?: number;
-  classification?: string;
-  tags?: string[];
-} = {}): string {
-  return JSON.stringify({
-    summary: opts.summary ?? "The project uses Postgres 16 for the primary store.",
-    confidence: opts.confidence ?? 0.82,
-    tags: opts.tags ?? ["postgres", "storage"],
-    entities: [{ name: "Postgres", kind: "database" }],
-    classification: opts.classification ?? "fact",
-  });
-}
-
-const PRIMARY_KEY = "sk-primary-test-not-real-12345";
-const FALLBACK_KEY = "nvapi-fallback-test-not-real-12345";
-// Explicit provider config: neutral URLs -> "custom" label.
-const PRIMARY_BASE_URL = "https://api.example.com/v1";
-const PRIMARY_MODEL = "test/model-primary";
-const FALLBACK_BASE_URL = "https://api.fallback.example/v1";
-const FALLBACK_MODEL = "test/model-fallback";
 
 // Pin a deterministic `Date.now()` for tests that read the
 // persisted `derivedAt`. The seam override also reads from this
@@ -290,17 +230,17 @@ test("buildPersistedMetadata: does not mutate the existing object", () => {
 // ---------------------------------------------------------------------------
 
 test("controller: default seam returns empty list -> no relationship block in metadata", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-mcp-rb-");
   try {
     const { fetchImpl } = scriptFetch(() => okChatResponse(safeAnalysis()));
     const outcome = await runRememberController(handle, "Some safe project fact.", {
       providerFetchImpl: fetchImpl,
-      providerPrimaryApiKey: PRIMARY_KEY,
-      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-      providerPrimaryModel: PRIMARY_MODEL,
-      providerFallbackApiKey: FALLBACK_KEY,
-      providerFallbackBaseUrl: FALLBACK_BASE_URL,
-      providerFallbackModel: FALLBACK_MODEL,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
     });
     assert.equal(outcome.status, "saved");
     if (outcome.status !== "saved") throw new Error("unreachable");
@@ -327,7 +267,7 @@ test("controller: default seam returns empty list -> no relationship block in me
 // ---------------------------------------------------------------------------
 
 test("controller: seam override returns synthetic related memories -> relationship block stored", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-mcp-rb-");
   try {
     // Override the seam to return a candidate that the detector
     // will flag as a conflict. The candidate summary "we do not
@@ -362,12 +302,12 @@ test("controller: seam override returns synthetic related memories -> relationsh
       "Some safe project fact.",
       {
         providerFetchImpl: fetchImpl,
-        providerPrimaryApiKey: PRIMARY_KEY,
-        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-        providerPrimaryModel: PRIMARY_MODEL,
-        providerFallbackApiKey: FALLBACK_KEY,
-        providerFallbackBaseUrl: FALLBACK_BASE_URL,
-        providerFallbackModel: FALLBACK_MODEL,
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+        providerPrimaryModel: TEST_PRIMARY_MODEL,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
+        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+        providerFallbackModel: TEST_FALLBACK_MODEL,
         now: pinnedNow(pinnedTime),
       },
     );
@@ -409,7 +349,7 @@ test("controller: seam override returns synthetic related memories -> relationsh
 // ---------------------------------------------------------------------------
 
 test("controller: stored metadata does not contain raw input string (Phase B invariant)", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-mcp-rb-");
   try {
     setRelatedMemoriesImpl(() => ({
       memories: [
@@ -432,12 +372,12 @@ test("controller: stored metadata does not contain raw input string (Phase B inv
       "We picked Postgres 16 for the primary data store because of better JSON support.";
     const outcome = await runRememberController(handle, rawText, {
       providerFetchImpl: fetchImpl,
-      providerPrimaryApiKey: PRIMARY_KEY,
-      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-      providerPrimaryModel: PRIMARY_MODEL,
-      providerFallbackApiKey: FALLBACK_KEY,
-      providerFallbackBaseUrl: FALLBACK_BASE_URL,
-      providerFallbackModel: FALLBACK_MODEL,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
       now: pinnedNow(1_700_000_000_000),
     });
     assert.equal(outcome.status, "saved");
@@ -473,7 +413,7 @@ test("controller: stored metadata does not contain raw input string (Phase B inv
 // ---------------------------------------------------------------------------
 
 test("public remember tool result shape is unchanged with seam override (status, message)", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-mcp-rb-");
   try {
     setRelatedMemoriesImpl(() => ({
       memories: [
@@ -503,12 +443,12 @@ test("public remember tool result shape is unchanged with seam override (status,
       // controller and check the structured result.
       const r = await runRememberController(handle, "Some safe fact.", {
         providerFetchImpl: fetchImpl,
-        providerPrimaryApiKey: PRIMARY_KEY,
-        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-        providerPrimaryModel: PRIMARY_MODEL,
-        providerFallbackApiKey: FALLBACK_KEY,
-        providerFallbackBaseUrl: FALLBACK_BASE_URL,
-        providerFallbackModel: FALLBACK_MODEL,
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+        providerPrimaryModel: TEST_PRIMARY_MODEL,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
+        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+        providerFallbackModel: TEST_FALLBACK_MODEL,
         now: pinnedNow(1_700_000_000_000),
       });
       assert.equal(r.status, "saved");
@@ -565,7 +505,7 @@ test("remember tool: still exposes exactly one text param", () => {
 });
 
 test("storage: memories table never has a raw/original text column (no schema migration)", () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-mcp-rb-");
   try {
     const cols = handle.db
       .prepare("PRAGMA table_info(memories)")
@@ -597,7 +537,7 @@ test("storage: memories table never has a raw/original text column (no schema mi
 // ---------------------------------------------------------------------------
 
 test("controller: derivedAt is the value the controller passed via options.now", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-mcp-rb-");
   try {
     setRelatedMemoriesImpl(() => ({
       memories: [
@@ -618,12 +558,12 @@ test("controller: derivedAt is the value the controller passed via options.now",
     const t = 1_650_000_000_000;
     const outcome = await runRememberController(handle, "Some safe fact.", {
       providerFetchImpl: fetchImpl,
-      providerPrimaryApiKey: PRIMARY_KEY,
-      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-      providerPrimaryModel: PRIMARY_MODEL,
-      providerFallbackApiKey: FALLBACK_KEY,
-      providerFallbackBaseUrl: FALLBACK_BASE_URL,
-      providerFallbackModel: FALLBACK_MODEL,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
       now: pinnedNow(t),
     });
     assert.equal(outcome.status, "saved");
@@ -645,19 +585,19 @@ test("controller: derivedAt is the value the controller passed via options.now",
 // ---------------------------------------------------------------------------
 
 test("controller: pre-existing active rows are not state-transitioned by a new insert", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-mcp-rb-");
   try {
     // Insert one safe memory.
     {
       const { fetchImpl } = scriptFetch(() => okChatResponse(safeAnalysis()));
       const r1 = await runRememberController(handle, "First safe fact.", {
         providerFetchImpl: fetchImpl,
-        providerPrimaryApiKey: PRIMARY_KEY,
-        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-        providerPrimaryModel: PRIMARY_MODEL,
-        providerFallbackApiKey: FALLBACK_KEY,
-        providerFallbackBaseUrl: FALLBACK_BASE_URL,
-        providerFallbackModel: FALLBACK_MODEL,
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+        providerPrimaryModel: TEST_PRIMARY_MODEL,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
+        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+        providerFallbackModel: TEST_FALLBACK_MODEL,
         now: pinnedNow(1),
       });
       assert.equal(r1.status, "saved");
@@ -674,12 +614,12 @@ test("controller: pre-existing active rows are not state-transitioned by a new i
       );
       const r2 = await runRememberController(handle, "Second safe fact.", {
         providerFetchImpl: fetchImpl,
-        providerPrimaryApiKey: PRIMARY_KEY,
-        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-        providerPrimaryModel: PRIMARY_MODEL,
-        providerFallbackApiKey: FALLBACK_KEY,
-        providerFallbackBaseUrl: FALLBACK_BASE_URL,
-        providerFallbackModel: FALLBACK_MODEL,
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+        providerPrimaryModel: TEST_PRIMARY_MODEL,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
+        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+        providerFallbackModel: TEST_FALLBACK_MODEL,
         now: pinnedNow(2),
       });
       assert.equal(r2.status, "saved");
@@ -702,7 +642,7 @@ test("controller: pre-existing active rows are not state-transitioned by a new i
 // ---------------------------------------------------------------------------
 
 test("controller: after seam override reset, the seam returns the MVP empty list", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-mcp-rb-");
   try {
     setRelatedMemoriesImpl(() => ({
       memories: [{ id: 5000, memoryContent: "anything" }],
@@ -713,12 +653,12 @@ test("controller: after seam override reset, the seam returns the MVP empty list
     const { fetchImpl } = scriptFetch(() => okChatResponse(safeAnalysis()));
     const r = await runRememberController(handle, "Some safe fact.", {
       providerFetchImpl: fetchImpl,
-      providerPrimaryApiKey: PRIMARY_KEY,
-      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-      providerPrimaryModel: PRIMARY_MODEL,
-      providerFallbackApiKey: FALLBACK_KEY,
-      providerFallbackBaseUrl: FALLBACK_BASE_URL,
-      providerFallbackModel: FALLBACK_MODEL,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
     });
     assert.equal(r.status, "saved");
     if (r.status !== "saved") throw new Error("unreachable");
@@ -773,7 +713,7 @@ test("relationship metadata write: remember-controller does not import benchmark
 // ---------------------------------------------------------------------------
 
 test("tool: handleRemember with seam override still returns one of the four statuses", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-mcp-rb-");
   try {
     setRelatedMemoriesImpl(() => ({
       memories: [
@@ -845,7 +785,7 @@ test("buildPersistedMetadata is pure — output is independent of wall clock", (
 // The seam override returns the older row's id. The candidate is
 // a near-paraphrase of the older row that clears τ' (0.90).
 test("controller: olderVariantsOf is non-empty when a related memory is an earlier near-variant (B-1 fix)", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-mcp-rb-");
   try {
     // Step 1: pre-insert an "earlier" memory (id will be 1).
     // Use a high-overlap summary the detector can later see as a
@@ -876,12 +816,12 @@ test("controller: olderVariantsOf is non-empty when a related memory is an earli
         "Older fact about Postgres migration.",
         {
           providerFetchImpl: fetchImpl,
-          providerPrimaryApiKey: PRIMARY_KEY,
-          providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-          providerPrimaryModel: PRIMARY_MODEL,
-          providerFallbackApiKey: FALLBACK_KEY,
-          providerFallbackBaseUrl: FALLBACK_BASE_URL,
-          providerFallbackModel: FALLBACK_MODEL,
+          providerPrimaryApiKey: TEST_PRIMARY_KEY,
+          providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+          providerPrimaryModel: TEST_PRIMARY_MODEL,
+          providerFallbackApiKey: TEST_FALLBACK_KEY,
+          providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+          providerFallbackModel: TEST_FALLBACK_MODEL,
           now: pinnedNow(1_700_000_000_000),
         },
       );
@@ -922,12 +862,12 @@ test("controller: olderVariantsOf is non-empty when a related memory is an earli
       "Newer near-paraphrase about Postgres migration.",
       {
         providerFetchImpl: fetchImpl,
-        providerPrimaryApiKey: PRIMARY_KEY,
-        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-        providerPrimaryModel: PRIMARY_MODEL,
-        providerFallbackApiKey: FALLBACK_KEY,
-        providerFallbackBaseUrl: FALLBACK_BASE_URL,
-        providerFallbackModel: FALLBACK_MODEL,
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+        providerPrimaryModel: TEST_PRIMARY_MODEL,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
+        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+        providerFallbackModel: TEST_FALLBACK_MODEL,
         now: pinnedNow(pinnedTime),
       },
     );
@@ -1022,7 +962,7 @@ test("controller: olderVariantsOf is non-empty when a related memory is an earli
 // `conflictsWith: [-1]` / `olderVariantsOf: [-1]` list, which is
 // wrong on every read.
 test("controller: malformed related-memory id is skipped, not coerced to -1 and persisted (I-1 fix)", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-mcp-rb-");
   try {
     // Override the seam to return ONE good related memory and
     // several bad rows (non-finite ids, string ids, etc.). The
@@ -1060,12 +1000,12 @@ test("controller: malformed related-memory id is skipped, not coerced to -1 and 
     );
     const outcome = await runRememberController(handle, "Some safe fact.", {
       providerFetchImpl: fetchImpl,
-      providerPrimaryApiKey: PRIMARY_KEY,
-      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-      providerPrimaryModel: PRIMARY_MODEL,
-      providerFallbackApiKey: FALLBACK_KEY,
-      providerFallbackBaseUrl: FALLBACK_BASE_URL,
-      providerFallbackModel: FALLBACK_MODEL,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
       now: pinnedNow(1_700_000_000_000),
     });
     assert.equal(outcome.status, "saved");

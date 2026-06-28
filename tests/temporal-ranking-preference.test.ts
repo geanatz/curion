@@ -93,6 +93,7 @@ import {
 import type { BenchmarkQuery } from "../src/benchmark/queries.js";
 import { evaluateQuery, type QueryEval } from "../src/benchmark/metrics.js";
 import { PUBLIC_TOOL_NAMES } from "../src/server.js";
+import { walkTs } from "./_helpers/fs-walk.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -492,7 +493,7 @@ test("temporal-ranking-preference: production source tree does NOT import the ne
     if (!fs.existsSync(dir)) continue;
     const files = walkTs(dir);
     for (const f of files) {
-      const text = fs.readFileSync(f, "utf8");
+      const text = fs.readFileSync(path.join(dir, f), "utf8");
       assert.ok(
         !text.includes("temporal-ranking-preference"),
         `production source ${f} must not import the new module`,
@@ -500,23 +501,6 @@ test("temporal-ranking-preference: production source tree does NOT import the ne
     }
   }
 });
-
-/**
- * Walk a directory recursively and return all
- * .ts files (excluding .d.ts).
- */
-function walkTs(dir: string): string[] {
-  const out: string[] = [];
-  for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
-    const full = path.join(dir, ent.name);
-    if (ent.isDirectory()) {
-      out.push(...walkTs(full));
-    } else if (ent.isFile() && full.endsWith(".ts") && !full.endsWith(".d.ts")) {
-      out.push(full);
-    }
-  }
-  return out;
-}
 
 // ---------------------------------------------------------------------------
 // 4. Deterministic output

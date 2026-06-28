@@ -93,6 +93,7 @@ import {
 } from "../src/benchmark/retrieval-runner.ts";
 import { PUBLIC_TOOL_NAMES } from "../src/server.ts";
 import type { LexicalCandidate } from "../src/retrieval/lexical.ts";
+import { walkTs } from "./_helpers/fs-walk.ts";
 
 // ---------------------------------------------------------------------------
 // 1. Embedder interface + metadata shape
@@ -1003,22 +1004,9 @@ test("dense variant: only the benchmark directory imports the dense modules", ()
     path.join("safety"),
     path.join("storage"),
   ];
-  function walk(dir: string): string[] {
-    const out: string[] = [];
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        out.push(...walk(full));
-      } else if (entry.name.endsWith(".ts")) {
-        out.push(full);
-      }
-    }
-    return out;
-  }
-  for (const file of walk(root)) {
-    const rel = path.relative(root, file);
+  for (const rel of walkTs(root, { excludeDts: false })) {
     if (allowedImporters.has(rel)) continue;
-    const src = fs.readFileSync(file, "utf8");
+    const src = fs.readFileSync(path.join(root, rel), "utf8");
     const importsDenseModule =
       src.includes("from \"./dense-embedder\"") ||
       src.includes("from \"./dense-embedder.js\"") ||

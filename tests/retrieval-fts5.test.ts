@@ -59,6 +59,7 @@ import {
   formatComparisonReport,
 } from "../src/benchmark/retrieval-runner.ts";
 import { aggregateMetrics } from "../src/benchmark/metrics.ts";
+import { walkTs } from "./_helpers/fs-walk.ts";
 
 // ---------------------------------------------------------------------------
 // 1. In-memory index: no persistent DB writes
@@ -507,22 +508,9 @@ test("FTS5 variant: only the benchmark runner imports the FTS5 module", () => {
     path.join("benchmark", "variants", "fts5.ts"),
     path.join("benchmark", "variants", "hybrid.ts"),
   ]);
-  function walk(dir: string): string[] {
-    const out: string[] = [];
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        out.push(...walk(full));
-      } else if (entry.name.endsWith(".ts")) {
-        out.push(full);
-      }
-    }
-    return out;
-  }
-  for (const file of walk(root)) {
-    const rel = path.relative(root, file);
-    if (allowedImporters.has(rel)) continue;
-    const src = fs.readFileSync(file, "utf8");
+  for (const file of walkTs(root, { excludeDts: false })) {
+    if (allowedImporters.has(file)) continue;
+    const src = fs.readFileSync(path.join(root, file), "utf8");
     // The relative import path is the canonical form
     // (`./fts5.js` is what TypeScript emits for ESM).
     const importsFts5Module =
@@ -538,11 +526,11 @@ test("FTS5 variant: only the benchmark runner imports the FTS5 module", () => {
       src.match(/\bbuildFts5Index\b/) !== null;
     assert.ok(
       !importsFts5Module,
-      `unexpected import of FTS5 module in ${rel}`,
+      `unexpected import of FTS5 module in ${file}`,
     );
     assert.ok(
       !usesFts5Symbol,
-      `unexpected FTS5 symbol usage in ${rel}`,
+      `unexpected FTS5 symbol usage in ${file}`,
     );
   }
 });

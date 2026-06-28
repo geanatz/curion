@@ -143,6 +143,7 @@ import {
 import {
   SIMULATED_SUPERSESSION_EDGES,
 } from "../src/benchmark/supersession-edge-simulation.js";
+import { walkTs } from "./_helpers/fs-walk.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -214,23 +215,6 @@ function mkArtifact(evals: ReadonlyArray<QueryEval>): BenchmarkArtifact {
     config: { recordCount: 132 },
     evals,
   };
-}
-
-/**
- * Walk a directory recursively and return all
- * .ts files (excluding .d.ts).
- */
-function walkTs(dir: string): string[] {
-  const out: string[] = [];
-  for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
-    const full = path.join(dir, ent.name);
-    if (ent.isDirectory()) {
-      out.push(...walkTs(full));
-    } else if (ent.isFile() && full.endsWith(".ts") && !full.endsWith(".d.ts")) {
-      out.push(full);
-    }
-  }
-  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -985,7 +969,7 @@ test("temporal-candidate-generation-probe: production source tree does NOT impor
     if (!fs.existsSync(root)) continue;
     const files = walkTs(root);
     for (const f of files) {
-      const text = fs.readFileSync(f, "utf8");
+      const text = fs.readFileSync(path.join(root, f), "utf8");
       for (const ident of newModuleIdentifiers) {
         assert.ok(
           !text.includes(ident),

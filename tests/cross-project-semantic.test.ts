@@ -27,7 +27,6 @@ import {
   StubSemanticEmbedder,
 } from "../src/retrieval/semantic/embedder.ts";
 import {
-  initStorage,
   insertMemoryRecord,
   type StorageHandle,
 } from "../src/storage/storage.ts";
@@ -41,28 +40,19 @@ import {
   setListRegisteredProjectsStub,
   resetListRegisteredProjectsStub,
 } from "../src/config/registry.ts";
-
-// ---------------------------------------------------------------------------
-// Provider config (neutral URLs -> "custom" label; explicit params to avoid
-// env-based fallback that would cause provider_error in tests)
-// ---------------------------------------------------------------------------
-
-const PRIMARY_KEY = "sk-primary-test-not-real-12345";
-const FALLBACK_KEY = "sk-fallback-test-not-real-12345";
-const PRIMARY_BASE_URL = "https://api.example.com/v1";
-const PRIMARY_MODEL = "test/model-primary";
-const FALLBACK_BASE_URL = "https://api.fallback.example/v1";
-const FALLBACK_MODEL = "test/model-fallback";
+import {
+  TEST_PRIMARY_KEY,
+  TEST_FALLBACK_KEY,
+  TEST_PRIMARY_BASE_URL,
+  TEST_PRIMARY_MODEL,
+  TEST_FALLBACK_BASE_URL,
+  TEST_FALLBACK_MODEL,
+} from "./shared-test-provider.ts";
+import { mkStorage, rmStorage } from "./_helpers/test-storage.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function mkStorage(): { tmp: string; handle: StorageHandle } {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-cross-project-semantic-"));
-  const handle = initStorage({ projectRoot: tmp });
-  return { tmp, handle };
-}
 
 /**
  * Temporarily override `os.homedir()` to point to a temp directory so that
@@ -91,15 +81,6 @@ function withTempHome<T>(fn: () => T): T {
     // Clean up the temp HOME dir.
     fs.rmSync(tmpHome, { recursive: true, force: true });
   }
-}
-
-function rmStorage(tmp: string, handle: StorageHandle): void {
-  try {
-    handle.db.close();
-  } catch {
-    // ignore
-  }
-  fs.rmSync(tmp, { recursive: true, force: true });
 }
 
 function scriptFetch(content: string): typeof fetch {
@@ -339,12 +320,12 @@ test("source: local answer path sets source to 'local'", async () => {
     const controllerResult = await runRecallController(currentHandle, "What is the primary provider?", {
       semanticEnabled: false,
       providerFetchImpl: scriptFetch("The primary provider is NVIDIA NIM."),
-      providerPrimaryApiKey: PRIMARY_KEY,
-      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-      providerPrimaryModel: PRIMARY_MODEL,
-      providerFallbackApiKey: FALLBACK_KEY,
-      providerFallbackBaseUrl: FALLBACK_BASE_URL,
-      providerFallbackModel: FALLBACK_MODEL,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
     });
 
     // Verify: local answer found with source=local

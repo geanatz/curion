@@ -36,9 +36,6 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 
 import { runRememberController } from "../src/controller/remember-controller.ts";
 import { runRecallController } from "../src/controller/recall-controller.ts";
@@ -49,7 +46,6 @@ import {
   type ResolvedHistorySignal,
 } from "../src/retrieval/resolved-history.ts";
 import {
-  initStorage,
   insertMemoryRecord,
   type StorageHandle,
   type MemoryRecord,
@@ -68,77 +64,24 @@ import {
   setListRegisteredProjectsStub,
   resetListRegisteredProjectsStub,
 } from "../src/config/registry.ts";
+import {
+  TEST_PRIMARY_KEY,
+  TEST_FALLBACK_KEY,
+  TEST_PRIMARY_BASE_URL,
+  TEST_PRIMARY_MODEL,
+  TEST_FALLBACK_BASE_URL,
+  TEST_FALLBACK_MODEL,
+} from "./shared-test-provider.ts";
+import {
+  scriptFetch,
+  okChatResponse,
+  safeAnalysis,
+} from "./_helpers/provider-stub.ts";
+import { mkStorage, rmStorage } from "./_helpers/test-storage.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function mkStorage(): { tmp: string; handle: StorageHandle } {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-pub-no-id-"));
-  const handle = initStorage({ projectRoot: tmp });
-  return { tmp, handle };
-}
-
-function rmStorage(tmp: string, handle: StorageHandle): void {
-  try {
-    handle.db.close();
-  } catch {
-    // ignore
-  }
-  fs.rmSync(tmp, { recursive: true, force: true });
-}
-
-function scriptFetch(responder: () => Response): {
-  fetchImpl: typeof fetch;
-  calls: Array<{ url: string; body: string }>;
-} {
-  const calls: Array<{ url: string; body: string }> = [];
-  const fetchImpl: typeof fetch = async (input, init) => {
-    const url = typeof input === "string" ? input : (input as URL).toString();
-    let body = "";
-    if (init && typeof init === "object" && "body" in init && init.body) {
-      body = String(init.body);
-    }
-    calls.push({ url, body });
-    return responder();
-  };
-  return { fetchImpl, calls };
-}
-
-function okChatResponse(content: string): Response {
-  return new Response(
-    JSON.stringify({
-      id: "x",
-      model: "m",
-      choices: [{ message: { role: "assistant", content } }],
-    }),
-    { status: 200, headers: { "content-type": "application/json" } },
-  );
-}
-
-const PRIMARY_KEY = "sk-primary-test-not-real-12345";
-const FALLBACK_KEY = "sk-fallback-test-not-real-12345";
-// Explicit provider config: base URL contains "nvidia" so provider
-// label is "nvidia-nim", model is the test primary model.
-const PRIMARY_BASE_URL = "https://api.nvidia.example.com/v1";
-const PRIMARY_MODEL = "test/model-primary";
-const FALLBACK_BASE_URL = "https://api.fallback.example/v1";
-const FALLBACK_MODEL = "test/model-fallback";
-
-/** A valid, safe analysis payload the provider would return. */
-function safeAnalysis(opts: {
-  summary?: string;
-  confidence?: number;
-  classification?: string;
-} = {}): string {
-  return JSON.stringify({
-    summary: opts.summary ?? "The project uses Postgres 16 for the primary store.",
-    confidence: opts.confidence ?? 0.82,
-    tags: ["postgres", "storage"],
-    entities: [{ name: "Postgres", kind: "database" }],
-    classification: opts.classification ?? "fact",
-  });
-}
 
 /**
  * Assert that a public message string carries no `#\d+` token
@@ -201,7 +144,7 @@ function insertWithRelationship(
 // ===========================================================================
 
 test("regression: remember tool saved message has no #N id reference; memoryId field is preserved", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-pub-no-id-");
   try {
     setRememberStorageProvider(() => ({ handle, ownsHandle: false }));
     try {
@@ -218,12 +161,12 @@ test("regression: remember tool saved message has no #N id reference; memoryId f
         "The team picked Postgres 16 for the primary store.",
         {
           providerFetchImpl: fetchImpl,
-          providerPrimaryApiKey: PRIMARY_KEY,
-          providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-          providerPrimaryModel: PRIMARY_MODEL,
-          providerFallbackApiKey: FALLBACK_KEY,
-          providerFallbackBaseUrl: FALLBACK_BASE_URL,
-          providerFallbackModel: FALLBACK_MODEL,
+          providerPrimaryApiKey: TEST_PRIMARY_KEY,
+          providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+          providerPrimaryModel: TEST_PRIMARY_MODEL,
+          providerFallbackApiKey: TEST_FALLBACK_KEY,
+          providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+          providerFallbackModel: TEST_FALLBACK_MODEL,
         },
       );
       assert.equal(controllerOutcome.status, "saved");
@@ -265,7 +208,7 @@ test("regression: remember tool saved message has no #N id reference; memoryId f
 });
 
 test("regression: handleRemember (tool layer) saved message has no #N id reference; memoryId field is preserved", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-pub-no-id-");
   try {
     setRememberStorageProvider(() => ({ handle, ownsHandle: false }));
     try {
@@ -298,7 +241,7 @@ test("regression: handleRemember (tool layer) saved message has no #N id referen
 // ===========================================================================
 
 test("regression: remember controller saved message has no #N id reference", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-pub-no-id-");
   try {
     const { fetchImpl } = scriptFetch(() => okChatResponse(safeAnalysis()));
     const r = await runRememberController(
@@ -306,12 +249,12 @@ test("regression: remember controller saved message has no #N id reference", asy
       "The team picked Postgres 16 for the primary store.",
       {
         providerFetchImpl: fetchImpl,
-        providerPrimaryApiKey: PRIMARY_KEY,
-        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-        providerPrimaryModel: PRIMARY_MODEL,
-        providerFallbackApiKey: FALLBACK_KEY,
-        providerFallbackBaseUrl: FALLBACK_BASE_URL,
-        providerFallbackModel: FALLBACK_MODEL,
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+        providerPrimaryModel: TEST_PRIMARY_MODEL,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
+        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+        providerFallbackModel: TEST_FALLBACK_MODEL,
       },
     );
     assert.equal(r.status, "saved");
@@ -341,7 +284,7 @@ test("regression: remember controller saved message has no #N id reference on po
   // form. We exercise the post-update path by injecting a
   // related memory that triggers the relationship
   // derivation (the seam override path).
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-pub-no-id-");
   try {
     // Pre-seed a related memory with a high-overlap
     // summary so the controller's relationship derivation
@@ -355,12 +298,12 @@ test("regression: remember controller saved message has no #N id reference on po
       "The team picked Postgres 16 for the primary store.",
       {
         providerFetchImpl: fetchImpl,
-        providerPrimaryApiKey: PRIMARY_KEY,
-        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-        providerPrimaryModel: PRIMARY_MODEL,
-        providerFallbackApiKey: FALLBACK_KEY,
-        providerFallbackBaseUrl: FALLBACK_BASE_URL,
-        providerFallbackModel: FALLBACK_MODEL,
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+        providerPrimaryModel: TEST_PRIMARY_MODEL,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
+        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+        providerFallbackModel: TEST_FALLBACK_MODEL,
       },
     );
     assert.equal(r.status, "saved");
@@ -382,7 +325,7 @@ test("regression: remember controller saved message has no #N id reference on po
 // ===========================================================================
 
 test("regression: recall answered-ambiguous public message has no #N id reference; sourceIds field is preserved", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-pub-no-id-");
   try {
     // Two rows with a mutual `conflictsWith` pointer above
     // the detector's threshold. The detector will fire
@@ -431,12 +374,12 @@ test("regression: recall answered-ambiguous public message has no #N id referenc
       "What database does the project use?",
       {
         providerFetchImpl: fetchImpl,
-        providerPrimaryApiKey: PRIMARY_KEY,
-        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-        providerPrimaryModel: PRIMARY_MODEL,
-        providerFallbackApiKey: FALLBACK_KEY,
-        providerFallbackBaseUrl: FALLBACK_BASE_URL,
-        providerFallbackModel: FALLBACK_MODEL,
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+        providerPrimaryModel: TEST_PRIMARY_MODEL,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
+        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+        providerFallbackModel: TEST_FALLBACK_MODEL,
       },
     );
     assert.equal(out.status, "answered");
@@ -484,7 +427,7 @@ test("regression: recall answered-ambiguous public message has no #N id referenc
 });
 
 test("regression: recall answered-ambiguous public message has no #N id reference (older-variant path)", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-pub-no-id-");
   try {
     // Two rows with a mutual `olderVariantsOf` pointer
     // above the threshold. The detector will fire
@@ -534,12 +477,12 @@ test("regression: recall answered-ambiguous public message has no #N id referenc
       "What database does the project use?",
       {
         providerFetchImpl: fetchImpl,
-        providerPrimaryApiKey: PRIMARY_KEY,
-        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-        providerPrimaryModel: PRIMARY_MODEL,
-        providerFallbackApiKey: FALLBACK_KEY,
-        providerFallbackBaseUrl: FALLBACK_BASE_URL,
-        providerFallbackModel: FALLBACK_MODEL,
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+        providerPrimaryModel: TEST_PRIMARY_MODEL,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
+        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+        providerFallbackModel: TEST_FALLBACK_MODEL,
       },
     );
     assert.equal(out.status, "answered");
@@ -597,7 +540,7 @@ test("regression: recall answered-resolved-history public message has no #N id r
   // `formatResolvedHistoryNote`. The shape mirrors the
   // SG8 scenario in the validation suite (which pins the
   // state-activation invariant on the same row set).
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-pub-no-id-");
   try {
     const r1 = insertWithRelationship(handle, {
       summary: "Render was the previous hosting platform.",
@@ -620,12 +563,12 @@ test("regression: recall answered-resolved-history public message has no #N id r
       "What hosting platform does the project use?",
       {
         providerFetchImpl: fetchImpl,
-        providerPrimaryApiKey: PRIMARY_KEY,
-        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-        providerPrimaryModel: PRIMARY_MODEL,
-        providerFallbackApiKey: FALLBACK_KEY,
-        providerFallbackBaseUrl: FALLBACK_BASE_URL,
-        providerFallbackModel: FALLBACK_MODEL,
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+        providerPrimaryModel: TEST_PRIMARY_MODEL,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
+        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+        providerFallbackModel: TEST_FALLBACK_MODEL,
       },
     );
     assert.equal(out.status, "answered");
@@ -798,7 +741,7 @@ test("regression: recall answered-resolved-history prefers resolved-history note
   // We reuse the same row set as the SG8 scenario in the
   // validation suite; the runner there is the canonical
   // authority for the end-to-end pipeline projection.
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-pub-no-id-");
   try {
     insertWithRelationship(handle, {
       summary: "Render was the previous hosting platform.",
@@ -815,12 +758,12 @@ test("regression: recall answered-resolved-history prefers resolved-history note
       "What hosting platform does the project use?",
       {
         providerFetchImpl: fetchImpl,
-        providerPrimaryApiKey: PRIMARY_KEY,
-        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-        providerPrimaryModel: PRIMARY_MODEL,
-        providerFallbackApiKey: FALLBACK_KEY,
-        providerFallbackBaseUrl: FALLBACK_BASE_URL,
-        providerFallbackModel: FALLBACK_MODEL,
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+        providerPrimaryModel: TEST_PRIMARY_MODEL,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
+        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+        providerFallbackModel: TEST_FALLBACK_MODEL,
       },
     );
     assert.equal(out.status, "answered");
@@ -870,7 +813,7 @@ test("regression: recall answered-resolved-history prefers resolved-history note
 // ===========================================================================
 
 test("regression: recall no_memory public message has no #N id reference", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-pub-no-id-");
   try {
     setRecallStorageProvider(() => ({ handle, ownsHandle: false }));
     setListRegisteredProjectsStub(() => []);
@@ -894,7 +837,7 @@ test("regression: recall no_memory public message has no #N id reference", async
 });
 
 test("regression: recall rejected public message has no #N id reference", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-pub-no-id-");
   try {
     setRecallStorageProvider(() => ({ handle, ownsHandle: false }));
     try {
@@ -915,7 +858,7 @@ test("regression: recall rejected public message has no #N id reference", async 
 });
 
 test("regression: recall provider_error public message has no #N id reference", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-pub-no-id-");
   try {
     // Seed a real stored memory so the provider gets
     // called, then force a provider failure via a 500
@@ -929,12 +872,12 @@ test("regression: recall provider_error public message has no #N id reference", 
       "What database does the project use?",
       {
         providerFetchImpl: errFetch.fetchImpl,
-        providerPrimaryApiKey: PRIMARY_KEY,
-        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-        providerPrimaryModel: PRIMARY_MODEL,
-        providerFallbackApiKey: FALLBACK_KEY,
-        providerFallbackBaseUrl: FALLBACK_BASE_URL,
-        providerFallbackModel: FALLBACK_MODEL,
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+        providerPrimaryModel: TEST_PRIMARY_MODEL,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
+        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+        providerFallbackModel: TEST_FALLBACK_MODEL,
       },
     );
     assert.equal(out.status, "provider_error");
@@ -952,7 +895,7 @@ test("regression: recall provider_error public message has no #N id reference", 
 // ===========================================================================
 
 test("regression: internal id fields remain intact (memoryId, sourceIds, memoryIds, relationship ids)", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-pub-no-id-");
   try {
     // 1. `record.id` is preserved on the remember outcome
     //    (the structured field the tool layer exposes as
@@ -963,12 +906,12 @@ test("regression: internal id fields remain intact (memoryId, sourceIds, memoryI
       "The team picked Postgres 16 for the primary store.",
       {
         providerFetchImpl: fetchImpl,
-        providerPrimaryApiKey: PRIMARY_KEY,
-        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-        providerPrimaryModel: PRIMARY_MODEL,
-        providerFallbackApiKey: FALLBACK_KEY,
-        providerFallbackBaseUrl: FALLBACK_BASE_URL,
-        providerFallbackModel: FALLBACK_MODEL,
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+        providerPrimaryModel: TEST_PRIMARY_MODEL,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
+        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+        providerFallbackModel: TEST_FALLBACK_MODEL,
       },
     );
     assert.equal(r.status, "saved");
@@ -1005,12 +948,12 @@ test("regression: internal id fields remain intact (memoryId, sourceIds, memoryI
       "What database does the project use?",
       {
         providerFetchImpl: recallFetch,
-        providerPrimaryApiKey: PRIMARY_KEY,
-        providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-        providerPrimaryModel: PRIMARY_MODEL,
-        providerFallbackApiKey: FALLBACK_KEY,
-        providerFallbackBaseUrl: FALLBACK_BASE_URL,
-        providerFallbackModel: FALLBACK_MODEL,
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+        providerPrimaryModel: TEST_PRIMARY_MODEL,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
+        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+        providerFallbackModel: TEST_FALLBACK_MODEL,
       },
     );
     assert.equal(recallOut.status, "answered");

@@ -68,13 +68,9 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 
 import { runRecallController } from "../src/controller/recall-controller.ts";
 import {
-  initStorage,
   insertMemoryRecord,
   listActiveMemorySummaries,
   listActiveMemoryRelationshipBlocks,
@@ -96,62 +92,20 @@ import {
   setListRegisteredProjectsStub,
   resetListRegisteredProjectsStub,
 } from "../src/config/registry.ts";
+import {
+  TEST_PRIMARY_KEY,
+  TEST_FALLBACK_KEY,
+  TEST_PRIMARY_BASE_URL,
+  TEST_PRIMARY_MODEL,
+  TEST_FALLBACK_BASE_URL,
+  TEST_FALLBACK_MODEL,
+} from "./shared-test-provider.ts";
+import { scriptFetch, okChatResponse } from "./_helpers/provider-stub.ts";
+import { mkStorage, rmStorage } from "./_helpers/test-storage.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function mkStorage(): { tmp: string; handle: StorageHandle } {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-amb-ctrl-"));
-  const handle = initStorage({ projectRoot: tmp });
-  return { tmp, handle };
-}
-
-function rmStorage(tmp: string, handle: StorageHandle): void {
-  try {
-    handle.db.close();
-  } catch {
-    // ignore
-  }
-  fs.rmSync(tmp, { recursive: true, force: true });
-}
-
-/** Scripted fetch that returns a single canned response. */
-function scriptFetch(responder: () => Response): {
-  fetchImpl: typeof fetch;
-  calls: Array<{ url: string; body: string }>;
-} {
-  const calls: Array<{ url: string; body: string }> = [];
-  const fetchImpl: typeof fetch = async (input, init) => {
-    const url = typeof input === "string" ? input : (input as URL).toString();
-    let body = "";
-    if (init && typeof init === "object" && "body" in init && init.body) {
-      body = String(init.body);
-    }
-    calls.push({ url, body });
-    return responder();
-  };
-  return { fetchImpl, calls };
-}
-
-function okChatResponse(content: string): Response {
-  return new Response(
-    JSON.stringify({
-      id: "x",
-      model: "m",
-      choices: [{ message: { role: "assistant", content } }],
-    }),
-    { status: 200, headers: { "content-type": "application/json" } },
-  );
-}
-
-const PRIMARY_KEY = "sk-primary-test-not-real-12345";
-const FALLBACK_KEY = "nvapi-fallback-test-not-real-12345";
-// Explicit provider config: neutral URLs -> "custom" label.
-const PRIMARY_BASE_URL = "https://api.example.com/v1";
-const PRIMARY_MODEL = "test/model-primary";
-const FALLBACK_BASE_URL = "https://api.fallback.example/v1";
-const FALLBACK_MODEL = "test/model-fallback";
 
 /**
  * Insert a memory record with an optional stored
@@ -212,12 +166,12 @@ function runRecallWith(handle: StorageHandle, opts: {
 }) {
   return runRecallController(handle, opts.text, {
     providerFetchImpl: opts.fetchImpl,
-    providerPrimaryApiKey: PRIMARY_KEY,
-    providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-    providerPrimaryModel: PRIMARY_MODEL,
-    providerFallbackApiKey: FALLBACK_KEY,
-    providerFallbackBaseUrl: FALLBACK_BASE_URL,
-    providerFallbackModel: FALLBACK_MODEL,
+    providerPrimaryApiKey: TEST_PRIMARY_KEY,
+    providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+    providerPrimaryModel: TEST_PRIMARY_MODEL,
+    providerFallbackApiKey: TEST_FALLBACK_KEY,
+    providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+    providerFallbackModel: TEST_FALLBACK_MODEL,
   });
 }
 
@@ -226,7 +180,7 @@ function runRecallWith(handle: StorageHandle, opts: {
 // ---------------------------------------------------------------------------
 
 test("storage: listActiveMemoryRelationshipBlocks projects stored relationship blocks", () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-amb-ctrl-");
   try {
     const r1 = insertWithRelationship(handle, {
       memoryContent: "we use Postgres for storage",
@@ -263,7 +217,7 @@ test("storage: listActiveMemoryRelationshipBlocks projects stored relationship b
 });
 
 test("storage: listActiveMemoryRelationshipBlocks is forward-compatible with malformed metadata", () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-amb-ctrl-");
   try {
     // Hand-insert a row with a malformed `metadata` JSON.
     handle.db
@@ -309,7 +263,7 @@ test("storage: listActiveMemoryRelationshipBlocks is forward-compatible with mal
 // ---------------------------------------------------------------------------
 
 test("controller: internal outcome includes ambiguity when stored blocks indicate a mutual conflict", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-amb-ctrl-");
   try {
     // Two rows that carry a mutual conflictsWith pointer
     // above τ. The summaries share enough tokens with the
@@ -396,7 +350,7 @@ test("controller: internal outcome includes ambiguity when stored blocks indicat
 });
 
 test("controller: internal outcome is none when no stored block indicates a conflict (MVP default)", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-amb-ctrl-");
   try {
     // Pre-Phase-B row shape: no `relationship` key. The
     // detector must return `kind: "none"` because the
@@ -426,7 +380,7 @@ test("controller: internal outcome is none when no stored block indicates a conf
 });
 
 test("controller: internal outcome is none when stored block is olderVariantsOf only (no mutual pointer)", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-amb-ctrl-");
   try {
     // Two rows that each carry `olderVariantsOf` pointing
     // at the OTHER row. The detector's older-variant rule
@@ -480,7 +434,7 @@ test("controller: internal outcome is none when stored block is olderVariantsOf 
 });
 
 test("controller: internal outcome is ambiguous with reason older-variant-suspected when olderVariantsOf is mutual", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-amb-ctrl-");
   try {
     const r1 = insertWithRelationship(handle, {
       memoryContent: "Postgres stores project data reliably",
@@ -529,7 +483,7 @@ test("controller: internal outcome is ambiguous with reason older-variant-suspec
 });
 
 test("controller: internal outcome uses lexical safety-net when stored block is missing", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-amb-ctrl-");
   try {
     // Two rows that DO NOT carry a stored `relationship`
     // block (the MVP default). The detector must still
@@ -566,7 +520,7 @@ test("controller: internal outcome uses lexical safety-net when stored block is 
 // ---------------------------------------------------------------------------
 
 test("public handleRecall projection: message/answer/sourceIds/status unchanged, no ambiguity text", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-amb-ctrl-");
   try {
     setRecallStorageProvider(() => ({ handle, ownsHandle: false }));
     try {
@@ -629,7 +583,7 @@ test("public handleRecall projection: message/answer/sourceIds/status unchanged,
 });
 
 test("public handleRecall: tool-layer result does not expose internalAmbiguity (the field is dropped)", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-amb-ctrl-");
   try {
     setRecallStorageProvider(() => ({ handle, ownsHandle: false }));
     try {
@@ -695,7 +649,7 @@ test("public handleRecall: tool-layer result does not expose internalAmbiguity (
 });
 
 test("public handleRecall: no_memory path is unchanged (no internalAmbiguity field)", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-amb-ctrl-");
   try {
     setRecallStorageProvider(() => ({ handle, ownsHandle: false }));
     setListRegisteredProjectsStub(() => []);
@@ -737,7 +691,7 @@ test("public handleRecall: no_memory path is unchanged (no internalAmbiguity fie
 // ---------------------------------------------------------------------------
 
 test("controller: provider is called exactly once per call; detector does not short-circuit", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-amb-ctrl-");
   try {
     insertWithRelationship(handle, {
       memoryContent: "The project uses Postgres 16 for the primary store.",
@@ -759,7 +713,7 @@ test("controller: provider is called exactly once per call; detector does not sh
 });
 
 test("controller: the four-status union is preserved (answered | no_memory | rejected | provider_error)", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-amb-ctrl-");
   try {
     // Case 1: answered
     insertWithRelationship(handle, {
@@ -783,12 +737,12 @@ test("controller: the four-status union is preserved (answered | no_memory | rej
         "When is the company picnic?",
         {
 providerFetchImpl: fetchImpl,
-      providerPrimaryApiKey: PRIMARY_KEY,
-      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-      providerPrimaryModel: PRIMARY_MODEL,
-      providerFallbackApiKey: FALLBACK_KEY,
-      providerFallbackBaseUrl: FALLBACK_BASE_URL,
-      providerFallbackModel: FALLBACK_MODEL,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
         },
       );
       assert.equal(r.status, "no_memory");
@@ -800,12 +754,12 @@ providerFetchImpl: fetchImpl,
         "AKIAIOSFODNN7EXAMPLE",
         {
 providerFetchImpl: fetchImpl,
-      providerPrimaryApiKey: PRIMARY_KEY,
-      providerPrimaryBaseUrl: PRIMARY_BASE_URL,
-      providerPrimaryModel: PRIMARY_MODEL,
-      providerFallbackApiKey: FALLBACK_KEY,
-      providerFallbackBaseUrl: FALLBACK_BASE_URL,
-      providerFallbackModel: FALLBACK_MODEL,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
         },
       );
       assert.equal(r.status, "rejected");
@@ -818,8 +772,8 @@ providerFetchImpl: fetchImpl,
         "What database does the project use?",
         {
           providerFetchImpl: errFetch.fetchImpl,
-          providerPrimaryApiKey: PRIMARY_KEY,
-          providerFallbackApiKey: FALLBACK_KEY,
+          providerPrimaryApiKey: TEST_PRIMARY_KEY,
+          providerFallbackApiKey: TEST_FALLBACK_KEY,
         },
       );
       assert.equal(r.status, "provider_error");
@@ -834,7 +788,7 @@ providerFetchImpl: fetchImpl,
 // ---------------------------------------------------------------------------
 
 test("controller: SafeMemorySummary projection is unchanged (no raw text leaked)", () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-amb-ctrl-");
   try {
     insertWithRelationship(handle, {
       memoryContent: "we use Postgres for storage",
@@ -873,7 +827,7 @@ test("controller: SafeMemorySummary projection is unchanged (no raw text leaked)
 // ---------------------------------------------------------------------------
 
 test("Phase D: answered + ambiguous -> public message includes concise ambiguity note", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-amb-ctrl-");
   try {
     // Two rows with a mutual `conflictsWith` pointer above
     // τ. The detector must return `kind: "ambiguous"` and
@@ -964,7 +918,7 @@ test("Phase D: answered + ambiguous -> public message includes concise ambiguity
 });
 
 test("Phase D: note is prose-only (no ids) and does not echo raw summaries / raw query / answer", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-amb-ctrl-");
   try {
     // Two rows with distinct, distinctive summaries so we
     // can prove the note does not echo them. Use
@@ -1044,7 +998,7 @@ test("Phase D: note is prose-only (no ids) and does not echo raw summaries / raw
 });
 
 test("Phase D: no ambiguity signal -> public message byte-equal pre-Phase-D", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-amb-ctrl-");
   try {
     // Single row, no relationship block. Detector returns
     // `kind: "none"`. The public `message` / `answer` must
@@ -1096,7 +1050,7 @@ test("Phase D: no ambiguity signal -> public message byte-equal pre-Phase-D", as
 });
 
 test("Phase D: no_memory outcome is unchanged (no prefix, no note)", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-amb-ctrl-");
   try {
     setRecallStorageProvider(() => ({ handle, ownsHandle: false }));
     setListRegisteredProjectsStub(() => []);
@@ -1119,7 +1073,7 @@ test("Phase D: no_memory outcome is unchanged (no prefix, no note)", async () =>
 });
 
 test("Phase D: rejected outcome is unchanged (no prefix, no note)", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-amb-ctrl-");
   try {
     setRecallStorageProvider(() => ({ handle, ownsHandle: false }));
     try {
@@ -1140,7 +1094,7 @@ test("Phase D: rejected outcome is unchanged (no prefix, no note)", async () => 
 });
 
 test("Phase D: provider_error outcome is unchanged (no prefix, no note)", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-amb-ctrl-");
   try {
     setRecallStorageProvider(() => ({ handle, ownsHandle: false }));
     try {
@@ -1158,8 +1112,8 @@ test("Phase D: provider_error outcome is unchanged (no prefix, no note)", async 
       const errFetch = scriptFetch(() => new Response("boom", { status: 500 }));
       const out = await runRecallController(handle, "What database does the project use?", {
         providerFetchImpl: errFetch.fetchImpl,
-        providerPrimaryApiKey: PRIMARY_KEY,
-        providerFallbackApiKey: FALLBACK_KEY,
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
       });
       assert.equal(out.status, "provider_error");
       if (out.status !== "provider_error") throw new Error("unreachable");
@@ -1177,7 +1131,7 @@ test("Phase D: provider_error outcome is unchanged (no prefix, no note)", async 
 });
 
 test("Phase D: provider is still called exactly once (no short-circuit)", async () => {
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-amb-ctrl-");
   try {
     // Two rows with a mutual `conflictsWith` pointer above
     // τ. The detector will return `kind: "ambiguous"`,
@@ -1235,7 +1189,7 @@ test("Phase D: tool/API contract (single text param, two public tools) still hol
   // regression safety: the public `RecallResult.message` is
   // still a string; the four-status union is preserved; no
   // new top-level public field has been added.
-  const { tmp, handle } = mkStorage();
+  const { tmp, handle } = mkStorage("curion-amb-ctrl-");
   try {
     setRecallStorageProvider(() => ({ handle, ownsHandle: false }));
     try {
