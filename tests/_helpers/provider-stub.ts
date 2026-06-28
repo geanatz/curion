@@ -41,7 +41,7 @@ export function okChatResponse(content: string): Response {
       model: "m",
       choices: [{ message: { role: "assistant", content } }],
     }),
-    { status: 200, headers: { "content-type": "application/json" } },
+    { status: 200, headers: { "content-type": "application/json" } }
   );
 }
 
@@ -50,12 +50,14 @@ export function okChatResponse(content: string): Response {
  * The default fields mirror the dominant form across the suite
  * (Postgres summary, 0.82 confidence, etc.).
  */
-export function safeAnalysis(opts: {
-  summary?: string;
-  confidence?: number;
-  classification?: string;
-  tags?: string[];
-} = {}): string {
+export function safeAnalysis(
+  opts: {
+    summary?: string;
+    confidence?: number;
+    classification?: string;
+    tags?: string[];
+  } = {}
+): string {
   return JSON.stringify({
     summary: opts.summary ?? "The project uses Postgres 16 for the primary store.",
     confidence: opts.confidence ?? 0.82,

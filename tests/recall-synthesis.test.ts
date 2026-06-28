@@ -23,25 +23,25 @@
  *   - no fabricated provider labels in any surface
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
+import { test } from "node:test";
 
 import {
-  synthesizeRecallWithFallback,
-  loadRecallAdapterConfig,
-  RECALL_DEFAULT_TIMEOUT_MS,
   RECALL_DEFAULT_MAX_TOKENS,
+  RECALL_DEFAULT_TIMEOUT_MS,
   type RecallMemoryInput,
+  loadRecallAdapterConfig,
+  synthesizeRecallWithFallback,
 } from "../src/providers/recall-synthesis.ts";
 import { withCleanEnv } from "./_helpers/env.ts";
 import {
   TEST_ENV_KEYS,
-  TEST_PRIMARY_KEY,
-  TEST_FALLBACK_KEY,
-  TEST_PRIMARY_BASE_URL,
-  TEST_PRIMARY_MODEL,
   TEST_FALLBACK_BASE_URL,
+  TEST_FALLBACK_KEY,
   TEST_FALLBACK_MODEL,
+  TEST_PRIMARY_BASE_URL,
+  TEST_PRIMARY_KEY,
+  TEST_PRIMARY_MODEL,
 } from "./shared-test-provider.ts";
 
 // ---------------------------------------------------------------------------
@@ -50,7 +50,7 @@ import {
 
 function scriptedFetch(
   responses: Array<() => Response>,
-  log: Array<{ url: string; body: string }>,
+  log: Array<{ url: string; body: string }>
 ): typeof fetch {
   let i = 0;
   const f: typeof fetch = async (input, init) => {
@@ -75,7 +75,7 @@ function okChatResponse(content: string, model = "m"): Response {
       model,
       choices: [{ message: { role: "assistant", content } }],
     }),
-    { status: 200, headers: { "content-type": "application/json" } },
+    { status: 200, headers: { "content-type": "application/json" } }
   );
 }
 
@@ -133,7 +133,11 @@ test("recall: loadRecallAdapterConfig treats whitespace-only overrides as missin
     // All slots remain empty when values are whitespace-only.
     assert.equal(cfg.primaryBaseUrl, "", "whitespace-only primary base URL is treated as missing");
     assert.equal(cfg.primaryModel, "", "whitespace-only primary model is treated as missing");
-    assert.equal(cfg.fallbackBaseUrl, "", "whitespace-only fallback base URL is treated as missing");
+    assert.equal(
+      cfg.fallbackBaseUrl,
+      "",
+      "whitespace-only fallback base URL is treated as missing"
+    );
     assert.equal(cfg.fallbackModel, "", "whitespace-only fallback model is treated as missing");
     assert.equal(cfg.primaryApiKey, "", "whitespace-only primary key is treated as missing");
     assert.equal(cfg.fallbackApiKey, "", "whitespace-only fallback key is treated as missing");
@@ -149,30 +153,20 @@ test("recall: primary hard-fail with no fallback configured -> all-providers-fai
   return withCleanEnv(ENV_KEYS, async () => {
     const log: Array<{ url: string; body: string }> = [];
     const fetchImpl = scriptedFetch(
-      [
-        () => httpErrorResponse(500, "down"),
-        () => okChatResponse("ignored", "m"),
-      ],
-      log,
+      [() => httpErrorResponse(500, "down"), () => okChatResponse("ignored", "m")],
+      log
     );
-    const r = await synthesizeRecallWithFallback(
-      "q",
-      SAMPLE_MEMORIES,
-      {
-        primaryApiKey: TEST_PRIMARY_KEY,
-        primaryBaseUrl: TEST_PRIMARY_BASE_URL,
-        primaryModel: TEST_PRIMARY_MODEL,
-        fetchImpl,
-      },
-    );
+    const r = await synthesizeRecallWithFallback("q", SAMPLE_MEMORIES, {
+      primaryApiKey: TEST_PRIMARY_KEY,
+      primaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      primaryModel: TEST_PRIMARY_MODEL,
+      fetchImpl,
+    });
     assert.equal(r.ok, false);
     if (!r.ok) {
       assert.equal(r.kind, "all-providers-failed");
       assert.equal(r.httpCalls, 1, "no fallback call when fallback slot is empty");
-      assert.match(
-        r.message,
-        /^primary failed and no fallback configured: /,
-      );
+      assert.match(r.message, /^primary failed and no fallback configured: /);
     }
     assert.equal(log.length, 1);
   });
@@ -228,9 +222,10 @@ test("recall: primary success with explicit config returns correct provider labe
   const log: Array<{ url: string; body: string }> = [];
   const fetchImpl = scriptedFetch(
     [
-      () => okChatResponse("The project uses Postgres 16 for the primary store.", TEST_PRIMARY_MODEL),
+      () =>
+        okChatResponse("The project uses Postgres 16 for the primary store.", TEST_PRIMARY_MODEL),
     ],
-    log,
+    log
   );
   const r = await synthesizeRecallWithFallback(
     "What database does the project use?",
@@ -243,7 +238,7 @@ test("recall: primary success with explicit config returns correct provider labe
       fallbackBaseUrl: TEST_FALLBACK_BASE_URL,
       fallbackModel: TEST_FALLBACK_MODEL,
       fetchImpl,
-    },
+    }
   );
   assert.equal(r.ok, true);
   if (r.ok) {
@@ -259,7 +254,7 @@ test("recall: primary success with explicit config returns correct provider labe
   assert.match(
     log[0]!.url,
     new RegExp(`^${TEST_PRIMARY_BASE_URL}/chat/completions`),
-    "primary call must go to the configured primary endpoint",
+    "primary call must go to the configured primary endpoint"
   );
   const body = JSON.parse(log[0]!.body);
   assert.equal(body.model, TEST_PRIMARY_MODEL);
@@ -278,10 +273,7 @@ test("recall: primary success with explicit config returns correct provider labe
 
 test("recall: regression - primary 401 error label is derived from base URL, not hardcoded", async () => {
   const log: Array<{ url: string; body: string }> = [];
-  const fetchImpl = scriptedFetch(
-    [() => httpErrorResponse(401, "Unauthorized")],
-    log,
-  );
+  const fetchImpl = scriptedFetch([() => httpErrorResponse(401, "Unauthorized")], log);
   // No fallback key: the adapter should report the primary
   // failure directly (no fallback attempt).
   const r = await synthesizeRecallWithFallback(
@@ -292,7 +284,7 @@ test("recall: regression - primary 401 error label is derived from base URL, not
       primaryBaseUrl: TEST_PRIMARY_BASE_URL,
       primaryModel: TEST_PRIMARY_MODEL,
       fetchImpl,
-    },
+    }
   );
   assert.equal(r.ok, false);
   if (!r.ok) {
@@ -304,13 +296,10 @@ test("recall: regression - primary 401 error label is derived from base URL, not
     assert.match(
       r.lastError!.message,
       new RegExp(`custom\\/${TEST_PRIMARY_MODEL}#recall: auth failed \\(HTTP 401\\)`),
-      "primary error message must use the actual primary endpoint label derived from base URL",
+      "primary error message must use the actual primary endpoint label derived from base URL"
     );
     // The top-level message also must not echo a wrong vendor label.
-    assert.ok(
-      !r.message.includes("minimax/"),
-      "top-level message must NOT carry a minimax label",
-    );
+    assert.ok(!r.message.includes("minimax/"), "top-level message must NOT carry a minimax label");
   }
   // The request must have gone to the configured primary base URL.
   assert.equal(log.length, 1);
@@ -329,12 +318,9 @@ test("recall: primary hard failure falls back to configured fallback provider", 
     [
       () => httpErrorResponse(500, "primary down"),
       () =>
-        okChatResponse(
-          "The project uses Postgres 16 for the primary store.",
-          TEST_FALLBACK_MODEL,
-        ),
+        okChatResponse("The project uses Postgres 16 for the primary store.", TEST_FALLBACK_MODEL),
     ],
-    log,
+    log
   );
   const r = await synthesizeRecallWithFallback(
     "What database does the project use?",
@@ -347,7 +333,7 @@ test("recall: primary hard failure falls back to configured fallback provider", 
       fallbackBaseUrl: TEST_FALLBACK_BASE_URL,
       fallbackModel: TEST_FALLBACK_MODEL,
       fetchImpl,
-    },
+    }
   );
   assert.equal(r.ok, true);
   if (r.ok) {
@@ -374,11 +360,8 @@ test("recall: primary hard failure falls back to configured fallback provider", 
 test("recall: both providers fail -> error message uses the actual endpoint labels", async () => {
   const log: Array<{ url: string; body: string }> = [];
   const fetchImpl = scriptedFetch(
-    [
-      () => httpErrorResponse(401, "Unauthorized"),
-      () => httpErrorResponse(403, "Forbidden"),
-    ],
-    log,
+    [() => httpErrorResponse(401, "Unauthorized"), () => httpErrorResponse(403, "Forbidden")],
+    log
   );
   const r = await synthesizeRecallWithFallback(
     "What database does the project use?",
@@ -391,7 +374,7 @@ test("recall: both providers fail -> error message uses the actual endpoint labe
       fallbackBaseUrl: TEST_FALLBACK_BASE_URL,
       fallbackModel: TEST_FALLBACK_MODEL,
       fetchImpl,
-    },
+    }
   );
   assert.equal(r.ok, false);
   if (!r.ok) {
@@ -402,12 +385,14 @@ test("recall: both providers fail -> error message uses the actual endpoint labe
     const fallbackLabel = `custom/${TEST_FALLBACK_MODEL}#recall`;
     // The message should reference each slot's actual label.
     assert.ok(
-      r.message.includes(primaryLabel) || r.message.includes(`primary=${primaryLabel.split("/")[0]}`),
-      `message should reference primary provider label`,
+      r.message.includes(primaryLabel) ||
+        r.message.includes(`primary=${primaryLabel.split("/")[0]}`),
+      `message should reference primary provider label`
     );
     assert.ok(
-      r.message.includes(fallbackLabel) || r.message.includes(`fallback=${fallbackLabel.split("/")[0]}`),
-      `message should reference fallback provider label`,
+      r.message.includes(fallbackLabel) ||
+        r.message.includes(`fallback=${fallbackLabel.split("/")[0]}`),
+      `message should reference fallback provider label`
     );
     // The last error is the fallback's auth failure (403).
     assert.equal(r.lastError?.kind, "auth");
@@ -427,10 +412,7 @@ test("recall: both providers fail -> error message uses the actual endpoint labe
 
 test("recall: primary no-key message reflects the primary slot label (empty base URL -> custom)", async () => {
   const log: Array<{ url: string; body: string }> = [];
-  const fetchImpl = scriptedFetch(
-    [() => okChatResponse("ignored")],
-    log,
-  );
+  const fetchImpl = scriptedFetch([() => okChatResponse("ignored")], log);
   const r = await synthesizeRecallWithFallback(
     "What database does the project use?",
     SAMPLE_MEMORIES,
@@ -443,7 +425,7 @@ test("recall: primary no-key message reflects the primary slot label (empty base
       fallbackModel: TEST_FALLBACK_MODEL,
       disableFallback: true,
       fetchImpl,
-    },
+    }
   );
   assert.equal(r.ok, false);
   if (!r.ok) {
@@ -455,7 +437,7 @@ test("recall: primary no-key message reflects the primary slot label (empty base
     assert.match(
       r.lastError!.message,
       /^custom: no api key configured$/,
-      "primary missing-config message must use the derived label (custom for empty base URL)",
+      "primary missing-config message must use the derived label (custom for empty base URL)"
     );
     // No HTTP call should have been attempted on the primary slot.
     assert.equal(log.length, 0);
@@ -469,14 +451,11 @@ test("recall: primary no-key message reflects the primary slot label (empty base
 test("recall: no api keys configured -> typed missing-config (no http calls)", async () => {
   return withCleanEnv(ENV_KEYS, async () => {
     const log: Array<{ url: string; body: string }> = [];
-    const fetchImpl = scriptedFetch(
-      [() => okChatResponse("ignored")],
-      log,
-    );
+    const fetchImpl = scriptedFetch([() => okChatResponse("ignored")], log);
     const r = await synthesizeRecallWithFallback(
       "What database does the project use?",
       SAMPLE_MEMORIES,
-      { fetchImpl },
+      { fetchImpl }
     );
     assert.equal(r.ok, false);
     if (!r.ok) {
@@ -501,20 +480,13 @@ test("recall: no api keys configured -> typed missing-config (no http calls)", a
 
 test("recall: custom primary URL containing 'nvidia' still resolves to nvidia-nim label", async () => {
   const log: Array<{ url: string; body: string }> = [];
-  const fetchImpl = scriptedFetch(
-    [() => okChatResponse("ok", "m")],
-    log,
-  );
-  const r = await synthesizeRecallWithFallback(
-    "q",
-    SAMPLE_MEMORIES,
-    {
-      primaryApiKey: TEST_PRIMARY_KEY,
-      primaryBaseUrl: "https://my.nvidia.proxy.example/v1",
-      primaryModel: "openai/gpt-oss-120b",
-      fetchImpl,
-    },
-  );
+  const fetchImpl = scriptedFetch([() => okChatResponse("ok", "m")], log);
+  const r = await synthesizeRecallWithFallback("q", SAMPLE_MEMORIES, {
+    primaryApiKey: TEST_PRIMARY_KEY,
+    primaryBaseUrl: "https://my.nvidia.proxy.example/v1",
+    primaryModel: "openai/gpt-oss-120b",
+    fetchImpl,
+  });
   assert.equal(r.ok, true);
   if (r.ok) {
     assert.equal(r.providerUsed, "nvidia-nim");
@@ -527,25 +499,18 @@ test("recall: custom primary URL containing 'nvidia' still resolves to nvidia-ni
 test("recall: custom fallback URL containing 'minimax' still resolves to minimax label", async () => {
   const log: Array<{ url: string; body: string }> = [];
   const fetchImpl = scriptedFetch(
-    [
-      () => httpErrorResponse(500, "primary down"),
-      () => okChatResponse("ok", "MiniMax-M3"),
-    ],
-    log,
+    [() => httpErrorResponse(500, "primary down"), () => okChatResponse("ok", "MiniMax-M3")],
+    log
   );
-  const r = await synthesizeRecallWithFallback(
-    "q",
-    SAMPLE_MEMORIES,
-    {
-      primaryApiKey: TEST_PRIMARY_KEY,
-      primaryBaseUrl: "https://integrate.api.nvidia.com/v1",
-      primaryModel: "openai/gpt-oss-120b",
-      fallbackApiKey: TEST_FALLBACK_KEY,
-      fallbackBaseUrl: "https://my.minimax.proxy.example/v1",
-      fallbackModel: "MiniMax-M3",
-      fetchImpl,
-    },
-  );
+  const r = await synthesizeRecallWithFallback("q", SAMPLE_MEMORIES, {
+    primaryApiKey: TEST_PRIMARY_KEY,
+    primaryBaseUrl: "https://integrate.api.nvidia.com/v1",
+    primaryModel: "openai/gpt-oss-120b",
+    fallbackApiKey: TEST_FALLBACK_KEY,
+    fallbackBaseUrl: "https://my.minimax.proxy.example/v1",
+    fallbackModel: "MiniMax-M3",
+    fetchImpl,
+  });
   assert.equal(r.ok, true);
   if (r.ok) {
     assert.equal(r.fallbackUsed, true);
@@ -563,11 +528,8 @@ test("recall: custom fallback URL containing 'minimax' still resolves to minimax
 test("recall: serialized result never contains api key values", async () => {
   const log: Array<{ url: string; body: string }> = [];
   const fetchImpl = scriptedFetch(
-    [
-      () => httpErrorResponse(500, "primary down"),
-      () => okChatResponse("ok", TEST_FALLBACK_MODEL),
-    ],
-    log,
+    [() => httpErrorResponse(500, "primary down"), () => okChatResponse("ok", TEST_FALLBACK_MODEL)],
+    log
   );
   const r = await synthesizeRecallWithFallback(
     "What database does the project use?",
@@ -580,7 +542,7 @@ test("recall: serialized result never contains api key values", async () => {
       fallbackBaseUrl: TEST_FALLBACK_BASE_URL,
       fallbackModel: TEST_FALLBACK_MODEL,
       fetchImpl,
-    },
+    }
   );
   const serialized = JSON.stringify(r);
   assert.ok(!serialized.includes(TEST_PRIMARY_KEY), "primary key leaked into result");
@@ -593,10 +555,7 @@ test("recall: serialized result never contains api key values", async () => {
 
 test("recall: empty query returns typed invalid-input (no http call)", async () => {
   const log: Array<{ url: string; body: string }> = [];
-  const fetchImpl = scriptedFetch(
-    [() => okChatResponse("ignored")],
-    log,
-  );
+  const fetchImpl = scriptedFetch([() => okChatResponse("ignored")], log);
   const r = await synthesizeRecallWithFallback("", SAMPLE_MEMORIES, {
     primaryApiKey: TEST_PRIMARY_KEY,
     fetchImpl,
@@ -611,10 +570,7 @@ test("recall: empty query returns typed invalid-input (no http call)", async () 
 
 test("recall: empty memories list returns typed invalid-input (no http call)", async () => {
   const log: Array<{ url: string; body: string }> = [];
-  const fetchImpl = scriptedFetch(
-    [() => okChatResponse("ignored")],
-    log,
-  );
+  const fetchImpl = scriptedFetch([() => okChatResponse("ignored")], log);
   const r = await synthesizeRecallWithFallback("what?", [], {
     primaryApiKey: TEST_PRIMARY_KEY,
     fetchImpl,
@@ -633,31 +589,24 @@ test("recall: empty memories list returns typed invalid-input (no http call)", a
 
 test("recall: disableFallback short-circuits the fallback on primary failure", async () => {
   const log: Array<{ url: string; body: string }> = [];
-  const fetchImpl = scriptedFetch(
-    [() => httpErrorResponse(401, "Unauthorized")],
-    log,
-  );
-  const r = await synthesizeRecallWithFallback(
-    "q",
-    SAMPLE_MEMORIES,
-    {
-      primaryApiKey: TEST_PRIMARY_KEY,
-      primaryBaseUrl: TEST_PRIMARY_BASE_URL,
-      primaryModel: TEST_PRIMARY_MODEL,
-      fallbackApiKey: TEST_FALLBACK_KEY,
-      fallbackBaseUrl: TEST_FALLBACK_BASE_URL,
-      fallbackModel: TEST_FALLBACK_MODEL,
-      fetchImpl,
-      disableFallback: true,
-    },
-  );
+  const fetchImpl = scriptedFetch([() => httpErrorResponse(401, "Unauthorized")], log);
+  const r = await synthesizeRecallWithFallback("q", SAMPLE_MEMORIES, {
+    primaryApiKey: TEST_PRIMARY_KEY,
+    primaryBaseUrl: TEST_PRIMARY_BASE_URL,
+    primaryModel: TEST_PRIMARY_MODEL,
+    fallbackApiKey: TEST_FALLBACK_KEY,
+    fallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+    fallbackModel: TEST_FALLBACK_MODEL,
+    fetchImpl,
+    disableFallback: true,
+  });
   assert.equal(r.ok, false);
   if (!r.ok) {
     assert.equal(r.kind, "all-providers-failed");
     assert.equal(r.httpCalls, 1);
     assert.match(
       r.lastError!.message,
-      new RegExp(`custom\\/${TEST_PRIMARY_MODEL}#recall: auth failed \\(HTTP 401\\)`),
+      new RegExp(`custom\\/${TEST_PRIMARY_MODEL}#recall: auth failed \\(HTTP 401\\)`)
     );
   }
   assert.equal(log.length, 1, "no fallback call when disableFallback is true");
@@ -675,34 +624,24 @@ test("recall: regression gate - no hardcoded minimax/openai/gpt-oss-120b#recall 
   // surface for the old hardcoded label. With explicit config,
   // the label is derived from the base URL (custom/<model>#recall).
   const log: Array<{ url: string; body: string }> = [];
-  const fetchImpl = scriptedFetch(
-    [() => httpErrorResponse(401, "Unauthorized")],
-    log,
-  );
-  const r = await synthesizeRecallWithFallback(
-    "q",
-    SAMPLE_MEMORIES,
-    {
-      primaryApiKey: TEST_PRIMARY_KEY,
-      primaryBaseUrl: TEST_PRIMARY_BASE_URL,
-      primaryModel: TEST_PRIMARY_MODEL,
-      fetchImpl,
-    },
-  );
+  const fetchImpl = scriptedFetch([() => httpErrorResponse(401, "Unauthorized")], log);
+  const r = await synthesizeRecallWithFallback("q", SAMPLE_MEMORIES, {
+    primaryApiKey: TEST_PRIMARY_KEY,
+    primaryBaseUrl: TEST_PRIMARY_BASE_URL,
+    primaryModel: TEST_PRIMARY_MODEL,
+    fetchImpl,
+  });
   assert.equal(r.ok, false);
   if (!r.ok) {
-    const surfaces = [
-      r.message,
-      r.lastError?.message ?? "",
-    ];
+    const surfaces = [r.message, r.lastError?.message ?? ""];
     for (const s of surfaces) {
       assert.ok(
         !s.includes("minimax/openai/gpt-oss-120b#recall"),
-        `surface still contains the old hardcoded label: ${JSON.stringify(s)}`,
+        `surface still contains the old hardcoded label: ${JSON.stringify(s)}`
       );
       assert.ok(
         !s.includes("minimax: hard failure"),
-        `surface still contains the stale minimax hard-failure prefix: ${JSON.stringify(s)}`,
+        `surface still contains the stale minimax hard-failure prefix: ${JSON.stringify(s)}`
       );
     }
   }
@@ -743,7 +682,7 @@ function malformedContentResponse(): Response {
       // undefined -> http-client returns ok=false, kind=bad-request
       // with message "response missing choices[0].message.content".
     }),
-    { status: 200, headers: { "content-type": "application/json" } },
+    { status: 200, headers: { "content-type": "application/json" } }
   );
 }
 
@@ -755,10 +694,7 @@ test("recall: primary 200 with malformed content (no fallback configured) -> all
   // and the `primary failed and no fallback configured:` prefix
   // on the top-level message.
   const log: Array<{ url: string; body: string }> = [];
-  const fetchImpl = scriptedFetch(
-    [() => malformedContentResponse()],
-    log,
-  );
+  const fetchImpl = scriptedFetch([() => malformedContentResponse()], log);
   const r = await synthesizeRecallWithFallback(
     "What database does the project use?",
     SAMPLE_MEMORIES,
@@ -767,16 +703,12 @@ test("recall: primary 200 with malformed content (no fallback configured) -> all
       primaryBaseUrl: TEST_PRIMARY_BASE_URL,
       primaryModel: TEST_PRIMARY_MODEL,
       fetchImpl,
-    },
+    }
   );
   assert.equal(r.ok, false, "primary 200 with no usable content must not report ok");
   if (r.ok) return;
   assert.equal(r.kind, "all-providers-failed");
-  assert.equal(
-    r.httpCalls,
-    1,
-    "no fallback call when no fallback is configured",
-  );
+  assert.equal(r.httpCalls, 1, "no fallback call when no fallback is configured");
   assert.ok(r.lastError, "lastError should be present");
   // The bad-request error must name the missing field and use
   // the actual primary endpoint's label derived from base URL.
@@ -785,14 +717,18 @@ test("recall: primary 200 with malformed content (no fallback configured) -> all
   assert.equal(r.lastError!.reachedServer, true);
   assert.match(
     r.lastError!.message,
-    new RegExp(`custom\\/${TEST_PRIMARY_MODEL}#recall: response missing choices\\[0\\]\\.message\\.content`),
-    "lastError must name the missing field and use the actual primary endpoint label",
+    new RegExp(
+      `custom\\/${TEST_PRIMARY_MODEL}#recall: response missing choices\\[0\\]\\.message\\.content`
+    ),
+    "lastError must name the missing field and use the actual primary endpoint label"
   );
   // The top-level message must follow the documented shape.
   assert.match(
     r.message,
-    new RegExp(`^primary failed and no fallback configured: custom\\/${TEST_PRIMARY_MODEL}#recall: response missing choices\\[0\\]\\.message\\.content$`),
-    "top-level message must follow the operator-visible shape",
+    new RegExp(
+      `^primary failed and no fallback configured: custom\\/${TEST_PRIMARY_MODEL}#recall: response missing choices\\[0\\]\\.message\\.content$`
+    ),
+    "top-level message must follow the operator-visible shape"
   );
   // No fabricated answer.
   assert.ok(!r.message.includes("Postgres"));
@@ -812,12 +748,9 @@ test("recall: primary 200 with malformed content + fallback configured -> fallba
     [
       () => malformedContentResponse(),
       () =>
-        okChatResponse(
-          "The project uses Postgres 16 for the primary store.",
-          TEST_FALLBACK_MODEL,
-        ),
+        okChatResponse("The project uses Postgres 16 for the primary store.", TEST_FALLBACK_MODEL),
     ],
-    log,
+    log
   );
   const r = await synthesizeRecallWithFallback(
     "What database does the project use?",
@@ -830,7 +763,7 @@ test("recall: primary 200 with malformed content + fallback configured -> fallba
       fallbackBaseUrl: TEST_FALLBACK_BASE_URL,
       fallbackModel: TEST_FALLBACK_MODEL,
       fetchImpl,
-    },
+    }
   );
   assert.equal(r.ok, true);
   if (!r.ok) return;
@@ -869,24 +802,18 @@ test("recall: primary 200 with empty string content (no fallback) -> all-provide
         JSON.stringify({
           id: "x",
           model: TEST_PRIMARY_MODEL,
-          choices: [
-            { message: { role: "assistant", content: "" } },
-          ],
+          choices: [{ message: { role: "assistant", content: "" } }],
         }),
-        { status: 200, headers: { "content-type": "application/json" } },
+        { status: 200, headers: { "content-type": "application/json" } }
       );
     };
   })();
-  const r = await synthesizeRecallWithFallback(
-    "q",
-    SAMPLE_MEMORIES,
-    {
-      primaryApiKey: TEST_PRIMARY_KEY,
-      primaryBaseUrl: TEST_PRIMARY_BASE_URL,
-      primaryModel: TEST_PRIMARY_MODEL,
-      fetchImpl,
-    },
-  );
+  const r = await synthesizeRecallWithFallback("q", SAMPLE_MEMORIES, {
+    primaryApiKey: TEST_PRIMARY_KEY,
+    primaryBaseUrl: TEST_PRIMARY_BASE_URL,
+    primaryModel: TEST_PRIMARY_MODEL,
+    fetchImpl,
+  });
   assert.equal(r.ok, false);
   if (r.ok) return;
   assert.equal(r.kind, "all-providers-failed");
@@ -896,7 +823,7 @@ test("recall: primary 200 with empty string content (no fallback) -> all-provide
   assert.equal(
     r.message,
     `custom: empty response content`,
-    "top-level message must name the primary endpoint and the empty-content reason",
+    "top-level message must name the primary endpoint and the empty-content reason"
   );
   assert.equal(r.lastError, undefined);
   assert.equal(log.length, 1);

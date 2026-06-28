@@ -80,30 +80,27 @@
  *      registers exactly `remember` + `recall`.
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { test } from "node:test";
 
+import { BENCHMARK_RECORDS } from "../src/benchmark/corpus.ts";
+import { buildCandidates } from "../src/benchmark/retrieval-runner.ts";
+import { parseRetrievalCli } from "../src/benchmark/retrieval-runner.ts";
+import { BgeM3Embedder, type BgeM3TextKind } from "../src/benchmark/variants/bge-m3-embedder.ts";
 import {
-  createDenseEmbedder,
+  type DenseEmbedder,
+  type EmbedderMetadata,
   StubDeterministicDenseEmbedder,
   TransformersJsEmbedder,
-  type EmbedderMetadata,
-  type DenseEmbedder,
+  createDenseEmbedder,
 } from "../src/benchmark/variants/dense-embedder.ts";
-import {
-  BgeM3Embedder,
-  type BgeM3TextKind,
-} from "../src/benchmark/variants/bge-m3-embedder.ts";
-import { buildCandidates } from "../src/benchmark/retrieval-runner.ts";
 import {
   rankDenseVectorAsync,
   rankDenseVectorWithMetadataAsync,
 } from "../src/benchmark/variants/dense-vector.ts";
-import { parseRetrievalCli } from "../src/benchmark/retrieval-runner.ts";
 import { PUBLIC_TOOL_NAMES } from "../src/server.ts";
-import { BENCHMARK_RECORDS } from "../src/benchmark/corpus.ts";
 import { walkTs } from "./_helpers/fs-walk.ts";
 
 // ---------------------------------------------------------------------------
@@ -117,41 +114,30 @@ test("BgeM3Embedder: construction exposes the documented metadata", () => {
   assert.equal(
     m.modelId,
     "Xenova/bge-m3",
-    "default model id must be the pinned Xenova/bge-m3 mirror",
+    "default model id must be the pinned Xenova/bge-m3 mirror"
   );
   assert.equal(m.dim, 1024, "BGE-M3 dense mode produces 1024-dim vectors");
-  assert.equal(
-    m.quantized,
-    true,
-    "default dtype q8 means the embedder reports quantized=true",
-  );
-  assert.equal(
-    m.status,
-    "skipped",
-    "construction is in skipped status until init()",
-  );
+  assert.equal(m.quantized, true, "default dtype q8 means the embedder reports quantized=true");
+  assert.equal(m.status, "skipped", "construction is in skipped status until init()");
   // The description surfaces the key knobs so a
   // reviewer reading the metadata can audit the
   // configuration.
   assert.ok(
     typeof m.description === "string" && m.description.includes("q8"),
-    `description must mention the q8 dtype; got: ${m.description}`,
+    `description must mention the q8 dtype; got: ${m.description}`
   );
   assert.ok(
     m.description.includes("cls"),
-    `description must mention the cls pooling; got: ${m.description}`,
+    `description must mention the cls pooling; got: ${m.description}`
   );
   // The MIT license is surfaced on the description
   // so a reviewer can audit it on the artifact.
   assert.ok(
     m.description.includes("MIT"),
-    `description must mention the MIT license; got: ${m.description}`,
+    `description must mention the MIT license; got: ${m.description}`
   );
   // The cache dir is the documented default.
-  assert.equal(
-    m.cacheDir,
-    `${process.cwd()}/.curion/transformers-cache`,
-  );
+  assert.equal(m.cacheDir, `${process.cwd()}/.curion/transformers-cache`);
 });
 
 test("BgeM3Embedder: custom modelId, dtype, pooling, cacheDir are honored", () => {
@@ -284,11 +270,7 @@ test("BgeM3Embedder: fallback path is input-driven (embedQuery / embedDocument p
       break;
     }
   }
-  assert.equal(
-    equal,
-    true,
-    "BGE-M3: identical input produces identical vector (kind-agnostic)",
-  );
+  assert.equal(equal, true, "BGE-M3: identical input produces identical vector (kind-agnostic)");
 });
 
 test("BgeM3Embedder: BgeM3TextKind is the documented union", () => {
@@ -344,7 +326,7 @@ test("BgeM3Embedder: init() without a real library reports `error` metadata", as
   // integration test covers the success path.
   if (!(await isBgeM3LibraryMissing())) {
     t.skip(
-      "@huggingface/transformers is installed; the init-failure path is exercised in CI where the package is absent",
+      "@huggingface/transformers is installed; the init-failure path is exercised in CI where the package is absent"
     );
     return;
   }
@@ -362,21 +344,17 @@ test("BgeM3Embedder: init() without a real library reports `error` metadata", as
   assert.equal(
     embedder.metadata.status,
     "error",
-    "init() must flip status to 'error' when the library is not installed",
+    "init() must flip status to 'error' when the library is not installed"
   );
   // The error message is captured so a
   // reviewer can audit the failure on the
   // artifact.
   assert.ok(
-    typeof embedder.metadata.errorMessage === "string" &&
-      embedder.metadata.errorMessage.length > 0,
-    "errorMessage must be a non-empty string on init failure",
+    typeof embedder.metadata.errorMessage === "string" && embedder.metadata.errorMessage.length > 0,
+    "errorMessage must be a non-empty string on init failure"
   );
   // The loadMs is captured even on failure.
-  assert.ok(
-    typeof embedder.metadata.loadMs === "number" &&
-      embedder.metadata.loadMs >= 0,
-  );
+  assert.ok(typeof embedder.metadata.loadMs === "number" && embedder.metadata.loadMs >= 0);
 });
 
 test("BgeM3Embedder: embed() / embedBatch() fall back to the stub when init() failed", async (t) => {
@@ -387,7 +365,7 @@ test("BgeM3Embedder: embed() / embedBatch() fall back to the stub when init() fa
   // not exercised and this test is skipped.
   if (!(await isBgeM3LibraryMissing())) {
     t.skip(
-      "@huggingface/transformers is installed; the init-failure fallback is exercised in CI where the package is absent",
+      "@huggingface/transformers is installed; the init-failure fallback is exercised in CI where the package is absent"
     );
     return;
   }
@@ -420,15 +398,9 @@ test("BgeM3Embedder: embed() / embedBatch() fall back to the stub when init() fa
 // ---------------------------------------------------------------------------
 
 test("createDenseEmbedder: 'bge-m3' spec dispatches to BgeM3Embedder", async () => {
-  const { embedder, spec } = await createDenseEmbedder(
-    "bge-m3",
-    { skip: true },
-  );
+  const { embedder, spec } = await createDenseEmbedder("bge-m3", { skip: true });
   assert.equal(embedder.metadata.backend, "bge-m3");
-  assert.equal(
-    embedder.metadata.modelId,
-    "Xenova/bge-m3",
-  );
+  assert.equal(embedder.metadata.modelId, "Xenova/bge-m3");
   // The factory skips init when `skip: true`
   // so the test does not require the library.
   // The `status: "skipped"` placeholder is
@@ -440,23 +412,16 @@ test("createDenseEmbedder: 'bge-m3' spec dispatches to BgeM3Embedder", async () 
 });
 
 test("createDenseEmbedder: 'bgem3' is an alias for 'bge-m3'", async () => {
-  const { embedder, spec } = await createDenseEmbedder(
-    "bgem3",
-    { skip: true },
-  );
+  const { embedder, spec } = await createDenseEmbedder("bgem3", { skip: true });
   assert.equal(embedder.metadata.backend, "bge-m3");
   assert.equal(spec, "bgem3");
 });
 
 test("createDenseEmbedder: 'bge-m3:model=...,dtype=...,pooling=...' parses all keys", async () => {
-  const specStr =
-    "bge-m3:model=org/custom-bge-m3-onnx,dtype=fp16,pooling=mean";
+  const specStr = "bge-m3:model=org/custom-bge-m3-onnx,dtype=fp16,pooling=mean";
   const { embedder } = await createDenseEmbedder(specStr, { skip: true });
   assert.equal(embedder.metadata.backend, "bge-m3");
-  assert.equal(
-    embedder.metadata.modelId,
-    "org/custom-bge-m3-onnx",
-  );
+  assert.equal(embedder.metadata.modelId, "org/custom-bge-m3-onnx");
   // The description surfaces the custom values.
   assert.ok(embedder.metadata.description.includes("fp16"));
   assert.ok(embedder.metadata.description.includes("mean"));
@@ -466,10 +431,7 @@ test("createDenseEmbedder: 'bge-m3:pooling=<unknown>' falls back to the default"
   // An unknown pooling value is silently
   // ignored (the BGE-M3 embedder constructor
   // uses its default `cls`).
-  const { embedder } = await createDenseEmbedder(
-    "bge-m3:pooling=unknown",
-    { skip: true },
-  );
+  const { embedder } = await createDenseEmbedder("bge-m3:pooling=unknown", { skip: true });
   assert.equal(embedder.metadata.backend, "bge-m3");
   assert.ok(embedder.metadata.description.includes("cls"));
 });
@@ -480,10 +442,7 @@ test("createDenseEmbedder: object spec with backend=bge-m3 dispatches to BGE-M3"
     cacheDir: "/tmp/curion-bge-m3-obj-spec-cache",
   });
   assert.equal(embedder.metadata.backend, "bge-m3");
-  assert.equal(
-    embedder.metadata.cacheDir,
-    "/tmp/curion-bge-m3-obj-spec-cache",
-  );
+  assert.equal(embedder.metadata.cacheDir, "/tmp/curion-bge-m3-obj-spec-cache");
 });
 
 test("createDenseEmbedder: 'bge-m3' without skip calls init() and may report error when library is missing", async (t) => {
@@ -493,7 +452,7 @@ test("createDenseEmbedder: 'bge-m3' without skip calls init() and may report err
   // test is not exercised; skip in that env.
   if (!(await isBgeM3LibraryMissing())) {
     t.skip(
-      "@huggingface/transformers is installed; the init-failure factory contract is exercised in CI where the package is absent",
+      "@huggingface/transformers is installed; the init-failure factory contract is exercised in CI where the package is absent"
     );
     return;
   }
@@ -510,8 +469,7 @@ test("createDenseEmbedder: 'bge-m3' without skip calls init() and may report err
   assert.equal(embedder.metadata.backend, "bge-m3");
   assert.equal(embedder.metadata.status, "error");
   assert.ok(
-    typeof embedder.metadata.errorMessage === "string" &&
-      embedder.metadata.errorMessage.length > 0,
+    typeof embedder.metadata.errorMessage === "string" && embedder.metadata.errorMessage.length > 0
   );
 });
 
@@ -528,28 +486,19 @@ test("createDenseEmbedder: existing 'stub-dense' / 'transformersjs' / 'qwen3' / 
   // still dispatch to it.
   const xjs = await createDenseEmbedder("transformersjs", { skip: true });
   assert.equal(xjs.embedder.metadata.backend, "transformersjs");
-  assert.equal(
-    xjs.embedder.metadata.modelId,
-    "Xenova/all-MiniLM-L6-v2",
-  );
+  assert.equal(xjs.embedder.metadata.modelId, "Xenova/all-MiniLM-L6-v2");
   // The Qwen3 path must continue to work
   // unchanged (the BGE-M3 work is additive to
   // the Qwen3 work).
   const qwen3 = await createDenseEmbedder("qwen3", { skip: true });
   assert.equal(qwen3.embedder.metadata.backend, "qwen3");
-  assert.equal(
-    qwen3.embedder.metadata.modelId,
-    "onnx-community/Qwen3-Embedding-0.6B-ONNX",
-  );
+  assert.equal(qwen3.embedder.metadata.modelId, "onnx-community/Qwen3-Embedding-0.6B-ONNX");
   // The EmbeddingGemma path must continue to
   // work unchanged (the BGE-M3 work is additive
   // to the EmbeddingGemma work).
   const eg = await createDenseEmbedder("embeddinggemma", { skip: true });
   assert.equal(eg.embedder.metadata.backend, "embeddinggemma");
-  assert.equal(
-    eg.embedder.metadata.modelId,
-    "onnx-community/embeddinggemma-300m-ONNX",
-  );
+  assert.equal(eg.embedder.metadata.modelId, "onnx-community/embeddinggemma-300m-ONNX");
 });
 
 test("createDenseEmbedder: object spec with backend=stub-dense dispatches to stub-dense", async () => {
@@ -560,10 +509,7 @@ test("createDenseEmbedder: object spec with backend=stub-dense dispatches to stu
 });
 
 test("createDenseEmbedder: unknown spec is rejected", async () => {
-  await assert.rejects(
-    async () => createDenseEmbedder("not-a-real-spec"),
-    /unknown spec/,
-  );
+  await assert.rejects(async () => createDenseEmbedder("not-a-real-spec"), /unknown spec/);
 });
 
 // ---------------------------------------------------------------------------
@@ -614,24 +560,16 @@ test("rankDenseVectorWithMetadataAsync: kind='query' dispatches to embedQuery fo
     kind: "query",
   });
   // Exactly one embedQuery call for the query.
-  assert.equal(
-    embedQueryCalls,
-    1,
-    "kind=query should call embedQuery exactly once",
-  );
+  assert.equal(embedQueryCalls, 1, "kind=query should call embedQuery exactly once");
   // The candidates go through embedBatch
   // (document-mode batch). `embed` is NOT
   // called for the candidates OR the query
   // when the embedder exposes `embedQuery`.
-  assert.equal(
-    embedCalls,
-    0,
-    "kind=query should not call embed (the document path) for the query",
-  );
+  assert.equal(embedCalls, 0, "kind=query should not call embed (the document path) for the query");
   // The embedBatch call is the document path.
   assert.ok(
     recorded.some((r) => r.method === "embedBatch"),
-    "ranker must call embedBatch for the documents",
+    "ranker must call embedBatch for the documents"
   );
 });
 
@@ -670,11 +608,7 @@ test("rankDenseVectorWithMetadataAsync: kind=undefined (default) does not invoke
     embedder: fakeBgeM3,
     // kind is undefined -> default "document"
   });
-  assert.equal(
-    embedQueryCalls,
-    0,
-    "default kind should not call embedQuery",
-  );
+  assert.equal(embedQueryCalls, 0, "default kind should not call embedQuery");
 });
 
 test("rankDenseVectorAsync: kind-agnostic embedders (stub / MiniLM) continue to use embedBatch", async () => {
@@ -704,22 +638,12 @@ test("rankDenseVectorAsync: kind-agnostic embedders (stub / MiniLM) continue to 
 // ---------------------------------------------------------------------------
 
 test("parseRetrievalCli: --embedder bge-m3 is accepted", () => {
-  const opts = parseRetrievalCli([
-    "--variant",
-    "vector-dense",
-    "--embedder",
-    "bge-m3",
-  ]);
+  const opts = parseRetrievalCli(["--variant", "vector-dense", "--embedder", "bge-m3"]);
   assert.equal(opts.denseEmbedderSpec, "bge-m3");
 });
 
 test("parseRetrievalCli: --embedder bgem3 is accepted (alias)", () => {
-  const opts = parseRetrievalCli([
-    "--variant",
-    "vector-dense",
-    "--embedder",
-    "bgem3",
-  ]);
+  const opts = parseRetrievalCli(["--variant", "vector-dense", "--embedder", "bgem3"]);
   assert.equal(opts.denseEmbedderSpec, "bgem3");
 });
 
@@ -730,10 +654,7 @@ test("parseRetrievalCli: --embedder bge-m3:model=...,dtype=...,pooling=... parse
     "--embedder",
     "bge-m3:model=org/custom,dtype=fp16,pooling=mean",
   ]);
-  assert.equal(
-    opts.denseEmbedderSpec,
-    "bge-m3:model=org/custom,dtype=fp16,pooling=mean",
-  );
+  assert.equal(opts.denseEmbedderSpec, "bge-m3:model=org/custom,dtype=fp16,pooling=mean");
 });
 
 test("parseRetrievalCli: --embedder bge-m3 --dense-cache-dir composes backend=bge-m3 + cacheDir", () => {
@@ -795,7 +716,7 @@ test("parseRetrievalCli: --embedder bge-m3:model=...,pooling=... --dense-skip pr
   assert.equal(
     spec.spec,
     "bge-m3:model=org/custom,dtype=fp16,pooling=mean",
-    "the original spec string must be preserved as baseObj.spec",
+    "the original spec string must be preserved as baseObj.spec"
   );
 });
 
@@ -807,15 +728,11 @@ test("createDenseEmbedder: object spec with backend=bge-m3 + spec=bge-m3:model=.
   // preserved end-to-end.
   const { embedder } = await createDenseEmbedder({
     backend: "bge-m3",
-    spec:
-      "bge-m3:model=org/custom-bge-m3-onnx,dtype=fp16,pooling=mean",
+    spec: "bge-m3:model=org/custom-bge-m3-onnx,dtype=fp16,pooling=mean",
     skip: true,
   });
   assert.equal(embedder.metadata.backend, "bge-m3");
-  assert.equal(
-    embedder.metadata.modelId,
-    "org/custom-bge-m3-onnx",
-  );
+  assert.equal(embedder.metadata.modelId, "org/custom-bge-m3-onnx");
   assert.ok(embedder.metadata.description.includes("fp16"));
   assert.ok(embedder.metadata.description.includes("mean"));
 });
@@ -870,45 +787,35 @@ test("StubDeterministicDenseEmbedder: continues to be the deterministic control"
 
 test("BGE-M3 benchmark is benchmark-only: production recall() controller is not modified", () => {
   const recallSrc = fs.readFileSync(
-    path.join(
-      import.meta.dirname,
-      "..",
-      "src",
-      "controller",
-      "recall-controller.ts",
-    ),
-    "utf8",
+    path.join(import.meta.dirname, "..", "src", "controller", "recall-controller.ts"),
+    "utf8"
   );
   assert.doesNotMatch(
     recallSrc,
     /bge-m3|BgeM3|BGEM3|bge_m3/i,
-    "recall controller must NOT import BGE-M3 modules",
+    "recall controller must NOT import BGE-M3 modules"
   );
   const seamSrc = fs.readFileSync(
     path.join(import.meta.dirname, "..", "src", "retrieval", "seam.ts"),
-    "utf8",
+    "utf8"
   );
   assert.doesNotMatch(
     seamSrc,
     /bge-m3|BgeM3|BGEM3|bge_m3/i,
-    "retrieval/seam.ts must NOT import BGE-M3 modules",
+    "retrieval/seam.ts must NOT import BGE-M3 modules"
   );
   // The MCP server still exposes exactly two
   // tools.
   const serverSrc = fs.readFileSync(
     path.join(import.meta.dirname, "..", "src", "server.ts"),
-    "utf8",
+    "utf8"
   );
   const toolCallCount = (serverSrc.match(/server\.registerTool\(/g) ?? []).length;
-  assert.equal(
-    toolCallCount,
-    2,
-    `server.ts must register exactly 2 tools, found ${toolCallCount}`,
-  );
+  assert.equal(toolCallCount, 2, `server.ts must register exactly 2 tools, found ${toolCallCount}`);
   assert.deepEqual(
     [...PUBLIC_TOOL_NAMES],
     ["remember", "recall"],
-    "public MCP tool surface must remain exactly remember + recall",
+    "public MCP tool surface must remain exactly remember + recall"
   );
 });
 
@@ -943,10 +850,10 @@ test("BGE-M3 benchmark: only the benchmark directory imports the BGE-M3 module",
     if (allowedImporters.has(rel)) continue;
     const src = fs.readFileSync(path.join(root, rel), "utf8");
     const importsBgeM3 =
-      src.includes("from \"./bge-m3-embedder\"") ||
-      src.includes("from \"./bge-m3-embedder.js\"") ||
-      src.includes("from \"../benchmark/variants/bge-m3-embedder") ||
-      src.includes("from \"../../benchmark/variants/bge-m3-embedder");
+      src.includes('from "./bge-m3-embedder"') ||
+      src.includes('from "./bge-m3-embedder.js"') ||
+      src.includes('from "../benchmark/variants/bge-m3-embedder') ||
+      src.includes('from "../../benchmark/variants/bge-m3-embedder');
     const usesBgeM3Symbol =
       src.match(/\bBgeM3Embedder\b/) !== null ||
       src.match(/\bBgeM3TextKind\b/) !== null ||
@@ -955,24 +862,12 @@ test("BGE-M3 benchmark: only the benchmark directory imports the BGE-M3 module",
       // BGE-M3 module.
       /"bge-m3"/.test(src) ||
       /'bge-m3'/.test(src);
-    assert.ok(
-      !importsBgeM3,
-      `unexpected import of bge-m3 module in ${rel}`,
-    );
-    assert.ok(
-      !usesBgeM3Symbol,
-      `unexpected BGE-M3 symbol usage in ${rel}`,
-    );
+    assert.ok(!importsBgeM3, `unexpected import of bge-m3 module in ${rel}`);
+    assert.ok(!usesBgeM3Symbol, `unexpected BGE-M3 symbol usage in ${rel}`);
     for (const prefix of productionDirPrefixes) {
       if (rel === prefix || rel.startsWith(prefix + path.sep)) {
-        assert.ok(
-          !importsBgeM3,
-          `production file ${rel} must not import bge-m3 modules`,
-        );
-        assert.ok(
-          !usesBgeM3Symbol,
-          `production file ${rel} must not use BGE-M3 symbols`,
-        );
+        assert.ok(!importsBgeM3, `production file ${rel} must not import bge-m3 modules`);
+        assert.ok(!usesBgeM3Symbol, `production file ${rel} must not use BGE-M3 symbols`);
       }
     }
   }
@@ -1002,13 +897,11 @@ test("runDenseRetrievalBenchmark: variant=vector-dense with embedder=bge-m3 prod
   // surface stays clean in the dev env.
   if (!(await isBgeM3LibraryMissing())) {
     t.skip(
-      "@huggingface/transformers is installed; the runDenseRetrievalBenchmark end-to-end path is exercised in CI where the package is absent (the live integration test in tests/_helpers/retrieval-dense-bge-m3-live.test.ts covers the real-model path)",
+      "@huggingface/transformers is installed; the runDenseRetrievalBenchmark end-to-end path is exercised in CI where the package is absent (the live integration test in tests/_helpers/retrieval-dense-bge-m3-live.test.ts covers the real-model path)"
     );
     return;
   }
-  const { runDenseRetrievalBenchmark } = await import(
-    "../src/benchmark/retrieval-runner.ts"
-  );
+  const { runDenseRetrievalBenchmark } = await import("../src/benchmark/retrieval-runner.ts");
   const report = await runDenseRetrievalBenchmark({
     variant: "vector-dense",
     denseEmbedderSpec: "bge-m3",
@@ -1019,10 +912,7 @@ test("runDenseRetrievalBenchmark: variant=vector-dense with embedder=bge-m3 prod
   };
   assert.equal(r.variant, "vector-dense-benchmark");
   assert.equal(r.config.embeddingBackend.backend, "bge-m3");
-  assert.equal(
-    r.config.embeddingBackend.modelId,
-    "Xenova/bge-m3",
-  );
+  assert.equal(r.config.embeddingBackend.modelId, "Xenova/bge-m3");
   // The status is "error" (init failed because
   // the library is not installed). The
   // benchmark still produced a report.

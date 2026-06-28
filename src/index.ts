@@ -9,20 +9,18 @@
  */
 
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { buildServer, PUBLIC_TOOL_NAMES } from "./server.js";
 import { logger } from "./logging/logger.js";
-import { initStorage, closeStorage } from "./storage/storage.js";
-import { setStorageProvider } from "./tools/remember.js";
+import { PUBLIC_TOOL_NAMES, buildServer } from "./server.js";
+import { closeStorage, initStorage } from "./storage/storage.js";
 import { setStorageProvider as setRecallStorageProvider } from "./tools/recall.js";
+import { setStorageProvider } from "./tools/remember.js";
 
 async function main(): Promise<void> {
   // Initialize project-local storage. Side effect: creates .curion/ if
   // missing. Failures here are fatal — the server cannot run without
   // its data directory.
   const storage = initStorage();
-  logger.info(
-    `curion starting (storage: ${storage.dir}, tools: ${PUBLIC_TOOL_NAMES.join(", ")})`,
-  );
+  logger.info(`curion starting (storage: ${storage.dir}, tools: ${PUBLIC_TOOL_NAMES.join(", ")})`);
 
   // Inject the long-lived storage handle into both tool layers so
   // they do not open a fresh DB on every call. We retain ownership

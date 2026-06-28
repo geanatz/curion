@@ -34,20 +34,20 @@
  * SDK boundary is exercised end-to-end.
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
+import { test } from "node:test";
 
 import { buildServer } from "../src/server.ts";
-import { REMEMBER_INPUT_SCHEMA } from "../src/tools/remember.ts";
 import { RECALL_INPUT_SCHEMA } from "../src/tools/recall.ts";
 import {
-  setStorageProvider as setRememberStorageProvider,
-  resetStorageProvider as resetRememberStorageProvider,
-} from "../src/tools/remember.ts";
-import {
-  setStorageProvider as setRecallStorageProvider,
   resetStorageProvider as resetRecallStorageProvider,
+  setStorageProvider as setRecallStorageProvider,
 } from "../src/tools/recall.ts";
+import { REMEMBER_INPUT_SCHEMA } from "../src/tools/remember.ts";
+import {
+  resetStorageProvider as resetRememberStorageProvider,
+  setStorageProvider as setRememberStorageProvider,
+} from "../src/tools/remember.ts";
 import { mkStorage, rmStorage } from "./_helpers/test-storage.ts";
 
 // ---------------------------------------------------------------------------
@@ -67,30 +67,32 @@ import { mkStorage, rmStorage } from "./_helpers/test-storage.ts";
  */
 async function callToolThroughServer(
   toolName: "remember" | "recall",
-  args: Record<string, unknown> | undefined,
+  args: Record<string, unknown> | undefined
 ): Promise<{
   content: Array<{ type: string; text: string }>;
   structuredContent?: Record<string, unknown>;
   isError?: boolean;
 }> {
   const server = buildServer();
-  const registered = (server as unknown as {
-    _registeredTools: Record<
-      string,
-      {
-        inputSchema?: unknown;
-        outputSchema?: unknown;
-        handler: (
-          args: Record<string, unknown>,
-          extra: unknown,
-        ) => Promise<{
-          content: Array<{ type: string; text: string }>;
-          structuredContent?: Record<string, unknown>;
-          isError?: boolean;
-        }>;
-      }
-    >;
-  })._registeredTools;
+  const registered = (
+    server as unknown as {
+      _registeredTools: Record<
+        string,
+        {
+          inputSchema?: unknown;
+          outputSchema?: unknown;
+          handler: (
+            args: Record<string, unknown>,
+            extra: unknown
+          ) => Promise<{
+            content: Array<{ type: string; text: string }>;
+            structuredContent?: Record<string, unknown>;
+            isError?: boolean;
+          }>;
+        }
+      >;
+    }
+  )._registeredTools;
   const tool = registered[toolName];
   if (!tool) throw new Error(`tool ${toolName} not registered`);
 
@@ -113,7 +115,7 @@ async function callToolThroughServer(
       const message =
         error && typeof error === "object" && "issues" in error
           ? `Invalid arguments for tool ${toolName}: ${JSON.stringify(
-              (error as { issues: unknown }).issues,
+              (error as { issues: unknown }).issues
             )}`
           : `Invalid arguments for tool ${toolName}: ${String(error)}`;
       return {
@@ -124,13 +126,10 @@ async function callToolThroughServer(
   }
   // Validation passed; invoke the handler the same way the
   // SDK's `executeToolHandler` does.
-  return await tool.handler(
-    (args as Record<string, unknown>) ?? {},
-    {
-      signal: new AbortController().signal,
-      requestId: 1,
-    },
-  );
+  return await tool.handler((args as Record<string, unknown>) ?? {}, {
+    signal: new AbortController().signal,
+    requestId: 1,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -141,13 +140,13 @@ test("remember: tools/list inputSchema has additionalProperties: false and one t
   const { toJsonSchemaCompat } = await import(
     "@modelcontextprotocol/sdk/server/zod-json-schema-compat.js"
   );
-  const { normalizeObjectSchema } = await import(
-    "@modelcontextprotocol/sdk/server/zod-compat.js"
-  );
+  const { normalizeObjectSchema } = await import("@modelcontextprotocol/sdk/server/zod-compat.js");
   const server = buildServer();
-  const registered = (server as unknown as {
-    _registeredTools: Record<string, { inputSchema: unknown }>;
-  })._registeredTools;
+  const registered = (
+    server as unknown as {
+      _registeredTools: Record<string, { inputSchema: unknown }>;
+    }
+  )._registeredTools;
   const obj = normalizeObjectSchema(registered["remember"]!.inputSchema);
   assert.ok(obj, "remember inputSchema must normalize to an object schema");
   const json = toJsonSchemaCompat(obj!, {
@@ -168,13 +167,13 @@ test("recall: tools/list inputSchema has additionalProperties: false and one tex
   const { toJsonSchemaCompat } = await import(
     "@modelcontextprotocol/sdk/server/zod-json-schema-compat.js"
   );
-  const { normalizeObjectSchema } = await import(
-    "@modelcontextprotocol/sdk/server/zod-compat.js"
-  );
+  const { normalizeObjectSchema } = await import("@modelcontextprotocol/sdk/server/zod-compat.js");
   const server = buildServer();
-  const registered = (server as unknown as {
-    _registeredTools: Record<string, { inputSchema: unknown }>;
-  })._registeredTools;
+  const registered = (
+    server as unknown as {
+      _registeredTools: Record<string, { inputSchema: unknown }>;
+    }
+  )._registeredTools;
   const obj = normalizeObjectSchema(registered["recall"]!.inputSchema);
   assert.ok(obj, "recall inputSchema must normalize to an object schema");
   const json = toJsonSchemaCompat(obj!, {
@@ -213,11 +212,7 @@ test("remember: REMEMBER_INPUT_SCHEMA rejects any unknown top-level key", () => 
   ];
   for (const c of candidates) {
     const r = REMEMBER_INPUT_SCHEMA.safeParse(c);
-    assert.equal(
-      r.success,
-      false,
-      `REMEMBER_INPUT_SCHEMA must reject ${JSON.stringify(c)}`,
-    );
+    assert.equal(r.success, false, `REMEMBER_INPUT_SCHEMA must reject ${JSON.stringify(c)}`);
   }
 });
 
@@ -238,11 +233,7 @@ test("recall: RECALL_INPUT_SCHEMA rejects any unknown top-level key", () => {
   ];
   for (const c of candidates) {
     const r = RECALL_INPUT_SCHEMA.safeParse(c);
-    assert.equal(
-      r.success,
-      false,
-      `RECALL_INPUT_SCHEMA must reject ${JSON.stringify(c)}`,
-    );
+    assert.equal(r.success, false, `RECALL_INPUT_SCHEMA must reject ${JSON.stringify(c)}`);
   }
 });
 
@@ -289,7 +280,7 @@ test("remember: SDK input validation rejects extra keys and surfaces isError: tr
       assert.equal(
         r.isError,
         true,
-        `SDK input validation must reject extra keys; got ${JSON.stringify(r)}`,
+        `SDK input validation must reject extra keys; got ${JSON.stringify(r)}`
       );
       // The error content is a text block describing the
       // validation failure. We do not pin the exact wording
@@ -328,7 +319,7 @@ test("recall: SDK input validation rejects extra keys and surfaces isError: true
       assert.equal(
         r.isError,
         true,
-        `SDK input validation must reject extra keys; got ${JSON.stringify(r)}`,
+        `SDK input validation must reject extra keys; got ${JSON.stringify(r)}`
       );
       assert.equal(r.structuredContent, undefined);
       assert.equal(r.content.length, 1);
@@ -361,10 +352,7 @@ test("remember: SDK input validation accepts the well-formed { text } payload an
       assert.notEqual(r.isError, true);
       assert.equal(r.content.length, 1);
       assert.equal(r.content[0]!.type, "text");
-      assert.ok(
-        r.structuredContent,
-        "well-formed input must produce a structuredContent payload",
-      );
+      assert.ok(r.structuredContent, "well-formed input must produce a structuredContent payload");
     } finally {
       resetRememberStorageProvider();
     }
@@ -382,10 +370,7 @@ test("recall: SDK input validation accepts the well-formed { text } payload and 
       assert.notEqual(r.isError, true);
       assert.equal(r.content.length, 1);
       assert.equal(r.content[0]!.type, "text");
-      assert.ok(
-        r.structuredContent,
-        "well-formed input must produce a structuredContent payload",
-      );
+      assert.ok(r.structuredContent, "well-formed input must produce a structuredContent payload");
     } finally {
       resetRecallStorageProvider();
     }

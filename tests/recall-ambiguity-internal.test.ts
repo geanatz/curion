@@ -66,42 +66,39 @@
  * remains byte-equal to pre-Phase-D).
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
+import { test } from "node:test";
 
-import { runRecallController } from "../src/controller/recall-controller.ts";
 import {
-  insertMemoryRecord,
-  listActiveMemorySummaries,
-  listActiveMemoryRelationshipBlocks,
-  type StorageHandle,
+  resetListRegisteredProjectsStub,
+  setListRegisteredProjectsStub,
+} from "../src/config/registry.ts";
+import { runRecallController } from "../src/controller/recall-controller.ts";
+import { AMBIGUITY_NOTE_MAX_LENGTH, formatAmbiguityNote } from "../src/retrieval/ambiguity.ts";
+import {
   type MemoryRecord,
   type SafeMemorySummary,
+  type StorageHandle,
+  insertMemoryRecord,
+  listActiveMemoryRelationshipBlocks,
+  listActiveMemorySummaries,
 } from "../src/storage/storage.ts";
 import {
-  formatAmbiguityNote,
-  AMBIGUITY_NOTE_MAX_LENGTH,
-} from "../src/retrieval/ambiguity.ts";
-import {
-  handleRecall,
   NO_RELEVANT_MEMORY,
-  setStorageProvider as setRecallStorageProvider,
+  handleRecall,
   resetStorageProvider as resetRecallStorageProvider,
+  setStorageProvider as setRecallStorageProvider,
 } from "../src/tools/recall.ts";
-import {
-  setListRegisteredProjectsStub,
-  resetListRegisteredProjectsStub,
-} from "../src/config/registry.ts";
-import {
-  TEST_PRIMARY_KEY,
-  TEST_FALLBACK_KEY,
-  TEST_PRIMARY_BASE_URL,
-  TEST_PRIMARY_MODEL,
-  TEST_FALLBACK_BASE_URL,
-  TEST_FALLBACK_MODEL,
-} from "./shared-test-provider.ts";
-import { scriptFetch, okChatResponse } from "./_helpers/provider-stub.ts";
+import { okChatResponse, scriptFetch } from "./_helpers/provider-stub.ts";
 import { mkStorage, rmStorage } from "./_helpers/test-storage.ts";
+import {
+  TEST_FALLBACK_BASE_URL,
+  TEST_FALLBACK_KEY,
+  TEST_FALLBACK_MODEL,
+  TEST_PRIMARY_BASE_URL,
+  TEST_PRIMARY_KEY,
+  TEST_PRIMARY_MODEL,
+} from "./shared-test-provider.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -132,7 +129,7 @@ function insertWithRelationship(
       olderVariantsOf?: number[];
       detectionConfidence?: number;
     };
-  },
+  }
 ): MemoryRecord {
   const rel = opts.relationship;
   const metadata: Record<string, unknown> = {
@@ -160,10 +157,13 @@ function insertWithRelationship(
   });
 }
 
-function runRecallWith(handle: StorageHandle, opts: {
-  text: string;
-  fetchImpl: typeof fetch;
-}) {
+function runRecallWith(
+  handle: StorageHandle,
+  opts: {
+    text: string;
+    fetchImpl: typeof fetch;
+  }
+) {
   return runRecallController(handle, opts.text, {
     providerFetchImpl: opts.fetchImpl,
     providerPrimaryApiKey: TEST_PRIMARY_KEY,
@@ -223,28 +223,22 @@ test("storage: listActiveMemoryRelationshipBlocks is forward-compatible with mal
     handle.db
       .prepare(
         `INSERT INTO memories (kind, created_at, summary, state, metadata)
-         VALUES (?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?)`
       )
-      .run(
-        "fact",
-        Date.now(),
-        "row with bad metadata",
-        "active",
-        "this is not json {",
-      );
+      .run("fact", Date.now(), "row with bad metadata", "active", "this is not json {");
     // And a row with `metadata.relationship` set to a
     // non-object (defensive forward-compat).
     handle.db
       .prepare(
         `INSERT INTO memories (kind, created_at, summary, state, metadata)
-         VALUES (?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?)`
       )
       .run(
         "fact",
         Date.now() + 1,
         "row with non-object relationship",
         "active",
-        JSON.stringify({ relationship: "not an object" }),
+        JSON.stringify({ relationship: "not an object" })
       );
     const blocks = listActiveMemoryRelationshipBlocks(handle);
     assert.equal(blocks.length, 2);
@@ -314,7 +308,7 @@ test("controller: internal outcome includes ambiguity when stored blocks indicat
       .run(JSON.stringify({ tags: [], classification: null, relationship: blockB }), r2.id);
 
     const { fetchImpl, calls } = scriptFetch(() =>
-      okChatResponse("Postgres stores project data reliably."),
+      okChatResponse("Postgres stores project data reliably.")
     );
     const out = await runRecallWith(handle, {
       text: "What database does the project use?",
@@ -325,14 +319,14 @@ test("controller: internal outcome includes ambiguity when stored blocks indicat
     // The internal field exists on the controller outcome.
     assert.ok(
       "internalAmbiguity" in out,
-      "RecallOutcome.answered must carry the internalAmbiguity field (Phase C)",
+      "RecallOutcome.answered must carry the internalAmbiguity field (Phase C)"
     );
     assert.equal(out.internalAmbiguity.kind, "ambiguous");
     if (out.internalAmbiguity.kind !== "ambiguous") throw new Error("unreachable");
     assert.equal(out.internalAmbiguity.reason, "conflicting-candidates");
     assert.deepEqual(
       out.internalAmbiguity.memoryIds.slice().sort((a, b) => a - b),
-      [r1.id, r2.id].slice().sort((a, b) => a - b),
+      [r1.id, r2.id].slice().sort((a, b) => a - b)
     );
     assert.ok(out.internalAmbiguity.confidence >= 0.8);
     // The provider call happened exactly once (no
@@ -342,7 +336,7 @@ test("controller: internal outcome includes ambiguity when stored blocks indicat
     assert.equal(out.answer, "Postgres stores project data reliably.");
     assert.deepEqual(
       out.sourceIds.slice().sort((a, b) => a - b),
-      [r1.id, r2.id].slice().sort((a, b) => a - b),
+      [r1.id, r2.id].slice().sort((a, b) => a - b)
     );
   } finally {
     rmStorage(tmp, handle);
@@ -364,7 +358,7 @@ test("controller: internal outcome is none when no stored block indicates a conf
       memoryContent: "The project uses Postgres 16 for the primary data store.",
     });
     const { fetchImpl } = scriptFetch(() =>
-      okChatResponse("The project uses Postgres 16 for the primary store."),
+      okChatResponse("The project uses Postgres 16 for the primary store.")
     );
     const out = await runRecallWith(handle, {
       text: "What database does the project use?",
@@ -418,9 +412,7 @@ test("controller: internal outcome is none when stored block is olderVariantsOf 
       .run(JSON.stringify({ tags: [], classification: null, relationship: blockA }), r1.id);
     // Also no asymmetric negation between the rows, so the
     // lexical safety-net path stays silent too.
-    const { fetchImpl } = scriptFetch(() =>
-      okChatResponse("Postgres is the primary store."),
-    );
+    const { fetchImpl } = scriptFetch(() => okChatResponse("Postgres is the primary store."));
     const out = await runRecallWith(handle, {
       text: "What database does the project use?",
       fetchImpl,
@@ -464,9 +456,7 @@ test("controller: internal outcome is ambiguous with reason older-variant-suspec
       .prepare("UPDATE memories SET metadata = ? WHERE id = ?")
       .run(JSON.stringify({ tags: [], classification: null, relationship: blockB }), r2.id);
 
-    const { fetchImpl } = scriptFetch(() =>
-      okChatResponse("Postgres is the primary store."),
-    );
+    const { fetchImpl } = scriptFetch(() => okChatResponse("Postgres is the primary store."));
     const out = await runRecallWith(handle, {
       text: "What database does the project use?",
       fetchImpl,
@@ -498,7 +488,7 @@ test("controller: internal outcome uses lexical safety-net when stored block is 
       memoryContent: "Postgres stores project data reliably; we use MySQL",
     });
     const { fetchImpl } = scriptFetch(() =>
-      okChatResponse("Postgres stores project data reliably; we use MySQL."),
+      okChatResponse("Postgres stores project data reliably; we use MySQL.")
     );
     const out = await runRecallWith(handle, {
       text: "What database does the project use?",
@@ -536,7 +526,7 @@ test("public handleRecall projection: message/answer/sourceIds/status unchanged,
       // We need to drive the recall through the controller
       // (the public tool layer has no fetch override).
       const { fetchImpl } = scriptFetch(() =>
-        okChatResponse("The project uses Postgres 16 for the primary store."),
+        okChatResponse("The project uses Postgres 16 for the primary store.")
       );
       // Use the controller directly; the public
       // message-shape pins live in `recall-mvp.test.ts` and
@@ -571,7 +561,7 @@ test("public handleRecall projection: message/answer/sourceIds/status unchanged,
       ]) {
         assert.ok(
           !out.answer.includes(tok),
-          `public answer must not include '${tok}' (Phase C invariant)`,
+          `public answer must not include '${tok}' (Phase C invariant)`
         );
       }
     } finally {
@@ -595,9 +585,7 @@ test("public handleRecall: tool-layer result does not expose internalAmbiguity (
       insertWithRelationship(handle, {
         memoryContent: "The project uses Postgres 16 for the primary store.",
       });
-      const { fetchImpl } = scriptFetch(() =>
-        okChatResponse("Postgres 16."),
-      );
+      const { fetchImpl } = scriptFetch(() => okChatResponse("Postgres 16."));
       // We can't inject the fetch into handleRecall
       // through the public surface (the contract forbids
       // knobs). Drive the controller instead, then
@@ -621,7 +609,7 @@ test("public handleRecall: tool-layer result does not expose internalAmbiguity (
       assert.equal(
         projected.internalAmbiguity,
         undefined,
-        "RecallResult projection must not expose internalAmbiguity",
+        "RecallResult projection must not expose internalAmbiguity"
       );
       // And the public message / answer is unchanged.
       for (const tok of [
@@ -637,7 +625,7 @@ test("public handleRecall: tool-layer result does not expose internalAmbiguity (
       ]) {
         assert.ok(
           !String(projected.message).includes(tok),
-          `public message must not include '${tok}'`,
+          `public message must not include '${tok}'`
         );
       }
     } finally {
@@ -672,10 +660,7 @@ test("public handleRecall: no_memory path is unchanged (no internalAmbiguity fie
         "derivedAt",
         "relationship",
       ]) {
-        assert.ok(
-          !r.message.includes(tok),
-          `no_memory public message must not include '${tok}'`,
-        );
+        assert.ok(!r.message.includes(tok), `no_memory public message must not include '${tok}'`);
       }
     } finally {
       resetRecallStorageProvider();
@@ -696,9 +681,7 @@ test("controller: provider is called exactly once per call; detector does not sh
     insertWithRelationship(handle, {
       memoryContent: "The project uses Postgres 16 for the primary store.",
     });
-    const { fetchImpl, calls } = scriptFetch(() =>
-      okChatResponse("Postgres."),
-    );
+    const { fetchImpl, calls } = scriptFetch(() => okChatResponse("Postgres."));
     await runRecallWith(handle, {
       text: "What database does the project use?",
       fetchImpl,
@@ -719,63 +702,49 @@ test("controller: the four-status union is preserved (answered | no_memory | rej
     insertWithRelationship(handle, {
       memoryContent: "The project uses Postgres 16 for the primary store.",
     });
-    const { fetchImpl } = scriptFetch(() =>
-      okChatResponse("Postgres."),
-    );
+    const { fetchImpl } = scriptFetch(() => okChatResponse("Postgres."));
     const out1 = await runRecallWith(handle, {
       text: "What database does the project use?",
       fetchImpl,
     });
     assert.ok(
       ["answered", "no_memory", "rejected", "provider_error"].includes(out1.status),
-      `unexpected status: ${out1.status}`,
+      `unexpected status: ${out1.status}`
     );
     // Case 2: no_memory
     {
-      const r = await runRecallController(
-        handle,
-        "When is the company picnic?",
-        {
-providerFetchImpl: fetchImpl,
-      providerPrimaryApiKey: TEST_PRIMARY_KEY,
-      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
-      providerPrimaryModel: TEST_PRIMARY_MODEL,
-      providerFallbackApiKey: TEST_FALLBACK_KEY,
-      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
-      providerFallbackModel: TEST_FALLBACK_MODEL,
-        },
-      );
+      const r = await runRecallController(handle, "When is the company picnic?", {
+        providerFetchImpl: fetchImpl,
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+        providerPrimaryModel: TEST_PRIMARY_MODEL,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
+        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+        providerFallbackModel: TEST_FALLBACK_MODEL,
+      });
       assert.equal(r.status, "no_memory");
     }
     // Case 3: rejected (secret)
     {
-      const r = await runRecallController(
-        handle,
-        "AKIAIOSFODNN7EXAMPLE",
-        {
-providerFetchImpl: fetchImpl,
-      providerPrimaryApiKey: TEST_PRIMARY_KEY,
-      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
-      providerPrimaryModel: TEST_PRIMARY_MODEL,
-      providerFallbackApiKey: TEST_FALLBACK_KEY,
-      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
-      providerFallbackModel: TEST_FALLBACK_MODEL,
-        },
-      );
+      const r = await runRecallController(handle, "AKIAIOSFODNN7EXAMPLE", {
+        providerFetchImpl: fetchImpl,
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+        providerPrimaryModel: TEST_PRIMARY_MODEL,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
+        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+        providerFallbackModel: TEST_FALLBACK_MODEL,
+      });
       assert.equal(r.status, "rejected");
     }
     // Case 4: provider_error
     {
       const errFetch = scriptFetch(() => new Response("boom", { status: 500 }));
-      const r = await runRecallController(
-        handle,
-        "What database does the project use?",
-        {
-          providerFetchImpl: errFetch.fetchImpl,
-          providerPrimaryApiKey: TEST_PRIMARY_KEY,
-          providerFallbackApiKey: TEST_FALLBACK_KEY,
-        },
-      );
+      const r = await runRecallController(handle, "What database does the project use?", {
+        providerFetchImpl: errFetch.fetchImpl,
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
+      });
       assert.equal(r.status, "provider_error");
     }
   } finally {
@@ -804,7 +773,7 @@ test("controller: SafeMemorySummary projection is unchanged (no raw text leaked)
         assert.equal(
           (s as unknown as Record<string, unknown>)[forbidden],
           undefined,
-          `SafeMemorySummary must not include '${forbidden}'`,
+          `SafeMemorySummary must not include '${forbidden}'`
         );
       }
     }
@@ -870,7 +839,7 @@ test("Phase D: answered + ambiguous -> public message includes concise ambiguity
       .run(JSON.stringify({ tags: [], classification: null, relationship: blockB }), r2.id);
 
     const { fetchImpl, calls } = scriptFetch(() =>
-      okChatResponse("Postgres stores project data reliably."),
+      okChatResponse("Postgres stores project data reliably.")
     );
     const out = await runRecallWith(handle, {
       text: "What database does the project use?",
@@ -881,14 +850,13 @@ test("Phase D: answered + ambiguous -> public message includes concise ambiguity
     // Project the public `message` exactly the way the
     // tool layer does (note prefix on the answered case).
     const note = formatAmbiguityNote(out.internalAmbiguity);
-    const projectedMessage =
-      note.length === 0 ? out.answer : `${note}\n\n${out.answer}`;
+    const projectedMessage = note.length === 0 ? out.answer : `${note}\n\n${out.answer}`;
     // Public message includes the note and the answer.
     // The note is the prose-only no-id form; ids are NOT
     // rendered into the public message.
     assert.match(
       projectedMessage,
-      /^Note: stored memories on this topic disagree\.\n\nPostgres stores project data reliably\.$/s,
+      /^Note: stored memories on this topic disagree\.\n\nPostgres stores project data reliably\.$/s
     );
     // The answer field (synthesized answer only) is
     // byte-equal to the provider response.
@@ -902,13 +870,14 @@ test("Phase D: answered + ambiguous -> public message includes concise ambiguity
     const notePart = projectedMessage.slice(0, noteEnd);
     assert.ok(
       !/#\d+/.test(notePart),
-      `Phase D note must not include any #N id reference; got ${JSON.stringify(notePart)}`,
+      `Phase D note must not include any #N id reference; got ${JSON.stringify(notePart)}`
     );
     // Bounded: note + answer total length is bounded by the
     // formatter cap + the answer length.
     assert.ok(
-      projectedMessage.length <= AMBIGUITY_NOTE_MAX_LENGTH + 2 + "Postgres stores project data reliably.".length,
-      `total message length must be bounded (got ${projectedMessage.length})`,
+      projectedMessage.length <=
+        AMBIGUITY_NOTE_MAX_LENGTH + 2 + "Postgres stores project data reliably.".length,
+      `total message length must be bounded (got ${projectedMessage.length})`
     );
     // Provider was still called exactly once.
     assert.equal(calls.length, 1);
@@ -932,7 +901,7 @@ test("Phase D: note is prose-only (no ids) and does not echo raw summaries / raw
       memoryContent: "Zesty lemon tart is not on the office menu",
     });
     const { fetchImpl } = scriptFetch(() =>
-      okChatResponse("Zesty lemon tart is on the office menu."),
+      okChatResponse("Zesty lemon tart is on the office menu.")
     );
     const out = await runRecallWith(handle, {
       text: "Is the zesty lemon tart on the office menu today?",
@@ -943,21 +912,17 @@ test("Phase D: note is prose-only (no ids) and does not echo raw summaries / raw
     // Project the public `message` the same way the tool
     // layer does.
     const note = formatAmbiguityNote(out.internalAmbiguity);
-    const projectedMessage =
-      note.length === 0 ? out.answer : `${note}\n\n${out.answer}`;
+    const projectedMessage = note.length === 0 ? out.answer : `${note}\n\n${out.answer}`;
     // The note carries the "Note:" prefix.
     assert.match(projectedMessage, /Note:/);
     // The note is prose only: no `#N` id reference is
     // rendered. The internal `memoryIds` array is preserved
     // on the internal signal but never leaks to the public
     // surface.
-    const notePart =
-      projectedMessage.split(
-        "Zesty lemon tart is on the office menu.",
-      )[0] ?? "";
+    const notePart = projectedMessage.split("Zesty lemon tart is on the office menu.")[0] ?? "";
     assert.ok(
       !/#\d+/.test(notePart),
-      `Phase D note must not include any #N id reference; got ${JSON.stringify(notePart)}`,
+      `Phase D note must not include any #N id reference; got ${JSON.stringify(notePart)}`
     );
     // The note must NOT echo:
     //   - raw stored summaries
@@ -982,15 +947,13 @@ test("Phase D: note is prose-only (no ids) and does not echo raw summaries / raw
     ]) {
       assert.ok(
         !notePart.includes(tok),
-        `Phase D note must not include '${tok}' (note was: ${JSON.stringify(notePart)})`,
+        `Phase D note must not include '${tok}' (note was: ${JSON.stringify(notePart)})`
       );
     }
     // The synthesized answer itself is preserved in full.
     assert.equal(
-      projectedMessage.slice(-(
-        "Zesty lemon tart is on the office menu.".length
-      )),
-      "Zesty lemon tart is on the office menu.",
+      projectedMessage.slice(-"Zesty lemon tart is on the office menu.".length),
+      "Zesty lemon tart is on the office menu."
     );
   } finally {
     rmStorage(tmp, handle);
@@ -1019,8 +982,7 @@ test("Phase D: no ambiguity signal -> public message byte-equal pre-Phase-D", as
     // layer does; in the no-ambiguity case the projection
     // collapses to the synthesized answer.
     const note = formatAmbiguityNote(out.internalAmbiguity);
-    const projectedMessage =
-      note.length === 0 ? out.answer : `${note}\n\n${out.answer}`;
+    const projectedMessage = note.length === 0 ? out.answer : `${note}\n\n${out.answer}`;
     // Byte-equal to the synthesized answer text.
     assert.equal(projectedMessage, answer);
     // And the public `message` field is the same string
@@ -1041,7 +1003,7 @@ test("Phase D: no ambiguity signal -> public message byte-equal pre-Phase-D", as
     ]) {
       assert.ok(
         !projectedMessage.includes(tok),
-        `byte-equal pre-Phase-D message must not include '${tok}'`,
+        `byte-equal pre-Phase-D message must not include '${tok}'`
       );
     }
   } finally {
@@ -1165,7 +1127,7 @@ test("Phase D: provider is still called exactly once (no short-circuit)", async 
       .run(JSON.stringify({ tags: [], classification: null, relationship: blockB }), r2.id);
 
     const { fetchImpl, calls } = scriptFetch(() =>
-      okChatResponse("Postgres is the primary store."),
+      okChatResponse("Postgres is the primary store.")
     );
     const out = await runRecallWith(handle, {
       text: "What database does the project use?",
@@ -1200,7 +1162,7 @@ test("Phase D: tool/API contract (single text param, two public tools) still hol
       // Four-status union preserved.
       assert.ok(
         ["answered", "no_memory", "rejected", "provider_error"].includes(r.status),
-        `unexpected status: ${r.status}`,
+        `unexpected status: ${r.status}`
       );
       // Public `message` is a string.
       assert.equal(typeof r.message, "string");
@@ -1209,13 +1171,7 @@ test("Phase D: tool/API contract (single text param, two public tools) still hol
       // documented shape: `status`, `message`, optionally
       // `answer`, `sourceIds`, `safetyClass`. We assert the
       // public keys are exactly the union of those.
-      const allowed = new Set([
-        "status",
-        "message",
-        "answer",
-        "sourceIds",
-        "safetyClass",
-      ]);
+      const allowed = new Set(["status", "message", "answer", "sourceIds", "safetyClass"]);
       const rAsObj = r as unknown as Record<string, unknown>;
       for (const k of Object.keys(rAsObj)) {
         assert.ok(allowed.has(k), `unexpected public field: ${k}`);

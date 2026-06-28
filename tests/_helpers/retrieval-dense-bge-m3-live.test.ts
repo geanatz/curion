@@ -53,11 +53,11 @@
  *   node --import tsx --test tests/_helpers/retrieval-dense-bge-m3-live.test.ts
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
-import path from "node:path";
-import os from "node:os";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { test } from "node:test";
 
 import {
   BgeM3Embedder,
@@ -72,9 +72,7 @@ import type { EmbedderMetadata as DenseEmbedderMetadata } from "../../src/benchm
  * into the user's `.curion/` directory.
  */
 function makeCacheDir(): string {
-  return fs.mkdtempSync(
-    path.join(os.tmpdir(), "curion-bge-m3-live-cache-"),
-  );
+  return fs.mkdtempSync(path.join(os.tmpdir(), "curion-bge-m3-live-cache-"));
 }
 
 /**
@@ -146,18 +144,12 @@ test("BgeM3Embedder live: init() produces a real semantic embedding with the kin
   // the unit-test surface clean.
   const meta: EmbedderMetadata = embedder.metadata as EmbedderMetadata & DenseEmbedderMetadata;
   if (meta.status !== "ready") {
-    const errMsg =
-      typeof meta.errorMessage === "string"
-        ? meta.errorMessage
-        : "unknown error";
+    const errMsg = typeof meta.errorMessage === "string" ? meta.errorMessage : "unknown error";
     t.skip(`BGE-M3 init() did not reach ready (network or model missing): ${errMsg}`);
     return;
   }
   assert.equal(meta.backend, "bge-m3");
-  assert.equal(
-    meta.modelId,
-    "Xenova/bge-m3",
-  );
+  assert.equal(meta.modelId, "Xenova/bge-m3");
   // The conventional BGE-M3 dense dim is
   // 1024. The `init()` probe may overwrite
   // the placeholder if the model reports a
@@ -170,13 +162,13 @@ test("BgeM3Embedder live: init() produces a real semantic embedding with the kin
   // non-negative number.
   assert.ok(
     typeof meta.loadMs === "number" && meta.loadMs >= 0,
-    "loadMs must be a non-negative number",
+    "loadMs must be a non-negative number"
   );
   // The runtime version is captured when the
   // library exposes one.
   assert.ok(
     typeof meta.runtimeVersion === "string",
-    "runtimeVersion must be a string on a ready embedder",
+    "runtimeVersion must be a string on a ready embedder"
   );
   // Embed two pairs: a semantically related
   // pair and an unrelated pair. The cosine
@@ -186,12 +178,8 @@ test("BgeM3Embedder live: init() produces a real semantic embedding with the kin
   // forwarded verbatim (no instruction
   // prefix).
   const a = await embedder.embedQuery("Postgres is the primary data store");
-  const b = await embedder.embedDocument(
-    "Postgres is used for storage of project memory",
-  );
-  const c = await embedder.embedDocument(
-    "The kitchen dishwasher runs nightly",
-  );
+  const b = await embedder.embedDocument("Postgres is used for storage of project memory");
+  const c = await embedder.embedDocument("The kitchen dishwasher runs nightly");
   // Manual cosine similarity (the helper is
   // in `vector.ts`; we re-implement it inline
   // to keep this test independent of the
@@ -216,7 +204,7 @@ test("BgeM3Embedder live: init() produces a real semantic embedding with the kin
   assert.ok(
     related > unrelated,
     `semantically related pair should have higher cosine: ` +
-      `related=${related.toFixed(4)} vs unrelated=${unrelated.toFixed(4)}`,
+      `related=${related.toFixed(4)} vs unrelated=${unrelated.toFixed(4)}`
   );
   // L2 normalization: both vectors should be
   // unit length (the BGE-M3 backend applies
@@ -228,36 +216,28 @@ test("BgeM3Embedder live: init() produces a real semantic embedding with the kin
   };
   assert.ok(Math.abs(norm(a) - 1) < 1e-3, "vector a should be L2-normalized");
   assert.ok(Math.abs(norm(b) - 1) < 1e-3, "vector b should be L2-normalized");
-  assert.ok(
-    Math.abs(norm(c) - 1) < 1e-3,
-    "vector c should be L2-normalized",
-  );
+  assert.ok(Math.abs(norm(c) - 1) < 1e-3, "vector c should be L2-normalized");
   // Determinism: re-embed `a` and check it
   // is bit-identical. ONNX Runtime is
   // bit-deterministic for a fixed input and
   // a fixed model.
   const a2 = await embedder.embedQuery("Postgres is the primary data store");
-  assert.deepEqual(
-    a,
-    a2,
-    "embedQuery must be deterministic for the same input",
-  );
+  assert.deepEqual(a, a2, "embedQuery must be deterministic for the same input");
   // The embedder's `embedCount` and `embedMs`
   // are updated on every call. Note: the
   // embedder reassigns `metadata` on each
   // update, so we read the latest snapshot via
   // the property accessor rather than the
   // `meta` local captured at init time.
-  const latestMeta: EmbedderMetadata = embedder.metadata as EmbedderMetadata & DenseEmbedderMetadata;
+  const latestMeta: EmbedderMetadata = embedder.metadata as EmbedderMetadata &
+    DenseEmbedderMetadata;
   assert.ok(
-    typeof latestMeta.embedCount === "number" &&
-      latestMeta.embedCount >= 3,
-    "embedCount should be >= 3 after three embed calls",
+    typeof latestMeta.embedCount === "number" && latestMeta.embedCount >= 3,
+    "embedCount should be >= 3 after three embed calls"
   );
   assert.ok(
-    typeof latestMeta.embedMs === "number" &&
-      latestMeta.embedMs >= 0,
-    "embedMs should be a non-negative number",
+    typeof latestMeta.embedMs === "number" && latestMeta.embedMs >= 0,
+    "embedMs should be a non-negative number"
   );
   // BGE-M3 dense mode is kind-agnostic: a
   // query and a document with the SAME plain
@@ -280,6 +260,6 @@ test("BgeM3Embedder live: init() produces a real semantic embedding with the kin
   assert.equal(
     equal,
     true,
-    "BGE-M3 live: embedQuery and embedDocument must produce identical vectors for the same input text (kind-agnostic dense mode)",
+    "BGE-M3 live: embedQuery and embedDocument must produce identical vectors for the same input text (kind-agnostic dense mode)"
   );
 });

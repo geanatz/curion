@@ -360,8 +360,8 @@
  *     updated evidence file.
  */
 
-import type { BenchmarkQuery, BenchmarkQueryFamily } from "./queries.js";
 import type { QueryEval } from "./metrics.js";
+import type { BenchmarkQuery, BenchmarkQueryFamily } from "./queries.js";
 
 // ---------------------------------------------------------------------------
 // Stale-record set
@@ -438,17 +438,16 @@ export type TemporalTruthCategory =
  * the category table by hand and a reviewer can grep the
  * artifact for the documented set.
  */
-export const TEMPORAL_TRUTH_CATEGORIES: ReadonlyArray<TemporalTruthCategory> =
-  [
-    "abstained-or-empty",
-    "fixture-ambiguous",
-    "current-truth-top1",
-    "current-truth-in-topk-stale-top1",
-    "current-truth-in-topk-no-stale-top1",
-    "current-truth-missing-stale-present",
-    "current-truth-missing-no-stale",
-    "mixed-current-and-stale",
-  ];
+export const TEMPORAL_TRUTH_CATEGORIES: ReadonlyArray<TemporalTruthCategory> = [
+  "abstained-or-empty",
+  "fixture-ambiguous",
+  "current-truth-top1",
+  "current-truth-in-topk-stale-top1",
+  "current-truth-in-topk-no-stale-top1",
+  "current-truth-missing-stale-present",
+  "current-truth-missing-no-stale",
+  "mixed-current-and-stale",
+];
 
 /**
  * Short human-readable explanation for each category. The
@@ -456,26 +455,24 @@ export const TEMPORAL_TRUTH_CATEGORIES: ReadonlyArray<TemporalTruthCategory> =
  * the human report so a reviewer can audit the action-class
  * reading without re-implementing the classifier.
  */
-export const TEMPORAL_TRUTH_CATEGORY_EXPLANATION: Readonly<
-  Record<TemporalTruthCategory, string>
-> = {
-  "abstained-or-empty":
-    "ranker returned zero candidates; no temporal signal to inspect — candidate-generation gap",
-  "fixture-ambiguous":
-    "query carries the divergentTemporal label; expectedIds includes both old and new by fixture design — current-truth@1 is uninterpretable on this query",
-  "current-truth-top1":
-    "top-1 IS the current truth; currentTruthAt1 passes — no fix needed",
-  "current-truth-in-topk-stale-top1":
-    "top-1 is a known stale/superseded/legacy/conflict record; current truth IS in the top-K; the OLD fact was ranked above the current one — fix: temporal metadata / current-truth ranking preference",
-  "current-truth-in-topk-no-stale-top1":
-    "top-1 is NOT the current truth and is NOT a known stale candidate; current truth IS in the top-K; an unrelated distractor outranked the current fact — fix: generic current-truth preference re-ranker",
-  "current-truth-missing-stale-present":
-    "current truth is NOT in the top-K; a known stale/superseded record IS in the top-K; the stale fact shadows the current fact — fix: candidate generation (or a current-truth-aware re-ranker)",
-  "current-truth-missing-no-stale":
-    "current truth is NOT in the top-K and no stale candidate is either; the top-K is populated with unrelated records — fix: candidate generation",
-  "mixed-current-and-stale":
-    "top-K contains BOTH the current truth and at least one known stale candidate; the gap is shape-dependent (temporal multi-hop or supersession pattern) — fix: fixture audit",
-};
+export const TEMPORAL_TRUTH_CATEGORY_EXPLANATION: Readonly<Record<TemporalTruthCategory, string>> =
+  {
+    "abstained-or-empty":
+      "ranker returned zero candidates; no temporal signal to inspect — candidate-generation gap",
+    "fixture-ambiguous":
+      "query carries the divergentTemporal label; expectedIds includes both old and new by fixture design — current-truth@1 is uninterpretable on this query",
+    "current-truth-top1": "top-1 IS the current truth; currentTruthAt1 passes — no fix needed",
+    "current-truth-in-topk-stale-top1":
+      "top-1 is a known stale/superseded/legacy/conflict record; current truth IS in the top-K; the OLD fact was ranked above the current one — fix: temporal metadata / current-truth ranking preference",
+    "current-truth-in-topk-no-stale-top1":
+      "top-1 is NOT the current truth and is NOT a known stale candidate; current truth IS in the top-K; an unrelated distractor outranked the current fact — fix: generic current-truth preference re-ranker",
+    "current-truth-missing-stale-present":
+      "current truth is NOT in the top-K; a known stale/superseded record IS in the top-K; the stale fact shadows the current fact — fix: candidate generation (or a current-truth-aware re-ranker)",
+    "current-truth-missing-no-stale":
+      "current truth is NOT in the top-K and no stale candidate is either; the top-K is populated with unrelated records — fix: candidate generation",
+    "mixed-current-and-stale":
+      "top-K contains BOTH the current truth and at least one known stale candidate; the gap is shape-dependent (temporal multi-hop or supersession pattern) — fix: fixture audit",
+  };
 
 /**
  * Per-query diagnostic block. The shape is what the report's
@@ -581,10 +578,7 @@ export interface TemporalTruthDiagnosticReport {
    * diagnostics is omitted so the report does not carry
    * empty families.
    */
-  perFamily: Record<
-    BenchmarkQueryFamily,
-    Record<TemporalTruthCategory, number>
-  >;
+  perFamily: Record<BenchmarkQueryFamily, Record<TemporalTruthCategory, number>>;
   /**
    * Headline metrics the brief asks for. All rates are
    * over the `temporalQueryCount` denominator.
@@ -697,7 +691,7 @@ export interface TemporalTruthDiagnosticReport {
  */
 export function classifyTemporalTruthFailure(
   e: QueryEval,
-  query: BenchmarkQuery,
+  query: BenchmarkQuery
 ): TemporalTruthDiagnostic {
   const family = query.family;
   const expected = query.expectedIds;
@@ -736,8 +730,7 @@ export function classifyTemporalTruthFailure(
       queryId: e.queryId,
       family,
       category: "abstained-or-empty",
-      categoryExplanation:
-        TEMPORAL_TRUTH_CATEGORY_EXPLANATION["abstained-or-empty"],
+      categoryExplanation: TEMPORAL_TRUTH_CATEGORY_EXPLANATION["abstained-or-empty"],
       top1Id: null,
       top1IsCurrentTruth: false,
       top1IsStale: false,
@@ -764,8 +757,7 @@ export function classifyTemporalTruthFailure(
       queryId: e.queryId,
       family,
       category: "fixture-ambiguous",
-      categoryExplanation:
-        TEMPORAL_TRUTH_CATEGORY_EXPLANATION["fixture-ambiguous"],
+      categoryExplanation: TEMPORAL_TRUTH_CATEGORY_EXPLANATION["fixture-ambiguous"],
       top1Id: top0,
       top1IsCurrentTruth,
       top1IsStale,
@@ -788,8 +780,7 @@ export function classifyTemporalTruthFailure(
       queryId: e.queryId,
       family,
       category: "current-truth-top1",
-      categoryExplanation:
-        TEMPORAL_TRUTH_CATEGORY_EXPLANATION["current-truth-top1"],
+      categoryExplanation: TEMPORAL_TRUTH_CATEGORY_EXPLANATION["current-truth-top1"],
       top1Id: top0,
       top1IsCurrentTruth: true,
       top1IsStale,
@@ -817,9 +808,7 @@ export function classifyTemporalTruthFailure(
         family,
         category: "current-truth-in-topk-stale-top1",
         categoryExplanation:
-          TEMPORAL_TRUTH_CATEGORY_EXPLANATION[
-            "current-truth-in-topk-stale-top1"
-          ],
+          TEMPORAL_TRUTH_CATEGORY_EXPLANATION["current-truth-in-topk-stale-top1"],
         top1Id: top0,
         top1IsCurrentTruth: false,
         top1IsStale: true,
@@ -839,9 +828,7 @@ export function classifyTemporalTruthFailure(
       family,
       category: "current-truth-in-topk-no-stale-top1",
       categoryExplanation:
-        TEMPORAL_TRUTH_CATEGORY_EXPLANATION[
-          "current-truth-in-topk-no-stale-top1"
-        ],
+        TEMPORAL_TRUTH_CATEGORY_EXPLANATION["current-truth-in-topk-no-stale-top1"],
       top1Id: top0,
       top1IsCurrentTruth: false,
       top1IsStale: false,
@@ -869,9 +856,7 @@ export function classifyTemporalTruthFailure(
       family,
       category: "current-truth-missing-stale-present",
       categoryExplanation:
-        TEMPORAL_TRUTH_CATEGORY_EXPLANATION[
-          "current-truth-missing-stale-present"
-        ],
+        TEMPORAL_TRUTH_CATEGORY_EXPLANATION["current-truth-missing-stale-present"],
       top1Id: top0,
       top1IsCurrentTruth: false,
       top1IsStale,
@@ -892,8 +877,7 @@ export function classifyTemporalTruthFailure(
     queryId: e.queryId,
     family,
     category: "current-truth-missing-no-stale",
-    categoryExplanation:
-      TEMPORAL_TRUTH_CATEGORY_EXPLANATION["current-truth-missing-no-stale"],
+    categoryExplanation: TEMPORAL_TRUTH_CATEGORY_EXPLANATION["current-truth-missing-no-stale"],
     top1Id: top0,
     top1IsCurrentTruth: false,
     top1IsStale: false,
@@ -957,7 +941,7 @@ export function buildTemporalTruthDiagnosticReport(args: {
   if (evals.length !== queries.length) {
     throw new Error(
       `buildTemporalTruthDiagnosticReport: evals.length (${evals.length}) must match ` +
-        `queries.length (${queries.length}) for variant "${variant}"`,
+        `queries.length (${queries.length}) for variant "${variant}"`
     );
   }
   const diagnostics: TemporalTruthDiagnostic[] = [];
@@ -967,7 +951,7 @@ export function buildTemporalTruthDiagnosticReport(args: {
     if (e.queryId !== q.id) {
       throw new Error(
         `buildTemporalTruthDiagnosticReport: evals[${i}].queryId="${e.queryId}" does ` +
-          `not match queries[${i}].id="${q.id}" for variant "${variant}"`,
+          `not match queries[${i}].id="${q.id}" for variant "${variant}"`
       );
     }
     let diag = classifyTemporalTruthFailure(e, q);
@@ -1033,10 +1017,7 @@ export function buildTemporalTruthDiagnosticReport(args: {
   const perFamily: Record<
     BenchmarkQueryFamily,
     Record<TemporalTruthCategory, number>
-  > = {} as Record<
-    BenchmarkQueryFamily,
-    Record<TemporalTruthCategory, number>
-  >;
+  > = {} as Record<BenchmarkQueryFamily, Record<TemporalTruthCategory, number>>;
   for (let i = 0; i < diagnostics.length; i++) {
     const d = diagnostics[i]!;
     const q = queries[i]!;
@@ -1106,9 +1087,7 @@ export function buildTemporalTruthDiagnosticReport(args: {
  * the only differences will be the actual numbers. The
  * function is pure: same report -> same string.
  */
-export function formatTemporalTruthDiagnosticReport(
-  report: TemporalTruthDiagnosticReport,
-): string {
+export function formatTemporalTruthDiagnosticReport(report: TemporalTruthDiagnosticReport): string {
   const out: string[] = [];
   out.push(`# Temporal / current-truth diagnostic (variant: ${report.variant})`);
   if (report.sourceVariant !== null && report.sourceVariant !== report.variant) {
@@ -1123,31 +1102,29 @@ export function formatTemporalTruthDiagnosticReport(
   out.push(`  temporal queries:                   ${report.temporalQueryCount}`);
   out.push(
     `  currentTruthAt1:                    ${report.metrics.currentTruthAt1} ` +
-      `(${(report.metrics.currentTruthAt1Rate * 100).toFixed(1)}%)`,
+      `(${(report.metrics.currentTruthAt1Rate * 100).toFixed(1)}%)`
   );
   out.push(
     `  currentTruthInTopK:                 ${report.metrics.currentTruthHitsAt5} ` +
-      `(${(report.metrics.currentTruthInTopKRate * 100).toFixed(1)}%)`,
+      `(${(report.metrics.currentTruthInTopKRate * 100).toFixed(1)}%)`
   );
   out.push(
     `  staleTop1:                          ${report.metrics.staleTop1} ` +
-      `(${(report.metrics.staleTop1Rate * 100).toFixed(1)}%)`,
+      `(${(report.metrics.staleTop1Rate * 100).toFixed(1)}%)`
   );
   out.push(
     `  staleOverCurrent (count, rate):     ${report.metrics.staleOverCurrentCount} ` +
-      `(${(report.metrics.staleOverCurrentRate * 100).toFixed(1)}%)`,
+      `(${(report.metrics.staleOverCurrentRate * 100).toFixed(1)}%)`
   );
   out.push(
     `  currentMissing (count, rate):       ${report.metrics.currentMissingCount} ` +
-      `(${(report.metrics.currentMissingRate * 100).toFixed(1)}%)`,
+      `(${(report.metrics.currentMissingRate * 100).toFixed(1)}%)`
   );
   out.push(`  divergentTemporal labeled:          ${report.metrics.divergentLabeled}`);
   out.push(
-    `  divergentLabeled @1 miss:           ${report.metrics.divergentLabeledCurrentTruthAt1Miss}`,
+    `  divergentLabeled @1 miss:           ${report.metrics.divergentLabeledCurrentTruthAt1Miss}`
   );
-  out.push(
-    `  divergentLabeled staleTop1:         ${report.metrics.divergentLabeledStaleTop1}`,
-  );
+  out.push(`  divergentLabeled staleTop1:         ${report.metrics.divergentLabeledStaleTop1}`);
   out.push("");
   out.push("## Per-category counts (temporal slice)");
   out.push("");
@@ -1155,12 +1132,10 @@ export function formatTemporalTruthDiagnosticReport(
   for (const cat of TEMPORAL_TRUTH_CATEGORIES) {
     const n = report.perCategory[cat] ?? 0;
     const pct =
-      report.temporalQueryCount > 0
-        ? ((n / report.temporalQueryCount) * 100).toFixed(1)
-        : "0.0";
+      report.temporalQueryCount > 0 ? ((n / report.temporalQueryCount) * 100).toFixed(1) : "0.0";
     out.push(
       `  ${cat.padEnd(38)} ${String(n).padStart(4)}  (${pct.padStart(5)}%)  ` +
-        TEMPORAL_TRUTH_CATEGORY_EXPLANATION[cat],
+        TEMPORAL_TRUTH_CATEGORY_EXPLANATION[cat]
     );
   }
   out.push("");
@@ -1188,10 +1163,7 @@ export function formatTemporalTruthDiagnosticReport(
   const familyNames = (Object.keys(report.perFamily) as BenchmarkQueryFamily[]).sort();
   for (const family of familyNames) {
     const slot = report.perFamily[family];
-    const familyTotal = (Object.values(slot) as number[]).reduce(
-      (a, b) => a + b,
-      0,
-    );
+    const familyTotal = (Object.values(slot) as number[]).reduce((a, b) => a + b, 0);
     out.push(`  family=${family} (n=${familyTotal})`);
     for (const cat of TEMPORAL_TRUTH_CATEGORIES) {
       const n = slot[cat] ?? 0;

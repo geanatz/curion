@@ -145,7 +145,12 @@
     "test:dense-embeddinggemma-live": "node --import tsx --test tests/_helpers/retrieval-dense-embeddinggemma-live.test.ts",
     "test:dense-bge-m3-live": "node --import tsx --test tests/_helpers/retrieval-dense-bge-m3-live.test.ts",
     "probe:recall-synthesis": "tsx scripts/recall-synthesis-budget-probe.ts",
-    "probe:remember-cap": "tsx scripts/remember-summary-cap-probe.ts"
+    "probe:remember-cap": "tsx scripts/remember-summary-cap-probe.ts",
+    "test:coverage": "c8 --reporter=text --reporter=text-summary --reporter=html --reporter=lcov node --import tsx --test tests/*.test.ts",
+    "lint": "biome check src tests",
+    "lint:fix": "biome check --write --unsafe src tests",
+    "format": "biome format --write src tests",
+    "format:check": "biome format src tests"
   },
   "engines": {
     "node": ">=22"
@@ -162,6 +167,8 @@
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.10.0",
     "tsx": "^4.20.0",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "@biomejs/biome": "^1.9.4",
+    "c8": "^11.0.0"
   }
 }

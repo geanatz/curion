@@ -38,57 +38,52 @@
  *     secret fragments.
  */
 
-import { classifyInput } from "../safety/precheck.js";
-import type { Clarification } from "../tools/remember-structured-content.js";
+import { logger } from "../logging/logger.js";
 import {
-  listActiveMemorySummaries,
-  listActiveMemoryRelationshipBlocks,
-  getEmbeddingsForMemories,
-  type SafeMemorySummary,
-  type StorageHandle,
-} from "../storage/storage.js";
+  type RecallMemoryInput,
+  type RecallSynthesisOptions,
+  type RecallSynthesisResult,
+  synthesizeRecallWithFallback,
+} from "../providers/recall-synthesis.js";
 import {
-  rankLexical,
-  scoreCandidateDetailed,
+  type AmbiguitySignal,
+  type SafeMemorySummaryWithRelationship,
+  detectAmbiguity,
+} from "../retrieval/ambiguity.js";
+import {
   DEFAULT_RELEVANCE_THRESHOLD,
   DEFAULT_TOP_K,
   type LexicalScoredCandidate,
+  rankLexical,
+  scoreCandidateDetailed,
 } from "../retrieval/lexical.js";
 import {
-  demoteSupersededMemories,
-  type ScoredCandidateWithRelationship,
-} from "../retrieval/superseded-demotion.js";
-import {
-  detectAmbiguity,
-  type AmbiguitySignal,
-  type SafeMemorySummaryWithRelationship,
-} from "../retrieval/ambiguity.js";
-import {
-  detectResolvedHistory,
   type ResolvedHistorySignal,
+  detectResolvedHistory,
 } from "../retrieval/resolved-history.js";
+import type { SemanticEmbedder } from "../retrieval/semantic/embedder.js";
+import { createSemanticEmbedder } from "../retrieval/semantic/embedder.js";
+import { fuseLexicalAndSemantic, scoreSemanticCandidates } from "../retrieval/semantic/score.js";
 import {
-  synthesizeRecallWithFallback,
-  type RecallSynthesisOptions,
-  type RecallSynthesisResult,
-  type RecallMemoryInput,
-} from "../providers/recall-synthesis.js";
+  type ScoredCandidateWithRelationship,
+  demoteSupersededMemories,
+} from "../retrieval/superseded-demotion.js";
+import { classifyInput } from "../safety/precheck.js";
 import { redactSummary } from "../safety/precheck.js";
-import { logger } from "../logging/logger.js";
+import {
+  type SafeMemorySummary,
+  type StorageHandle,
+  getEmbeddingsForMemories,
+  listActiveMemoryRelationshipBlocks,
+  listActiveMemorySummaries,
+} from "../storage/storage.js";
+import type { Clarification } from "../tools/remember-structured-content.js";
 import {
   RECALL_ACTIVE_MEMORY_READ_KIND,
   RECALL_LEXICAL_RANKING_KIND,
   RECALL_SELECTED_CANDIDATES_KIND,
   RECALL_SUPERSEDED_DEMOTION_KIND,
 } from "../trace/trace-tool-boundary.js";
-import type { SemanticEmbedder } from "../retrieval/semantic/embedder.js";
-import {
-  createSemanticEmbedder,
-} from "../retrieval/semantic/embedder.js";
-import {
-  fuseLexicalAndSemantic,
-  scoreSemanticCandidates,
-} from "../retrieval/semantic/score.js";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -182,7 +177,12 @@ export type RecallOutcome =
       coverage: { topScore: number; supportingCount: number };
       clarification_needed?: Clarification;
     }
-  | { status: "rejected"; reason: string; safetyClass: string; clarification_needed?: Clarification }
+  | {
+      status: "rejected";
+      reason: string;
+      safetyClass: string;
+      clarification_needed?: Clarification;
+    }
   | { status: "provider_error"; reason: string };
 
 /** Controller options. Most fields have safe defaults. */
@@ -313,7 +313,7 @@ export interface RecallTraceContext {
 export async function runRecallController(
   storage: StorageHandle,
   query: string,
-  options: RecallControllerOptions = {},
+  options: RecallControllerOptions = {}
 ): Promise<RecallOutcome> {
   const threshold = options.relevanceThreshold ?? DEFAULT_RELEVANCE_THRESHOLD;
   const topK = options.topK ?? DEFAULT_TOP_K;
@@ -329,14 +329,11 @@ export async function runRecallController(
   // as defense in depth. The public message does not echo the
   // query.
   const safety = classifyInput(query);
-  logger.debug(
-    `recall: pre-check class=${safety.class} reason=${safety.reason}`,
-  );
+  logger.debug(`recall: pre-check class=${safety.class} reason=${safety.reason}`);
   if (safety.class === "secret") {
     return {
       status: "rejected",
-      reason:
-        "query contains a secret-shaped fragment; refusing to search or forward it",
+      reason: "query contains a secret-shaped fragment; refusing to search or forward it",
       safetyClass: "secret",
     };
   }
@@ -360,9 +357,7 @@ export async function runRecallController(
   const summaries = listActiveMemorySummaries(storage, {
     limit: storageLimit,
   });
-  logger.debug(
-    `recall: read ${summaries.length} safe summary(ies) from storage`,
-  );
+  logger.debug(`recall: read ${summaries.length} safe summary(ies) from storage`);
   // Parallel lookup of stored `relationship` blocks
   // (Phase C). The controller uses this only for the
   // internal `internalAmbiguity` field on the answered
@@ -398,13 +393,11 @@ export async function runRecallController(
       text: s.memoryContent,
       tags: s.tags,
     })),
-    { threshold, topK: lexicalTopK },
+    { threshold, topK: lexicalTopK }
   );
   // Build the id->summary map once; used by both the trace
   // event and the topSummaries construction below.
-  const summaryById = new Map<number, SafeMemorySummary>(
-    summaries.map((s) => [s.id, s]),
-  );
+  const summaryById = new Map<number, SafeMemorySummary>(summaries.map((s) => [s.id, s]));
   // -- Phase 3A trace: lexical ranking (before demotion) ----------------
   // The trace records the raw lexical ranking; the demotion
   // is a pure post-rank step that only reorders candidates
@@ -433,7 +426,8 @@ export async function runRecallController(
   if (shouldRunSemantic) {
     try {
       // Use injected embedder if provided; otherwise create one internally.
-      const embedder = options.semanticEmbedder ?? await createSemanticEmbedder({ enabled: true });
+      const embedder =
+        options.semanticEmbedder ?? (await createSemanticEmbedder({ enabled: true }));
       // Only proceed if embedder is ready (not error status)
       if (embedder.metadata.status === "ready") {
         // Get embeddings for ALL summaries that have them, not just topK.
@@ -456,24 +450,22 @@ export async function runRecallController(
             semRanked,
             { lexical: 1, semantic: 1 },
             60, // RRF k constant
-            storageLimit, // Consider top storageLimit candidates in fusion
+            storageLimit // Consider top storageLimit candidates in fusion
           );
           finalRanked = fused;
           logger.debug(
-            `recall: semantic fused ${ranked.length} lexical + ${semRanked.length} semantic -> ${fused.length} final`,
+            `recall: semantic fused ${ranked.length} lexical + ${semRanked.length} semantic -> ${fused.length} final`
           );
         } else {
           logger.debug("recall: semantic enabled but no embeddings stored");
         }
       } else {
-        logger.debug(
-          `recall: semantic embedder not ready (status: ${embedder.metadata.status})`,
-        );
+        logger.debug(`recall: semantic embedder not ready (status: ${embedder.metadata.status})`);
       }
     } catch (err) {
       // Non-fatal: fall back to lexical-only if semantic fails.
       logger.debug(
-        `recall: semantic retrieval failed: ${(err as Error).message}; falling back to lexical`,
+        `recall: semantic retrieval failed: ${(err as Error).message}; falling back to lexical`
       );
     }
   }
@@ -501,21 +493,19 @@ export async function runRecallController(
   // are present in the ranked set, demote B so A ranks higher.
   // Missing references are silently ignored. The demotion is a pure
   // reordering step; no I/O, no state change.
-  const scoredWithRelationships: ScoredCandidateWithRelationship[] = finalRanked.map(
-    (r) => {
-      const block = blockById.get(r.id);
-      return block === undefined
-        ? { id: r.id, score: r.score }
-        : {
-            id: r.id,
-            score: r.score,
-            relationship: {
-              supersedes: block.supersedes,
-              supersededBy: block.supersededBy,
-            },
-          };
-    },
-  );
+  const scoredWithRelationships: ScoredCandidateWithRelationship[] = finalRanked.map((r) => {
+    const block = blockById.get(r.id);
+    return block === undefined
+      ? { id: r.id, score: r.score }
+      : {
+          id: r.id,
+          score: r.score,
+          relationship: {
+            supersedes: block.supersedes,
+            supersededBy: block.supersededBy,
+          },
+        };
+  });
   const demotedRanked = demoteSupersededMemories(scoredWithRelationships);
 
   // -- Phase 3A trace: superseded demotion --------------------------------
@@ -570,19 +560,13 @@ export async function runRecallController(
     const s = summaryById.get(r.id);
     if (!s) continue;
     const block = blockById.get(r.id);
-    topSummaries.push(
-      block === undefined
-        ? { ...s }
-        : { ...s, relationship: { ...block } },
-    );
+    topSummaries.push(block === undefined ? { ...s } : { ...s, relationship: { ...block } });
   }
   // Sanity: every ranked id must have a summary. If this ever
   // fails, it means a memory was deleted between the read and
   // the rank — fall back to no_memory rather than fabricating.
   if (topSummaries.length !== demotedRanked.length) {
-    logger.debug(
-      "recall: ranked-id missing summary (storage raced); returning no_memory",
-    );
+    logger.debug("recall: ranked-id missing summary (storage raced); returning no_memory");
     return { status: "no_memory" };
   }
 
@@ -622,7 +606,7 @@ export async function runRecallController(
   const result: RecallSynthesisResult = await synthesizeRecallWithFallback(
     query,
     memories,
-    adapterOptions,
+    adapterOptions
   );
 
   if (!result.ok) {
@@ -660,9 +644,7 @@ export async function runRecallController(
       // reroute site defensive and matches the brief's
       // trigger condition (`topSummaries.length > 0`).
       if (topSummaries.length > 0) {
-        logger.debug(
-          "recall: provider answer was a refusal; rerouting to weak_match",
-        );
+        logger.debug("recall: provider answer was a refusal; rerouting to weak_match");
         const topScore = finalRanked[0]!.score;
         const supportingCount = finalRanked.length;
         const out: RecallOutcome = {
@@ -683,9 +665,7 @@ export async function runRecallController(
         }
         return out;
       }
-      logger.debug(
-        "recall: provider answer was a refusal; rerouting to no_memory",
-      );
+      logger.debug("recall: provider answer was a refusal; rerouting to no_memory");
       // Also check if the query is vague for the no_memory fallback.
       if (isVagueQuery(query)) {
         return {
@@ -698,9 +678,7 @@ export async function runRecallController(
       }
       return { status: "no_memory" };
     }
-    logger.debug(
-      `recall: provider answer rejected: ${validation.reason}`,
-    );
+    logger.debug(`recall: provider answer rejected: ${validation.reason}`);
     return {
       status: "provider_error",
       reason: validation.reason,
@@ -815,10 +793,7 @@ function stripMemoryIdReferences(text: string): string {
   // Pattern 2: "entry #N", "record #N", "note #N", "summary #N"
   // (case-insensitive). These are the same memory-record nouns
   // used by `isProviderRefusal`'s noun alternation.
-  out = out.replace(
-    /\b(entry|record|note|summary)\s+#\d+\b/gi,
-    "[memory]",
-  );
+  out = out.replace(/\b(entry|record|note|summary)\s+#\d+\b/gi, "[memory]");
   // Pattern 3: bare `#N` that follows a word boundary. We require
   // the character immediately before `#` to be whitespace,
   // `(`, `,`, or the start of the string. This skips `#N` that
@@ -826,10 +801,7 @@ function stripMemoryIdReferences(text: string): string {
   // `://` or `/`), inside hex colors (`#ffffff`), and inside
   // quoted technical content. We also cap the digit run at 1-6
   // characters so a long hash-shaped fragment is never matched.
-  out = out.replace(
-    /(^|[\s(,])(#\d{1,6})\b/g,
-    (_match, prefix: string) => `${prefix}[memory]`,
-  );
+  out = out.replace(/(^|[\s(,])(#\d{1,6})\b/g, (_match, prefix: string) => `${prefix}[memory]`);
   // Collapse runs of adjacent `[memory]` placeholders to a single
   // one, so a multi-reference sentence does not become visually
   // noisy in the public text.
@@ -861,10 +833,7 @@ function stripReasoningBlocks(answer: string): string {
   let text = answer;
   // 1) and 2): HTML-style reasoning tags, multiline, case-insensitive.
   // The `s` flag (dotAll) lets `.` match newlines.
-  text = text.replace(
-    /<\s*think(?:ing)?\s*>[\s\S]*?<\s*\/\s*think(?:ing)?\s*>/gi,
-    "",
-  );
+  text = text.replace(/<\s*think(?:ing)?\s*>[\s\S]*?<\s*\/\s*think(?:ing)?\s*>/gi, "");
   // 3) Bounded leading "Reasoning:" / "Thought:" blocks. We only
   // strip when (a) the block is at the start of the text (after
   // trimming), (b) the label is exactly "Reasoning:" or "Thought:"
@@ -872,7 +841,7 @@ function stripReasoningBlocks(answer: string): string {
   // and (c) the block is followed by a blank line before the
   // visible answer. This avoids eating legitimate prose.
   const leadingLabelMatch = text.match(
-    /^\s*(?:Reasoning|Thought)\s*:\s*([\s\S]{0,2000}?)(?:\n\s*\n|\n\s*$)/i,
+    /^\s*(?:Reasoning|Thought)\s*:\s*([\s\S]{0,2000}?)(?:\n\s*\n|\n\s*$)/i
   );
   if (leadingLabelMatch && leadingLabelMatch.index !== undefined) {
     const before = text.slice(0, leadingLabelMatch.index);
@@ -922,7 +891,7 @@ function isProviderRefusal(text: string): boolean {
       // specific summary for session 2 in the available memories."
       String.raw`\bI (?:do not|don't|did not|didn't) have (?:a |an |any |the |specific |relevant )*(?:details|information|memory|memories|record|records|summary|summaries|entry|entries|note|notes)\b`,
     ].join("|"),
-    "i",
+    "i"
   );
   return candidates.some((c) => pattern.test(c));
 }
@@ -990,8 +959,7 @@ function validateAnswer(answer: string): AnswerOk | AnswerFail {
   if (stripped.length < 10) {
     return {
       ok: false,
-      reason:
-        "provider answer contained insufficient non-secret content after redaction",
+      reason: "provider answer contained insufficient non-secret content after redaction",
     };
   }
   // Strip memory-id references from the post-redaction text. This
@@ -1012,8 +980,7 @@ function validateAnswer(answer: string): AnswerOk | AnswerFail {
   if (looksLikeRawDump(noIds)) {
     return {
       ok: false,
-      reason:
-        "provider answer looks like a raw dump rather than a synthesized answer",
+      reason: "provider answer looks like a raw dump rather than a synthesized answer",
     };
   }
   // Refusal-shape check runs last: the structural-safety gates
@@ -1075,7 +1042,7 @@ function emitActiveMemoryReadStage(
   payload: {
     readCount: number;
     storageLimit: number;
-  },
+  }
 ): void {
   // Short-circuit on disabled / closed writers or when no trace
   // context was provided. The check is intentionally outside the
@@ -1136,7 +1103,7 @@ function emitLexicalRankingStage(
     topK: number;
     ranked: LexicalScoredCandidate[];
     summariesById: Map<number, SafeMemorySummary>;
-  },
+  }
 ): void {
   if (!trace || trace.runId === null) return;
   const rankedDetail = payload.ranked.map((r, index) => {
@@ -1187,7 +1154,7 @@ function emitLexicalRankingStage(
  */
 function emitSelectedCandidatesStage(
   trace: RecallTraceContext | undefined,
-  topSummaries: SafeMemorySummaryWithRelationship[],
+  topSummaries: SafeMemorySummaryWithRelationship[]
 ): void {
   if (!trace || trace.runId === null) return;
   trace.recordStage(RECALL_SELECTED_CANDIDATES_KIND, {
@@ -1235,7 +1202,7 @@ function emitSupersededDemotionStage(
     demotedIds: ReadonlySet<number>;
     /** Map from stale id to superseding id (only populated when reason is supersededBy). */
     supersededByMap: ReadonlyMap<number, number>;
-  },
+  }
 ): void {
   if (!trace || trace.runId === null) return;
 
@@ -1287,10 +1254,7 @@ function emitSupersededDemotionStage(
  * consistent with the ranker's internal computation.
  */
 function buildMatchText(s: SafeMemorySummary): string {
-  const tagPart =
-    Array.isArray(s.tags) && s.tags.length > 0
-      ? ` ${s.tags.join(" ")}`
-      : "";
+  const tagPart = Array.isArray(s.tags) && s.tags.length > 0 ? ` ${s.tags.join(" ")}` : "";
   return `${s.memoryContent}${tagPart}`;
 }
 
@@ -1332,13 +1296,40 @@ function isVagueQuery(query: string): boolean {
 
   // Generic reference word set
   const genericWords = new Set([
-    "it", "its", "this", "that", "these", "those",
-    "the", "a", "an",
-    "thing", "things", "stuff", "something", "everything", "nothing",
-    "what", "which", "who", "where", "when", "why", "how",
-    "there", "here",
-    "last", "next", "previous", "earlier", "later",
-    "some", "any", "all", "none", "no",
+    "it",
+    "its",
+    "this",
+    "that",
+    "these",
+    "those",
+    "the",
+    "a",
+    "an",
+    "thing",
+    "things",
+    "stuff",
+    "something",
+    "everything",
+    "nothing",
+    "what",
+    "which",
+    "who",
+    "where",
+    "when",
+    "why",
+    "how",
+    "there",
+    "here",
+    "last",
+    "next",
+    "previous",
+    "earlier",
+    "later",
+    "some",
+    "any",
+    "all",
+    "none",
+    "no",
   ]);
 
   // Every token must be a generic word (no content term)
@@ -1358,10 +1349,7 @@ function isVagueQuery(query: string): boolean {
  * between top and rest suggests ambiguity about which memory is
  * actually relevant.
  */
-function suggestsCompetingCandidates(
-  topScore: number,
-  supportingCount: number,
-): boolean {
+function suggestsCompetingCandidates(topScore: number, supportingCount: number): boolean {
   // Very low top score: query doesn't match anything well
   if (topScore < 0.1) return true;
 

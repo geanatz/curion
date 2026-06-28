@@ -60,10 +60,7 @@ export function allVariants(): RetrievalVariant[] {
     placeholder("vector", "embedding-only retrieval"),
     placeholder("hybrid-rrf", "hybrid with Reciprocal Rank Fusion"),
     placeholder("hybrid-rerank", "hybrid + cross-encoder rerank"),
-    placeholder(
-      "hybrid-entity-temporal",
-      "hybrid + entity/temporal reweighting",
-    ),
+    placeholder("hybrid-entity-temporal", "hybrid + entity/temporal reweighting"),
   ];
 }
 
@@ -89,7 +86,7 @@ function placeholder(id: VariantId, description: string): RetrievalVariant {
  */
 export async function runAllVariants(
   storage: StorageHandle,
-  query: VariantQuery,
+  query: VariantQuery
 ): Promise<VariantResult[]> {
   const results: VariantResult[] = [];
   for (const v of allVariants()) {

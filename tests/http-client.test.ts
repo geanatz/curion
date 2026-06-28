@@ -18,8 +18,8 @@
  *      bodies.
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
+import { test } from "node:test";
 
 import { chatCompletion, sanitizeServerText } from "../src/providers/http-client.ts";
 
@@ -37,7 +37,7 @@ function recordingFetch(
     method?: string;
     headers?: Record<string, string>;
     body?: string;
-  },
+  }
 ): typeof fetch {
   const f: typeof fetch = async (input, init) => {
     log.url = typeof input === "string" ? input : (input as URL).toString();
@@ -88,9 +88,9 @@ test("http-client: sends Authorization: Bearer <key> header, key is NOT in body"
           model: "test-model",
           choices: [{ message: { role: "assistant", content: "ok" } }],
         }),
-        { status: 200, headers: { "content-type": "application/json" } },
+        { status: 200, headers: { "content-type": "application/json" } }
       ),
-    log,
+    log
   );
   const r = await chatCompletion(VALID_REQ, {
     baseUrl: "https://api.test/v1",
@@ -117,11 +117,10 @@ test("http-client: sends Authorization: Bearer <key> header, key is NOT in body"
 
 test("http-client: server error body that contains the API key has it redacted", async () => {
   const log: Record<string, string> = {};
-  const echoBody =
-    `upstream error: request rejected, auth=<${TEST_KEY}> please rotate`;
+  const echoBody = `upstream error: request rejected, auth=<${TEST_KEY}> please rotate`;
   const fetchImpl = recordingFetch(
     () => new Response(echoBody, { status: 500, headers: { "content-type": "text/plain" } }),
-    log as { body?: string },
+    log as { body?: string }
   );
   const r = await chatCompletion(VALID_REQ, {
     baseUrl: "https://api.test/v1",
@@ -146,11 +145,10 @@ test("http-client: server error body that contains the API key has it redacted",
 test("http-client: server error body containing a Bearer token is redacted", async () => {
   const fetchImpl = recordingFetch(
     () =>
-      new Response(
-        `proxy echoed: Authorization: Bearer nvapi-abcdef0123456789xyzAB`,
-        { status: 502 },
-      ),
-    {} as { body?: string },
+      new Response(`proxy echoed: Authorization: Bearer nvapi-abcdef0123456789xyzAB`, {
+        status: 502,
+      }),
+    {} as { body?: string }
   );
   const r = await chatCompletion(VALID_REQ, {
     baseUrl: "https://api.test/v1",
@@ -164,7 +162,7 @@ test("http-client: server error body containing a Bearer token is redacted", asy
     assert.equal(r.error.kind, "server");
     assert.ok(
       !r.error.message.includes("nvapi-abcdef0123456789xyzAB"),
-      "raw token must be redacted",
+      "raw token must be redacted"
     );
     assert.match(r.error.message, /<redacted>/);
   }
@@ -172,12 +170,8 @@ test("http-client: server error body containing a Bearer token is redacted", asy
 
 test("http-client: server error body containing an sk- key is redacted", async () => {
   const fetchImpl = recordingFetch(
-    () =>
-      new Response(
-        `mirror debug: sk-abcdefghijklmnopqrstuv`,
-        { status: 500 },
-      ),
-    {} as { body?: string },
+    () => new Response(`mirror debug: sk-abcdefghijklmnopqrstuv`, { status: 500 }),
+    {} as { body?: string }
   );
   const r = await chatCompletion(VALID_REQ, {
     baseUrl: "https://api.test/v1",
@@ -191,7 +185,7 @@ test("http-client: server error body containing an sk- key is redacted", async (
     assert.equal(r.error.kind, "server");
     assert.ok(
       !r.error.message.includes("sk-abcdefghijklmnopqrstuv"),
-      "raw sk- key must be redacted",
+      "raw sk- key must be redacted"
     );
   }
 });
@@ -199,11 +193,11 @@ test("http-client: server error body containing an sk- key is redacted", async (
 test("http-client: server error body with JSON field 'api_key' has its value redacted", async () => {
   const fetchImpl = recordingFetch(
     () =>
-      new Response(
-        JSON.stringify({ error: "upstream", api_key: "leaked-key-1" }),
-        { status: 500, headers: { "content-type": "application/json" } },
-      ),
-    {} as { body?: string },
+      new Response(JSON.stringify({ error: "upstream", api_key: "leaked-key-1" }), {
+        status: 500,
+        headers: { "content-type": "application/json" },
+      }),
+    {} as { body?: string }
   );
   const r = await chatCompletion(VALID_REQ, {
     baseUrl: "https://api.test/v1",
@@ -215,10 +209,7 @@ test("http-client: server error body with JSON field 'api_key' has its value red
   assert.equal(r.ok, false);
   if (!r.ok) {
     assert.equal(r.error.kind, "server");
-    assert.ok(
-      !r.error.message.includes("leaked-key-1"),
-      "json api_key value must be redacted",
-    );
+    assert.ok(!r.error.message.includes("leaked-key-1"), "json api_key value must be redacted");
     assert.match(r.error.message, /api[_-]?key"?\s*:\s*"?<redacted>/i);
   }
 });
@@ -232,7 +223,7 @@ test("http-client: network error message that contains the API key has it redact
     // Simulate a runtime / undici-style error message that
     // includes the URL with the bearer token in a query string.
     throw new Error(
-      `TypeError: failed to fetch https://api.test/v1/chat/completions?token=${TEST_KEY}`,
+      `TypeError: failed to fetch https://api.test/v1/chat/completions?token=${TEST_KEY}`
     );
   };
   const r = await chatCompletion(VALID_REQ, {
@@ -247,7 +238,7 @@ test("http-client: network error message that contains the API key has it redact
     assert.equal(r.error.kind, "network");
     assert.ok(
       !r.error.message.includes(TEST_KEY),
-      "key must be redacted from network error message",
+      "key must be redacted from network error message"
     );
   }
 });
@@ -273,12 +264,10 @@ test("sanitizeServerText: redacts Bearer tokens and sk- / nvapi- prefixes", () =
 
 test("sanitizeServerText: redacts named JSON secret fields", () => {
   for (const field of ["api_key", "apiKey", "token", "password", "secret", "authorization"]) {
-    const out = sanitizeServerText(
-      JSON.stringify({ [field]: "leaked-value-123" }),
-    );
+    const out = sanitizeServerText(JSON.stringify({ [field]: "leaked-value-123" }));
     assert.ok(
       !out.includes("leaked-value-123"),
-      `value of field ${field} must be redacted, got: ${out}`,
+      `value of field ${field} must be redacted, got: ${out}`
     );
   }
 });
@@ -326,7 +315,7 @@ test("sanitizeServerText: non-string input returns empty string", () => {
 /** Helper: drive `chatCompletion` with a scripted 200 OK body. */
 async function chatCompletionWithBody(
   body: string,
-  contentType: "application/json" | "text/plain" = "application/json",
+  contentType: "application/json" | "text/plain" = "application/json"
 ): Promise<
   | { ok: true; response: { content: string } }
   | { ok: false; error: { kind: string; status?: number; message: string; reachedServer: boolean } }
@@ -344,14 +333,15 @@ async function chatCompletionWithBody(
     providerLabel: "test",
   }) as Promise<
     | { ok: true; response: { content: string } }
-    | { ok: false; error: { kind: string; status?: number; message: string; reachedServer: boolean } }
+    | {
+        ok: false;
+        error: { kind: string; status?: number; message: string; reachedServer: boolean };
+      }
   >;
 }
 
 test("http-client: 200 OK with empty choices -> bad-request, missing content message", async () => {
-  const r = await chatCompletionWithBody(
-    JSON.stringify({ id: "x", model: "m", choices: [] }),
-  );
+  const r = await chatCompletionWithBody(JSON.stringify({ id: "x", model: "m", choices: [] }));
   assert.equal(r.ok, false);
   if (!r.ok) {
     assert.equal(r.error.kind, "bad-request");
@@ -360,14 +350,14 @@ test("http-client: 200 OK with empty choices -> bad-request, missing content mes
     assert.match(
       r.error.message,
       /response missing choices\[0\]\.message\.content/,
-      "operator-visible message must name the missing field",
+      "operator-visible message must name the missing field"
     );
   }
 });
 
 test("http-client: 200 OK with choices[0] lacking message -> bad-request, missing content message", async () => {
   const r = await chatCompletionWithBody(
-    JSON.stringify({ id: "x", model: "m", choices: [{ finish_reason: "stop" }] }),
+    JSON.stringify({ id: "x", model: "m", choices: [{ finish_reason: "stop" }] })
   );
   assert.equal(r.ok, false);
   if (!r.ok) {
@@ -383,7 +373,7 @@ test("http-client: 200 OK with message.content=null -> bad-request, missing cont
       id: "x",
       model: "m",
       choices: [{ message: { role: "assistant", content: null } }],
-    }),
+    })
   );
   assert.equal(r.ok, false);
   if (!r.ok) {
@@ -405,7 +395,7 @@ test("http-client: 200 OK with message.content='' -> ok with empty string conten
       id: "x",
       model: "m",
       choices: [{ message: { role: "assistant", content: "" } }],
-    }),
+    })
   );
   assert.equal(r.ok, true);
   if (r.ok) {
@@ -423,7 +413,7 @@ test("http-client: 200 OK with non-JSON body -> bad-request, invalid JSON messag
     assert.match(
       r.error.message,
       /invalid JSON response/,
-      "operator-visible message must explain the JSON parse failure",
+      "operator-visible message must explain the JSON parse failure"
     );
   }
 });
@@ -434,7 +424,7 @@ test("http-client: 200 OK with valid choices[0].message.content string -> ok", a
       id: "x",
       model: "m",
       choices: [{ message: { role: "assistant", content: "hello" } }],
-    }),
+    })
   );
   assert.equal(r.ok, true);
   if (r.ok) {

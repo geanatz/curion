@@ -351,30 +351,30 @@
  *     experiment.
  */
 
-import type { BenchmarkQuery } from "./queries.js";
 import type { QueryEval } from "./metrics.js";
 import {
-  classifyTemporalTruthFailure,
-  type TemporalTruthCategory,
-  TEMPORAL_TRUTH_CATEGORIES,
-} from "./temporal-truth-diagnostic.js";
-import { SIMULATED_SUPERSESSION_EDGES } from "./supersession-edge-simulation.js";
-import {
-  SIMULATED_MULTI_ANCHOR_TREATMENT,
-  SIMULATED_MULTI_ANCHOR_IDS,
-  SIMULATED_PROTECTED_ANCHOR_IDS,
-  applyMultiAnchorRerankRule,
   BUILTIN_MULTI_ANCHOR_RERANK_VARIANTS,
   type MultiAnchorRerankRule,
   type MultiAnchorRerankVariant,
+  SIMULATED_MULTI_ANCHOR_IDS,
+  SIMULATED_MULTI_ANCHOR_TREATMENT,
+  SIMULATED_PROTECTED_ANCHOR_IDS,
+  applyMultiAnchorRerankRule,
 } from "./multi-anchor-current-previous.js";
+import type { BenchmarkQuery } from "./queries.js";
+import { SIMULATED_SUPERSESSION_EDGES } from "./supersession-edge-simulation.js";
 import {
   BUILTIN_CANDIDATE_GENERATION_VARIANTS,
-  applyCandidateExpansionRule,
-  type CandidateExpansionRule,
   type CandidateExpansionResult,
+  type CandidateExpansionRule,
   type CandidateGenerationVariant,
+  applyCandidateExpansionRule,
 } from "./temporal-candidate-generation-probe.js";
+import {
+  TEMPORAL_TRUTH_CATEGORIES,
+  type TemporalTruthCategory,
+  classifyTemporalTruthFailure,
+} from "./temporal-truth-diagnostic.js";
 
 // ---------------------------------------------------------------------------
 // Guard rule types
@@ -614,7 +614,14 @@ export function applySupersedesPromoteGuardRule(args: {
   query: BenchmarkQuery;
   downstreamRule: MultiAnchorRerankRule;
 }): { topIds: number[]; topScores: number[]; promotionsBlocked: number } {
-  const { rule, topIds: inputIds, topScores: inputScores, injectedIds, query, downstreamRule } = args;
+  const {
+    rule,
+    topIds: inputIds,
+    topScores: inputScores,
+    injectedIds,
+    query,
+    downstreamRule,
+  } = args;
 
   // Defensive copy. The function never
   // mutates the input arrays.
@@ -640,23 +647,19 @@ export function applySupersedesPromoteGuardRule(args: {
 
   // Determine if the rank-1 candidate is
   // protected by the multi-anchor treatment.
-  const isProtectedAnchor =
-    SIMULATED_PROTECTED_ANCHOR_IDS.has(top0);
+  const isProtectedAnchor = SIMULATED_PROTECTED_ANCHOR_IDS.has(top0);
 
   // Determine if the rank-1 candidate is
   // non-injected. This is the GUARD's
   // primary protection condition.
-  const isNonInjectedRank1 =
-    !injectedSet.has(top0) && top0 !== undefined;
+  const isNonInjectedRank1 = !injectedSet.has(top0) && top0 !== undefined;
 
   // For the oracle guard, we also compute
   // the set of current-truth ids the
   // guard can use as a HINT for which
   // candidates to protect.
   const currentTruthSet: Set<number> | null =
-    rule.kind === "oracle-supersedes-promote-guard"
-      ? new Set(query.currentTruthIds)
-      : null;
+    rule.kind === "oracle-supersedes-promote-guard" ? new Set(query.currentTruthIds) : null;
 
   const protectedAnchorFirst: number[] = [];
   const supersedesFirst: number[] = [];
@@ -702,12 +705,9 @@ export function applySupersedesPromoteGuardRule(args: {
   for (const p of restPositions) {
     const id = ids[p]!;
     const edge = SIMULATED_SUPERSESSION_EDGES.get(id);
-    const isSuperseded =
-      edge !== undefined && edge.isSuperseded;
+    const isSuperseded = edge !== undefined && edge.isSuperseded;
     const supersedesInTopK =
-      edge !== undefined &&
-      edge.supersedes !== null &&
-      topKSet.has(edge.supersedes);
+      edge !== undefined && edge.supersedes !== null && topKSet.has(edge.supersedes);
 
     if (isSuperseded) {
       supersededLast.push(p);
@@ -739,9 +739,7 @@ export function applySupersedesPromoteGuardRule(args: {
       // is current truth (the oracle
       // guard's stronger protection, even
       // if the candidate is not injected).
-      const blockPromotion =
-        (isInjected && isNonInjectedRank1) ||
-        supersedesCurrent === true;
+      const blockPromotion = (isInjected && isNonInjectedRank1) || supersedesCurrent === true;
       if (blockPromotion) {
         // The promotion is blocked; the
         // candidate is demoted to the
@@ -784,7 +782,6 @@ export function applySupersedesPromoteGuardRule(args: {
     promotionsBlocked,
   };
 }
-
 
 // ---------------------------------------------------------------------------
 // Per-query guarded-rerank output
@@ -1015,69 +1012,68 @@ export interface GuardedRerankVariantRow {
  * variant (the DIAGNOSTIC IDEAL PROTECTION
  * CEILING).
  */
-export const BUILTIN_GUARDED_RERANK_VARIANTS: ReadonlyArray<GuardedRerankVariant> =
-  [
-    {
-      id: "baseline-no-rerank",
-      description:
-        "Baseline: no candidate expansion, no guard, no reranker. The lexical baseline's existing top-K order is used as-is. The reference row; production-like.",
-      category: "production-like",
-      candidateExpansionRule: { kind: "none" },
-      guardRule: { kind: "none" },
+export const BUILTIN_GUARDED_RERANK_VARIANTS: ReadonlyArray<GuardedRerankVariant> = [
+  {
+    id: "baseline-no-rerank",
+    description:
+      "Baseline: no candidate expansion, no guard, no reranker. The lexical baseline's existing top-K order is used as-is. The reference row; production-like.",
+    category: "production-like",
+    candidateExpansionRule: { kind: "none" },
+    guardRule: { kind: "none" },
+  },
+  {
+    id: "reranker-control-multi-anchor-aware-combined",
+    description:
+      "Reranker-control: no candidate expansion, no guard; the downstream reranker is Experiment 8's multi-anchor-aware-combined. The fixed downstream control. This variant is the experiment's control row; the guarded primary composes the same downstream reranker on top of the guard.",
+    category: "reranker-control",
+    candidateExpansionRule: { kind: "none" },
+    guardRule: { kind: "none" },
+  },
+  {
+    id: "oracle-candidate-injection-ceiling",
+    description:
+      "Oracle: for every query, inject every id in currentTruthIds that is NOT in the baseline top-K into the candidate set, then apply the unguarded multi-anchor-aware-combined downstream reranker. The honest candidate-generation ceiling (no guard). Mirrors Experiment 9's oracle. The variant is the BEFORE-state reference for the guard's diagnostic ceiling.",
+    category: "oracle",
+    candidateExpansionRule: { kind: "oracle-candidate-injection-ceiling" },
+    guardRule: { kind: "none" },
+  },
+  {
+    id: "guarded-multi-anchor-linked-expansion",
+    description:
+      "Multi-anchor-simulation (PRIMARY DELIVERABLE): Experiment 9's metadata-simulation-multi-anchor-linked-expansion candidate-expansion rule PLUS the supersedes-promote-guard guard rule. The guard is a COMPLETE re-rank (the multi-anchor protection is integrated): the guard partitions the post-expansion top-K into protectedAnchorFirst (multi-anchor records at rank 1), supersedesFirst (supersedes candidates that are NOT blocked by the guard), middle (other candidates, including injected supersedes candidates blocked by the guard), and supersededLast (superseded records). The guard's primary protection: an injected supersedes candidate is blocked (demoted to the middle bucket) when the rank-1 is non-injected. The rule does NOT consult currentTruthIds. The guard is a STRUCTURAL rule on the candidate-expansion's provenance (injected vs non-injected), not a current-truth lookup. Honest trade-off: the guard ELIMINATES the temp-rate-limit regression (where the rank-1 is a current-truth candidate) AT THE COST of losing the +2 recoveries of Experiment 9's candidate-expansion step (where the rank-1 is a stale candidate and the injected supersedes candidate is the current truth — the guard blocks the legitimate recovery too). The variant is the closest a non-oracle structural rule can come to the diagnostic ceiling; the experiment's PRIMARY DELIVERABLE.",
+    category: "multi-anchor-simulation",
+    candidateExpansionRule: {
+      kind: "metadata-simulation-multi-anchor-linked-expansion",
     },
-    {
-      id: "reranker-control-multi-anchor-aware-combined",
-      description:
-        "Reranker-control: no candidate expansion, no guard; the downstream reranker is Experiment 8's multi-anchor-aware-combined. The fixed downstream control. This variant is the experiment's control row; the guarded primary composes the same downstream reranker on top of the guard.",
-      category: "reranker-control",
-      candidateExpansionRule: { kind: "none" },
-      guardRule: { kind: "none" },
+    guardRule: { kind: "supersedes-promote-guard" },
+  },
+  {
+    id: "guarded-linked-candidate-expansion",
+    description:
+      "Metadata-simulation: Experiment 9's metadata-simulation-linked-candidate-expansion candidate-expansion rule (the pure supersededBy-projection rule) PLUS the supersedes-promote-guard guard rule PLUS the multi-anchor-aware-combined downstream reranker. Surfaces the guard's marginal effect on the pure supersededBy-projection candidate-expansion rule (the rule kind the linked-expansion is fixture-derived from).",
+    category: "metadata-simulation",
+    candidateExpansionRule: {
+      kind: "metadata-simulation-linked-candidate-expansion",
     },
-    {
-      id: "oracle-candidate-injection-ceiling",
-      description:
-        "Oracle: for every query, inject every id in currentTruthIds that is NOT in the baseline top-K into the candidate set, then apply the unguarded multi-anchor-aware-combined downstream reranker. The honest candidate-generation ceiling (no guard). Mirrors Experiment 9's oracle. The variant is the BEFORE-state reference for the guard's diagnostic ceiling.",
-      category: "oracle",
-      candidateExpansionRule: { kind: "oracle-candidate-injection-ceiling" },
-      guardRule: { kind: "none" },
-    },
-    {
-      id: "guarded-multi-anchor-linked-expansion",
-      description:
-        "Multi-anchor-simulation (PRIMARY DELIVERABLE): Experiment 9's metadata-simulation-multi-anchor-linked-expansion candidate-expansion rule PLUS the supersedes-promote-guard guard rule. The guard is a COMPLETE re-rank (the multi-anchor protection is integrated): the guard partitions the post-expansion top-K into protectedAnchorFirst (multi-anchor records at rank 1), supersedesFirst (supersedes candidates that are NOT blocked by the guard), middle (other candidates, including injected supersedes candidates blocked by the guard), and supersededLast (superseded records). The guard's primary protection: an injected supersedes candidate is blocked (demoted to the middle bucket) when the rank-1 is non-injected. The rule does NOT consult currentTruthIds. The guard is a STRUCTURAL rule on the candidate-expansion's provenance (injected vs non-injected), not a current-truth lookup. Honest trade-off: the guard ELIMINATES the temp-rate-limit regression (where the rank-1 is a current-truth candidate) AT THE COST of losing the +2 recoveries of Experiment 9's candidate-expansion step (where the rank-1 is a stale candidate and the injected supersedes candidate is the current truth — the guard blocks the legitimate recovery too). The variant is the closest a non-oracle structural rule can come to the diagnostic ceiling; the experiment's PRIMARY DELIVERABLE.",
-      category: "multi-anchor-simulation",
-      candidateExpansionRule: {
-        kind: "metadata-simulation-multi-anchor-linked-expansion",
-      },
-      guardRule: { kind: "supersedes-promote-guard" },
-    },
-    {
-      id: "guarded-linked-candidate-expansion",
-      description:
-        "Metadata-simulation: Experiment 9's metadata-simulation-linked-candidate-expansion candidate-expansion rule (the pure supersededBy-projection rule) PLUS the supersedes-promote-guard guard rule PLUS the multi-anchor-aware-combined downstream reranker. Surfaces the guard's marginal effect on the pure supersededBy-projection candidate-expansion rule (the rule kind the linked-expansion is fixture-derived from).",
-      category: "metadata-simulation",
-      candidateExpansionRule: {
-        kind: "metadata-simulation-linked-candidate-expansion",
-      },
-      guardRule: { kind: "supersedes-promote-guard" },
-    },
-    {
-      id: "guarded-no-op",
-      description:
-        "Reranker-control sanity row: no candidate expansion, but the supersedes-promote-guard guard rule is active. The guard is a pass-through when no candidate was injected (the injected-id set is empty). The variant surfaces 'the guard alone, with no expansion, is a no-op': the guard's promotionsBlockedByGuard is 0; the variant's afterCurrentTruthAt1 equals the reranker-control's. The row is the honest 'the guard is a structural rule, not a semantic re-ranker' framing.",
-      category: "reranker-control",
-      candidateExpansionRule: { kind: "none" },
-      guardRule: { kind: "supersedes-promote-guard" },
-    },
-    {
-      id: "oracle-guarded-candidate-injection-ceiling",
-      description:
-        "Oracle-DIAGNOSTIC: for every query, inject every id in currentTruthIds that is NOT in the baseline top-K into the candidate set, then apply the oracle-supersedes-promote-guard guard rule (the oracle guard: the rule is allowed to consult currentTruthIds as a HINT for which candidates to protect), then apply the multi-anchor-aware-combined downstream reranker. The IDEAL PROTECTION CEILING: a re-ranker that knows which candidates are current AND protects them. Clearly labeled oracle-diagnostic; NOT production-like. The variant bounds the ideal protection the guarded primary could achieve if the production-side schema carried the currentTruthIds column. Use this row to read 'how far is the primary from the ideal ceiling?'.",
-      category: "oracle-diagnostic",
-      candidateExpansionRule: { kind: "oracle-candidate-injection-ceiling" },
-      guardRule: { kind: "oracle-supersedes-promote-guard" },
-    },
-  ];
+    guardRule: { kind: "supersedes-promote-guard" },
+  },
+  {
+    id: "guarded-no-op",
+    description:
+      "Reranker-control sanity row: no candidate expansion, but the supersedes-promote-guard guard rule is active. The guard is a pass-through when no candidate was injected (the injected-id set is empty). The variant surfaces 'the guard alone, with no expansion, is a no-op': the guard's promotionsBlockedByGuard is 0; the variant's afterCurrentTruthAt1 equals the reranker-control's. The row is the honest 'the guard is a structural rule, not a semantic re-ranker' framing.",
+    category: "reranker-control",
+    candidateExpansionRule: { kind: "none" },
+    guardRule: { kind: "supersedes-promote-guard" },
+  },
+  {
+    id: "oracle-guarded-candidate-injection-ceiling",
+    description:
+      "Oracle-DIAGNOSTIC: for every query, inject every id in currentTruthIds that is NOT in the baseline top-K into the candidate set, then apply the oracle-supersedes-promote-guard guard rule (the oracle guard: the rule is allowed to consult currentTruthIds as a HINT for which candidates to protect), then apply the multi-anchor-aware-combined downstream reranker. The IDEAL PROTECTION CEILING: a re-ranker that knows which candidates are current AND protects them. Clearly labeled oracle-diagnostic; NOT production-like. The variant bounds the ideal protection the guarded primary could achieve if the production-side schema carried the currentTruthIds column. Use this row to read 'how far is the primary from the ideal ceiling?'.",
+    category: "oracle-diagnostic",
+    candidateExpansionRule: { kind: "oracle-candidate-injection-ceiling" },
+    guardRule: { kind: "oracle-supersedes-promote-guard" },
+  },
+];
 
 // ---------------------------------------------------------------------------
 // Per-query guarded-rerank evaluation
@@ -1127,10 +1123,7 @@ export function evaluateGuardedRerankForQuery(args: {
     topIds: expansion.topIds,
     topScores: expansion.topScores,
   };
-  const afterExpansionDiag = classifyTemporalTruthFailure(
-    afterExpansionEval,
-    q,
-  );
+  const afterExpansionDiag = classifyTemporalTruthFailure(afterExpansionEval, q);
 
   // Step 4: apply the guard rule (between
   // candidate-expansion and downstream
@@ -1221,8 +1214,7 @@ export function evaluateGuardedRerankForQuery(args: {
   const categoryChange = `${baselineDiag.category} -> ${afterDiag.category}`;
 
   const regression =
-    baselineDiag.top1IsCurrentTruth === true &&
-    afterDiag.top1IsCurrentTruth === false;
+    baselineDiag.top1IsCurrentTruth === true && afterDiag.top1IsCurrentTruth === false;
 
   const tempRateLimitRegression = regression && e.queryId === "temp-rate-limit";
 
@@ -1254,8 +1246,7 @@ export function evaluateGuardedRerankForQuery(args: {
     baselineTop1Id: baselineDiag.top1Id,
     baselineCurrentTruthAt1: baselineDiag.top1IsCurrentTruth,
     baselineStaleTop1: baselineDiag.top1IsStale,
-    baselineStaleOverCurrent:
-      baselineDiag.top1IsStale && baselineDiag.topKHasCurrentTruth,
+    baselineStaleOverCurrent: baselineDiag.top1IsStale && baselineDiag.topKHasCurrentTruth,
     baselineCategory: baselineDiag.category,
     baselineIsDivergentLabeled: baselineDiag.isDivergentLabeled,
     baselineCurrentInTopK: baselineDiag.topKHasCurrentTruth,
@@ -1263,8 +1254,7 @@ export function evaluateGuardedRerankForQuery(args: {
     afterTop1Id: afterDiag.top1Id,
     afterCurrentTruthAt1: afterDiag.top1IsCurrentTruth,
     afterStaleTop1: afterDiag.top1IsStale,
-    afterStaleOverCurrent:
-      afterDiag.top1IsStale && afterDiag.topKHasCurrentTruth,
+    afterStaleOverCurrent: afterDiag.top1IsStale && afterDiag.topKHasCurrentTruth,
     afterCategory: afterDiag.category,
     categoryChange,
     regression,
@@ -1305,21 +1295,21 @@ export function evaluateGuardedRerankVariant(args: {
       }
       throw new Error(
         "supersedes-promote-guard: BUILTIN_MULTI_ANCHOR_RERANK_VARIANTS " +
-          "must contain a 'multi-anchor-aware-combined' variant (Experiment 8 contract)",
+          "must contain a 'multi-anchor-aware-combined' variant (Experiment 8 contract)"
       );
     })(),
   } = args;
   if (evals.length !== queries.length) {
     throw new Error(
       `evaluateGuardedRerankVariant: evals.length (${evals.length}) must match ` +
-        `queries.length (${queries.length}) for variant "${variant.id}"`,
+        `queries.length (${queries.length}) for variant "${variant.id}"`
     );
   }
   if (downstreamVariant.id !== "multi-anchor-aware-combined") {
     throw new Error(
       `evaluateGuardedRerankVariant: downstreamVariant must be ` +
         `'multi-anchor-aware-combined' for variant "${variant.id}", ` +
-        `got "${downstreamVariant.id}"`,
+        `got "${downstreamVariant.id}"`
     );
   }
 
@@ -1330,7 +1320,7 @@ export function evaluateGuardedRerankVariant(args: {
     if (e.queryId !== q.id) {
       throw new Error(
         `evaluateGuardedRerankVariant: evals[${i}].queryId="${e.queryId}" does ` +
-          `not match queries[${i}].id="${q.id}" for variant "${variant.id}"`,
+          `not match queries[${i}].id="${q.id}" for variant "${variant.id}"`
       );
     }
     if (q.family !== "temporal") continue;
@@ -1340,7 +1330,7 @@ export function evaluateGuardedRerankVariant(args: {
         eval: e,
         query: q,
         downstreamVariant,
-      }),
+      })
     );
   }
   return aggregateGuardedRerankPerQuery(perQuery);
@@ -1352,7 +1342,7 @@ export function evaluateGuardedRerankVariant(args: {
  * block. The function is pure.
  */
 export function aggregateGuardedRerankPerQuery(
-  perQuery: ReadonlyArray<GuardedRerankPerQuery>,
+  perQuery: ReadonlyArray<GuardedRerankPerQuery>
 ): GuardedRerankVariantMetrics {
   const total = perQuery.length;
   let cleanTotal = 0;
@@ -1425,10 +1415,7 @@ export function aggregateGuardedRerankPerQuery(
     if (p.regression) regressionCount += 1;
     if (p.tempRateLimitRegression) tempRateLimitRegressionCount += 1;
     if (p.promotionBlockedByGuard) promotionsBlockedByGuard += 1;
-    if (
-      p.baselineCurrentInTopK === false &&
-      p.afterExpansionCurrentInTopK === true
-    ) {
+    if (p.baselineCurrentInTopK === false && p.afterExpansionCurrentInTopK === true) {
       recoveredByExpansion += 1;
     }
     if (
@@ -1454,18 +1441,13 @@ export function aggregateGuardedRerankPerQuery(
 
     if (p.hasExcludedCurrentAnchor) {
       multiAnchorQueryCount += 1;
-      if (p.baselineCurrentTruthAt1)
-        multiAnchorBaselineCurrentTruthAt1 += 1;
+      if (p.baselineCurrentTruthAt1) multiAnchorBaselineCurrentTruthAt1 += 1;
       if (p.afterCurrentTruthAt1) multiAnchorAfterCurrentTruthAt1 += 1;
       if (p.regression) multiAnchorRegressionCount += 1;
-      if (
-        p.baselineCurrentInTopK === false &&
-        p.afterExpansionCurrentInTopK === true
-      ) {
+      if (p.baselineCurrentInTopK === false && p.afterExpansionCurrentInTopK === true) {
         multiAnchorRecoveredByExpansion += 1;
       }
-      if (p.expansionInjectedCurrent)
-        multiAnchorExpansionInjectedCurrentCount += 1;
+      if (p.expansionInjectedCurrent) multiAnchorExpansionInjectedCurrentCount += 1;
     }
 
     if (p.isClean) {
@@ -1474,34 +1456,26 @@ export function aggregateGuardedRerankPerQuery(
       if (p.regression) cleanRegressionCount += 1;
       if (p.tempRateLimitRegression) cleanTempRateLimitRegressionCount += 1;
     } else {
-      if (p.baselineCurrentTruthAt1)
-        fixtureAmbiguousBaselineCurrentTruthAt1 += 1;
-      if (p.afterCurrentTruthAt1)
-        fixtureAmbiguousAfterCurrentTruthAt1 += 1;
+      if (p.baselineCurrentTruthAt1) fixtureAmbiguousBaselineCurrentTruthAt1 += 1;
+      if (p.afterCurrentTruthAt1) fixtureAmbiguousAfterCurrentTruthAt1 += 1;
       if (p.regression) fixtureAmbiguousRegressionCount += 1;
     }
 
-    perCategoryChange[p.categoryChange] =
-      (perCategoryChange[p.categoryChange] ?? 0) + 1;
+    perCategoryChange[p.categoryChange] = (perCategoryChange[p.categoryChange] ?? 0) + 1;
   }
 
   const safeDiv = (n: number, d: number): number => (d > 0 ? n / d : 0);
   const currentTruthAt1Delta = afterCurrentTruthAt1 - baselineCurrentTruthAt1;
   const currentTruthAt1RateDelta =
-    safeDiv(afterCurrentTruthAt1, total) -
-    safeDiv(baselineCurrentTruthAt1, total);
+    safeDiv(afterCurrentTruthAt1, total) - safeDiv(baselineCurrentTruthAt1, total);
   const staleTop1Delta = afterStaleTop1 - baselineStaleTop1;
-  const staleOverCurrentDelta =
-    afterStaleOverCurrent - baselineStaleOverCurrent;
+  const staleOverCurrentDelta = afterStaleOverCurrent - baselineStaleOverCurrent;
   const currentMissingDelta = afterCurrentMissing - baselineCurrentMissing;
-  const expansionCurrentMissingDelta =
-    afterExpansionCurrentMissing - baselineCurrentMissing;
+  const expansionCurrentMissingDelta = afterExpansionCurrentMissing - baselineCurrentMissing;
 
-  const cleanCurrentTruthAt1Delta =
-    cleanAfterCurrentTruthAt1 - cleanBaselineCurrentTruthAt1;
+  const cleanCurrentTruthAt1Delta = cleanAfterCurrentTruthAt1 - cleanBaselineCurrentTruthAt1;
   const fixtureAmbiguousCurrentTruthAt1Delta =
-    fixtureAmbiguousAfterCurrentTruthAt1 -
-    fixtureAmbiguousBaselineCurrentTruthAt1;
+    fixtureAmbiguousAfterCurrentTruthAt1 - fixtureAmbiguousBaselineCurrentTruthAt1;
 
   const multiAnchorCurrentTruthAt1Delta =
     multiAnchorAfterCurrentTruthAt1 - multiAnchorBaselineCurrentTruthAt1;
@@ -1564,13 +1538,15 @@ export function aggregateGuardedRerankPerQuery(
  * Compute the per-variant verdict. Mirrors
  * Experiment 9's verdict function.
  */
-export function computeGuardedRerankVerdict(
-  metrics: GuardedRerankVariantMetrics,
-): { verdict: GuardedRerankVerdict; note: string } {
+export function computeGuardedRerankVerdict(metrics: GuardedRerankVariantMetrics): {
+  verdict: GuardedRerankVerdict;
+  note: string;
+} {
   if (metrics.regressionCount > 0) {
     return {
       verdict: "unsafe",
-      note: `introduced ${metrics.regressionCount} regression(s) ` +
+      note:
+        `introduced ${metrics.regressionCount} regression(s) ` +
         `(including ${metrics.tempRateLimitRegressionCount} on temp-rate-limit); ` +
         `the guarded-rerank variant is unsafe on this slice`,
     };
@@ -1578,7 +1554,8 @@ export function computeGuardedRerankVerdict(
   if (metrics.currentTruthAt1Delta > 0) {
     return {
       verdict: "safe",
-      note: `recovered ${metrics.currentTruthAt1Delta} currentTruthAt1 ` +
+      note:
+        `recovered ${metrics.currentTruthAt1Delta} currentTruthAt1 ` +
         `query/queries with 0 regressions (temp-rate-limit: ${metrics.tempRateLimitRegressionCount})`,
     };
   }
@@ -1681,14 +1658,12 @@ export function buildGuardedRerankReport(args: {
   if (evals.length !== queries.length) {
     throw new Error(
       `buildGuardedRerankReport: evals.length (${evals.length}) must match ` +
-        `queries.length (${queries.length})`,
+        `queries.length (${queries.length})`
     );
   }
   const rows: GuardedRerankVariantRow[] = [];
   for (const v of variants) {
-    rows.push(
-      buildGuardedRerankVariantRow({ variant: v, evals, queries }),
-    );
+    rows.push(buildGuardedRerankVariantRow({ variant: v, evals, queries }));
   }
   let temporalQueryCount = 0;
   for (const q of queries) {
@@ -1738,14 +1713,10 @@ export function buildGuardedRerankReport(args: {
   const recoveredByRerankerByVariant: Record<string, number> = {};
   const expansionInjectedCurrentByVariant: Record<string, number> = {};
   for (const row of rows) {
-    unchangedByVariant[row.variant.id] =
-      row.metrics.unchangedBecauseCurrentMissing;
-    recoveredByExpansionByVariant[row.variant.id] =
-      row.metrics.recoveredByExpansion;
-    recoveredByRerankerByVariant[row.variant.id] =
-      row.metrics.recoveredByReranker;
-    expansionInjectedCurrentByVariant[row.variant.id] =
-      row.metrics.expansionInjectedCurrentCount;
+    unchangedByVariant[row.variant.id] = row.metrics.unchangedBecauseCurrentMissing;
+    recoveredByExpansionByVariant[row.variant.id] = row.metrics.recoveredByExpansion;
+    recoveredByRerankerByVariant[row.variant.id] = row.metrics.recoveredByReranker;
+    expansionInjectedCurrentByVariant[row.variant.id] = row.metrics.expansionInjectedCurrentCount;
   }
   let semanticOverlay: GuardedRerankReport["semanticOverlay"];
   if (semantic) {
@@ -1782,7 +1753,7 @@ export function buildGuardedRerankReport(args: {
     if (missQueries.length !== miss) {
       throw new Error(
         `buildGuardedRerankReport: semantic overlay miss mismatch ` +
-          `(${missQueries.length} vs ${miss})`,
+          `(${missQueries.length} vs ${miss})`
       );
     }
   }
@@ -1825,30 +1796,24 @@ export function buildGuardedRerankReport(args: {
  * Render a `GuardedRerankReport` as a
  * human-readable text block. Deterministic.
  */
-export function formatGuardedRerankReport(
-  report: GuardedRerankReport,
-): string {
+export function formatGuardedRerankReport(report: GuardedRerankReport): string {
   const out: string[] = [];
-  out.push(
-    `# Supersedes-promote guard probe (source: ${report.sourceVariant})`,
-  );
+  out.push(`# Supersedes-promote guard probe (source: ${report.sourceVariant})`);
   if (report.recordCount !== null) {
     out.push(`#   (records: ${report.recordCount})`);
   }
   out.push(`#   (temporal queries: ${report.temporalQueryCount})`);
   out.push(
     `#   (simulated supersession edge map: ${report.supersessionEdgeMapSize} entries; ` +
-      `multi-anchor treatment: ${report.multiAnchorTreatmentSize} entries)`,
+      `multi-anchor treatment: ${report.multiAnchorTreatmentSize} entries)`
   );
-  out.push(
-    `#   (downstream reranker: ${report.downstreamRerankerId})`,
-  );
+  out.push(`#   (downstream reranker: ${report.downstreamRerankerId})`);
   out.push("");
 
   out.push("## Variant table (temporal slice)");
   out.push("");
   out.push(
-    "  category | variant | n | baseline@1 | after@1 | delta | recoveredByExpansion | currentMissing baseline->afterExpansion->afterRerank | regressions | tempRateLimit | promotionsBlocked | verdict",
+    "  category | variant | n | baseline@1 | after@1 | delta | recoveredByExpansion | currentMissing baseline->afterExpansion->afterRerank | regressions | tempRateLimit | promotionsBlocked | verdict"
   );
   for (const row of report.variants) {
     const m = row.metrics;
@@ -1863,7 +1828,7 @@ export function formatGuardedRerankReport(
         `${String(m.regressionCount).padStart(11)} | ` +
         `${String(m.tempRateLimitRegressionCount).padStart(13)} | ` +
         `${String(m.promotionsBlockedByGuard).padStart(17)} | ` +
-        `${row.verdict}`,
+        `${row.verdict}`
     );
   }
   out.push("");
@@ -1871,7 +1836,7 @@ export function formatGuardedRerankReport(
   out.push("## Variant table (clean / fixture-ambiguous split)");
   out.push("");
   out.push(
-    "  category | variant | cleanN | cleanBaseline@1 | cleanAfter@1 | cleanDelta | cleanRegressions | cleanTempRateLimit | ambigN | ambigBaseline@1 | ambigAfter@1 | ambigDelta | ambigRegressions",
+    "  category | variant | cleanN | cleanBaseline@1 | cleanAfter@1 | cleanDelta | cleanRegressions | cleanTempRateLimit | ambigN | ambigBaseline@1 | ambigAfter@1 | ambigDelta | ambigRegressions"
   );
   for (const row of report.variants) {
     const m = row.metrics;
@@ -1887,7 +1852,7 @@ export function formatGuardedRerankReport(
         `${String(m.fixtureAmbiguousBaselineCurrentTruthAt1).padStart(15)} | ` +
         `${String(m.fixtureAmbiguousAfterCurrentTruthAt1).padStart(12)} | ` +
         `${signedInt(m.fixtureAmbiguousCurrentTruthAt1Delta).padStart(10)} | ` +
-        `${String(m.fixtureAmbiguousRegressionCount).padStart(17)}`,
+        `${String(m.fixtureAmbiguousRegressionCount).padStart(17)}`
     );
   }
   out.push("");
@@ -1926,7 +1891,7 @@ export function formatGuardedRerankReport(
   out.push("## Multi-anchor subset per-query breakdown");
   out.push("");
   out.push(
-    `  total temporal queries whose currentTruthIds intersects SIMULATED_MULTI_ANCHOR_IDS: ${report.multiAnchorSubset.total}`,
+    `  total temporal queries whose currentTruthIds intersects SIMULATED_MULTI_ANCHOR_IDS: ${report.multiAnchorSubset.total}`
   );
   out.push("");
   out.push("  per-query breakdown (sorted by queryId):");
@@ -1934,12 +1899,12 @@ export function formatGuardedRerankReport(
     out.push("    (no multi-anchor queries on the temporal slice)");
   } else {
     const sorted = [...report.multiAnchorSubset.perQuery].sort((a, b) =>
-      a.queryId < b.queryId ? -1 : a.queryId > b.queryId ? 1 : 0,
+      a.queryId < b.queryId ? -1 : a.queryId > b.queryId ? 1 : 0
     );
     for (const p of sorted) {
       out.push(
         `    ${p.queryId.padEnd(48)}  family=${p.family.padEnd(10)}  ` +
-          `multi-anchor=${JSON.stringify(p.multiAnchorCurrentTruthIds)}`,
+          `multi-anchor=${JSON.stringify(p.multiAnchorCurrentTruthIds)}`
       );
     }
   }
@@ -1952,34 +1917,26 @@ export function formatGuardedRerankReport(
       "`currentMissing` after BOTH the candidate expansion step and the " +
       "downstream reranker. A query is `unchangedBecauseCurrentMissing` iff " +
       "the baseline was missing AND the after-expansion step was missing " +
-      "AND the after-rerank step was missing.",
+      "AND the after-rerank step was missing."
   );
   out.push("");
   out.push("  per-variant (unchangedBecauseCurrentMissing):");
-  for (const [vid, n] of Object.entries(
-    report.gapBreakdown.unchangedByVariant,
-  )) {
+  for (const [vid, n] of Object.entries(report.gapBreakdown.unchangedByVariant)) {
     out.push(`    ${vid.padEnd(60)}  ${n}`);
   }
   out.push("");
   out.push("  per-variant (recoveredByExpansion):");
-  for (const [vid, n] of Object.entries(
-    report.gapBreakdown.recoveredByExpansionByVariant,
-  )) {
+  for (const [vid, n] of Object.entries(report.gapBreakdown.recoveredByExpansionByVariant)) {
     out.push(`    ${vid.padEnd(60)}  ${n}`);
   }
   out.push("");
   out.push("  per-variant (recoveredByReranker):");
-  for (const [vid, n] of Object.entries(
-    report.gapBreakdown.recoveredByRerankerByVariant,
-  )) {
+  for (const [vid, n] of Object.entries(report.gapBreakdown.recoveredByRerankerByVariant)) {
     out.push(`    ${vid.padEnd(60)}  ${n}`);
   }
   out.push("");
   out.push("  per-variant (expansionInjectedCurrentCount):");
-  for (const [vid, n] of Object.entries(
-    report.gapBreakdown.expansionInjectedCurrentByVariant,
-  )) {
+  for (const [vid, n] of Object.entries(report.gapBreakdown.expansionInjectedCurrentByVariant)) {
     out.push(`    ${vid.padEnd(60)}  ${n}`);
   }
   out.push("");
@@ -1998,14 +1955,12 @@ export function formatGuardedRerankReport(
       "candidate from being displaced by a `supersedes-promote` of an " +
       "injected candidate. The metric `tempRateLimitRegressionCount` is " +
       "the headline evidence: the guarded primary MUST produce 0; the " +
-      "unguarded Exp 9 variants produce 1.",
+      "unguarded Exp 9 variants produce 1."
   );
   out.push("");
   out.push("  per-variant (tempRateLimitRegressionCount):");
   for (const row of report.variants) {
-    out.push(
-      `    ${row.variant.id.padEnd(60)}  ${row.metrics.tempRateLimitRegressionCount}`,
-    );
+    out.push(`    ${row.variant.id.padEnd(60)}  ${row.metrics.tempRateLimitRegressionCount}`);
   }
   out.push("");
 
@@ -2024,7 +1979,7 @@ export function formatGuardedRerankReport(
       "`injected` provenance flag at `remember` time would let a " +
       "runtime candidate generator + a runtime guarded re-ranker " +
       "reach the guarded primary's ceiling WITHOUT depending on the " +
-      "fixture truth at all'.",
+      "fixture truth at all'."
   );
   out.push("");
   return out.join("\n");
@@ -2047,5 +2002,11 @@ function signedInt(n: number): string {
 // type imports that are re-exported for
 // downstream tests but not used inside this
 // module's body.
-export type { TemporalTruthCategory, MultiAnchorRerankRule, MultiAnchorRerankVariant, CandidateExpansionRule, CandidateGenerationVariant };
+export type {
+  TemporalTruthCategory,
+  MultiAnchorRerankRule,
+  MultiAnchorRerankVariant,
+  CandidateExpansionRule,
+  CandidateGenerationVariant,
+};
 export { TEMPORAL_TRUTH_CATEGORIES, BUILTIN_CANDIDATE_GENERATION_VARIANTS };

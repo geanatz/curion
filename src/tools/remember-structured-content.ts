@@ -71,11 +71,7 @@ export const CLARIFICATION_SCHEMA = z
 export type Clarification = z.infer<typeof CLARIFICATION_SCHEMA>;
 
 /** The set of valid `status` values for the `remember` tool. */
-export const REMEMBER_STATUS_VALUES = [
-  "saved",
-  "rejected",
-  "provider_error",
-] as const;
+export const REMEMBER_STATUS_VALUES = ["saved", "rejected", "provider_error"] as const;
 export type RememberStatusValue = (typeof REMEMBER_STATUS_VALUES)[number];
 
 /**
@@ -105,6 +101,4 @@ export const REMEMBER_STRUCTURED_CONTENT_SCHEMA = z
   .strict();
 
 /** TypeScript type for the validated `structuredContent`. */
-export type RememberStructuredContent = z.infer<
-  typeof REMEMBER_STRUCTURED_CONTENT_SCHEMA
->;
+export type RememberStructuredContent = z.infer<typeof REMEMBER_STRUCTURED_CONTENT_SCHEMA>;

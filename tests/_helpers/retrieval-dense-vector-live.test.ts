@@ -38,15 +38,15 @@
  *   node --import tsx --test tests/retrieval-dense-vector-live.test.ts
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
-import path from "node:path";
-import os from "node:os";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { test } from "node:test";
 
 import {
-  TransformersJsEmbedder,
   type EmbedderMetadata,
+  TransformersJsEmbedder,
 } from "../../src/benchmark/variants/dense-embedder.ts";
 
 /**
@@ -55,9 +55,7 @@ import {
  * not leak state into the user's `.curion/` directory.
  */
 function makeCacheDir(): string {
-  return fs.mkdtempSync(
-    path.join(os.tmpdir(), "curion-dense-live-cache-"),
-  );
+  return fs.mkdtempSync(path.join(os.tmpdir(), "curion-dense-live-cache-"));
 }
 
 test("TransformersJsEmbedder live: init() produces a real semantic embedding", async (t) => {
@@ -100,7 +98,7 @@ test("TransformersJsEmbedder live: init() produces a real semantic embedding", a
   // few hundred ms; a cached run is faster).
   assert.ok(
     typeof meta.loadMs === "number" && meta.loadMs >= 0,
-    "loadMs must be a non-negative number",
+    "loadMs must be a non-negative number"
   );
   // Embed two pairs: a semantically related pair and
   // an unrelated pair. The cosine similarity of the
@@ -131,7 +129,7 @@ test("TransformersJsEmbedder live: init() produces a real semantic embedding", a
   assert.ok(
     related > unrelated,
     `semantically related pair should have higher cosine: ` +
-      `related=${related.toFixed(4)} vs unrelated=${unrelated.toFixed(4)}`,
+      `related=${related.toFixed(4)} vs unrelated=${unrelated.toFixed(4)}`
   );
   // L2 normalization: both vectors should be unit
   // length (the transformers.js backend applies
@@ -143,10 +141,7 @@ test("TransformersJsEmbedder live: init() produces a real semantic embedding", a
   };
   assert.ok(Math.abs(norm(a) - 1) < 1e-3, "vector a should be L2-normalized");
   assert.ok(Math.abs(norm(b) - 1) < 1e-3, "vector b should be L2-normalized");
-  assert.ok(
-    Math.abs(norm(c) - 1) < 1e-3,
-    "vector c should be L2-normalized",
-  );
+  assert.ok(Math.abs(norm(c) - 1) < 1e-3, "vector c should be L2-normalized");
   // Determinism: re-embed `a` and check it is
   // bit-identical. ONNX Runtime is bit-deterministic
   // for a fixed input and a fixed model.
@@ -161,10 +156,10 @@ test("TransformersJsEmbedder live: init() produces a real semantic embedding", a
   const latestMeta: EmbedderMetadata = embedder.metadata;
   assert.ok(
     typeof latestMeta.embedCount === "number" && latestMeta.embedCount >= 3,
-    "embedCount should be >= 3 after three embed calls",
+    "embedCount should be >= 3 after three embed calls"
   );
   assert.ok(
     typeof latestMeta.embedMs === "number" && latestMeta.embedMs >= 0,
-    "embedMs should be a non-negative number",
+    "embedMs should be a non-negative number"
   );
 });

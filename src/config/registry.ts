@@ -16,9 +16,9 @@
  *     `remember` or `recall` there and the project is not private.
  */
 
-import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
+import path from "node:path";
 import { logger } from "../logging/logger.js";
 
 const REGISTRY_DIRNAME = ".curion";
@@ -216,9 +216,7 @@ let listRegisteredProjectsStub: (() => RegistryEntry[]) | null = null;
  * Test hook: override `listRegisteredProjects`.
  * Production code does not call this.
  */
-export function setListRegisteredProjectsStub(
-  stub: () => RegistryEntry[],
-): void {
+export function setListRegisteredProjectsStub(stub: () => RegistryEntry[]): void {
   listRegisteredProjectsStub = stub;
 }
 

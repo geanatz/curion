@@ -110,6 +110,4 @@ export const RECALL_STRUCTURED_CONTENT_SCHEMA = z
   .strict();
 
 /** TypeScript type for the validated `structuredContent`. */
-export type RecallStructuredContent = z.infer<
-  typeof RECALL_STRUCTURED_CONTENT_SCHEMA
->;
+export type RecallStructuredContent = z.infer<typeof RECALL_STRUCTURED_CONTENT_SCHEMA>;

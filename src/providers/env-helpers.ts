@@ -39,9 +39,7 @@ function pickTrimmedString(...candidates: string[]): string {
  * unrecognized value so that missing env vars default to the
  * safe backwards-compatible behavior.
  */
-function readApiFormatValue(
-  name: string,
-): "openai-compatible" | "anthropic" {
+function readApiFormatValue(name: string): "openai-compatible" | "anthropic" {
   const raw = readTrimmedString(name);
   if (raw === "anthropic") return "anthropic";
   return "openai-compatible";
@@ -121,67 +119,65 @@ export interface LoadRoleConfigOpts {
 export function loadRoleConfig(opts: LoadRoleConfigOpts): AdapterRoleConfig {
   const overrides = opts.overrides ?? {};
 
-  const primaryApiFormat = overrides.primaryApiFormat
-    ?? readApiFormatValue("CURION_PRIMARY_API_FORMAT");
-  const fallbackApiFormat = overrides.fallbackApiFormat
-    ?? readApiFormatValue("CURION_FALLBACK_API_FORMAT");
+  const primaryApiFormat =
+    overrides.primaryApiFormat ?? readApiFormatValue("CURION_PRIMARY_API_FORMAT");
+  const fallbackApiFormat =
+    overrides.fallbackApiFormat ?? readApiFormatValue("CURION_FALLBACK_API_FORMAT");
 
   const primaryBaseUrlCandidate = pickTrimmedString(
     overrides.primaryBaseUrl ?? "",
-    readTrimmedString("CURION_PRIMARY_BASE_URL"),
+    readTrimmedString("CURION_PRIMARY_BASE_URL")
   );
   const fallbackBaseUrlCandidate = pickTrimmedString(
     overrides.fallbackBaseUrl ?? "",
-    readTrimmedString("CURION_FALLBACK_BASE_URL"),
+    readTrimmedString("CURION_FALLBACK_BASE_URL")
   );
 
   return {
-    primaryBaseUrl: primaryApiFormat === "anthropic" && !primaryBaseUrlCandidate
-      ? "https://api.anthropic.com"
-      : primaryBaseUrlCandidate,
+    primaryBaseUrl:
+      primaryApiFormat === "anthropic" && !primaryBaseUrlCandidate
+        ? "https://api.anthropic.com"
+        : primaryBaseUrlCandidate,
     primaryModel: pickTrimmedString(
       overrides.primaryModel ?? "",
-      readTrimmedString("CURION_PRIMARY_MODEL"),
+      readTrimmedString("CURION_PRIMARY_MODEL")
     ),
     primaryProviderLabel: pickTrimmedString(
       overrides.primaryProviderLabel ?? "",
-      readTrimmedString("CURION_PRIMARY_PROVIDER_LABEL"),
+      readTrimmedString("CURION_PRIMARY_PROVIDER_LABEL")
     ),
     primaryApiFormat,
-    primaryStrictJson: overrides.primaryStrictJson ?? (
-      opts.strictJson && process.env.CURION_PRIMARY_STRICT_JSON === "true"
-    ),
-    fallbackBaseUrl: fallbackApiFormat === "anthropic" && !fallbackBaseUrlCandidate
-      ? "https://api.anthropic.com"
-      : fallbackBaseUrlCandidate,
+    primaryStrictJson:
+      overrides.primaryStrictJson ??
+      (opts.strictJson && process.env.CURION_PRIMARY_STRICT_JSON === "true"),
+    fallbackBaseUrl:
+      fallbackApiFormat === "anthropic" && !fallbackBaseUrlCandidate
+        ? "https://api.anthropic.com"
+        : fallbackBaseUrlCandidate,
     fallbackModel: pickTrimmedString(
       overrides.fallbackModel ?? "",
-      readTrimmedString("CURION_FALLBACK_MODEL"),
+      readTrimmedString("CURION_FALLBACK_MODEL")
     ),
     fallbackProviderLabel: pickTrimmedString(
       overrides.fallbackProviderLabel ?? "",
-      readTrimmedString("CURION_FALLBACK_PROVIDER_LABEL"),
+      readTrimmedString("CURION_FALLBACK_PROVIDER_LABEL")
     ),
     fallbackApiFormat,
-    fallbackStrictJson: overrides.fallbackStrictJson ?? (
-      opts.strictJson && process.env.CURION_FALLBACK_STRICT_JSON === "true"
-    ),
+    fallbackStrictJson:
+      overrides.fallbackStrictJson ??
+      (opts.strictJson && process.env.CURION_FALLBACK_STRICT_JSON === "true"),
     primaryApiKey: pickTrimmedString(
       overrides.primaryApiKey ?? "",
-      readTrimmedString("CURION_PRIMARY_API_KEY"),
+      readTrimmedString("CURION_PRIMARY_API_KEY")
     ),
     fallbackApiKey: pickTrimmedString(
       overrides.fallbackApiKey ?? "",
-      readTrimmedString("CURION_FALLBACK_API_KEY"),
+      readTrimmedString("CURION_FALLBACK_API_KEY")
     ),
-    timeoutMs: overrides.timeoutMs ?? readNumber(
-      "CURION_ADAPTER_TIMEOUT_MS",
-      opts.defaults.timeoutMs,
-    ),
-    maxTokens: overrides.maxTokens ?? readNumber(
-      "CURION_ADAPTER_MAX_TOKENS",
-      opts.defaults.maxTokens,
-    ),
+    timeoutMs:
+      overrides.timeoutMs ?? readNumber("CURION_ADAPTER_TIMEOUT_MS", opts.defaults.timeoutMs),
+    maxTokens:
+      overrides.maxTokens ?? readNumber("CURION_ADAPTER_MAX_TOKENS", opts.defaults.maxTokens),
   };
 }
 

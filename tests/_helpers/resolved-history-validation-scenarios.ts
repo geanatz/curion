@@ -155,11 +155,7 @@ export interface Verdict {
   warning: boolean;
   /** Detector reason surfaced. `"none"` is asserted
    *  when the detector is expected to stay silent. */
-  reason:
-    | "conflicting-candidates"
-    | "older-variant-suspected"
-    | "resolved-history"
-    | "none";
+  reason: "conflicting-candidates" | "older-variant-suspected" | "resolved-history" | "none";
   /** Public outcome status. */
   status: ExpectedStatus;
   /** Short human-readable note. The runner does not
@@ -172,11 +168,7 @@ export interface Verdict {
 
 export interface ExpectedOutcome {
   warning: boolean;
-  reason?:
-    | "conflicting-candidates"
-    | "older-variant-suspected"
-    | "resolved-history"
-    | "none";
+  reason?: "conflicting-candidates" | "older-variant-suspected" | "resolved-history" | "none";
   status?: ExpectedStatus;
   /** Free-form note for the runner. Used for both
    *  current-actual and future-desired gap rows. */
@@ -291,7 +283,8 @@ export const SCENARIOS: readonly Scenario[] = [
     kind: "expect-current-silent-future-resolved",
     rows: [
       {
-        summary: "Render was the previous hosting platform. The current hosting platform is Fly.io.",
+        summary:
+          "Render was the previous hosting platform. The current hosting platform is Fly.io.",
         tags: ["hosting"],
       },
       {
@@ -854,20 +847,13 @@ export const SCENARIOS: readonly Scenario[] = [
  * ids. `otherId` is the id the `RowRef` should be
  * replaced with.
  */
-export function resolveIdList(
-  list: IdList | undefined,
-  otherId: number,
-): number[] {
+export function resolveIdList(list: IdList | undefined, otherId: number): number[] {
   if (!Array.isArray(list)) return [];
   const out: number[] = [];
   for (const x of list) {
     if (typeof x === "number") {
       out.push(x);
-    } else if (
-      x !== null &&
-      typeof x === "object" &&
-      (x as RowRef).ref === "other"
-    ) {
+    } else if (x !== null && typeof x === "object" && (x as RowRef).ref === "other") {
       out.push(otherId);
     }
   }
@@ -986,33 +972,19 @@ export function newReportRows(): ScenarioReportRow[] {
 }
 
 /** Build the final report from a buffer of rows. */
-export function buildReport(
-  rows: readonly ScenarioReportRow[],
-): ValidationReport {
-  const expectedCurrentWarningCount = rows.filter(
-    (r) => r.expectedCurrentWarning,
-  ).length;
+export function buildReport(rows: readonly ScenarioReportRow[]): ValidationReport {
+  const expectedCurrentWarningCount = rows.filter((r) => r.expectedCurrentWarning).length;
   const actualWarningCount = rows.filter((r) => r.actualWarning).length;
   const futureResolvedHistoryExpectedCount = rows.filter(
-    (r) => r.expectedFutureReason === "resolved-history",
+    (r) => r.expectedFutureReason === "resolved-history"
   ).length;
-  const documentedCapabilityGaps = rows.filter(
-    (r) => r.documentedCapabilityGap,
-  ).length;
+  const documentedCapabilityGaps = rows.filter((r) => r.documentedCapabilityGap).length;
   const futureResolvedHistoryAchievedCount = rows.filter(
-    (r) =>
-      r.expectedFutureReason === "resolved-history" &&
-      r.actualReason === "resolved-history",
+    (r) => r.expectedFutureReason === "resolved-history" && r.actualReason === "resolved-history"
   ).length;
-  const recencyOnlyNotResolvedChecks = rows.filter((r) =>
-    r.id === "SG3" || r.id === "SG2",
-  ).length;
-  const explicitUnresolvedConflictChecks = rows.filter(
-    (r) => r.id === "SG6",
-  ).length;
-  const stateActiveChecks = rows.filter(
-    (r) => r.stateActiveOk !== null,
-  ).length;
+  const recencyOnlyNotResolvedChecks = rows.filter((r) => r.id === "SG3" || r.id === "SG2").length;
+  const explicitUnresolvedConflictChecks = rows.filter((r) => r.id === "SG6").length;
+  const stateActiveChecks = rows.filter((r) => r.stateActiveOk !== null).length;
   const apiAsserted = rows.filter((r) => r.apiDrift !== null);
   const apiDriftChecks = {
     asserted: apiAsserted.length,
@@ -1029,9 +1001,7 @@ export function buildReport(
     answered: rows.filter((r) => r.actualStatus === "answered").length,
     no_memory: rows.filter((r) => r.actualStatus === "no_memory").length,
     rejected: rows.filter((r) => r.actualStatus === "rejected").length,
-    provider_error: rows.filter(
-      (r) => r.actualStatus === "provider_error",
-    ).length,
+    provider_error: rows.filter((r) => r.actualStatus === "provider_error").length,
   };
   const regressions = rows.filter((r) => r.verdict === "regression").length;
   return {
@@ -1061,53 +1031,45 @@ export function formatReport(report: ValidationReport): string {
   lines.push("=============================================");
   lines.push(`total scenarios                       : ${report.totalScenarios}`);
   lines.push(
-    `future-resolved-history expected      : ${report.futureResolvedHistoryExpectedCount}`,
+    `future-resolved-history expected      : ${report.futureResolvedHistoryExpectedCount}`
   );
   lines.push(
     `current capability gaps (documented)  : ${report.documentedCapabilityGaps} ` +
-      `(expected 0 after Phase J; >0 means a future gap is still open)`,
+      `(expected 0 after Phase J; >0 means a future gap is still open)`
   );
   lines.push(
     `future-resolved-history achieved      : ${report.futureResolvedHistoryAchievedCount} ` +
       `(expected 3 after Phase J: SG1, SG4, SG7; 0 means the future ` +
-      `behavior is not yet produced by the current implementation)`,
+      `behavior is not yet produced by the current implementation)`
   );
-  lines.push(
-    `recency-only not-resolved checks      : ${report.recencyOnlyNotResolvedChecks}`,
-  );
-  lines.push(
-    `explicit-unresolved-conflict checks   : ${report.explicitUnresolvedConflictChecks}`,
-  );
-  lines.push(
-    `state-active / retrievable checks     : ${report.stateActiveChecks}`,
-  );
+  lines.push(`recency-only not-resolved checks      : ${report.recencyOnlyNotResolvedChecks}`);
+  lines.push(`explicit-unresolved-conflict checks   : ${report.explicitUnresolvedConflictChecks}`);
+  lines.push(`state-active / retrievable checks     : ${report.stateActiveChecks}`);
   lines.push(
     `status preservation      : answered=${report.statusPreservation.answered}, ` +
       `no_memory=${report.statusPreservation.no_memory}, ` +
       `rejected=${report.statusPreservation.rejected}, ` +
-      `provider_error=${report.statusPreservation.provider_error}`,
+      `provider_error=${report.statusPreservation.provider_error}`
   );
   lines.push(
     `api drift checks         : asserted=${report.apiDriftChecks.asserted}, ` +
       `passed=${report.apiDriftChecks.passed}, ` +
-      `failed=${report.apiDriftChecks.failed}`,
+      `failed=${report.apiDriftChecks.failed}`
   );
   lines.push(
     `provider-call checks     : asserted=${report.providerCallChecks.asserted}, ` +
       `passed=${report.providerCallChecks.passed}, ` +
-      `failed=${report.providerCallChecks.failed}`,
+      `failed=${report.providerCallChecks.failed}`
   );
   lines.push(`regressions (current invariants)      : ${report.regressions}`);
   lines.push("");
   lines.push("Per-scenario verdicts:");
   for (const r of report.rows) {
     const gapTag = r.documentedCapabilityGap ? " [gap]" : "";
-    const expectedCalls =
-      r.expectedProviderCalls === null ? "n/a" : `${r.expectedProviderCalls}`;
+    const expectedCalls = r.expectedProviderCalls === null ? "n/a" : `${r.expectedProviderCalls}`;
     const actualCalls = `${r.actualProviderCalls}`;
     const callMatch =
-      r.expectedProviderCalls === null ||
-      r.expectedProviderCalls === r.actualProviderCalls
+      r.expectedProviderCalls === null || r.expectedProviderCalls === r.actualProviderCalls
         ? "ok"
         : "MISMATCH";
     lines.push(
@@ -1116,7 +1078,7 @@ export function formatReport(report: ValidationReport): string {
         `future=${r.expectedFutureStatus}/${r.expectedFutureWarning ? "warn" : "ok"} ` +
         `actual=${r.actualStatus}/${r.actualWarning ? "warn" : "ok"} ` +
         `reason=${r.actualReason} ` +
-        `calls=${actualCalls}/${expectedCalls}(${callMatch})${gapTag}  ${r.name}`,
+        `calls=${actualCalls}/${expectedCalls}(${callMatch})${gapTag}  ${r.name}`
     );
   }
   if (report.documentedCapabilityGaps > 0) {

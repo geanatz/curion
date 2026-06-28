@@ -232,9 +232,8 @@ export type AmbiguitySignal =
  */
 export function detectAmbiguity(input: AmbiguityInput): AmbiguitySignal {
   const { topCandidates, answer } = input;
-  const asOf = typeof input.asOf === "number" && Number.isFinite(input.asOf)
-    ? Math.trunc(input.asOf)
-    : 0;
+  const asOf =
+    typeof input.asOf === "number" && Number.isFinite(input.asOf) ? Math.trunc(input.asOf) : 0;
 
   // Defensive: a non-array `topCandidates` becomes an empty
   // list. The type is `readonly` so a structural type bug
@@ -316,7 +315,7 @@ export function detectAmbiguity(input: AmbiguityInput): AmbiguitySignal {
  * is conservative and the bound is `MAX_AMBIGUITY_IDS`.
  */
 function findMutualStoredConflict(
-  list: readonly SafeMemorySummaryWithRelationship[],
+  list: readonly SafeMemorySummaryWithRelationship[]
 ): [number, number] | null {
   const idSet = new Set<number>();
   for (const c of list) {
@@ -352,7 +351,7 @@ function findMutualStoredConflict(
  */
 function storedConflictConfidence(
   list: readonly SafeMemorySummaryWithRelationship[],
-  pair: [number, number],
+  pair: [number, number]
 ): number {
   const a = list.find((x) => x.id === pair[0]);
   const b = list.find((x) => x.id === pair[1]);
@@ -369,7 +368,7 @@ function storedConflictConfidence(
  *     `relationship.olderVariantsOf` includes `a`.
  */
 function findMutualStoredOlderVariant(
-  list: readonly SafeMemorySummaryWithRelationship[],
+  list: readonly SafeMemorySummaryWithRelationship[]
 ): [number, number] | null {
   const idSet = new Set<number>();
   for (const c of list) {
@@ -402,7 +401,7 @@ function findMutualStoredOlderVariant(
  */
 function storedOlderVariantConfidence(
   list: readonly SafeMemorySummaryWithRelationship[],
-  pair: [number, number],
+  pair: [number, number]
 ): number {
   const a = list.find((x) => x.id === pair[0]);
   const b = list.find((x) => x.id === pair[1]);
@@ -429,7 +428,7 @@ interface LexicalNegationHit {
  */
 function lexicalNegationSignal(
   list: readonly SafeMemorySummaryWithRelationship[],
-  answer: string,
+  answer: string
 ): LexicalNegationHit | null {
   if (answer.length === 0) return null;
   for (let i = 0; i < list.length; i += 1) {
@@ -589,9 +588,7 @@ function clamp01(n: number): number {
  * helper in `relationship.ts`; not imported to keep the two
  * modules replaceable.
  */
-function isSafeMemorySummaryWithRelationship(
-  v: unknown,
-): v is SafeMemorySummaryWithRelationship {
+function isSafeMemorySummaryWithRelationship(v: unknown): v is SafeMemorySummaryWithRelationship {
   if (typeof v !== "object" || v === null) return false;
   const o = v as Record<string, unknown>;
   if (typeof o.id !== "number" || !Number.isFinite(o.id)) return false;

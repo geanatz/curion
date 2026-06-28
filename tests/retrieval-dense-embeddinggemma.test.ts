@@ -86,30 +86,30 @@
  *      registers exactly `remember` + `recall`.
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { test } from "node:test";
 
+import { BENCHMARK_RECORDS } from "../src/benchmark/corpus.ts";
+import { buildCandidates } from "../src/benchmark/retrieval-runner.ts";
+import { parseRetrievalCli } from "../src/benchmark/retrieval-runner.ts";
 import {
-  createDenseEmbedder,
+  type DenseEmbedder,
+  type EmbedderMetadata,
   StubDeterministicDenseEmbedder,
   TransformersJsEmbedder,
-  type EmbedderMetadata,
-  type DenseEmbedder,
+  createDenseEmbedder,
 } from "../src/benchmark/variants/dense-embedder.ts";
-import {
-  EmbeddingGemmaEmbedder,
-  type EmbeddingGemmaTextKind,
-} from "../src/benchmark/variants/embeddinggemma-embedder.ts";
-import { buildCandidates } from "../src/benchmark/retrieval-runner.ts";
 import {
   rankDenseVectorAsync,
   rankDenseVectorWithMetadataAsync,
 } from "../src/benchmark/variants/dense-vector.ts";
-import { parseRetrievalCli } from "../src/benchmark/retrieval-runner.ts";
+import {
+  EmbeddingGemmaEmbedder,
+  type EmbeddingGemmaTextKind,
+} from "../src/benchmark/variants/embeddinggemma-embedder.ts";
 import { PUBLIC_TOOL_NAMES } from "../src/server.ts";
-import { BENCHMARK_RECORDS } from "../src/benchmark/corpus.ts";
 import { walkTs } from "./_helpers/fs-walk.ts";
 
 // ---------------------------------------------------------------------------
@@ -123,41 +123,30 @@ test("EmbeddingGemmaEmbedder: construction exposes the documented metadata", () 
   assert.equal(
     m.modelId,
     "onnx-community/embeddinggemma-300m-ONNX",
-    "default model id must be the pinned EmbeddingGemma-300M ONNX",
+    "default model id must be the pinned EmbeddingGemma-300M ONNX"
   );
   assert.equal(m.dim, 768, "EmbeddingGemma-300M produces 768-dim vectors");
-  assert.equal(
-    m.quantized,
-    true,
-    "default dtype q8 means the embedder reports quantized=true",
-  );
-  assert.equal(
-    m.status,
-    "skipped",
-    "construction is in skipped status until init()",
-  );
+  assert.equal(m.quantized, true, "default dtype q8 means the embedder reports quantized=true");
+  assert.equal(m.status, "skipped", "construction is in skipped status until init()");
   // The description surfaces the key knobs so a
   // reviewer reading the metadata can audit the
   // configuration.
   assert.ok(
     typeof m.description === "string" && m.description.includes("q8"),
-    `description must mention the q8 dtype; got: ${m.description}`,
+    `description must mention the q8 dtype; got: ${m.description}`
   );
   assert.ok(
     m.description.includes("mean"),
-    `description must mention the mean pooling; got: ${m.description}`,
+    `description must mention the mean pooling; got: ${m.description}`
   );
   // The license caveat is surfaced on the description
   // so a reviewer can audit it on the artifact.
   assert.ok(
     m.description.includes("Gemma"),
-    `description must mention the Gemma license; got: ${m.description}`,
+    `description must mention the Gemma license; got: ${m.description}`
   );
   // The cache dir is the documented default.
-  assert.equal(
-    m.cacheDir,
-    `${process.cwd()}/.curion/transformers-cache`,
-  );
+  assert.equal(m.cacheDir, `${process.cwd()}/.curion/transformers-cache`);
 });
 
 test("EmbeddingGemmaEmbedder: custom modelId, dtype, queryTask, pooling, cacheDir are honored", () => {
@@ -197,12 +186,9 @@ test("EmbeddingGemmaEmbedder.buildQueryPrefix: produces the documented task/quer
   // space, no trailing space.
   const prefix = EmbeddingGemmaEmbedder.buildQueryPrefix(
     "search result",
-    "What is the team's release schedule?",
+    "What is the team's release schedule?"
   );
-  assert.equal(
-    prefix,
-    "task: search result | query: What is the team's release schedule?",
-  );
+  assert.equal(prefix, "task: search result | query: What is the team's release schedule?");
 });
 
 test("EmbeddingGemmaEmbedder.buildQueryPrefix: empty task / empty query are still well-formed", () => {
@@ -235,13 +221,8 @@ test("EmbeddingGemmaEmbedder.buildDocumentPrefix: produces the documented title/
   //   title: none | text: <text>
   // with single spaces around the pipe, no leading
   // space, no trailing space.
-  const prefix = EmbeddingGemmaEmbedder.buildDocumentPrefix(
-    "Postgres is the primary data store",
-  );
-  assert.equal(
-    prefix,
-    "title: none | text: Postgres is the primary data store",
-  );
+  const prefix = EmbeddingGemmaEmbedder.buildDocumentPrefix("Postgres is the primary data store");
+  assert.equal(prefix, "title: none | text: Postgres is the primary data store");
 });
 
 test("EmbeddingGemmaEmbedder.buildDocumentPrefix: empty text is still well-formed", () => {
@@ -371,11 +352,7 @@ test("EmbeddingGemmaEmbedder: fallback path is input-driven (embedQuery / embedD
       break;
     }
   }
-  assert.equal(
-    equal,
-    true,
-    "fallback path: identical input produces identical vector",
-  );
+  assert.equal(equal, true, "fallback path: identical input produces identical vector");
 });
 
 test("EmbeddingGemmaEmbedder: EmbeddingGemmaTextKind is the documented union", () => {
@@ -430,7 +407,7 @@ test("EmbeddingGemmaEmbedder: init() without a real library reports `error` meta
   // integration test covers the success path.
   if (!(await isEmbeddingGemmaLibraryMissing())) {
     t.skip(
-      "@huggingface/transformers is installed; the init-failure path is exercised in CI where the package is absent",
+      "@huggingface/transformers is installed; the init-failure path is exercised in CI where the package is absent"
     );
     return;
   }
@@ -448,21 +425,17 @@ test("EmbeddingGemmaEmbedder: init() without a real library reports `error` meta
   assert.equal(
     embedder.metadata.status,
     "error",
-    "init() must flip status to 'error' when the library is not installed",
+    "init() must flip status to 'error' when the library is not installed"
   );
   // The error message is captured so a
   // reviewer can audit the failure on the
   // artifact.
   assert.ok(
-    typeof embedder.metadata.errorMessage === "string" &&
-      embedder.metadata.errorMessage.length > 0,
-    "errorMessage must be a non-empty string on init failure",
+    typeof embedder.metadata.errorMessage === "string" && embedder.metadata.errorMessage.length > 0,
+    "errorMessage must be a non-empty string on init failure"
   );
   // The loadMs is captured even on failure.
-  assert.ok(
-    typeof embedder.metadata.loadMs === "number" &&
-      embedder.metadata.loadMs >= 0,
-  );
+  assert.ok(typeof embedder.metadata.loadMs === "number" && embedder.metadata.loadMs >= 0);
 });
 
 test("EmbeddingGemmaEmbedder: embed() / embedBatch() fall back to the stub when init() failed", async (t) => {
@@ -473,7 +446,7 @@ test("EmbeddingGemmaEmbedder: embed() / embedBatch() fall back to the stub when 
   // not exercised and this test is skipped.
   if (!(await isEmbeddingGemmaLibraryMissing())) {
     t.skip(
-      "@huggingface/transformers is installed; the init-failure fallback is exercised in CI where the package is absent",
+      "@huggingface/transformers is installed; the init-failure fallback is exercised in CI where the package is absent"
     );
     return;
   }
@@ -507,15 +480,9 @@ test("EmbeddingGemmaEmbedder: embed() / embedBatch() fall back to the stub when 
 // ---------------------------------------------------------------------------
 
 test("createDenseEmbedder: 'embeddinggemma' spec dispatches to EmbeddingGemmaEmbedder", async () => {
-  const { embedder, spec } = await createDenseEmbedder(
-    "embeddinggemma",
-    { skip: true },
-  );
+  const { embedder, spec } = await createDenseEmbedder("embeddinggemma", { skip: true });
   assert.equal(embedder.metadata.backend, "embeddinggemma");
-  assert.equal(
-    embedder.metadata.modelId,
-    "onnx-community/embeddinggemma-300m-ONNX",
-  );
+  assert.equal(embedder.metadata.modelId, "onnx-community/embeddinggemma-300m-ONNX");
   // The factory skips init when `skip: true`
   // so the test does not require the library.
   // The `status: "skipped"` placeholder is
@@ -527,10 +494,7 @@ test("createDenseEmbedder: 'embeddinggemma' spec dispatches to EmbeddingGemmaEmb
 });
 
 test("createDenseEmbedder: 'embedding-gemma' is an alias for 'embeddinggemma'", async () => {
-  const { embedder, spec } = await createDenseEmbedder(
-    "embedding-gemma",
-    { skip: true },
-  );
+  const { embedder, spec } = await createDenseEmbedder("embedding-gemma", { skip: true });
   assert.equal(embedder.metadata.backend, "embeddinggemma");
   assert.equal(spec, "embedding-gemma");
 });
@@ -540,10 +504,7 @@ test("createDenseEmbedder: 'embeddinggemma:model=...,dtype=...,queryTask=...,poo
     "embeddinggemma:model=org/custom-embeddinggemma-onnx,dtype=fp16,queryTask=Custom%20retrieval%20task,pooling=last_token";
   const { embedder } = await createDenseEmbedder(specStr, { skip: true });
   assert.equal(embedder.metadata.backend, "embeddinggemma");
-  assert.equal(
-    embedder.metadata.modelId,
-    "org/custom-embeddinggemma-onnx",
-  );
+  assert.equal(embedder.metadata.modelId, "org/custom-embeddinggemma-onnx");
   // The description surfaces the custom values.
   assert.ok(embedder.metadata.description.includes("fp16"));
   assert.ok(embedder.metadata.description.includes("last_token"));
@@ -554,10 +515,7 @@ test("createDenseEmbedder: 'embeddinggemma:pooling=<unknown>' falls back to the 
   // An unknown pooling value is silently
   // ignored (the EmbeddingGemma embedder
   // constructor uses its default `mean`).
-  const { embedder } = await createDenseEmbedder(
-    "embeddinggemma:pooling=unknown",
-    { skip: true },
-  );
+  const { embedder } = await createDenseEmbedder("embeddinggemma:pooling=unknown", { skip: true });
   assert.equal(embedder.metadata.backend, "embeddinggemma");
   assert.ok(embedder.metadata.description.includes("mean"));
 });
@@ -568,10 +526,7 @@ test("createDenseEmbedder: object spec with backend=embeddinggemma dispatches to
     cacheDir: "/tmp/curion-embeddinggemma-obj-spec-cache",
   });
   assert.equal(embedder.metadata.backend, "embeddinggemma");
-  assert.equal(
-    embedder.metadata.cacheDir,
-    "/tmp/curion-embeddinggemma-obj-spec-cache",
-  );
+  assert.equal(embedder.metadata.cacheDir, "/tmp/curion-embeddinggemma-obj-spec-cache");
 });
 
 test("createDenseEmbedder: 'embeddinggemma' without skip calls init() and may report error when library is missing", async (t) => {
@@ -581,7 +536,7 @@ test("createDenseEmbedder: 'embeddinggemma' without skip calls init() and may re
   // test is not exercised; skip in that env.
   if (!(await isEmbeddingGemmaLibraryMissing())) {
     t.skip(
-      "@huggingface/transformers is installed; the init-failure factory contract is exercised in CI where the package is absent",
+      "@huggingface/transformers is installed; the init-failure factory contract is exercised in CI where the package is absent"
     );
     return;
   }
@@ -598,8 +553,7 @@ test("createDenseEmbedder: 'embeddinggemma' without skip calls init() and may re
   assert.equal(embedder.metadata.backend, "embeddinggemma");
   assert.equal(embedder.metadata.status, "error");
   assert.ok(
-    typeof embedder.metadata.errorMessage === "string" &&
-      embedder.metadata.errorMessage.length > 0,
+    typeof embedder.metadata.errorMessage === "string" && embedder.metadata.errorMessage.length > 0
   );
 });
 
@@ -616,19 +570,13 @@ test("createDenseEmbedder: existing 'stub-dense' / 'transformersjs' / 'qwen3' sp
   // still dispatch to it.
   const xjs = await createDenseEmbedder("transformersjs", { skip: true });
   assert.equal(xjs.embedder.metadata.backend, "transformersjs");
-  assert.equal(
-    xjs.embedder.metadata.modelId,
-    "Xenova/all-MiniLM-L6-v2",
-  );
+  assert.equal(xjs.embedder.metadata.modelId, "Xenova/all-MiniLM-L6-v2");
   // The Qwen3 path must continue to work
   // unchanged (the EmbeddingGemma work is
   // additive to the Qwen3 work).
   const qwen3 = await createDenseEmbedder("qwen3", { skip: true });
   assert.equal(qwen3.embedder.metadata.backend, "qwen3");
-  assert.equal(
-    qwen3.embedder.metadata.modelId,
-    "onnx-community/Qwen3-Embedding-0.6B-ONNX",
-  );
+  assert.equal(qwen3.embedder.metadata.modelId, "onnx-community/Qwen3-Embedding-0.6B-ONNX");
 });
 
 test("createDenseEmbedder: object spec with backend=stub-dense dispatches to stub-dense", async () => {
@@ -639,10 +587,7 @@ test("createDenseEmbedder: object spec with backend=stub-dense dispatches to stu
 });
 
 test("createDenseEmbedder: unknown spec is rejected", async () => {
-  await assert.rejects(
-    async () => createDenseEmbedder("not-a-real-spec"),
-    /unknown spec/,
-  );
+  await assert.rejects(async () => createDenseEmbedder("not-a-real-spec"), /unknown spec/);
 });
 
 // ---------------------------------------------------------------------------
@@ -693,24 +638,16 @@ test("rankDenseVectorWithMetadataAsync: kind='query' dispatches to embedQuery fo
     kind: "query",
   });
   // Exactly one embedQuery call for the query.
-  assert.equal(
-    embedQueryCalls,
-    1,
-    "kind=query should call embedQuery exactly once",
-  );
+  assert.equal(embedQueryCalls, 1, "kind=query should call embedQuery exactly once");
   // The candidates go through embedBatch
   // (document-mode batch). `embed` is NOT
   // called for the candidates OR the query
   // when the embedder exposes `embedQuery`.
-  assert.equal(
-    embedCalls,
-    0,
-    "kind=query should not call embed (the document path) for the query",
-  );
+  assert.equal(embedCalls, 0, "kind=query should not call embed (the document path) for the query");
   // The embedBatch call is the document path.
   assert.ok(
     recorded.some((r) => r.method === "embedBatch"),
-    "ranker must call embedBatch for the documents",
+    "ranker must call embedBatch for the documents"
   );
 });
 
@@ -749,11 +686,7 @@ test("rankDenseVectorWithMetadataAsync: kind=undefined (default) does not invoke
     embedder: fakeEmbeddingGemma,
     // kind is undefined -> default "document"
   });
-  assert.equal(
-    embedQueryCalls,
-    0,
-    "default kind should not call embedQuery",
-  );
+  assert.equal(embedQueryCalls, 0, "default kind should not call embedQuery");
 });
 
 test("rankDenseVectorAsync: kind-agnostic embedders (stub / MiniLM) continue to use embedBatch", async () => {
@@ -783,22 +716,12 @@ test("rankDenseVectorAsync: kind-agnostic embedders (stub / MiniLM) continue to 
 // ---------------------------------------------------------------------------
 
 test("parseRetrievalCli: --embedder embeddinggemma is accepted", () => {
-  const opts = parseRetrievalCli([
-    "--variant",
-    "vector-dense",
-    "--embedder",
-    "embeddinggemma",
-  ]);
+  const opts = parseRetrievalCli(["--variant", "vector-dense", "--embedder", "embeddinggemma"]);
   assert.equal(opts.denseEmbedderSpec, "embeddinggemma");
 });
 
 test("parseRetrievalCli: --embedder embedding-gemma is accepted (alias)", () => {
-  const opts = parseRetrievalCli([
-    "--variant",
-    "vector-dense",
-    "--embedder",
-    "embedding-gemma",
-  ]);
+  const opts = parseRetrievalCli(["--variant", "vector-dense", "--embedder", "embedding-gemma"]);
   assert.equal(opts.denseEmbedderSpec, "embedding-gemma");
 });
 
@@ -811,7 +734,7 @@ test("parseRetrievalCli: --embedder embeddinggemma:model=...,dtype=... parses th
   ]);
   assert.equal(
     opts.denseEmbedderSpec,
-    "embeddinggemma:model=org/custom,dtype=fp16,pooling=last_token",
+    "embeddinggemma:model=org/custom,dtype=fp16,pooling=last_token"
   );
 });
 
@@ -875,7 +798,7 @@ test("parseRetrievalCli: --embedder embeddinggemma:model=...,queryTask=... --den
   assert.equal(
     spec.spec,
     "embeddinggemma:model=org/custom,dtype=fp16,queryTask=Custom%20task,pooling=last_token",
-    "the original spec string must be preserved as baseObj.spec",
+    "the original spec string must be preserved as baseObj.spec"
   );
 });
 
@@ -887,20 +810,14 @@ test("createDenseEmbedder: object spec with backend=embeddinggemma + spec=embedd
   // preserved end-to-end.
   const { embedder } = await createDenseEmbedder({
     backend: "embeddinggemma",
-    spec:
-      "embeddinggemma:model=org/custom-embeddinggemma-onnx,dtype=fp16,queryTask=Custom%20task,pooling=last_token",
+    spec: "embeddinggemma:model=org/custom-embeddinggemma-onnx,dtype=fp16,queryTask=Custom%20task,pooling=last_token",
     skip: true,
   });
   assert.equal(embedder.metadata.backend, "embeddinggemma");
-  assert.equal(
-    embedder.metadata.modelId,
-    "org/custom-embeddinggemma-onnx",
-  );
+  assert.equal(embedder.metadata.modelId, "org/custom-embeddinggemma-onnx");
   assert.ok(embedder.metadata.description.includes("fp16"));
   assert.ok(embedder.metadata.description.includes("last_token"));
-  assert.ok(
-    embedder.metadata.description.includes("Custom%20task"),
-  );
+  assert.ok(embedder.metadata.description.includes("Custom%20task"));
 });
 
 test("parseRetrievalCli: --embedder transformersjs --dense-cache-dir composes backend=transformersjs (backward compat)", () => {
@@ -953,45 +870,35 @@ test("StubDeterministicDenseEmbedder: continues to be the deterministic control"
 
 test("EmbeddingGemma benchmark is benchmark-only: production recall() controller is not modified", () => {
   const recallSrc = fs.readFileSync(
-    path.join(
-      import.meta.dirname,
-      "..",
-      "src",
-      "controller",
-      "recall-controller.ts",
-    ),
-    "utf8",
+    path.join(import.meta.dirname, "..", "src", "controller", "recall-controller.ts"),
+    "utf8"
   );
   assert.doesNotMatch(
     recallSrc,
     /embeddinggemma|EmbeddingGemma/i,
-    "recall controller must NOT import EmbeddingGemma modules",
+    "recall controller must NOT import EmbeddingGemma modules"
   );
   const seamSrc = fs.readFileSync(
     path.join(import.meta.dirname, "..", "src", "retrieval", "seam.ts"),
-    "utf8",
+    "utf8"
   );
   assert.doesNotMatch(
     seamSrc,
     /embeddinggemma|EmbeddingGemma/i,
-    "retrieval/seam.ts must NOT import EmbeddingGemma modules",
+    "retrieval/seam.ts must NOT import EmbeddingGemma modules"
   );
   // The MCP server still exposes exactly two
   // tools.
   const serverSrc = fs.readFileSync(
     path.join(import.meta.dirname, "..", "src", "server.ts"),
-    "utf8",
+    "utf8"
   );
   const toolCallCount = (serverSrc.match(/server\.registerTool\(/g) ?? []).length;
-  assert.equal(
-    toolCallCount,
-    2,
-    `server.ts must register exactly 2 tools, found ${toolCallCount}`,
-  );
+  assert.equal(toolCallCount, 2, `server.ts must register exactly 2 tools, found ${toolCallCount}`);
   assert.deepEqual(
     [...PUBLIC_TOOL_NAMES],
     ["remember", "recall"],
-    "public MCP tool surface must remain exactly remember + recall",
+    "public MCP tool surface must remain exactly remember + recall"
   );
 });
 
@@ -1041,10 +948,10 @@ test("EmbeddingGemma benchmark: only the benchmark directory imports the Embeddi
     if (allowedImporters.has(rel)) continue;
     const src = fs.readFileSync(path.join(root, rel), "utf8");
     const importsEmbeddingGemma =
-      src.includes("from \"./embeddinggemma-embedder\"") ||
-      src.includes("from \"./embeddinggemma-embedder.js\"") ||
-      src.includes("from \"../benchmark/variants/embeddinggemma-embedder") ||
-      src.includes("from \"../../benchmark/variants/embeddinggemma-embedder");
+      src.includes('from "./embeddinggemma-embedder"') ||
+      src.includes('from "./embeddinggemma-embedder.js"') ||
+      src.includes('from "../benchmark/variants/embeddinggemma-embedder') ||
+      src.includes('from "../../benchmark/variants/embeddinggemma-embedder');
     const usesEmbeddingGemmaSymbol =
       src.match(/\bEmbeddingGemmaEmbedder\b/) !== null ||
       // `buildDocumentPrefix` is unique to the
@@ -1058,23 +965,17 @@ test("EmbeddingGemma benchmark: only the benchmark directory imports the Embeddi
       // EmbeddingGemma-specific marker.
       src.match(/\bbuildDocumentPrefix\b/) !== null ||
       src.match(/\bembeddinggemma-embedder\b/) !== null;
-    assert.ok(
-      !importsEmbeddingGemma,
-      `unexpected import of embeddinggemma module in ${rel}`,
-    );
-    assert.ok(
-      !usesEmbeddingGemmaSymbol,
-      `unexpected EmbeddingGemma symbol usage in ${rel}`,
-    );
+    assert.ok(!importsEmbeddingGemma, `unexpected import of embeddinggemma module in ${rel}`);
+    assert.ok(!usesEmbeddingGemmaSymbol, `unexpected EmbeddingGemma symbol usage in ${rel}`);
     for (const prefix of productionDirPrefixes) {
       if (rel === prefix || rel.startsWith(prefix + path.sep)) {
         assert.ok(
           !importsEmbeddingGemma,
-          `production file ${rel} must not import embeddinggemma modules`,
+          `production file ${rel} must not import embeddinggemma modules`
         );
         assert.ok(
           !usesEmbeddingGemmaSymbol,
-          `production file ${rel} must not use EmbeddingGemma symbols`,
+          `production file ${rel} must not use EmbeddingGemma symbols`
         );
       }
     }
@@ -1105,13 +1006,11 @@ test("runDenseRetrievalBenchmark: variant=vector-dense with embedder=embeddingge
   // surface stays clean in the dev env.
   if (!(await isEmbeddingGemmaLibraryMissing())) {
     t.skip(
-      "@huggingface/transformers is installed; the runDenseRetrievalBenchmark end-to-end path is exercised in CI where the package is absent (the live integration test in tests/_helpers/retrieval-dense-embeddinggemma-live.test.ts covers the real-model path)",
+      "@huggingface/transformers is installed; the runDenseRetrievalBenchmark end-to-end path is exercised in CI where the package is absent (the live integration test in tests/_helpers/retrieval-dense-embeddinggemma-live.test.ts covers the real-model path)"
     );
     return;
   }
-  const { runDenseRetrievalBenchmark } = await import(
-    "../src/benchmark/retrieval-runner.ts"
-  );
+  const { runDenseRetrievalBenchmark } = await import("../src/benchmark/retrieval-runner.ts");
   const report = await runDenseRetrievalBenchmark({
     variant: "vector-dense",
     denseEmbedderSpec: "embeddinggemma",
@@ -1122,10 +1021,7 @@ test("runDenseRetrievalBenchmark: variant=vector-dense with embedder=embeddingge
   };
   assert.equal(r.variant, "vector-dense-benchmark");
   assert.equal(r.config.embeddingBackend.backend, "embeddinggemma");
-  assert.equal(
-    r.config.embeddingBackend.modelId,
-    "onnx-community/embeddinggemma-300m-ONNX",
-  );
+  assert.equal(r.config.embeddingBackend.modelId, "onnx-community/embeddinggemma-300m-ONNX");
   // The status is "error" (init failed because
   // the library is not installed). The
   // benchmark still produced a report.

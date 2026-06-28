@@ -1,3 +1,9 @@
+import assert from "node:assert/strict";
+import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import readline from "node:readline";
 /**
  * Permanent tracked MCP stdio E2E test suite.
  *
@@ -101,13 +107,7 @@
  * developer laptop.
  */
 import { test } from "node:test";
-import assert from "node:assert/strict";
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import { fileURLToPath } from "node:url";
-import readline from "node:readline";
 
 import { initStorage, insertMemoryRecord } from "../src/storage/storage.ts";
 
@@ -155,8 +155,7 @@ class StdioMcpClient {
   private buffer = "";
   private stdoutLines: string[] = [];
   private stderrChunks: string[] = [];
-  private exitInfo: { code: number | null; signal: NodeJS.Signals | null } | null =
-    null;
+  private exitInfo: { code: number | null; signal: NodeJS.Signals | null } | null = null;
   private notificationHandler: ((msg: JsonRpcMessage) => void) | null = null;
   private closed = false;
   /** Temp HOME directory for the subprocess, so ~/.curion/registry.json is hermetic. */
@@ -175,9 +174,7 @@ class StdioMcpClient {
       // Reject any outstanding requests so the test sees a
       // clean failure instead of a hang.
       for (const [, p] of this.pending) {
-        p.reject(new Error(
-          `server exited before responding (code=${code}, signal=${signal})`,
-        ));
+        p.reject(new Error(`server exited before responding (code=${code}, signal=${signal})`));
       }
       this.pending.clear();
     });
@@ -206,9 +203,7 @@ class StdioMcpClient {
   }): Promise<StdioMcpClient> {
     const entry = opts.serverEntry ?? SERVER_ENTRY;
     if (!fs.existsSync(entry)) {
-      throw new Error(
-        `server entry not found at ${entry}; run \`npm run build\` first`,
-      );
+      throw new Error(`server entry not found at ${entry}; run \`npm run build\` first`);
     }
     // Create an isolated HOME for the subprocess so the global
     // registry at ~/.curion/ is never touched.
@@ -283,7 +278,7 @@ class StdioMcpClient {
   async request(
     method: string,
     params: unknown,
-    opts: { timeoutMs?: number } = {},
+    opts: { timeoutMs?: number } = {}
   ): Promise<JsonRpcMessage> {
     if (this.closed) throw new Error("client is closed");
     const id = this.nextId++;
@@ -348,21 +343,17 @@ class StdioMcpClient {
   async callTool(
     name: string,
     args: Record<string, unknown>,
-    opts: { timeoutMs?: number } = {},
+    opts: { timeoutMs?: number } = {}
   ): Promise<{
     content: Array<{ type: string; text?: string; [k: string]: unknown }>;
     structuredContent?: Record<string, unknown>;
     isError?: boolean;
     [k: string]: unknown;
   }> {
-    const resp = await this.request(
-      "tools/call",
-      { name, arguments: args },
-      opts,
-    );
+    const resp = await this.request("tools/call", { name, arguments: args }, opts);
     if (resp.error) {
       throw new Error(
-        `tools/call ${name} returned JSON-RPC error ${resp.error.code}: ${resp.error.message}`,
+        `tools/call ${name} returned JSON-RPC error ${resp.error.code}: ${resp.error.message}`
       );
     }
     return resp.result as ReturnType<StdioMcpClient["callTool"]> extends Promise<infer T>
@@ -453,7 +444,7 @@ class StdioMcpClient {
       // violation. Reject all pending requests so the
       // test surfaces this loudly.
       const err2 = new Error(
-        `server emitted non-JSON line on stdout: ${JSON.stringify(line.slice(0, 200))}`,
+        `server emitted non-JSON line on stdout: ${JSON.stringify(line.slice(0, 200))}`
       );
       for (const [, p] of this.pending) p.reject(err2);
       this.pending.clear();
@@ -477,12 +468,12 @@ class StdioMcpClient {
     while (this.stderrChunks.length === 0) {
       if (this.exitInfo !== null) {
         throw new Error(
-          `server exited before producing any stderr; code=${this.exitInfo.code}, signal=${this.exitInfo.signal}`,
+          `server exited before producing any stderr; code=${this.exitInfo.code}, signal=${this.exitInfo.signal}`
         );
       }
       if (Date.now() - start > timeoutMs) {
         throw new Error(
-          `timed out waiting for first stderr line from server (cwd=${this.child.spawnargs?.[2] ?? "?"})`,
+          `timed out waiting for first stderr line from server (cwd=${this.child.spawnargs?.[2] ?? "?"})`
         );
       }
       await new Promise((r) => setTimeout(r, 25));
@@ -521,8 +512,7 @@ function seedProject(opts: { preSeedMemory?: boolean } = {}): {
       // `MemoryRecordInput` field is `memoryContent`
       // (TS-side). The DB column on disk is still
       // `summary`.
-      memoryContent:
-        "The project uses Postgres 16 for the primary data store.",
+      memoryContent: "The project uses Postgres 16 for the primary data store.",
       providerId: "minimax",
       modelId: "MiniMax-M3",
       confidence: 0.9,
@@ -620,18 +610,14 @@ test("e2e: initialize handshake returns server identity and capabilities", async
     assert.ok(result.capabilities, "capabilities must be present");
     assert.ok(
       "tools" in result.capabilities,
-      `capabilities must include tools; got ${JSON.stringify(result.capabilities)}`,
+      `capabilities must include tools; got ${JSON.stringify(result.capabilities)}`
     );
     assert.equal(
       "resources" in result.capabilities,
       false,
-      "capabilities must not include resources",
+      "capabilities must not include resources"
     );
-    assert.equal(
-      "prompts" in result.capabilities,
-      false,
-      "capabilities must not include prompts",
-    );
+    assert.equal("prompts" in result.capabilities, false, "capabilities must not include prompts");
   } finally {
     await client.close();
     rmProject(tmp);
@@ -728,7 +714,10 @@ test("e2e: both tools expose outputSchema with a strict status enum", async () =
     const recall = tools.find((t) => t["name"] === "recall")!;
     const ro = remember["outputSchema"] as Record<string, unknown>;
     const co = recall["outputSchema"] as Record<string, unknown>;
-    for (const [toolName, schema] of [["remember", ro], ["recall", co]] as const) {
+    for (const [toolName, schema] of [
+      ["remember", ro],
+      ["recall", co],
+    ] as const) {
       assert.ok(schema, `${toolName} must have an outputSchema`);
       assert.equal(schema["type"], "object");
       // The Zod strict object is wired through to the
@@ -737,16 +726,17 @@ test("e2e: both tools expose outputSchema with a strict status enum", async () =
       assert.deepEqual(
         schema["additionalProperties"],
         false,
-        `${toolName} outputSchema must have additionalProperties: false`,
+        `${toolName} outputSchema must have additionalProperties: false`
       );
       const props = schema["properties"] as Record<string, unknown>;
       assert.ok(props["status"], `${toolName} outputSchema must include \`status\``);
       const status = props["status"] as Record<string, unknown>;
       assert.equal(status["type"], "string");
       const values = (status["enum"] as string[]).slice().sort();
-      const expected = toolName === "remember"
-        ? ["provider_error", "rejected", "saved"]
-        : ["answered", "no_memory", "provider_error", "rejected", "weak_match"];
+      const expected =
+        toolName === "remember"
+          ? ["provider_error", "rejected", "saved"]
+          : ["answered", "no_memory", "provider_error", "rejected", "weak_match"];
       assert.deepEqual(values, expected);
     }
   } finally {
@@ -787,7 +777,7 @@ test("e2e: recall with no stored memory -> { status: 'no_memory' } (no ids, no m
       assert.equal(
         key in (r.structuredContent as Record<string, unknown>),
         false,
-        `recall.no_memory structuredContent must not include '${key}'`,
+        `recall.no_memory structuredContent must not include '${key}'`
       );
     }
     const text = (block as { text: string }).text;
@@ -826,7 +816,7 @@ test("e2e: recall with a secret-shaped query -> { status: 'rejected', reason }, 
     const wireText = JSON.stringify(r);
     assert.ok(
       !wireText.includes(SECRET),
-      `raw secret must not appear on the wire; got ${wireText}`,
+      `raw secret must not appear on the wire; got ${wireText}`
     );
     // No `answer` / `notes` fields on a rejected response.
     assert.equal("answer" in sc, false);
@@ -845,18 +835,15 @@ test("e2e: recall with a secret-shaped query -> { status: 'rejected', reason }, 
     const text = (r.content[0]! as { text: string }).text;
     assert.ok(
       text.startsWith("Rejected: "),
-      `text must be the 'Rejected: ...' form; got ${JSON.stringify(text)}`,
+      `text must be the 'Rejected: ...' form; got ${JSON.stringify(text)}`
     );
     assert.ok(
       !text.includes(SECRET),
-      `text must not echo the raw secret; got ${JSON.stringify(text)}`,
+      `text must not echo the raw secret; got ${JSON.stringify(text)}`
     );
     // No provider call means no `Note:` prefix, no
     // answered-style prose.
-    assert.ok(
-      !/Note:/.test(text),
-      `text must not contain "Note:"; got ${JSON.stringify(text)}`,
-    );
+    assert.ok(!/Note:/.test(text), `text must not contain "Note:"; got ${JSON.stringify(text)}`);
   } finally {
     await client.close();
     rmProject(tmp);
@@ -891,14 +878,14 @@ test("e2e: recall with an unknown extra top-level key -> isError: true (SDK boun
     assert.equal(
       r.isError,
       true,
-      `SDK input validation must reject extra keys; got ${JSON.stringify(r)}`,
+      `SDK input validation must reject extra keys; got ${JSON.stringify(r)}`
     );
     // The handler was not invoked, so there is no
     // structuredContent payload.
     assert.equal(
       r.structuredContent,
       undefined,
-      `isError responses must not include structuredContent; got ${JSON.stringify(r.structuredContent)}`,
+      `isError responses must not include structuredContent; got ${JSON.stringify(r.structuredContent)}`
     );
     assert.equal(r.content.length, 1);
     const block = r.content[0]! as { type: string; text: string };
@@ -941,7 +928,7 @@ test("e2e: remember with vague input -> { status: 'rejected', reason }, no raw e
     const wireText = JSON.stringify(r);
     assert.ok(
       !wireText.includes(VAGUE),
-      `raw vague input must not appear on the wire; got ${wireText}`,
+      `raw vague input must not appear on the wire; got ${wireText}`
     );
     // No summary / kind / confidence / question / ids.
     for (const k of [
@@ -962,11 +949,11 @@ test("e2e: remember with vague input -> { status: 'rejected', reason }, no raw e
     const text = (r.content[0]! as { text: string }).text;
     assert.ok(
       text.startsWith("Rejected: "),
-      `text must be the 'Rejected: ...' form; got ${JSON.stringify(text)}`,
+      `text must be the 'Rejected: ...' form; got ${JSON.stringify(text)}`
     );
     assert.ok(
       !text.includes(VAGUE),
-      `text must not echo the raw vague input; got ${JSON.stringify(text)}`,
+      `text must not echo the raw vague input; got ${JSON.stringify(text)}`
     );
   } finally {
     await client.close();
@@ -993,7 +980,7 @@ test("e2e: remember with a secret-shaped input -> { status: 'rejected', reason }
     const wireText = JSON.stringify(r);
     assert.ok(
       !wireText.includes(SECRET),
-      `raw secret must not appear on the wire; got ${wireText}`,
+      `raw secret must not appear on the wire; got ${wireText}`
     );
   } finally {
     await client.close();
@@ -1027,7 +1014,7 @@ test("e2e: remember with an unknown extra top-level key -> isError: true (SDK bo
     assert.equal(
       r.isError,
       true,
-      `SDK input validation must reject extra keys; got ${JSON.stringify(r)}`,
+      `SDK input validation must reject extra keys; got ${JSON.stringify(r)}`
     );
     assert.equal(r.structuredContent, undefined);
     assert.equal(r.content.length, 1);
@@ -1069,7 +1056,7 @@ test("e2e: stdout contains only newline-delimited JSON-RPC; logs travel on stder
     for (const line of stdoutLines) {
       assert.doesNotThrow(
         () => JSON.parse(line) as unknown,
-        `every stdout line must be valid JSON; got: ${line.slice(0, 200)}`,
+        `every stdout line must be valid JSON; got: ${line.slice(0, 200)}`
       );
     }
     // Every parsed line must look like a JSON-RPC envelope.
@@ -1078,30 +1065,30 @@ test("e2e: stdout contains only newline-delimited JSON-RPC; logs travel on stder
       assert.equal(
         parsed.jsonrpc,
         "2.0",
-        `every stdout line must declare jsonrpc: "2.0"; got: ${line.slice(0, 200)}`,
+        `every stdout line must declare jsonrpc: "2.0"; got: ${line.slice(0, 200)}`
       );
       const hasId = parsed.id !== undefined;
       const hasMethod = typeof parsed.method === "string";
       assert.ok(
         hasId || hasMethod,
-        `every stdout line must carry an id (response) or method (notification/signal); got: ${line.slice(0, 200)}`,
+        `every stdout line must carry an id (response) or method (notification/signal); got: ${line.slice(0, 200)}`
       );
     }
     // No raw `[curion]` log lines on stdout.
     assert.ok(
       !stdout.includes("[curion]"),
-      `stdout must not contain [curion] log lines; got: ${stdout.slice(0, 400)}`,
+      `stdout must not contain [curion] log lines; got: ${stdout.slice(0, 400)}`
     );
     // stderr is non-empty and carries the project
     // logger's `[curion]` prefix.
     assert.ok(
       stderr.length > 0,
-      `stderr must be non-empty; the server's startup logs should travel there`,
+      `stderr must be non-empty; the server's startup logs should travel there`
     );
     assert.match(
       stderr,
       /\[curion\]/,
-      `stderr must contain the [curion] log prefix; got: ${stderr.slice(0, 400)}`,
+      `stderr must contain the [curion] log prefix; got: ${stderr.slice(0, 400)}`
     );
   } finally {
     await client.close();
@@ -1147,10 +1134,13 @@ test("e2e: recall with a pre-seeded memory in a no-API-key env -> { status: 'pro
     // We assert it is bounded and does not echo the
     // query or any id.
     const reason = sc["reason"] as string;
-    assert.ok(reason.length > 0 && reason.length < 400, `reason must be bounded; got length=${reason.length}`);
+    assert.ok(
+      reason.length > 0 && reason.length < 400,
+      `reason must be bounded; got length=${reason.length}`
+    );
     assert.ok(
       !reason.includes("What database does the project use?"),
-      `reason must not echo the query; got ${JSON.stringify(reason)}`,
+      `reason must not echo the query; got ${JSON.stringify(reason)}`
     );
     // No `answer` / `notes` / ids.
     for (const k of ["answer", "notes", "memoryId", "sourceIds", "memoryIds", "message"]) {
@@ -1161,11 +1151,11 @@ test("e2e: recall with a pre-seeded memory in a no-API-key env -> { status: 'pro
     const text = (r.content[0]! as { text: string }).text;
     assert.ok(
       text.startsWith("Provider error: "),
-      `text must be the 'Provider error: ...' form; got ${JSON.stringify(text)}`,
+      `text must be the 'Provider error: ...' form; got ${JSON.stringify(text)}`
     );
     assert.ok(
       !text.includes("What database does the project use?"),
-      `text must not echo the query; got ${JSON.stringify(text)}`,
+      `text must not echo the query; got ${JSON.stringify(text)}`
     );
   } finally {
     await client.close();
@@ -1202,7 +1192,7 @@ test("e2e: remember with a safe input in a no-API-key env -> { status: 'provider
     // the input.
     assert.ok(
       !reason.includes(SAFE_TEXT) && !reason.includes("Postgres 16"),
-      `reason must not echo the input; got ${JSON.stringify(reason)}`,
+      `reason must not echo the input; got ${JSON.stringify(reason)}`
     );
     // No `summary` / `kind` / `confidence` / `question` / ids.
     for (const k of [
@@ -1222,11 +1212,11 @@ test("e2e: remember with a safe input in a no-API-key env -> { status: 'provider
     const text = (r.content[0]! as { text: string }).text;
     assert.ok(
       text.startsWith("Provider error: "),
-      `text must be the 'Provider error: ...' form; got ${JSON.stringify(text)}`,
+      `text must be the 'Provider error: ...' form; got ${JSON.stringify(text)}`
     );
     assert.ok(
       !text.includes(SAFE_TEXT),
-      `text must not echo the raw input; got ${JSON.stringify(text)}`,
+      `text must not echo the raw input; got ${JSON.stringify(text)}`
     );
     // No memory was persisted: the controller
     // short-circuited before the storage write. We
@@ -1297,7 +1287,7 @@ test("e2e: semantic enabled server starts and handles remember (provider_error i
     // The reason must not echo the input.
     assert.ok(
       !((sc["reason"] as string) ?? "").includes("Postgres"),
-      `reason must not echo input; got ${JSON.stringify(sc["reason"])}`,
+      `reason must not echo input; got ${JSON.stringify(sc["reason"])}`
     );
   } finally {
     await client.close();
@@ -1371,7 +1361,7 @@ test("e2e: semantic enabled with pre-seeded memory + no API key -> provider_erro
     // The reason must not echo the query.
     assert.ok(
       !(sc["reason"] as string).includes("database"),
-      `reason must not echo query; got ${JSON.stringify(sc["reason"])}`,
+      `reason must not echo query; got ${JSON.stringify(sc["reason"])}`
     );
     // No answer/notes fields on a provider_error response.
     for (const k of ["answer", "notes", "memoryId", "message"]) {
@@ -1412,7 +1402,7 @@ test("e2e: semantic enabled server keeps stdout JSON-RPC-safe and logs on stderr
     for (const line of stdoutLines) {
       assert.doesNotThrow(
         () => JSON.parse(line) as unknown,
-        `every stdout line must be valid JSON; got: ${line.slice(0, 200)}`,
+        `every stdout line must be valid JSON; got: ${line.slice(0, 200)}`
       );
     }
     // Every parsed line must look like a JSON-RPC envelope.
@@ -1426,7 +1416,7 @@ test("e2e: semantic enabled server keeps stdout JSON-RPC-safe and logs on stderr
     // No raw `[curion]` log lines on stdout.
     assert.ok(
       !stdout.includes("[curion]"),
-      `stdout must not contain [curion] log lines; got: ${stdout.slice(0, 400)}`,
+      `stdout must not contain [curion] log lines; got: ${stdout.slice(0, 400)}`
     );
     // stderr is non-empty and carries the project
     // logger's `[curion]` prefix.

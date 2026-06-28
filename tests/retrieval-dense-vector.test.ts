@@ -52,47 +52,45 @@
  * live test file; see `tests/retrieval-dense-vector-live.test.ts`.
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { test } from "node:test";
 
 import { BENCHMARK_RECORDS } from "../src/benchmark/corpus.ts";
-import { BENCHMARK_QUERIES } from "../src/benchmark/queries.ts";
 import { buildCandidates } from "../src/benchmark/retrieval-runner.ts";
 import {
+  formatDenseComparisonReport,
+  formatDenseHumanReport,
+  isComparisonReport,
+  isSingleVariantReport,
+  parseRetrievalCli,
+  resolveBenchmarkArtifactsDir,
+  runDenseRetrievalBenchmark,
+  writeDenseBenchmarkReport,
+  writeDenseComparisonReport,
+} from "../src/benchmark/retrieval-runner.ts";
+import {
+  type EmbedderMetadata,
   StubDeterministicDenseEmbedder,
   TransformersJsEmbedder,
   createDenseEmbedder,
-  type DenseEmbedder,
-  type EmbedderMetadata,
 } from "../src/benchmark/variants/dense-embedder.ts";
 import {
-  rankDenseVectorAsync,
-  rankDenseVectorWithMetadataAsync,
   DEFAULT_DENSE_VECTOR_THRESHOLD,
   DEFAULT_DENSE_VECTOR_TOP_K,
+  rankDenseVectorAsync,
+  rankDenseVectorWithMetadataAsync,
 } from "../src/benchmark/variants/dense-vector.ts";
 import {
+  type RrfContributor,
+  fuseRankings,
   rankHybrid,
   rankHybridAsync,
-  fuseRankings,
-  type RrfContributor,
 } from "../src/benchmark/variants/hybrid.ts";
-import {
-  runDenseRetrievalBenchmark,
-  parseRetrievalCli,
-  isSingleVariantReport,
-  isComparisonReport,
-  resolveBenchmarkArtifactsDir,
-  writeDenseBenchmarkReport,
-  writeDenseComparisonReport,
-  formatDenseHumanReport,
-  formatDenseComparisonReport,
-} from "../src/benchmark/retrieval-runner.ts";
-import { PUBLIC_TOOL_NAMES } from "../src/server.ts";
 import type { LexicalCandidate } from "../src/retrieval/lexical.ts";
+import { PUBLIC_TOOL_NAMES } from "../src/server.ts";
 import { walkTs } from "./_helpers/fs-walk.ts";
 
 // ---------------------------------------------------------------------------
@@ -123,15 +121,15 @@ test("DenseEmbedder: custom dim is honored and surfaced on the metadata", () => 
 test("DenseEmbedder: rejects non-positive dim", () => {
   assert.throws(
     () => new StubDeterministicDenseEmbedder({ dim: 0 }),
-    /dim must be a positive integer/,
+    /dim must be a positive integer/
   );
   assert.throws(
     () => new StubDeterministicDenseEmbedder({ dim: -1 }),
-    /dim must be a positive integer/,
+    /dim must be a positive integer/
   );
   assert.throws(
     () => new StubDeterministicDenseEmbedder({ dim: 1.5 }),
-    /dim must be a positive integer/,
+    /dim must be a positive integer/
   );
 });
 
@@ -300,10 +298,7 @@ test("createDenseEmbedder: skip flag with qwen3 spec short-circuits init() and d
   const { embedder, spec } = await createDenseEmbedder("qwen3", { skip: true });
   assert.equal(embedder.metadata.backend, "qwen3");
   assert.equal(embedder.metadata.status, "skipped");
-  assert.equal(
-    embedder.metadata.modelId,
-    "onnx-community/Qwen3-Embedding-0.6B-ONNX",
-  );
+  assert.equal(embedder.metadata.modelId, "onnx-community/Qwen3-Embedding-0.6B-ONNX");
   assert.equal(spec, "qwen3");
 });
 
@@ -319,10 +314,7 @@ test("createDenseEmbedder: default (no spec, no options) returns a ready stub", 
 });
 
 test("createDenseEmbedder: unknown spec is rejected", async () => {
-  await assert.rejects(
-    async () => createDenseEmbedder("not-a-real-spec"),
-    /unknown spec/,
-  );
+  await assert.rejects(async () => createDenseEmbedder("not-a-real-spec"), /unknown spec/);
 });
 
 // ---------------------------------------------------------------------------
@@ -332,11 +324,10 @@ test("createDenseEmbedder: unknown spec is rejected", async () => {
 test("rankDenseVectorAsync: returns the {id, score}[] top-K shape", async () => {
   const cands = buildCandidates(BENCHMARK_RECORDS);
   const embedder = new StubDeterministicDenseEmbedder({ dim: 64 });
-  const hits = await rankDenseVectorAsync(
-    "What database does the project use?",
-    cands,
-    { topK: 5, embedder },
-  );
+  const hits = await rankDenseVectorAsync("What database does the project use?", cands, {
+    topK: 5,
+    embedder,
+  });
   assert.ok(Array.isArray(hits));
   assert.ok(hits.length > 0);
   assert.ok(hits.length <= 5);
@@ -364,11 +355,10 @@ test("rankDenseVectorAsync: returns the {id, score}[] top-K shape", async () => 
 test("rankDenseVectorAsync: withMetadata captures the embedder metadata", async () => {
   const cands = buildCandidates(BENCHMARK_RECORDS);
   const embedder = new StubDeterministicDenseEmbedder({ dim: 64 });
-  const res = await rankDenseVectorWithMetadataAsync(
-    "Postgres primary data store",
-    cands,
-    { topK: 5, embedder },
-  );
+  const res = await rankDenseVectorWithMetadataAsync("Postgres primary data store", cands, {
+    topK: 5,
+    embedder,
+  });
   assert.ok(res.embeddingBackend);
   assert.equal(res.embeddingBackend.backend, "stub-dense");
   assert.equal(res.embeddingBackend.dim, 64);
@@ -413,16 +403,13 @@ test("rankDenseVectorAsync: deterministic for a given query, corpus, and embedde
 test("rankDenseVectorAsync: threshold is respected", async () => {
   const cands = buildCandidates(BENCHMARK_RECORDS);
   const embedder = new StubDeterministicDenseEmbedder({ dim: 64 });
-  const hits = await rankDenseVectorAsync(
-    "Postgres 16 primary data store",
-    cands,
-    { topK: 5, threshold: 0.99, embedder },
-  );
+  const hits = await rankDenseVectorAsync("Postgres 16 primary data store", cands, {
+    topK: 5,
+    threshold: 0.99,
+    embedder,
+  });
   for (const h of hits) {
-    assert.ok(
-      h.score >= 0.99,
-      `threshold 0.99 not respected: hit ${h.id} score ${h.score}`,
-    );
+    assert.ok(h.score >= 0.99, `threshold 0.99 not respected: hit ${h.id} score ${h.score}`);
   }
 });
 
@@ -479,7 +466,7 @@ test("rankHybridAsync: useDenseVector=true without an embedder throws", async ()
         threshold: 0,
         useDenseVector: true,
       }),
-    /denseVectorEmbedder/,
+    /denseVectorEmbedder/
   );
 });
 
@@ -511,7 +498,7 @@ test("rankHybrid (sync): useDenseVector=true throws (async-only)", () => {
         threshold: 0,
         useDenseVector: true,
       }),
-    /async-only/,
+    /async-only/
   );
 });
 
@@ -552,22 +539,16 @@ test("runDenseRetrievalBenchmark: vector-dense returns a single-variant report w
       // `RetrievalBenchmarkReport` shape; the dense
       // shape is a different type. We do a structural
       // check on `variant` and `config.embeddingBackend`.
-      typeof (report as { variant?: string }).variant === "string",
+      typeof (report as { variant?: string }).variant === "string"
   );
   if (isSingleVariantReport(report)) {
     // The sync type guard happens to match because the
     // dense report's surface is a superset. We accept
     // this and double-check the metadata field that
     // distinguishes the dense shape.
-    assert.equal(
-      (report as unknown as { variant: string }).variant,
-      "vector-dense-benchmark",
-    );
+    assert.equal((report as unknown as { variant: string }).variant, "vector-dense-benchmark");
   } else {
-    assert.equal(
-      (report as { variant: string }).variant,
-      "vector-dense-benchmark",
-    );
+    assert.equal((report as { variant: string }).variant, "vector-dense-benchmark");
   }
   const r = report as { config: { embeddingBackend: EmbedderMetadata } };
   assert.equal(r.config.embeddingBackend.backend, "stub-dense");
@@ -607,15 +588,9 @@ test("runDenseRetrievalBenchmark: all-dense returns a comparison report", async 
     // because of the shared fields. The dense comparison
     // is a different type. We double-check the shape via
     // a structural probe.
-    assert.equal(
-      (report as unknown as { variant: string }).variant,
-      "all-dense",
-    );
+    assert.equal((report as unknown as { variant: string }).variant, "all-dense");
   } else {
-    assert.equal(
-      (report as { variant: string }).variant,
-      "all-dense",
-    );
+    assert.equal((report as { variant: string }).variant, "all-dense");
   }
   const r = report as {
     vectorDense: { variant: string };
@@ -633,11 +608,11 @@ test("runDenseRetrievalBenchmark: all-dense returns a comparison report", async 
 test("runDenseRetrievalBenchmark: rejects a non-dense variant", async () => {
   await assert.rejects(
     async () => runDenseRetrievalBenchmark({ variant: "lexical" }),
-    /vector-dense|hybrid-dense|all-dense/,
+    /vector-dense|hybrid-dense|all-dense/
   );
   await assert.rejects(
     async () => runDenseRetrievalBenchmark({ variant: "vector" }),
-    /vector-dense|hybrid-dense|all-dense/,
+    /vector-dense|hybrid-dense|all-dense/
   );
 });
 
@@ -698,7 +673,7 @@ test("runDenseRetrievalBenchmark: --calibrate is now supported on dense variants
   // for `variant: "vector-dense"`).
   assert.ok(
     r2.bestByVariant?.vectorDense !== undefined,
-    "vectorDense best key should be present on a dense calibration report",
+    "vectorDense best key should be present on a dense calibration report"
   );
   // The `hybrid-dense` best key is `null` when only
   // `vector-dense` was requested (the dense calibration
@@ -713,34 +688,17 @@ test("runDenseRetrievalBenchmark: --calibrate is now supported on dense variants
 // ---------------------------------------------------------------------------
 
 test("parseRetrievalCli: accepts --variant vector-dense / hybrid-dense / all-dense", () => {
-  assert.equal(
-    parseRetrievalCli(["--variant", "vector-dense"]).variant,
-    "vector-dense",
-  );
-  assert.equal(
-    parseRetrievalCli(["--variant", "hybrid-dense"]).variant,
-    "hybrid-dense",
-  );
-  assert.equal(
-    parseRetrievalCli(["--variant", "all-dense"]).variant,
-    "all-dense",
-  );
+  assert.equal(parseRetrievalCli(["--variant", "vector-dense"]).variant, "vector-dense");
+  assert.equal(parseRetrievalCli(["--variant", "hybrid-dense"]).variant, "hybrid-dense");
+  assert.equal(parseRetrievalCli(["--variant", "all-dense"]).variant, "all-dense");
 });
 
 test("parseRetrievalCli: rejects unknown --variant values", () => {
-  assert.throws(
-    () => parseRetrievalCli(["--variant", "vector-fancy"]),
-    /--variant must be one of/,
-  );
+  assert.throws(() => parseRetrievalCli(["--variant", "vector-fancy"]), /--variant must be one of/);
 });
 
 test("parseRetrievalCli: --embedder is captured as denseEmbedderSpec", () => {
-  const opts = parseRetrievalCli([
-    "--variant",
-    "vector-dense",
-    "--embedder",
-    "stub-dense:dim=128",
-  ]);
+  const opts = parseRetrievalCli(["--variant", "vector-dense", "--embedder", "stub-dense:dim=128"]);
   assert.equal(opts.denseEmbedderSpec, "stub-dense:dim=128");
 });
 
@@ -784,7 +742,7 @@ test("writeDenseBenchmarkReport: writes `retrieval-vector-dense-*.json` for vect
     const r = report as { variant: string };
     const file = writeDenseBenchmarkReport(
       r as unknown as Parameters<typeof writeDenseBenchmarkReport>[0],
-      dir,
+      dir
     );
     assert.ok(fs.existsSync(file));
     assert.match(path.basename(file), /^retrieval-vector-dense-/);
@@ -810,7 +768,7 @@ test("writeDenseBenchmarkReport: writes `retrieval-hybrid-dense-*.json` for hybr
     const r = report as { variant: string };
     const file = writeDenseBenchmarkReport(
       r as unknown as Parameters<typeof writeDenseBenchmarkReport>[0],
-      dir,
+      dir
     );
     assert.ok(fs.existsSync(file));
     assert.match(path.basename(file), /^retrieval-hybrid-dense-/);
@@ -831,9 +789,7 @@ test("writeDenseComparisonReport: writes `retrieval-compare-dense-*.json`", asyn
       variant: "all-dense",
       denseEmbedderSpec: "stub-dense",
     });
-    const r = report as unknown as Parameters<
-      typeof writeDenseComparisonReport
-    >[0];
+    const r = report as unknown as Parameters<typeof writeDenseComparisonReport>[0];
     const file = writeDenseComparisonReport(r, dir);
     assert.ok(fs.existsSync(file));
     assert.match(path.basename(file), /^retrieval-compare-dense-/);
@@ -860,7 +816,7 @@ test("formatDenseHumanReport: includes the embedding-backend block and the headl
     denseEmbedderSpec: "stub-dense",
   });
   const out = formatDenseHumanReport(
-    report as unknown as Parameters<typeof formatDenseHumanReport>[0],
+    report as unknown as Parameters<typeof formatDenseHumanReport>[0]
   );
   for (const section of [
     "embedding backend",
@@ -869,10 +825,7 @@ test("formatDenseHumanReport: includes the embedding-backend block and the headl
     "rank1 (top-hit, positive)",
     "no-answer TNR",
   ]) {
-    assert.ok(
-      out.includes(section),
-      `dense human report missing section: ${section}`,
-    );
+    assert.ok(out.includes(section), `dense human report missing section: ${section}`);
   }
 });
 
@@ -882,7 +835,7 @@ test("formatDenseComparisonReport: includes the vector-dense vs hybrid-dense hea
     denseEmbedderSpec: "stub-dense",
   });
   const out = formatDenseComparisonReport(
-    report as unknown as Parameters<typeof formatDenseComparisonReport>[0],
+    report as unknown as Parameters<typeof formatDenseComparisonReport>[0]
   );
   for (const section of [
     "comparison (vector-dense vs hybrid-dense)",
@@ -891,10 +844,7 @@ test("formatDenseComparisonReport: includes the vector-dense vs hybrid-dense hea
     "vector-dense-benchmark",
     "hybrid-dense-benchmark",
   ]) {
-    assert.ok(
-      out.includes(section),
-      `dense comparison report missing section: ${section}`,
-    );
+    assert.ok(out.includes(section), `dense comparison report missing section: ${section}`);
   }
 });
 
@@ -904,45 +854,35 @@ test("formatDenseComparisonReport: includes the vector-dense vs hybrid-dense hea
 
 test("dense variant is benchmark-only: production recall() controller is not modified", () => {
   const recallSrc = fs.readFileSync(
-    path.join(
-      import.meta.dirname,
-      "..",
-      "src",
-      "controller",
-      "recall-controller.ts",
-    ),
-    "utf8",
+    path.join(import.meta.dirname, "..", "src", "controller", "recall-controller.ts"),
+    "utf8"
   );
   assert.match(recallSrc, /rankLexical/);
   assert.doesNotMatch(
     recallSrc,
     /rankDenseVector|rankHybridAsync|dense-embedder|dense-vector/,
-    "recall controller must NOT import dense benchmark modules",
+    "recall controller must NOT import dense benchmark modules"
   );
   const seamSrc = fs.readFileSync(
     path.join(import.meta.dirname, "..", "src", "retrieval", "seam.ts"),
-    "utf8",
+    "utf8"
   );
   assert.doesNotMatch(
     seamSrc,
     /rankDenseVector|rankHybridAsync|dense-embedder|dense-vector/,
-    "retrieval/seam.ts must NOT import the dense benchmark modules",
+    "retrieval/seam.ts must NOT import the dense benchmark modules"
   );
   // The MCP server still exposes exactly two tools.
   const serverSrc = fs.readFileSync(
     path.join(import.meta.dirname, "..", "src", "server.ts"),
-    "utf8",
+    "utf8"
   );
   const toolCallCount = (serverSrc.match(/server\.registerTool\(/g) ?? []).length;
-  assert.equal(
-    toolCallCount,
-    2,
-    `server.ts must register exactly 2 tools, found ${toolCallCount}`,
-  );
+  assert.equal(toolCallCount, 2, `server.ts must register exactly 2 tools, found ${toolCallCount}`);
   assert.deepEqual(
     [...PUBLIC_TOOL_NAMES],
     ["remember", "recall"],
-    "public MCP tool surface must remain exactly remember + recall",
+    "public MCP tool surface must remain exactly remember + recall"
   );
 });
 
@@ -1008,14 +948,14 @@ test("dense variant: only the benchmark directory imports the dense modules", ()
     if (allowedImporters.has(rel)) continue;
     const src = fs.readFileSync(path.join(root, rel), "utf8");
     const importsDenseModule =
-      src.includes("from \"./dense-embedder\"") ||
-      src.includes("from \"./dense-embedder.js\"") ||
-      src.includes("from \"./dense-vector\"") ||
-      src.includes("from \"./dense-vector.js\"") ||
-      src.includes("from \"../benchmark/variants/dense-embedder") ||
-      src.includes("from \"../benchmark/variants/dense-vector") ||
-      src.includes("from \"../../benchmark/variants/dense-embedder") ||
-      src.includes("from \"../../benchmark/variants/dense-vector");
+      src.includes('from "./dense-embedder"') ||
+      src.includes('from "./dense-embedder.js"') ||
+      src.includes('from "./dense-vector"') ||
+      src.includes('from "./dense-vector.js"') ||
+      src.includes('from "../benchmark/variants/dense-embedder') ||
+      src.includes('from "../benchmark/variants/dense-vector') ||
+      src.includes('from "../../benchmark/variants/dense-embedder') ||
+      src.includes('from "../../benchmark/variants/dense-vector');
     const usesDenseSymbol =
       src.match(/\brankDenseVector\b/) !== null ||
       src.match(/\brankDenseVectorAsync\b/) !== null ||
@@ -1023,26 +963,14 @@ test("dense variant: only the benchmark directory imports the dense modules", ()
       src.match(/\bStubDeterministicDenseEmbedder\b/) !== null ||
       src.match(/\bTransformersJsEmbedder\b/) !== null ||
       src.match(/\bcreateDenseEmbedder\b/) !== null;
-    assert.ok(
-      !importsDenseModule,
-      `unexpected import of dense module in ${rel}`,
-    );
-    assert.ok(
-      !usesDenseSymbol,
-      `unexpected dense symbol usage in ${rel}`,
-    );
+    assert.ok(!importsDenseModule, `unexpected import of dense module in ${rel}`);
+    assert.ok(!usesDenseSymbol, `unexpected dense symbol usage in ${rel}`);
     // Belt-and-braces: production directories must not
     // import the dense modules at all.
     for (const prefix of productionDirPrefixes) {
       if (rel === prefix || rel.startsWith(prefix + path.sep)) {
-        assert.ok(
-          !importsDenseModule,
-          `production file ${rel} must not import dense modules`,
-        );
-        assert.ok(
-          !usesDenseSymbol,
-          `production file ${rel} must not use dense symbols`,
-        );
+        assert.ok(!importsDenseModule, `production file ${rel} must not import dense modules`);
+        assert.ok(!usesDenseSymbol, `production file ${rel} must not use dense symbols`);
       }
     }
   }
@@ -1055,19 +983,8 @@ test("dense variant: only the benchmark directory imports the dense modules", ()
 test("runRetrievalBenchmark (sync): rejects dense variants (async-only)", async () => {
   // We import the sync function lazily to keep this test
   // independent of the runner's module-load order.
-  const { runRetrievalBenchmark } = await import(
-    "../src/benchmark/retrieval-runner.ts"
-  );
-  assert.throws(
-    () => runRetrievalBenchmark({ variant: "vector-dense" }),
-    /async-only/,
-  );
-  assert.throws(
-    () => runRetrievalBenchmark({ variant: "hybrid-dense" }),
-    /async-only/,
-  );
-  assert.throws(
-    () => runRetrievalBenchmark({ variant: "all-dense" }),
-    /async-only/,
-  );
+  const { runRetrievalBenchmark } = await import("../src/benchmark/retrieval-runner.ts");
+  assert.throws(() => runRetrievalBenchmark({ variant: "vector-dense" }), /async-only/);
+  assert.throws(() => runRetrievalBenchmark({ variant: "hybrid-dense" }), /async-only/);
+  assert.throws(() => runRetrievalBenchmark({ variant: "all-dense" }), /async-only/);
 });

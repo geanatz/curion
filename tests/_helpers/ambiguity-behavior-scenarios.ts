@@ -345,7 +345,8 @@ export const SCENARIOS: readonly Scenario[] = [
     kind: "capability-gap",
     rows: [
       {
-        summary: "Postgres was the project primary store; MySQL was the previous primary store before 2023",
+        summary:
+          "Postgres was the project primary store; MySQL was the previous primary store before 2023",
       },
       {
         summary: "Postgres is the project primary store for the active project",
@@ -555,10 +556,7 @@ export const SCENARIOS: readonly Scenario[] = [
  * references to a list of concrete ids. `otherId` is the id
  * the `RowRef` should be replaced with.
  */
-export function resolveIdList(
-  list: IdList | undefined,
-  otherId: number,
-): number[] {
+export function resolveIdList(list: IdList | undefined, otherId: number): number[] {
   if (!Array.isArray(list)) return [];
   const out: number[] = [];
   for (const x of list) {
@@ -576,11 +574,7 @@ export function resolveIdList(
 // ---------------------------------------------------------------------------
 
 /** Per-scenario verdict (recorded by the runner). */
-export type ScenarioVerdict =
-  | "pass"
-  | "false-positive"
-  | "false-negative"
-  | "gap";
+export type ScenarioVerdict = "pass" | "false-positive" | "false-negative" | "gap";
 
 export interface ScenarioReportRow {
   id: string;
@@ -702,31 +696,30 @@ export function formatReport(report: ValidationReport): string {
         : Object.entries(report.warningReasonCounts)
             .map(([k, v]) => `${k}=${v}`)
             .join(", ")
-    }`,
+    }`
   );
   lines.push(
     `status preservation      : answered=${report.statusPreservation.answered}, ` +
       `no_memory=${report.statusPreservation.no_memory}, ` +
       `rejected=${report.statusPreservation.rejected}, ` +
-      `provider_error=${report.statusPreservation.provider_error}`,
+      `provider_error=${report.statusPreservation.provider_error}`
   );
   lines.push(
     `api drift checks         : asserted=${report.apiDriftChecks.asserted}, ` +
       `passed=${report.apiDriftChecks.passed}, ` +
-      `failed=${report.apiDriftChecks.failed}`,
+      `failed=${report.apiDriftChecks.failed}`
   );
   lines.push(
     `provider-call checks     : asserted=${report.providerCallChecks.asserted}, ` +
       `passed=${report.providerCallChecks.passed}, ` +
-      `failed=${report.providerCallChecks.failed}`,
+      `failed=${report.providerCallChecks.failed}`
   );
   lines.push(`documented capability gaps: ${report.capabilityGaps}`);
   lines.push("");
   lines.push("Per-scenario verdicts:");
   for (const r of report.rows) {
     const gapTag = r.capabilityGap !== undefined ? " [gap]" : "";
-    const expectedCalls =
-      r.expectedProviderCalls === null ? "n/a" : `${r.expectedProviderCalls}`;
+    const expectedCalls = r.expectedProviderCalls === null ? "n/a" : `${r.expectedProviderCalls}`;
     const actualCalls = `${r.actualProviderCalls}`;
     const callMatch =
       r.expectedProviderCalls === null || r.expectedProviderCalls === r.actualProviderCalls
@@ -737,7 +730,7 @@ export function formatReport(report: ValidationReport): string {
         `expected=${r.expectedStatus}/${r.expectedWarning ? "warn" : "ok"} ` +
         `actual=${r.actualStatus}/${r.actualWarning ? "warn" : "ok"} ` +
         `reason=${r.actualReason} ` +
-        `calls=${actualCalls}/${expectedCalls}(${callMatch})${gapTag}  ${r.name}`,
+        `calls=${actualCalls}/${expectedCalls}(${callMatch})${gapTag}  ${r.name}`
     );
   }
   if (report.capabilityGaps > 0) {

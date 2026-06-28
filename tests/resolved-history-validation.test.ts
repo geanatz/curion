@@ -69,53 +69,49 @@
  * text is stored or echoed.
  */
 
-import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { before, test } from "node:test";
 
 import { runRecallController } from "../src/controller/recall-controller.ts";
+import type { AmbiguitySignal } from "../src/retrieval/ambiguity.ts";
+import type { ResolvedHistorySignal } from "../src/retrieval/resolved-history.ts";
 import {
+  type MemoryRecord,
+  type StorageHandle,
   initStorage,
   insertMemoryRecord,
-  updateMemoryMetadata,
   listActiveMemorySummaries,
-  type StorageHandle,
-  type MemoryRecord,
+  updateMemoryMetadata,
 } from "../src/storage/storage.ts";
 import {
-  type AmbiguitySignal,
-} from "../src/retrieval/ambiguity.ts";
-import {
-  type ResolvedHistorySignal,
-} from "../src/retrieval/resolved-history.ts";
-import {
-  handleRecall,
   NO_RELEVANT_MEMORY,
-  setStorageProvider as setRecallStorageProvider,
-  resetStorageProvider as resetRecallStorageProvider,
   type RecallResult,
+  handleRecall,
+  resetStorageProvider as resetRecallStorageProvider,
+  setStorageProvider as setRecallStorageProvider,
 } from "../src/tools/recall.ts";
 
 import {
-  SCENARIOS,
-  resolveIdList,
-  newReportRows,
-  buildReport,
-  formatReport,
-  type Scenario,
-  type ScenarioReportRow,
   type ExpectedStatus,
   type IdList,
+  SCENARIOS,
+  type Scenario,
+  type ScenarioReportRow,
+  buildReport,
+  formatReport,
+  newReportRows,
+  resolveIdList,
 } from "./_helpers/resolved-history-validation-scenarios.ts";
 import {
-  TEST_PRIMARY_KEY,
-  TEST_FALLBACK_KEY,
-  TEST_PRIMARY_BASE_URL,
-  TEST_PRIMARY_MODEL,
   TEST_FALLBACK_BASE_URL,
+  TEST_FALLBACK_KEY,
   TEST_FALLBACK_MODEL,
+  TEST_PRIMARY_BASE_URL,
+  TEST_PRIMARY_KEY,
+  TEST_PRIMARY_MODEL,
 } from "./shared-test-provider.ts";
 
 // ---------------------------------------------------------------------------
@@ -172,7 +168,7 @@ function okChatResponse(content: string): Response {
       model: "m",
       choices: [{ message: { role: "assistant", content } }],
     }),
-    { status: 200, headers: { "content-type": "application/json" } },
+    { status: 200, headers: { "content-type": "application/json" } }
   );
 }
 
@@ -188,10 +184,7 @@ function okChatResponse(content: string): Response {
  * declaration order so the runner can use the ids in
  * further assertions if needed.
  */
-function seedScenarioRows(
-  handle: StorageHandle,
-  scenario: Scenario,
-): MemoryRecord[] {
+function seedScenarioRows(handle: StorageHandle, scenario: Scenario): MemoryRecord[] {
   const inserted: MemoryRecord[] = [];
   for (const row of scenario.rows) {
     const rec = insertMemoryRecord(handle, {
@@ -224,19 +217,19 @@ function seedScenarioRows(
     const otherId = inserted[1 - i]?.id ?? -1;
     const conflictsWith: number[] = resolveIdList(
       row.relationship.conflictsWith as IdList | undefined,
-      otherId,
+      otherId
     );
     const olderVariantsOf: number[] = resolveIdList(
       row.relationship.olderVariantsOf as IdList | undefined,
-      otherId,
+      otherId
     );
     const supersedes: number[] = resolveIdList(
       row.relationship.supersedes as IdList | undefined,
-      otherId,
+      otherId
     );
     const supersededBy: number[] = resolveIdList(
       row.relationship.supersededBy as IdList | undefined,
-      otherId,
+      otherId
     );
     const block = {
       derivedSchemaVersion: row.relationship.derivedSchemaVersion ?? "ccm-draft-1",
@@ -296,7 +289,7 @@ function seedScenarioRows(
  */
 async function runProjected(
   handle: StorageHandle,
-  scenario: Scenario,
+  scenario: Scenario
 ): Promise<{
   status: ExpectedStatus;
   message: string;
@@ -305,17 +298,11 @@ async function runProjected(
   reason?: string;
   safetyClass?: string;
   warning: boolean;
-  reasonActual:
-    | "conflicting-candidates"
-    | "older-variant-suspected"
-    | "resolved-history"
-    | "none";
+  reasonActual: "conflicting-candidates" | "older-variant-suspected" | "resolved-history" | "none";
   providerCalls: number;
   apiKeys: string[];
 }> {
-  const { fetchImpl, calls } = scriptFetch(() =>
-    okChatResponse(scenario.answer),
-  );
+  const { fetchImpl, calls } = scriptFetch(() => okChatResponse(scenario.answer));
   const out = await runRecallController(handle, scenario.query, {
     providerFetchImpl: fetchImpl,
     providerPrimaryApiKey: TEST_PRIMARY_KEY,
@@ -363,8 +350,7 @@ async function runProjected(
   }
   // status === "answered"
   const internal: AmbiguitySignal | undefined = out.internalAmbiguity;
-  const resolved: ResolvedHistorySignal | undefined =
-    out.internalResolvedHistory;
+  const resolved: ResolvedHistorySignal | undefined = out.internalResolvedHistory;
   // The runner inspects the two parallel internal
   // fields separately. The composition rule (mirroring
   // `src/tools/recall.ts`):
@@ -448,9 +434,7 @@ function formatInternalAmbiguityNote(internal: AmbiguitySignal): string {
  * (the runner checks the id list below) but is never
  * rendered into the public note.
  */
-function formatInternalResolvedHistoryNote(
-  resolved: ResolvedHistorySignal,
-): string {
+function formatInternalResolvedHistoryNote(resolved: ResolvedHistorySignal): string {
   if (resolved.kind !== "resolved-history") return "";
   return "Note: I found earlier related information, but newer entries appear to supersede it.";
 }
@@ -491,7 +475,7 @@ function buildPublicResult(
     sourceIds: number[];
     reason?: string;
     safetyClass?: string;
-  },
+  }
 ): RecallResult {
   switch (projected.status) {
     case "answered":
@@ -544,10 +528,7 @@ function expectedProviderCallsFor(status: ExpectedStatus): number {
  * test framework still reports the per-scenario test as
  * failed.
  */
-async function runScenarioAsync(
-  scenario: Scenario,
-  sink: ScenarioReportRow[],
-): Promise<void> {
+async function runScenarioAsync(scenario: Scenario, sink: ScenarioReportRow[]): Promise<void> {
   // SG9 is a multi-status scenario. The runner iterates
   // over three internal sub-records (no_memory,
   // rejected, provider_error) and pushes one row per
@@ -557,11 +538,9 @@ async function runScenarioAsync(
     return;
   }
 
-  const expectedStatus: ExpectedStatus =
-    scenario.expectedCurrent.status ?? "answered";
+  const expectedStatus: ExpectedStatus = scenario.expectedCurrent.status ?? "answered";
   const expectedWarning = scenario.expectedCurrent.warning;
-  const expectedReason: string =
-    scenario.expectedCurrent.reason ?? "none";
+  const expectedReason: string = scenario.expectedCurrent.reason ?? "none";
   const pinApiShape = scenario.pinApiShape ?? true;
   const pinProviderCalls = scenario.pinProviderCalls ?? true;
   const pinStateActive = scenario.pinStateActive ?? true;
@@ -588,13 +567,7 @@ async function runScenarioAsync(
   let stateActiveOk: boolean | null = null;
 
   let captured: {
-    kind:
-      | "status"
-      | "warning"
-      | "api"
-      | "calls"
-      | "state"
-      | "fatal";
+    kind: "status" | "warning" | "api" | "calls" | "state" | "fatal";
     message: string;
   } | null = null;
 
@@ -651,9 +624,7 @@ async function runScenarioAsync(
       // the adapter makes both the primary and the fallback
       // HTTP calls and `expectedCalls === 2` is met.
       seedScenarioRows(storage.handle, scenario);
-      const { fetchImpl, calls } = scriptFetch(
-        () => new Response("boom", { status: 500 }),
-      );
+      const { fetchImpl, calls } = scriptFetch(() => new Response("boom", { status: 500 }));
       const out = await runRecallController(storage.handle, scenario.query, {
         providerFetchImpl: fetchImpl,
         providerPrimaryApiKey: TEST_PRIMARY_KEY,
@@ -732,9 +703,7 @@ async function runScenarioAsync(
         // Run the recall controller to ensure the
         // controller's call path was exercised on a
         // fully-seeded storage.
-        const { fetchImpl } = scriptFetch(() =>
-          okChatResponse(scenario.answer),
-        );
+        const { fetchImpl } = scriptFetch(() => okChatResponse(scenario.answer));
         await runRecallController(fresh.handle, scenario.query, {
           providerFetchImpl: fetchImpl,
           providerPrimaryApiKey: TEST_PRIMARY_KEY,
@@ -744,9 +713,7 @@ async function runScenarioAsync(
           providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
           providerFallbackModel: TEST_FALLBACK_MODEL,
         });
-        const activeIds = new Set(
-          listActiveMemorySummaries(fresh.handle).map((s) => s.id),
-        );
+        const activeIds = new Set(listActiveMemorySummaries(fresh.handle).map((s) => s.id));
         let allActive = true;
         for (const rec of seeded) {
           if (!activeIds.has(rec.id)) {
@@ -793,9 +760,7 @@ async function runScenarioAsync(
       actualStatus: expectedStatus,
       expectedProviderCalls: expectedCalls,
       actualProviderCalls: providerCallCount,
-      documentedCapabilityGap:
-        scenario.expectedCurrent.warning !==
-        scenario.desiredFuture.warning,
+      documentedCapabilityGap: scenario.expectedCurrent.warning !== scenario.desiredFuture.warning,
       currentCapabilityGap: scenario.expectedCurrent.capabilityGap,
       futureCapabilityGap: scenario.desiredFuture.capabilityGap,
       apiDrift: null,
@@ -829,10 +794,7 @@ async function runScenarioAsync(
         kind: "warning",
         message: `scenario ${scenario.id} expected a current warning but none fired (reason=${actualReason})`,
       };
-    } else if (
-      publicResult !== null &&
-      !publicResult.message.startsWith("Note: ")
-    ) {
+    } else if (publicResult !== null && !publicResult.message.startsWith("Note: ")) {
       captured = {
         kind: "warning",
         message: `scenario ${scenario.id} public message must start with 'Note: '`,
@@ -854,10 +816,7 @@ async function runScenarioAsync(
         kind: "warning",
         message: `scenario ${scenario.id} detector must be silent when no warning is expected (got reason=${actualReason})`,
       };
-    } else if (
-      publicResult !== null &&
-      publicResult.message.startsWith("Note: ")
-    ) {
+    } else if (publicResult !== null && publicResult.message.startsWith("Note: ")) {
       captured = {
         kind: "warning",
         message: `scenario ${scenario.id} public message must not start with 'Note: '`,
@@ -920,8 +879,7 @@ async function runScenarioAsync(
     verdict = "regression";
   } else if (
     scenario.expectedCurrent.warning !== scenario.desiredFuture.warning ||
-    (scenario.expectedCurrent.reason ?? "none") !==
-      (scenario.desiredFuture.reason ?? "none")
+    (scenario.expectedCurrent.reason ?? "none") !== (scenario.desiredFuture.reason ?? "none")
   ) {
     verdict = "current-gap";
   } else {
@@ -945,10 +903,8 @@ async function runScenarioAsync(
     expectedProviderCalls: expectedCalls,
     actualProviderCalls: providerCallCount,
     documentedCapabilityGap:
-      scenario.expectedCurrent.warning !==
-        scenario.desiredFuture.warning ||
-      (scenario.expectedCurrent.reason ?? "none") !==
-        (scenario.desiredFuture.reason ?? "none"),
+      scenario.expectedCurrent.warning !== scenario.desiredFuture.warning ||
+      (scenario.expectedCurrent.reason ?? "none") !== (scenario.desiredFuture.reason ?? "none"),
     currentCapabilityGap: scenario.expectedCurrent.capabilityGap,
     futureCapabilityGap: scenario.desiredFuture.capabilityGap,
     apiDrift,
@@ -974,15 +930,8 @@ async function runScenarioAsync(
  * pushes a row per status, with a derived id
  * (`SG9-no_memory`, `SG9-rejected`, `SG9-provider_error`).
  */
-async function runSG9MultiStatus(
-  scenario: Scenario,
-  sink: ScenarioReportRow[],
-): Promise<void> {
-  const subStatuses: ExpectedStatus[] = [
-    "no_memory",
-    "rejected",
-    "provider_error",
-  ];
+async function runSG9MultiStatus(scenario: Scenario, sink: ScenarioReportRow[]): Promise<void> {
+  const subStatuses: ExpectedStatus[] = ["no_memory", "rejected", "provider_error"];
   for (const sub of subStatuses) {
     await runSG9SubStatus(scenario, sink, sub);
   }
@@ -991,7 +940,7 @@ async function runSG9MultiStatus(
 async function runSG9SubStatus(
   scenario: Scenario,
   sink: ScenarioReportRow[],
-  expectedStatus: ExpectedStatus,
+  expectedStatus: ExpectedStatus
 ): Promise<void> {
   const subId = `SG9-${expectedStatus}`;
   const expectedWarning = false;
@@ -1074,23 +1023,17 @@ async function runSG9SubStatus(
       // any such regression loud: a call to the fetch
       // throws and the runner records the failure.
       const { fetchImpl, calls } = scriptFetch(() => {
-        throw new Error(
-          "SG9-rejected: provider fetch must not be called on the rejected path",
-        );
+        throw new Error("SG9-rejected: provider fetch must not be called on the rejected path");
       });
-      const outcome = await runRecallController(
-        storage.handle,
-        "AKIAIOSFODNN7EXAMPLE",
-        {
-          providerFetchImpl: fetchImpl,
-          providerPrimaryApiKey: TEST_PRIMARY_KEY,
-          providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
-          providerPrimaryModel: TEST_PRIMARY_MODEL,
-          providerFallbackApiKey: TEST_FALLBACK_KEY,
-          providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
-          providerFallbackModel: TEST_FALLBACK_MODEL,
-        },
-      );
+      const outcome = await runRecallController(storage.handle, "AKIAIOSFODNN7EXAMPLE", {
+        providerFetchImpl: fetchImpl,
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+        providerPrimaryModel: TEST_PRIMARY_MODEL,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
+        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+        providerFallbackModel: TEST_FALLBACK_MODEL,
+      });
       if (outcome.status !== "rejected") {
         captured = {
           kind: "status",
@@ -1125,16 +1068,9 @@ async function runSG9SubStatus(
       // a mismatch we leave them as `undefined`.
       projected = {
         status: outcome.status,
-        message:
-          outcome.status === "rejected"
-            ? `Rejected: ${outcome.reason}`
-            : "",
-        reason:
-          outcome.status === "rejected" ? outcome.reason : undefined,
-        safetyClass:
-          outcome.status === "rejected"
-            ? outcome.safetyClass
-            : undefined,
+        message: outcome.status === "rejected" ? `Rejected: ${outcome.reason}` : "",
+        reason: outcome.status === "rejected" ? outcome.reason : undefined,
+        safetyClass: outcome.status === "rejected" ? outcome.safetyClass : undefined,
         sourceIds: [],
         warning: false,
         reasonActual: "none",
@@ -1157,9 +1093,7 @@ async function runSG9SubStatus(
       // fallback call is attempted and the adapter returns
       // `all-providers-failed` after both slots fail.
       seedScenarioRows(storage.handle, scenario);
-      const { fetchImpl, calls } = scriptFetch(
-        () => new Response("boom", { status: 500 }),
-      );
+      const { fetchImpl, calls } = scriptFetch(() => new Response("boom", { status: 500 }));
       const out = await runRecallController(storage.handle, scenario.query, {
         providerFetchImpl: fetchImpl,
         providerPrimaryApiKey: TEST_PRIMARY_KEY,
@@ -1198,18 +1132,12 @@ async function runSG9SubStatus(
   // State-activation pin (SG9 seeds rows only on
   // `rejected` and `provider_error`; the `no_memory`
   // sub-record has no rows to pin).
-  if (
-    stateActiveOk === null &&
-    expectedStatus !== "no_memory" &&
-    captured === null
-  ) {
+  if (stateActiveOk === null && expectedStatus !== "no_memory" && captured === null) {
     try {
       const fresh = mkStorage();
       try {
         const seeded = seedScenarioRows(fresh.handle, scenario);
-        const activeIds = new Set(
-          listActiveMemorySummaries(fresh.handle).map((s) => s.id),
-        );
+        const activeIds = new Set(listActiveMemorySummaries(fresh.handle).map((s) => s.id));
         let allActive = true;
         for (const rec of seeded) {
           if (!activeIds.has(rec.id)) {
@@ -1392,7 +1320,6 @@ test("Phase G summary: compact validation report", () => {
   // multi-line `console.log` so test runners surface it
   // intact. We use a sentinel prefix to make it
   // greppable.
-  // eslint-disable-next-line no-console
   console.log("\n" + formatReport(report));
 
   // Hard assertions: no regressions on a current
@@ -1400,19 +1327,19 @@ test("Phase G summary: compact validation report", () => {
   assert.equal(
     report.regressions,
     0,
-    `Phase G: ${report.regressions} regression(s) detected on a current invariant`,
+    `Phase G: ${report.regressions} regression(s) detected on a current invariant`
   );
   // All API drift pins must pass (no new public field).
   assert.equal(
     report.apiDriftChecks.failed,
     0,
-    `Phase G: ${report.apiDriftChecks.failed} API drift failure(s)`,
+    `Phase G: ${report.apiDriftChecks.failed} API drift failure(s)`
   );
   // All provider-call pins must pass.
   assert.equal(
     report.providerCallChecks.failed,
     0,
-    `Phase G: ${report.providerCallChecks.failed} provider-call failure(s)`,
+    `Phase G: ${report.providerCallChecks.failed} provider-call failure(s)`
   );
   // Sanity: scenario count matches the curated list plus
   // the SG9 sub-records.
@@ -1421,7 +1348,7 @@ test("Phase G summary: compact validation report", () => {
     report.totalScenarios,
     expectedRows,
     `Phase G / Phase J report row count must match the curated scenario list ` +
-      `(10 scenarios, with SG9 expanded to 3 sub-records = ${expectedRows})`,
+      `(10 scenarios, with SG9 expanded to 3 sub-records = ${expectedRows})`
   );
   // After Phase J: the three future-resolved-history
   // scenarios (SG1, SG4, SG7) are no longer future gaps;
@@ -1434,22 +1361,22 @@ test("Phase G summary: compact validation report", () => {
     0,
     "Phase J: documented capability gaps should be 0; all " +
       "expect-current-silent-future-resolved scenarios should now " +
-      "have expectedCurrent === desiredFuture.",
+      "have expectedCurrent === desiredFuture."
   );
   // Sanity: the four-status union is preserved (at
   // least one of each non-answered status appears in
   // the report).
   assert.ok(
     report.statusPreservation.no_memory >= 1,
-    "Phase G / Phase J: no_memory status should be preserved in the matrix",
+    "Phase G / Phase J: no_memory status should be preserved in the matrix"
   );
   assert.ok(
     report.statusPreservation.rejected >= 1,
-    "Phase G / Phase J: rejected status should be preserved in the matrix",
+    "Phase G / Phase J: rejected status should be preserved in the matrix"
   );
   assert.ok(
     report.statusPreservation.provider_error >= 1,
-    "Phase G / Phase J: provider_error status should be preserved in the matrix",
+    "Phase G / Phase J: provider_error status should be preserved in the matrix"
   );
   // After Phase J: the future-resolved-history
   // behavior IS produced by the current implementation
@@ -1467,6 +1394,6 @@ test("Phase G summary: compact validation report", () => {
     report.futureResolvedHistoryAchievedCount >= 3,
     "Phase J: future-resolved-history should be achieved by the " +
       "current implementation on at least 3 scenarios (SG1, SG4, " +
-      `SG7, and SG8 which also now resolves). Got ${report.futureResolvedHistoryAchievedCount}.`,
+      `SG7, and SG8 which also now resolves). Got ${report.futureResolvedHistoryAchievedCount}.`
   );
 });

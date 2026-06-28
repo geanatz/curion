@@ -12,39 +12,41 @@
  *   - No benchmark imports in production modules
  */
 
-import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { test } from "node:test";
 
 // ---------------------------------------------------------------------------
 // Imports from production modules (NOT benchmark)
 // ---------------------------------------------------------------------------
 
 import {
-  StubSemanticEmbedder,
-  BgeSmallEmbedder,
-  createSemanticEmbedder,
-  type SemanticEmbedder,
-} from "../src/retrieval/semantic/embedder.ts";
-import {
-  storeEmbedding,
-  getEmbedding,
-  getEmbeddingsForMemories,
-  deleteEmbedding,
-  insertMemoryRecord,
-  type StorageHandle,
-  type EmbeddingRecord,
-} from "../src/storage/storage.ts";
-import { cosineSimilarity, fuseLexicalAndSemantic, scoreSemanticCandidates } from "../src/retrieval/semantic/score.ts";
+  resetListRegisteredProjectsStub,
+  setListRegisteredProjectsStub,
+} from "../src/config/registry.ts";
 import { embedOnRemember } from "../src/retrieval/semantic/embed-on-remember.ts";
 import { backfillMissingEmbeddings } from "../src/retrieval/semantic/embed-on-remember.ts";
-import { handleRecall } from "../src/tools/recall.ts";
-import { handleRemember } from "../src/tools/remember.ts";
-import { setStorageProvider, resetStorageProvider } from "../src/tools/recall.ts";
 import {
-  setListRegisteredProjectsStub,
-  resetListRegisteredProjectsStub,
-} from "../src/config/registry.ts";
+  type SemanticEmbedder,
+  StubSemanticEmbedder,
+  createSemanticEmbedder,
+} from "../src/retrieval/semantic/embedder.ts";
+import {
+  cosineSimilarity,
+  fuseLexicalAndSemantic,
+  scoreSemanticCandidates,
+} from "../src/retrieval/semantic/score.ts";
+import {
+  type StorageHandle,
+  deleteEmbedding,
+  getEmbedding,
+  getEmbeddingsForMemories,
+  insertMemoryRecord,
+  storeEmbedding,
+} from "../src/storage/storage.ts";
+import { handleRecall } from "../src/tools/recall.ts";
+import { resetStorageProvider, setStorageProvider } from "../src/tools/recall.ts";
+import { handleRemember } from "../src/tools/remember.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -52,18 +54,18 @@ import {
 
 import { mkStorage, rmStorage } from "./_helpers/test-storage.ts";
 import {
-  TEST_PRIMARY_KEY,
-  TEST_FALLBACK_KEY,
-  TEST_PRIMARY_BASE_URL,
-  TEST_PRIMARY_MODEL,
   TEST_FALLBACK_BASE_URL,
+  TEST_FALLBACK_KEY,
   TEST_FALLBACK_MODEL,
+  TEST_PRIMARY_BASE_URL,
+  TEST_PRIMARY_KEY,
+  TEST_PRIMARY_MODEL,
 } from "./shared-test-provider.ts";
 
 function insertTestMemory(
   handle: StorageHandle,
   summary: string,
-  kind: "fact" | "decision" = "fact",
+  kind: "fact" | "decision" = "fact"
 ): number {
   const record = insertMemoryRecord(handle, {
     kind,
@@ -148,9 +150,8 @@ test("createSemanticEmbedder: enabled returns ready or error stub", async () => 
   });
   // Status should be either "ready" or "error" (error = network/model load fail in test)
   assert.ok(
-    embedder.metadata.status === "ready" ||
-    embedder.metadata.status === "error",
-    `unexpected status: ${embedder.metadata.status}`,
+    embedder.metadata.status === "ready" || embedder.metadata.status === "error",
+    `unexpected status: ${embedder.metadata.status}`
   );
 });
 
@@ -179,7 +180,7 @@ test("scoreSemanticCandidates: returns sorted by score desc", () => {
   const vecs = [
     { id: 1, vec: [1, 0] as number[] },
     { id: 2, vec: [0.707, 0.707] as number[] }, // ~45° from id1
-    { id: 3, vec: [-1, 0] as number[] },        // opposite of id1
+    { id: 3, vec: [-1, 0] as number[] }, // opposite of id1
   ];
   const query = [1, 0] as number[];
   const ranked = scoreSemanticCandidates(query, vecs);
@@ -398,7 +399,9 @@ test("embedOnRemember: non-fatal when embedder fails", async () => {
     // A mock embedder that throws
     const badEmbedder: SemanticEmbedder = {
       metadata: { backend: "stub", modelId: "bad", dim: 64, status: "ready" },
-      async embed() { throw new Error("simulated embed failure"); },
+      async embed() {
+        throw new Error("simulated embed failure");
+      },
       async embedBatch(texts) {
         return texts.map(() => Array(64).fill(0));
       },
@@ -441,7 +444,7 @@ function makeScriptedFetch(content: string): typeof fetch {
         model: "m",
         choices: [{ message: { role: "assistant", content } }],
       }),
-      { status: 200, headers: { "content-type": "application/json" } },
+      { status: 200, headers: { "content-type": "application/json" } }
     );
   };
   return fetchImpl;
@@ -469,7 +472,7 @@ test("recall controller: semantic disabled falls back to lexical", async () => {
     // Should return answered or no_memory (not error)
     assert.ok(
       result.status === "answered" || result.status === "no_memory",
-      `unexpected status: ${result.status}`,
+      `unexpected status: ${result.status}`
     );
   } finally {
     rmStorage(tmp, handle);
@@ -500,7 +503,7 @@ test("recall controller: stub embedder enables hybrid path", async () => {
     // Should work (answered or no_memory, not error)
     assert.ok(
       result.status === "answered" || result.status === "no_memory",
-      `unexpected status: ${result.status}`,
+      `unexpected status: ${result.status}`
     );
     // If answered, verify the sourceIds includes the stored memory
     if (result.status === "answered") {
@@ -521,29 +524,38 @@ test("recall controller: paraphrase recovery with stub embedder", async () => {
     const embedder = new StubSemanticEmbedder({ stubDim: 64 });
     // Store embedding for the memory so semantic path can find it
     await embedOnRemember(handle, embedder, memId, "The primary provider is NVIDIA NIM");
-    const result = await runRecallController(handle, "What LLM model does this project primarily use?", {
-      semanticEnabled: true,
-      semanticEmbedder: embedder,
-      relevanceThreshold: 0.0, // very low threshold to allow weak matches
-      providerFetchImpl: makeScriptedFetch("The project primarily uses NVIDIA NIM."),
-      providerPrimaryApiKey: TEST_PRIMARY_KEY,
-      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
-      providerPrimaryModel: TEST_PRIMARY_MODEL,
-      providerFallbackApiKey: TEST_FALLBACK_KEY,
-      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
-      providerFallbackModel: TEST_FALLBACK_MODEL,
-    });
+    const result = await runRecallController(
+      handle,
+      "What LLM model does this project primarily use?",
+      {
+        semanticEnabled: true,
+        semanticEmbedder: embedder,
+        relevanceThreshold: 0.0, // very low threshold to allow weak matches
+        providerFetchImpl: makeScriptedFetch("The project primarily uses NVIDIA NIM."),
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+        providerPrimaryModel: TEST_PRIMARY_MODEL,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
+        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+        providerFallbackModel: TEST_FALLBACK_MODEL,
+      }
+    );
     // With stub embedder, paraphrase recovery depends on shared vocabulary.
     // The stub's feature hashing means overlapping tokens in "provider" and "LLM"
     // may not correlate perfectly. The key is the controller doesn't crash
     // and semantic path is exercised (embeddings exist, embedder is used).
     assert.ok(
-      result.status === "answered" || result.status === "no_memory" || result.status === "weak_match",
-      `unexpected status: ${result.status}`,
+      result.status === "answered" ||
+        result.status === "no_memory" ||
+        result.status === "weak_match",
+      `unexpected status: ${result.status}`
     );
     // Verify semantic path was exercised: if answered, the memory should be in sourceIds
     if (result.status === "answered") {
-      assert.ok(result.sourceIds.includes(memId), "should retrieve the stored memory via semantic path");
+      assert.ok(
+        result.sourceIds.includes(memId),
+        "should retrieve the stored memory via semantic path"
+      );
     }
   } finally {
     rmStorage(tmp, handle);
@@ -573,8 +585,16 @@ test("cross-project: private project not included in external results", async ()
     assert.equal(isProjectPrivate(tmp1), false, "project 1 should be public");
     assert.equal(isProjectPrivate(tmp2), true, "project 2 should be private");
   } finally {
-    try { handle2.db.close(); } catch { /* ignore */ }
-    try { handle1.db.close(); } catch { /* ignore */ }
+    try {
+      handle2.db.close();
+    } catch {
+      /* ignore */
+    }
+    try {
+      handle1.db.close();
+    } catch {
+      /* ignore */
+    }
     fs.rmSync(tmp1, { recursive: true, force: true });
     fs.rmSync(tmp2, { recursive: true, force: true });
   }
@@ -591,7 +611,9 @@ test("storage: raw text never stored in embeddings table", () => {
     const vec = [0.1, 0.2, 0.3];
     storeEmbedding(handle, { memoryId, dim: vec.length, vec, modelId: "m1" });
     // Check the raw DB — vec column should be binary blob, not text
-    const row = handle.db.prepare("SELECT vec FROM embeddings WHERE memory_id = ?").get(memoryId) as { vec: Buffer };
+    const row = handle.db
+      .prepare("SELECT vec FROM embeddings WHERE memory_id = ?")
+      .get(memoryId) as { vec: Buffer };
     assert.ok(Buffer.isBuffer(row.vec), "vec should be stored as binary blob");
     // The vec blob should not decode as utf8 string of the summary
     const asText = row.vec.toString("utf8");
@@ -610,7 +632,9 @@ test("production modules do not import from benchmark", async () => {
   // from the benchmark directory.
   const { createSemanticEmbedder } = await import("../src/retrieval/semantic/embedder.ts");
   const { embedOnRemember } = await import("../src/retrieval/semantic/embed-on-remember.ts");
-  const { scoreSemanticCandidates, fuseLexicalAndSemantic } = await import("../src/retrieval/semantic/score.ts");
+  const { scoreSemanticCandidates, fuseLexicalAndSemantic } = await import(
+    "../src/retrieval/semantic/score.ts"
+  );
   // These are all production modules — verify they don't throw on import
   assert.ok(typeof createSemanticEmbedder === "function");
   assert.ok(typeof embedOnRemember === "function");
@@ -698,7 +722,7 @@ test("handleRemember: CURION_SEMANTIC_ENABLED=1 creates embedding for saved memo
       // We verify the status is provider_error (provider call failed), not crash.
       assert.ok(
         result.status === "saved" || result.status === "provider_error",
-        `expected saved or provider_error, got ${result.status}`,
+        `expected saved or provider_error, got ${result.status}`
       );
     } finally {
       resetStorageProvider();
@@ -734,7 +758,7 @@ test("handleRemember: semantic disabled (no env flag) does not attempt embedding
       });
       assert.ok(
         result.status === "saved" || result.status === "provider_error",
-        `expected saved or provider_error, got ${result.status}`,
+        `expected saved or provider_error, got ${result.status}`
       );
       // When semantic is disabled, no embedding should be attempted.
       // Note: if status is provider_error, the memory wasn't saved so there's
@@ -844,7 +868,7 @@ test("backfill: one call embeds at most batchSize missing memories", async () =>
     // Verify no embeddings exist yet
     const embBefore = getEmbeddingsForMemories(
       handle,
-      Array.from({ length: totalMemories }, (_, i) => i + 1),
+      Array.from({ length: totalMemories }, (_, i) => i + 1)
     );
     assert.equal(embBefore.size, 0, "no embeddings should exist before backfill");
 
@@ -852,10 +876,7 @@ test("backfill: one call embeds at most batchSize missing memories", async () =>
     const count = await backfillMissingEmbeddings(handle, embedder, { batchSize });
 
     // One call must embed at most batchSize memories
-    assert.ok(
-      count <= batchSize,
-      `first call embedded ${count}, expected at most ${batchSize}`,
-    );
+    assert.ok(count <= batchSize, `first call embedded ${count}, expected at most ${batchSize}`);
   } finally {
     resetStorageProvider();
     rmStorage(tmp, handle);
@@ -897,7 +918,7 @@ test("backfill: repeated calls continue with next batch, no skips", async () => 
       // Verify each subsequent call also respects batchSize
       assert.ok(
         count <= batchSize,
-        `call ${callCount + 1} embedded ${count}, expected <= ${batchSize}`,
+        `call ${callCount + 1} embedded ${count}, expected <= ${batchSize}`
       );
     }
 
@@ -906,14 +927,14 @@ test("backfill: repeated calls continue with next batch, no skips", async () => 
     assert.equal(
       embAfter.size,
       totalMemories,
-      `expected ${totalMemories} embeddings after backfill, got ${embAfter.size}`,
+      `expected ${totalMemories} embeddings after backfill, got ${embAfter.size}`
     );
 
     // Total embedded should match total memories (every embedding succeeded with stub)
     assert.equal(
       embCount,
       totalMemories,
-      `total embedded ${embCount} should equal ${totalMemories} memories`,
+      `total embedded ${embCount} should equal ${totalMemories} memories`
     );
   } finally {
     resetStorageProvider();

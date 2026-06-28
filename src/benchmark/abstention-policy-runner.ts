@@ -58,16 +58,16 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import type { AbstentionSignals, QueryEval } from "./metrics.js";
 import {
+  type AbstentionPolicy,
   BUILTIN_POLICIES,
+  type PolicyDecision,
+  type PolicyMetrics,
   buildPolicyPerQuery,
   computePolicyMetrics,
   evaluatePolicy,
-  type AbstentionPolicy,
-  type PolicyDecision,
-  type PolicyMetrics,
 } from "./abstention-policy.js";
+import type { AbstentionSignals, QueryEval } from "./metrics.js";
 
 // ---------------------------------------------------------------------------
 // Top-level config + result shapes
@@ -233,20 +233,14 @@ export function runAbstentionPolicy(args: {
 }): AbstentionPolicyReport {
   const { evals, signalsByQueryId, config = {}, labelsByQueryId } = args;
   const variant = args.variant;
-  const perQuery = buildPolicyPerQuery(
-    evals,
-    signalsByQueryId,
-    labelsByQueryId ?? new Map(),
-  );
+  const perQuery = buildPolicyPerQuery(evals, signalsByQueryId, labelsByQueryId ?? new Map());
   // Build the policy list. The custom policies come
   // first (in the order given); the built-in policies
   // follow. The `onlyPolicyIds` filter, when set,
   // restricts the report to the named policies.
   const customPolicies = config.customPolicies ?? [];
   const builtinPolicies = BUILTIN_POLICIES;
-  const filterIds = config.onlyPolicyIds
-    ? new Set(config.onlyPolicyIds)
-    : null;
+  const filterIds = config.onlyPolicyIds ? new Set(config.onlyPolicyIds) : null;
   const policies: AbstentionPolicy[] = [];
   for (const p of customPolicies) {
     if (filterIds === null || filterIds.has(p.id)) {
@@ -293,12 +287,10 @@ export function runAbstentionPolicy(args: {
       positiveCount,
       variant,
       policyCount: policies.length,
-      builtinPolicyCount: builtinPolicies.filter(
-        (p) => filterIds === null || filterIds.has(p.id),
-      ).length,
-      customPolicyCount: customPolicies.filter(
-        (p) => filterIds === null || filterIds.has(p.id),
-      ).length,
+      builtinPolicyCount: builtinPolicies.filter((p) => filterIds === null || filterIds.has(p.id))
+        .length,
+      customPolicyCount: customPolicies.filter((p) => filterIds === null || filterIds.has(p.id))
+        .length,
     },
     policies: rows,
     perQuery,
@@ -322,10 +314,7 @@ const ARTIFACT_FILE_PREFIX = "retrieval-abstention-policy";
  * current ISO timestamp with `:` / `.` replaced by
  * `-` so the filename is safe across shells.
  */
-export function writeAbstentionPolicyReport(
-  report: AbstentionPolicyReport,
-  dir: string,
-): string {
+export function writeAbstentionPolicyReport(report: AbstentionPolicyReport, dir: string): string {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   }
@@ -352,9 +341,7 @@ export function writeAbstentionPolicyReport(
  * The function is pure: same report -> same string.
  * The CLI entry point writes the string to stdout.
  */
-export function formatAbstentionPolicyReport(
-  report: AbstentionPolicyReport,
-): string {
+export function formatAbstentionPolicyReport(report: AbstentionPolicyReport): string {
   const lines: string[] = [];
   lines.push("=== curion retrieval abstention policy ===");
   lines.push(`generated at: ${report.generatedAt}`);
@@ -367,50 +354,28 @@ export function formatAbstentionPolicyReport(
   lines.push(
     `  policies evaluated:${String(report.config.policyCount).padStart(3)} ` +
       `(primary=${report.policies.filter((p) => p.category === "primary").length}, ` +
-      `ablation=${report.policies.filter((p) => p.category === "ablation").length})`,
+      `ablation=${report.policies.filter((p) => p.category === "ablation").length})`
   );
   lines.push("");
   lines.push("READ THIS FIRST: this is a BENCHMARK-ONLY study.");
-  lines.push(
-    "  The policy evaluator tests how a set of rule-based",
-  );
-  lines.push(
-    "  abstention policies behave on the fixture corpus. The",
-  );
-  lines.push(
-    "  policies are NOT wired into the production `recall(text)`",
-  );
-  lines.push(
-    "  controller, the public MCP API, or the existing audit /",
-  );
-  lines.push(
-    "  calibration report shapes. The recommended moderate policy's",
-  );
-  lines.push(
-    "  gains rely partly on the fixture-correlated",
-  );
-  lines.push(
-    "  `isFalsePremiseLike` query-shape flag, so this is",
-  );
-  lines.push(
-    "  research-only / fixture-dependent; do NOT generalise",
-  );
-  lines.push(
-    "  the policy beyond the current fixture corpus without",
-  );
-  lines.push(
-    "  re-evaluating on a new corpus.",
-  );
+  lines.push("  The policy evaluator tests how a set of rule-based");
+  lines.push("  abstention policies behave on the fixture corpus. The");
+  lines.push("  policies are NOT wired into the production `recall(text)`");
+  lines.push("  controller, the public MCP API, or the existing audit /");
+  lines.push("  calibration report shapes. The recommended moderate policy's");
+  lines.push("  gains rely partly on the fixture-correlated");
+  lines.push("  `isFalsePremiseLike` query-shape flag, so this is");
+  lines.push("  research-only / fixture-dependent; do NOT generalise");
+  lines.push("  the policy beyond the current fixture corpus without");
+  lines.push("  re-evaluating on a new corpus.");
   lines.push("");
   // ---- Headline policy frontier table ----
   lines.push("--- policy frontier ---");
   lines.push(
-    "  policy                       TNR%   posAbst%  hit5Ret%  rank1Ret%  curT1Ret%  P     R     F1    | gate counts (score/agree/hN/fP)",
+    "  policy                       TNR%   posAbst%  hit5Ret%  rank1Ret%  curT1Ret%  P     R     F1    | gate counts (score/agree/hN/fP)"
   );
   for (const row of report.policies) {
-    const policyLabel = row.policyId.length > 28
-      ? row.policyId.slice(0, 25) + "..."
-      : row.policyId;
+    const policyLabel = row.policyId.length > 28 ? row.policyId.slice(0, 25) + "..." : row.policyId;
     lines.push(
       `  ${policyLabel.padEnd(28)}` +
         ` ${(row.noAnswerAbstainedRate * 100).toFixed(1).padStart(5)}` +
@@ -419,58 +384,35 @@ export function formatAbstentionPolicyReport(
         `     ${(row.rank1RetainedRate * 100).toFixed(1).padStart(5)}` +
         `      ${(row.currentTruthAt1RetainedRate * 100).toFixed(1).padStart(5)}` +
         `   ${row.precision.toFixed(2)}  ${row.recall.toFixed(2)}  ${row.f1.toFixed(2)}` +
-        `    | ${String(row.gateCounts.score).padStart(2)}/${String(row.gateCounts.agreement).padStart(2)}/${String(row.gateCounts.hardNeg).padStart(2)}/${String(row.gateCounts.falsePrem).padStart(2)}`,
+        `    | ${String(row.gateCounts.score).padStart(2)}/${String(row.gateCounts.agreement).padStart(2)}/${String(row.gateCounts.hardNeg).padStart(2)}/${String(row.gateCounts.falsePrem).padStart(2)}`
     );
   }
   lines.push("");
-  lines.push(
-    "  TNR%        = no-answer queries the policy abstained on (TNR equivalent).",
-  );
-  lines.push(
-    "  posAbst%    = positive queries the policy abstained on (a damage metric).",
-  );
-  lines.push(
-    "  hit5Ret%    = hit@5 retained on positive queries (vs un-gated baseline).",
-  );
-  lines.push(
-    "  rank1Ret%   = rank1 retained on positive queries.",
-  );
-  lines.push(
-    "  curT1Ret%   = currentTruthAt1 retained on positive queries.",
-  );
-  lines.push(
-    "  P/R/F1      = precision / recall / F1 on the 'should-abstain' binary",
-  );
-  lines.push(
-    "                task with `isNoAnswer` as the positive class.",
-  );
-  lines.push(
-    "  gate counts = number of queries that triggered the score / agreement /",
-  );
-  lines.push(
-    "                hardNeg / falsePrem gate (a query that triggered two",
-  );
-  lines.push(
-    "                gates contributes to both buckets).",
-  );
+  lines.push("  TNR%        = no-answer queries the policy abstained on (TNR equivalent).");
+  lines.push("  posAbst%    = positive queries the policy abstained on (a damage metric).");
+  lines.push("  hit5Ret%    = hit@5 retained on positive queries (vs un-gated baseline).");
+  lines.push("  rank1Ret%   = rank1 retained on positive queries.");
+  lines.push("  curT1Ret%   = currentTruthAt1 retained on positive queries.");
+  lines.push("  P/R/F1      = precision / recall / F1 on the 'should-abstain' binary");
+  lines.push("                task with `isNoAnswer` as the positive class.");
+  lines.push("  gate counts = number of queries that triggered the score / agreement /");
+  lines.push("                hardNeg / falsePrem gate (a query that triggered two");
+  lines.push("                gates contributes to both buckets).");
   lines.push("");
   // ---- Per-family positive abstention breakdown for the recommended policy ----
-  const recommended = report.policies.find(
-    (p) => p.policyId === "moderate-score-0.40",
-  );
+  const recommended = report.policies.find((p) => p.policyId === "moderate-score-0.40");
   if (recommended) {
     lines.push("--- per-family positive abstention (recommended: moderate-score-0.40) ---");
-    lines.push(
-      "  family           total  abstained  rate   notes",
-    );
+    lines.push("  family           total  abstained  rate   notes");
     const familyOrder = Object.keys(recommended.positiveAbstainedByFamily).sort();
     for (const family of familyOrder) {
       const slot = recommended.positiveAbstainedByFamily[family]!;
-      const note = slot.abstained > 0
-        ? flagNotesForFamily(family, recommended.falsePositives)
-        : "no positive abstentions on this family";
+      const note =
+        slot.abstained > 0
+          ? flagNotesForFamily(family, recommended.falsePositives)
+          : "no positive abstentions on this family";
       lines.push(
-        `  ${family.padEnd(16)} ${String(slot.total).padStart(4)}    ${String(slot.abstained).padStart(4)}     ${(slot.rate * 100).toFixed(1).padStart(4)}%   ${note}`,
+        `  ${family.padEnd(16)} ${String(slot.total).padStart(4)}    ${String(slot.abstained).padStart(4)}     ${(slot.rate * 100).toFixed(1).padStart(4)}%   ${note}`
       );
     }
     lines.push("");
@@ -496,11 +438,8 @@ export function formatAbstentionPolicyReport(
       }
       for (const fp of recommended.falsePositives) {
         const labels = labelsByQueryId.get(fp.queryId);
-        const labelStr =
-          labels && labels.length > 0 ? `  labels=${labels.join("|")}` : "";
-        lines.push(
-          `  [${fp.family}] ${fp.queryId}  reason=${fp.reason}${labelStr}`,
-        );
+        const labelStr = labels && labels.length > 0 ? `  labels=${labels.join("|")}` : "";
+        lines.push(`  [${fp.family}] ${fp.queryId}  reason=${fp.reason}${labelStr}`);
       }
     }
     lines.push("");
@@ -516,83 +455,36 @@ export function formatAbstentionPolicyReport(
       }
       for (const fn of recommended.falseNegatives) {
         const labels = labelsByQueryId.get(fn.queryId);
-        const labelStr =
-          labels && labels.length > 0 ? `  labels=${labels.join("|")}` : "";
-        lines.push(
-          `  [${fn.family}] ${fn.queryId}  reason=${fn.reason}${labelStr}`,
-        );
+        const labelStr = labels && labels.length > 0 ? `  labels=${labels.join("|")}` : "";
+        lines.push(`  [${fn.family}] ${fn.queryId}  reason=${fn.reason}${labelStr}`);
       }
     }
     lines.push("");
   }
   // ---- Honest reading block ----
   lines.push("--- honest reading ---");
-  lines.push(
-    "  The flag-only baseline (`flag-only-zero-hit-cost`) abstains on the",
-  );
-  lines.push(
-    "  query-shape-flag subset of no-answer queries. It is the cheap, low-",
-  );
-  lines.push(
-    "  cost line; positive abstention rate is exactly the false-premise /",
-  );
-  lines.push(
-    "  hard-negative flag's positive-query false-positive rate (low on this",
-  );
-  lines.push(
-    "  fixture, but the gains on no-answer TNR are also low).",
-  );
-  lines.push(
-    "  The recommended moderate policy adds the score gate (meanContributor",
-  );
-  lines.push(
-    "  Score < 0.40 OR hardNeg OR falsePrem) and reaches a much higher TNR",
-  );
-  lines.push(
-    "  at the cost of a non-trivial positive abstention rate. The cost is",
-  );
-  lines.push(
-    "  concentrated on paraphrase and orientation queries; the per-family",
-  );
-  lines.push(
-    "  table above shows where the damage is. The score gate's contribution",
-  );
-  lines.push(
-    "  is mostly from the contributor-score distribution on paraphrases",
-  );
-  lines.push(
-    "  (a paraphrase query can have a high lexical / FTS5 score and a low",
-  );
-  lines.push(
-    "  vector-dense score, and the mean lands in the abstention band).",
-  );
-  lines.push(
-    "  The aggressive full-catch policy (0.50 threshold, no false-premise",
-  );
-  lines.push(
-    "  flag) catches more no-answer queries but inflicts more damage on",
-  );
-  lines.push(
-    "  answerable queries. It is reported as a stress-test, not a",
-  );
-  lines.push(
-    "  recommendation.",
-  );
-  lines.push(
-    "  The score-only and agreement-only ablations show what each gate",
-  );
-  lines.push(
-    "  contributes on its own. The agreement gate is a weak-signal",
-  );
-  lines.push(
-    "  ablation; on a fixture where the ranker always populates the",
-  );
-  lines.push(
-    "  contributor block with all three sources, the agreement-count",
-  );
-  lines.push(
-    "  signal is a much weaker separator than the score gate.",
-  );
+  lines.push("  The flag-only baseline (`flag-only-zero-hit-cost`) abstains on the");
+  lines.push("  query-shape-flag subset of no-answer queries. It is the cheap, low-");
+  lines.push("  cost line; positive abstention rate is exactly the false-premise /");
+  lines.push("  hard-negative flag's positive-query false-positive rate (low on this");
+  lines.push("  fixture, but the gains on no-answer TNR are also low).");
+  lines.push("  The recommended moderate policy adds the score gate (meanContributor");
+  lines.push("  Score < 0.40 OR hardNeg OR falsePrem) and reaches a much higher TNR");
+  lines.push("  at the cost of a non-trivial positive abstention rate. The cost is");
+  lines.push("  concentrated on paraphrase and orientation queries; the per-family");
+  lines.push("  table above shows where the damage is. The score gate's contribution");
+  lines.push("  is mostly from the contributor-score distribution on paraphrases");
+  lines.push("  (a paraphrase query can have a high lexical / FTS5 score and a low");
+  lines.push("  vector-dense score, and the mean lands in the abstention band).");
+  lines.push("  The aggressive full-catch policy (0.50 threshold, no false-premise");
+  lines.push("  flag) catches more no-answer queries but inflicts more damage on");
+  lines.push("  answerable queries. It is reported as a stress-test, not a");
+  lines.push("  recommendation.");
+  lines.push("  The score-only and agreement-only ablations show what each gate");
+  lines.push("  contributes on its own. The agreement gate is a weak-signal");
+  lines.push("  ablation; on a fixture where the ranker always populates the");
+  lines.push("  contributor block with all three sources, the agreement-count");
+  lines.push("  signal is a much weaker separator than the score gate.");
   lines.push("");
   return lines.join("\n");
 }
@@ -607,7 +499,7 @@ export function formatAbstentionPolicyReport(
  */
 function flagNotesForFamily(
   family: string,
-  falsePositives: ReadonlyArray<{ queryId: string; family: string; reason: string }>,
+  falsePositives: ReadonlyArray<{ queryId: string; family: string; reason: string }>
 ): string {
   const fpInFamily = falsePositives.filter((fp) => fp.family === family);
   const reasons = new Set(fpInFamily.map((fp) => fp.reason));

@@ -65,15 +65,15 @@
 import { tokenize } from "../../retrieval/lexical.js";
 import type {
   LexicalCandidate,
-  LexicalScoredCandidate,
   LexicalRankingOptions,
+  LexicalScoredCandidate,
 } from "../../retrieval/lexical.js";
-import { cosineSimilarity } from "./vector.js";
 import {
-  StubDeterministicDenseEmbedder,
   type DenseEmbedder,
   type EmbedderMetadata,
+  StubDeterministicDenseEmbedder,
 } from "./dense-embedder.js";
+import { cosineSimilarity } from "./vector.js";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -183,13 +183,9 @@ export interface DenseVectorRankResult {
 export async function rankDenseVectorAsync(
   query: string,
   candidates: ReadonlyArray<LexicalCandidate>,
-  options: DenseVectorRankingOptions = {},
+  options: DenseVectorRankingOptions = {}
 ): Promise<LexicalScoredCandidate[]> {
-  const { hits } = await rankDenseVectorWithMetadataAsync(
-    query,
-    candidates,
-    options,
-  );
+  const { hits } = await rankDenseVectorWithMetadataAsync(query, candidates, options);
   return hits;
 }
 
@@ -202,7 +198,7 @@ export async function rankDenseVectorAsync(
 export async function rankDenseVectorWithMetadataAsync(
   query: string,
   candidates: ReadonlyArray<LexicalCandidate>,
-  options: DenseVectorRankingOptions = {},
+  options: DenseVectorRankingOptions = {}
 ): Promise<DenseVectorRankResult> {
   const threshold = options.threshold ?? DEFAULT_DENSE_VECTOR_THRESHOLD;
   const topK = options.topK ?? DEFAULT_DENSE_VECTOR_TOP_K;
@@ -225,10 +221,7 @@ export async function rankDenseVectorWithMetadataAsync(
   // they consider the "match text".
   const candidateTexts = candidates.map((c) => {
     const text = typeof c.text === "string" ? c.text : "";
-    const tagPart =
-      Array.isArray(c.tags) && c.tags.length > 0
-        ? ` ${c.tags.join(" ")}`
-        : "";
+    const tagPart = Array.isArray(c.tags) && c.tags.length > 0 ? ` ${c.tags.join(" ")}` : "";
     return `${text}${tagPart}`;
   });
 
@@ -256,11 +249,16 @@ export async function rankDenseVectorWithMetadataAsync(
   // breaking.
   const isQuery = options.kind === "query";
   const hasEmbedQuery = isQwen3LikeEmbedder(embedder);
-  const queryPromise = isQuery && hasEmbedQuery
-    ? (embedder as unknown as {
-        embedQuery: (t: string) => Promise<number[]>;
-      }).embedQuery(safeQuery).then((v) => [v])
-    : embedder.embedBatch([safeQuery]);
+  const queryPromise =
+    isQuery && hasEmbedQuery
+      ? (
+          embedder as unknown as {
+            embedQuery: (t: string) => Promise<number[]>;
+          }
+        )
+          .embedQuery(safeQuery)
+          .then((v) => [v])
+      : embedder.embedBatch([safeQuery]);
   const [candidateVectors, queryVectorList] = await Promise.all([
     embedder.embedBatch(candidateTexts),
     queryPromise,

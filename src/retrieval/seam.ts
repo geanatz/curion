@@ -32,13 +32,13 @@
  * changing the seam's public surface.
  */
 
+import type { RelatedMemory } from "../providers/memory-analysis.js";
 import {
-  listActiveMemorySummaries,
   type SafeMemorySummary,
   type StorageHandle,
+  listActiveMemorySummaries,
 } from "../storage/storage.js";
-import { rankLexical, DEFAULT_TOP_K } from "./lexical.js";
-import type { RelatedMemory } from "../providers/memory-analysis.js";
+import { DEFAULT_TOP_K, rankLexical } from "./lexical.js";
 
 /** Hard cap on `topK` for the default implementation. */
 export const RELATED_MEMORIES_MAX_TOP_K = 16;
@@ -78,7 +78,7 @@ export interface RelatedMemoryQuery {
  */
 export type RelatedMemoriesImpl = (
   storage: StorageHandle,
-  query: RelatedMemoryQuery,
+  query: RelatedMemoryQuery
 ) => { memories: RelatedMemory[]; reason: string };
 
 let relatedMemoriesImpl: RelatedMemoriesImpl = defaultRelatedMemoriesImpl;
@@ -102,7 +102,7 @@ let relatedMemoriesImpl: RelatedMemoriesImpl = defaultRelatedMemoriesImpl;
  */
 export function findRelatedMemories(
   storage: StorageHandle,
-  query: RelatedMemoryQuery,
+  query: RelatedMemoryQuery
 ): { memories: RelatedMemory[]; reason: string } {
   return relatedMemoriesImpl(storage, query);
 }
@@ -134,7 +134,7 @@ export function findRelatedMemories(
  */
 function defaultRelatedMemoriesImpl(
   storage: StorageHandle,
-  query: RelatedMemoryQuery,
+  query: RelatedMemoryQuery
 ): { memories: RelatedMemory[]; reason: string } {
   const topK = clampTopK(query.topK);
   const summaries = listActiveMemorySummaries(storage);
@@ -202,9 +202,7 @@ function defaultRelatedMemoriesImpl(
   }
   return {
     memories,
-    reason: query.candidateText !== undefined
-      ? "lexical top-K (dual-text union)"
-      : "lexical top-K",
+    reason: query.candidateText !== undefined ? "lexical top-K (dual-text union)" : "lexical top-K",
   };
 }
 

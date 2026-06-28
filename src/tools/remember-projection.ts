@@ -28,9 +28,9 @@
  * none of which contain a `Note:` prefix.
  */
 
-import type { RememberResult } from "./remember.js";
+import { stripProviderErrorPrefix, stripRejectedPrefix } from "./message-prefix.js";
 import type { RememberStructuredContent } from "./remember-structured-content.js";
-import { stripRejectedPrefix, stripProviderErrorPrefix } from "./message-prefix.js";
+import type { RememberResult } from "./remember.js";
 
 /**
  * Build the per-status public `text` for the `remember` tool.
@@ -73,9 +73,7 @@ export function buildRememberPublicText(result: RememberResult): string {
  * that could be resolved with a rephrase. Provider errors
  * never carry `clarification_needed`.
  */
-export function buildRememberStructuredContent(
-  result: RememberResult,
-): RememberStructuredContent {
+export function buildRememberStructuredContent(result: RememberResult): RememberStructuredContent {
   switch (result.status) {
     case "saved": {
       const out: RememberStructuredContent = {
@@ -83,10 +81,7 @@ export function buildRememberStructuredContent(
         summary: result.summary ?? "",
         kind: result.memoryKind ?? "",
       };
-      if (
-        typeof result.confidence === "number" &&
-        Number.isFinite(result.confidence)
-      ) {
+      if (typeof result.confidence === "number" && Number.isFinite(result.confidence)) {
         out.confidence = result.confidence;
       }
       return out;

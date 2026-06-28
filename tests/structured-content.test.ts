@@ -56,49 +56,41 @@
  * registration, validation gating — is exercised.
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
+import { test } from "node:test";
 
-import { buildServer, PUBLIC_TOOL_NAMES } from "../src/server.ts";
+import {
+  resetListRegisteredProjectsStub,
+  setListRegisteredProjectsStub,
+} from "../src/config/registry.ts";
+import { runRecallController } from "../src/controller/recall-controller.ts";
+import { runRememberController } from "../src/controller/remember-controller.ts";
+import { PUBLIC_TOOL_NAMES, buildServer } from "../src/server.ts";
 import {
   RECALL_STRUCTURED_CONTENT_SCHEMA,
   REMEMBER_STRUCTURED_CONTENT_SCHEMA,
   type RecallStructuredContent,
   type RememberStructuredContent,
 } from "../src/server.ts";
+import { type StorageHandle, insertMemoryRecord } from "../src/storage/storage.ts";
 import {
-  setStorageProvider as setRememberStorageProvider,
-  resetStorageProvider as resetRememberStorageProvider,
-} from "../src/tools/remember.ts";
-import {
-  setStorageProvider as setRecallStorageProvider,
   resetStorageProvider as resetRecallStorageProvider,
+  setStorageProvider as setRecallStorageProvider,
 } from "../src/tools/recall.ts";
 import {
-  insertMemoryRecord,
-  type StorageHandle,
-  type MemoryRecord,
-} from "../src/storage/storage.ts";
-import { runRememberController } from "../src/controller/remember-controller.ts";
-import { runRecallController } from "../src/controller/recall-controller.ts";
-import {
-  setListRegisteredProjectsStub,
-  resetListRegisteredProjectsStub,
-} from "../src/config/registry.ts";
-import {
-  TEST_PRIMARY_KEY,
-  TEST_FALLBACK_KEY,
-  TEST_PRIMARY_BASE_URL,
-  TEST_PRIMARY_MODEL,
-  TEST_FALLBACK_BASE_URL,
-  TEST_FALLBACK_MODEL,
-} from "./shared-test-provider.ts";
-import {
-  scriptFetch,
-  okChatResponse,
-  safeAnalysis,
-} from "./_helpers/provider-stub.ts";
+  resetStorageProvider as resetRememberStorageProvider,
+  setStorageProvider as setRememberStorageProvider,
+} from "../src/tools/remember.ts";
+import { okChatResponse, safeAnalysis, scriptFetch } from "./_helpers/provider-stub.ts";
 import { mkStorage, rmStorage } from "./_helpers/test-storage.ts";
+import {
+  TEST_FALLBACK_BASE_URL,
+  TEST_FALLBACK_KEY,
+  TEST_FALLBACK_MODEL,
+  TEST_PRIMARY_BASE_URL,
+  TEST_PRIMARY_KEY,
+  TEST_PRIMARY_MODEL,
+} from "./shared-test-provider.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -114,25 +106,30 @@ import { mkStorage, rmStorage } from "./_helpers/test-storage.ts";
  */
 async function callToolHandler(
   toolName: "remember" | "recall",
-  args: Record<string, unknown>,
+  args: Record<string, unknown>
 ): Promise<{
   content: Array<{ type: string; text: string }>;
   structuredContent: Record<string, unknown> | undefined;
   isError?: boolean;
 }> {
   const server = buildServer();
-  const registered = (server as unknown as {
-    _registeredTools: Record<string, {
-      handler: (
-        args: Record<string, unknown>,
-        extra: unknown,
-      ) => Promise<{
-        content: Array<{ type: string; text: string }>;
-        structuredContent?: Record<string, unknown>;
-        isError?: boolean;
-      }>;
-    }>;
-  })._registeredTools;
+  const registered = (
+    server as unknown as {
+      _registeredTools: Record<
+        string,
+        {
+          handler: (
+            args: Record<string, unknown>,
+            extra: unknown
+          ) => Promise<{
+            content: Array<{ type: string; text: string }>;
+            structuredContent?: Record<string, unknown>;
+            isError?: boolean;
+          }>;
+        }
+      >;
+    }
+  )._registeredTools;
   const tool = registered[toolName];
   if (!tool) throw new Error(`tool ${toolName} not registered`);
   return await tool.handler(args, {
@@ -142,12 +139,13 @@ async function callToolHandler(
 }
 
 /** Extract the `structuredContent` of a handler response. */
-function getStructuredContent(
-  result: { structuredContent?: Record<string, unknown> },
-): Record<string, unknown> {
+function getStructuredContent(result: { structuredContent?: Record<string, unknown> }): Record<
+  string,
+  unknown
+> {
   assert.ok(
     result.structuredContent,
-    `handler must return structuredContent; got ${JSON.stringify(result)}`,
+    `handler must return structuredContent; got ${JSON.stringify(result)}`
   );
   return result.structuredContent as Record<string, unknown>;
 }
@@ -186,7 +184,7 @@ function getText(result: {
 async function projectRecallWireFormat(
   handle: StorageHandle,
   text: string,
-  fetchImpl: typeof fetch,
+  fetchImpl: typeof fetch
 ): Promise<{
   text: string;
   structuredContent: RecallStructuredContent;
@@ -206,7 +204,7 @@ async function projectRecallWireFormat(
   // tool callback for end-to-end coverage.
   if (outcome.status !== "answered") {
     throw new Error(
-      `projectRecallWireFormat only handles the answered case; got ${outcome.status}`,
+      `projectRecallWireFormat only handles the answered case; got ${outcome.status}`
     );
   }
   // Re-implement the tool-layer `formatOutcome` for the
@@ -214,20 +212,12 @@ async function projectRecallWireFormat(
   // projection is a single-source-of-truth function below.
   // We import the projection helpers to exercise the
   // exact code path the server uses.
-  const { formatAmbiguityNote } = await import(
-    "../src/retrieval/ambiguity.ts"
-  );
-  const { formatResolvedHistoryNote } = await import(
-    "../src/retrieval/resolved-history.ts"
-  );
+  const { formatAmbiguityNote } = await import("../src/retrieval/ambiguity.ts");
+  const { formatResolvedHistoryNote } = await import("../src/retrieval/resolved-history.ts");
   const ambiguityNote = formatAmbiguityNote(outcome.internalAmbiguity);
-  const resolvedHistoryNote = formatResolvedHistoryNote(
-    outcome.internalResolvedHistory,
-  );
-  const note =
-    ambiguityNote.length > 0 ? ambiguityNote : resolvedHistoryNote;
-  const message =
-    note.length === 0 ? outcome.answer : `${note}\n\n${outcome.answer}`;
+  const resolvedHistoryNote = formatResolvedHistoryNote(outcome.internalResolvedHistory);
+  const note = ambiguityNote.length > 0 ? ambiguityNote : resolvedHistoryNote;
+  const message = note.length === 0 ? outcome.answer : `${note}\n\n${outcome.answer}`;
   const recallResult = {
     status: "answered" as const,
     message,
@@ -255,9 +245,11 @@ test("public tool surface: still exactly remember + recall (in that order)", () 
 
 test("remember tool: still exposes exactly one text param", () => {
   const server = buildServer();
-  const registered = (server as unknown as {
-    _registeredTools: Record<string, { inputSchema: unknown }>;
-  })._registeredTools;
+  const registered = (
+    server as unknown as {
+      _registeredTools: Record<string, { inputSchema: unknown }>;
+    }
+  )._registeredTools;
   const remember = registered["remember"] as {
     inputSchema: {
       _def?: { shape?: () => Record<string, unknown> };
@@ -270,9 +262,11 @@ test("remember tool: still exposes exactly one text param", () => {
 
 test("recall tool: still exposes exactly one text param", () => {
   const server = buildServer();
-  const registered = (server as unknown as {
-    _registeredTools: Record<string, { inputSchema: unknown }>;
-  })._registeredTools;
+  const registered = (
+    server as unknown as {
+      _registeredTools: Record<string, { inputSchema: unknown }>;
+    }
+  )._registeredTools;
   const recall = registered["recall"] as {
     inputSchema: {
       _def?: { shape?: () => Record<string, unknown> };
@@ -289,14 +283,13 @@ test("recall tool: still exposes exactly one text param", () => {
 
 test("server: remember tool outputSchema exposes the user-approved discriminated shape", () => {
   const server = buildServer();
-  const registered = (server as unknown as {
-    _registeredTools: Record<string, { outputSchema: unknown }>;
-  })._registeredTools;
+  const registered = (
+    server as unknown as {
+      _registeredTools: Record<string, { outputSchema: unknown }>;
+    }
+  )._registeredTools;
   const remember = registered["remember"]!;
-  assert.ok(
-    remember.outputSchema,
-    "remember tool must have an outputSchema registered",
-  );
+  assert.ok(remember.outputSchema, "remember tool must have an outputSchema registered");
   // The Zod schema itself is exported; we verify the same
   // schema instance is the one wired into the server.
   assert.equal(remember.outputSchema, REMEMBER_STRUCTURED_CONTENT_SCHEMA);
@@ -305,38 +298,33 @@ test("server: remember tool outputSchema exposes the user-approved discriminated
   // shape). We assert the schema's `.shape` exposes a
   // `status` field with the four user-approved status
   // values.
-  const shape = (remember.outputSchema as {
-    shape: { status: { _def: { values: string[] } } };
-  }).shape;
+  const shape = (
+    remember.outputSchema as {
+      shape: { status: { _def: { values: string[] } } };
+    }
+  ).shape;
   assert.ok(shape.status, "outputSchema must include a `status` field");
-  const statusValues = (shape.status._def.values as string[])
-    .slice()
-    .sort();
-  assert.deepEqual(statusValues, [
-    "provider_error",
-    "rejected",
-    "saved",
-  ]);
+  const statusValues = (shape.status._def.values as string[]).slice().sort();
+  assert.deepEqual(statusValues, ["provider_error", "rejected", "saved"]);
 });
 
 test("server: recall tool outputSchema exposes the user-approved discriminated shape", () => {
   const server = buildServer();
-  const registered = (server as unknown as {
-    _registeredTools: Record<string, { outputSchema: unknown }>;
-  })._registeredTools;
+  const registered = (
+    server as unknown as {
+      _registeredTools: Record<string, { outputSchema: unknown }>;
+    }
+  )._registeredTools;
   const recall = registered["recall"]!;
-  assert.ok(
-    recall.outputSchema,
-    "recall tool must have an outputSchema registered",
-  );
+  assert.ok(recall.outputSchema, "recall tool must have an outputSchema registered");
   assert.equal(recall.outputSchema, RECALL_STRUCTURED_CONTENT_SCHEMA);
-  const shape = (recall.outputSchema as {
-    shape: { status: { _def: { values: string[] } } };
-  }).shape;
+  const shape = (
+    recall.outputSchema as {
+      shape: { status: { _def: { values: string[] } } };
+    }
+  ).shape;
   assert.ok(shape.status, "outputSchema must include a `status` field");
-  const statusValues = (shape.status._def.values as string[])
-    .slice()
-    .sort();
+  const statusValues = (shape.status._def.values as string[]).slice().sort();
   assert.deepEqual(statusValues, [
     "answered",
     "no_memory",
@@ -362,11 +350,7 @@ test("structuredContent: never includes a `message` field (any status, any tool)
       // no_memory
       const r0 = await callToolHandler("recall", { text: "anything" });
       const sc0 = getStructuredContent(r0);
-      assert.equal(
-        "message" in sc0,
-        false,
-        "structuredContent must not include `message`",
-      );
+      assert.equal("message" in sc0, false, "structuredContent must not include `message`");
       // rejected (secret-shaped query)
       const r1 = await callToolHandler("recall", {
         text: "AKIAIOSFODNN7EXAMPLE",
@@ -433,29 +417,23 @@ test("structuredContent: never includes a memory id or model/provider metadata f
     const sampleId = insertedIds[insertedIds.length - 1]!;
     assert.ok(
       sampleId >= 5,
-      `expected a 2+ digit id to avoid substring collisions; got ${sampleId}`,
+      `expected a 2+ digit id to avoid substring collisions; got ${sampleId}`
     );
 
-    const { fetchImpl } = scriptFetch(() =>
-      okChatResponse("Postgres 16 is the primary store."),
-    );
+    const { fetchImpl } = scriptFetch(() => okChatResponse("Postgres 16 is the primary store."));
     // Drive the controllers directly (so we can inject the
     // scripted fetch) and then run the wire projection
     // helpers (the same code path the server's
     // `registerTool` callback executes).
-    const recallOut = await runRecallController(
-      handle,
-      "What database does the project use?",
-      {
-        providerFetchImpl: fetchImpl,
-        providerPrimaryApiKey: TEST_PRIMARY_KEY,
-        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
-        providerPrimaryModel: TEST_PRIMARY_MODEL,
-        providerFallbackApiKey: TEST_FALLBACK_KEY,
-        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
-        providerFallbackModel: TEST_FALLBACK_MODEL,
-      },
-    );
+    const recallOut = await runRecallController(handle, "What database does the project use?", {
+      providerFetchImpl: fetchImpl,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
+    });
     assert.equal(recallOut.status, "answered");
 
     // Project the answered case through the wire format
@@ -464,15 +442,11 @@ test("structuredContent: never includes a memory id or model/provider metadata f
     const { structuredContent: sc1 } = await projectRecallWireFormat(
       handle,
       "What database does the project use?",
-      fetchImpl,
+      fetchImpl
     );
 
     for (const k of FORBIDDEN_ID_FIELDS) {
-      assert.equal(
-        k in sc1,
-        false,
-        `recall.answered structuredContent must not include '${k}'`,
-      );
+      assert.equal(k in sc1, false, `recall.answered structuredContent must not include '${k}'`);
     }
     // The numeric id must not appear anywhere in the
     // structuredContent JSON either. We use the seeded
@@ -483,7 +457,7 @@ test("structuredContent: never includes a memory id or model/provider metadata f
     const sc1Str = JSON.stringify(sc1);
     assert.ok(
       !sc1Str.includes(String(sampleId)),
-      `recall.answered structuredContent must not mention memory id ${sampleId}; got ${sc1Str}`,
+      `recall.answered structuredContent must not mention memory id ${sampleId}; got ${sc1Str}`
     );
 
     // recall.no_memory is reachable without a provider; we
@@ -495,11 +469,7 @@ test("structuredContent: never includes a memory id or model/provider metadata f
       });
       const sc2 = getStructuredContent(r2);
       for (const k of FORBIDDEN_ID_FIELDS) {
-        assert.equal(
-          k in sc2,
-          false,
-          `recall.no_memory structuredContent must not include '${k}'`,
-        );
+        assert.equal(k in sc2, false, `recall.no_memory structuredContent must not include '${k}'`);
       }
     } finally {
       resetRecallStorageProvider();
@@ -555,29 +525,25 @@ test("structuredContent.notes: plain strings, no Note: prefix, no type/severity,
       olderVariantsOf: [],
       detectionConfidence: 0.93,
     };
-    handle.db
-      .prepare("UPDATE memories SET metadata = ? WHERE id = ?")
-      .run(
-        JSON.stringify({
-          tags: [],
-          classification: null,
-          relationship: blockA,
-        }),
-        r1.id,
-      );
-    handle.db
-      .prepare("UPDATE memories SET metadata = ? WHERE id = ?")
-      .run(
-        JSON.stringify({
-          tags: [],
-          classification: null,
-          relationship: blockB,
-        }),
-        r2.id,
-      );
+    handle.db.prepare("UPDATE memories SET metadata = ? WHERE id = ?").run(
+      JSON.stringify({
+        tags: [],
+        classification: null,
+        relationship: blockA,
+      }),
+      r1.id
+    );
+    handle.db.prepare("UPDATE memories SET metadata = ? WHERE id = ?").run(
+      JSON.stringify({
+        tags: [],
+        classification: null,
+        relationship: blockB,
+      }),
+      r2.id
+    );
 
     const { fetchImpl } = scriptFetch(() =>
-      okChatResponse("Postgres stores project data reliably."),
+      okChatResponse("Postgres stores project data reliably.")
     );
     // Project the answered case through the wire format
     // (the same code path the server's registerTool callback
@@ -585,7 +551,7 @@ test("structuredContent.notes: plain strings, no Note: prefix, no type/severity,
     const { structuredContent: sc } = await projectRecallWireFormat(
       handle,
       "What database does the project use?",
-      fetchImpl,
+      fetchImpl
     );
     assert.equal(sc.status, "answered");
     // The structured projection drops the id list; the
@@ -597,12 +563,12 @@ test("structuredContent.notes: plain strings, no Note: prefix, no type/severity,
       assert.equal(
         typeof n,
         "string",
-        `every entry of notes must be a plain string; got ${typeof n}: ${JSON.stringify(n)}`,
+        `every entry of notes must be a plain string; got ${typeof n}: ${JSON.stringify(n)}`
       );
       // No `Note:` prefix.
       assert.ok(
         !/^Note:/.test(n),
-        `notes entries must not start with "Note:"; got ${JSON.stringify(n)}`,
+        `notes entries must not start with "Note:"; got ${JSON.stringify(n)}`
       );
       // No note `type` / `severity` (the entries are
       // strings, not objects, so this is structural; we
@@ -610,13 +576,12 @@ test("structuredContent.notes: plain strings, no Note: prefix, no type/severity,
       // just in case the note were ever to grow fields).
       assert.ok(
         !/type|severity/.test(n),
-        `notes entries must not include 'type' or 'severity'; got ${JSON.stringify(n)}`,
+        `notes entries must not include 'type' or 'severity'; got ${JSON.stringify(n)}`
       );
       // No memory id.
       assert.ok(
-        !new RegExp(`#?\\b${r1.id}\\b`).test(n) &&
-          !new RegExp(`#?\\b${r2.id}\\b`).test(n),
-        `notes entries must not mention any memory id; got ${JSON.stringify(n)}`,
+        !new RegExp(`#?\\b${r1.id}\\b`).test(n) && !new RegExp(`#?\\b${r2.id}\\b`).test(n),
+        `notes entries must not mention any memory id; got ${JSON.stringify(n)}`
       );
       // No diagnostic / internal token.
       for (const tok of [
@@ -632,7 +597,7 @@ test("structuredContent.notes: plain strings, no Note: prefix, no type/severity,
       ]) {
         assert.ok(
           !n.includes(tok),
-          `notes entry must not include diagnostic token '${tok}'; got ${JSON.stringify(n)}`,
+          `notes entry must not include diagnostic token '${tok}'; got ${JSON.stringify(n)}`
         );
       }
     }
@@ -669,7 +634,7 @@ test("structuredContent.notes (resolved-history): plain strings, no Note: prefix
       metadata: { tags: [], classification: null },
     });
     const { fetchImpl } = scriptFetch(() =>
-      okChatResponse("Fly.io is the current hosting platform."),
+      okChatResponse("Fly.io is the current hosting platform.")
     );
     // Project the answered case through the wire format
     // (the same code path the server's registerTool callback
@@ -677,7 +642,7 @@ test("structuredContent.notes (resolved-history): plain strings, no Note: prefix
     const { structuredContent: sc } = await projectRecallWireFormat(
       handle,
       "What hosting platform does the project use?",
-      fetchImpl,
+      fetchImpl
     );
     assert.equal(sc.status, "answered");
     assert.ok(Array.isArray(sc.notes), "notes must be an array");
@@ -686,11 +651,11 @@ test("structuredContent.notes (resolved-history): plain strings, no Note: prefix
       assert.equal(typeof n, "string");
       assert.ok(
         !/^Note:/.test(n),
-        `notes entries must not start with "Note:"; got ${JSON.stringify(n)}`,
+        `notes entries must not start with "Note:"; got ${JSON.stringify(n)}`
       );
       assert.ok(
         !/type|severity/.test(n),
-        `notes entries must not include 'type' or 'severity'; got ${JSON.stringify(n)}`,
+        `notes entries must not include 'type' or 'severity'; got ${JSON.stringify(n)}`
       );
     }
     // The exact text the user approved (without the
@@ -698,9 +663,9 @@ test("structuredContent.notes (resolved-history): plain strings, no Note: prefix
     const joined = sc.notes!.join("\n");
     assert.ok(
       joined.includes(
-        "I found earlier related information, but newer entries appear to supersede it.",
+        "I found earlier related information, but newer entries appear to supersede it."
       ),
-      `notes must include the resolved-history prose (without Note: prefix); got ${JSON.stringify(joined)}`,
+      `notes must include the resolved-history prose (without Note: prefix); got ${JSON.stringify(joined)}`
     );
   } finally {
     rmStorage(tmp, handle);
@@ -752,18 +717,12 @@ test("on-the-wire text fallback (recall.answered with notes): no Note: prefix, n
     };
     handle.db
       .prepare("UPDATE memories SET metadata = ? WHERE id = ?")
-      .run(
-        JSON.stringify({ tags: [], classification: null, relationship: blockA }),
-        r1.id,
-      );
+      .run(JSON.stringify({ tags: [], classification: null, relationship: blockA }), r1.id);
     handle.db
       .prepare("UPDATE memories SET metadata = ? WHERE id = ?")
-      .run(
-        JSON.stringify({ tags: [], classification: null, relationship: blockB }),
-        r2.id,
-      );
+      .run(JSON.stringify({ tags: [], classification: null, relationship: blockB }), r2.id);
     const { fetchImpl } = scriptFetch(() =>
-      okChatResponse("Postgres stores project data reliably."),
+      okChatResponse("Postgres stores project data reliably.")
     );
     // Project the answered case through the wire format
     // (the same code path the server's registerTool callback
@@ -771,27 +730,27 @@ test("on-the-wire text fallback (recall.answered with notes): no Note: prefix, n
     const { text } = await projectRecallWireFormat(
       handle,
       "What database does the project use?",
-      fetchImpl,
+      fetchImpl
     );
     // No `Note:` prefix anywhere.
     assert.ok(
       !/^Note:/.test(text),
-      `on-the-wire text must not start with "Note:"; got ${JSON.stringify(text)}`,
+      `on-the-wire text must not start with "Note:"; got ${JSON.stringify(text)}`
     );
     assert.ok(
       !text.includes("Note:"),
-      `on-the-wire text must not contain "Note:" anywhere; got ${JSON.stringify(text)}`,
+      `on-the-wire text must not contain "Note:" anywhere; got ${JSON.stringify(text)}`
     );
     // No `#N` memory id reference.
     assert.ok(
       !/#\d+/.test(text),
-      `on-the-wire text must not include any #N memory-id reference; got ${JSON.stringify(text)}`,
+      `on-the-wire text must not include any #N memory-id reference; got ${JSON.stringify(text)}`
     );
     // The plain note prose (without the `Note:` prefix) is
     // present, followed by the answer.
     assert.match(
       text,
-      /^stored memories on this topic disagree\.\n\nPostgres stores project data reliably\.$/,
+      /^stored memories on this topic disagree\.\n\nPostgres stores project data reliably\.$/
     );
   } finally {
     rmStorage(tmp, handle);
@@ -811,26 +770,24 @@ test("on-the-wire text fallback (recall.answered without notes): just the answer
       safetyFlags: ["controller-normalized"],
       metadata: { tags: [], classification: null },
     });
-    const { fetchImpl } = scriptFetch(() =>
-      okChatResponse("Postgres 16 is the primary store."),
-    );
+    const { fetchImpl } = scriptFetch(() => okChatResponse("Postgres 16 is the primary store."));
     // Project the answered case through the wire format
     // (the same code path the server's registerTool callback
     // runs).
     const { text } = await projectRecallWireFormat(
       handle,
       "What database does the project use?",
-      fetchImpl,
+      fetchImpl
     );
     // No `Note:` prefix when there are no notes.
     assert.ok(
       !text.includes("Note:"),
-      `on-the-wire text must not contain "Note:" when there are no notes; got ${JSON.stringify(text)}`,
+      `on-the-wire text must not contain "Note:" when there are no notes; got ${JSON.stringify(text)}`
     );
     // No `#N` id reference.
     assert.ok(
       !/#\d+/.test(text),
-      `on-the-wire text must not include any #N memory-id reference; got ${JSON.stringify(text)}`,
+      `on-the-wire text must not include any #N memory-id reference; got ${JSON.stringify(text)}`
     );
     // The text is byte-equal to the synthesized answer.
     assert.equal(text, "Postgres 16 is the primary store.");
@@ -879,7 +836,7 @@ test("recall structuredContent: rejected -> { status: 'rejected', reason }", asy
       // The `reason` MUST NOT echo the raw query / secret.
       assert.ok(
         !sc.reason!.includes("AKIAIOSFODNN7EXAMPLE"),
-        `reason must not echo the secret; got ${JSON.stringify(sc.reason)}`,
+        `reason must not echo the secret; got ${JSON.stringify(sc.reason)}`
       );
       // No answer / notes / sourceIds fields.
       assert.equal("answer" in sc, false);
@@ -908,16 +865,14 @@ test("recall structuredContent: answered without notes -> { status: 'answered', 
       safetyFlags: ["controller-normalized"],
       metadata: { tags: [], classification: null },
     });
-    const { fetchImpl } = scriptFetch(() =>
-      okChatResponse("Postgres 16 is the primary store."),
-    );
+    const { fetchImpl } = scriptFetch(() => okChatResponse("Postgres 16 is the primary store."));
     // Project the answered case through the wire format
     // (the same code path the server's registerTool callback
     // runs).
     const { structuredContent: sc } = await projectRecallWireFormat(
       handle,
       "What database does the project use?",
-      fetchImpl,
+      fetchImpl
     );
     assert.equal(sc.status, "answered");
     assert.equal(typeof sc.answer, "string");
@@ -952,7 +907,7 @@ test("remember structuredContent: rejected -> { status: 'rejected', reason }", a
       // The `reason` MUST NOT echo the raw input.
       assert.ok(
         !sc.reason!.includes("asdf"),
-        `reason must not echo the raw input; got ${JSON.stringify(sc.reason)}`,
+        `reason must not echo the raw input; got ${JSON.stringify(sc.reason)}`
       );
       // No summary / kind / confidence / question fields.
       assert.equal("summary" in sc, false);
@@ -1009,9 +964,7 @@ test("remember structuredContent: saved -> { status: 'saved', summary, kind, con
       // (`buildRememberStructuredContent`) which is
       // exactly what the tool callback uses. The
       // schema-validates the result.
-      const { fetchImpl } = scriptFetch(() =>
-        okChatResponse(safeAnalysis({ confidence: 0.91 })),
-      );
+      const { fetchImpl } = scriptFetch(() => okChatResponse(safeAnalysis({ confidence: 0.91 })));
       const controllerOut = await runRememberController(
         handle,
         "The team picked Postgres 16 for the primary store.",
@@ -1023,7 +976,7 @@ test("remember structuredContent: saved -> { status: 'saved', summary, kind, con
           providerFallbackApiKey: TEST_FALLBACK_KEY,
           providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
           providerFallbackModel: TEST_FALLBACK_MODEL,
-        },
+        }
       );
       assert.equal(controllerOut.status, "saved");
       if (controllerOut.status !== "saved") throw new Error("unreachable");
@@ -1032,9 +985,7 @@ test("remember structuredContent: saved -> { status: 'saved', summary, kind, con
       const { buildRememberStructuredContent } = await import(
         "../src/tools/remember-projection.ts"
       );
-      const { formatOutcome } = await import(
-        "../src/tools/remember.ts"
-      );
+      const { formatOutcome } = await import("../src/tools/remember.ts");
       // We need to construct a RememberResult from the
       // controller outcome. The formatOutcome helper
       // expects a RememberOutcome (the controller's
@@ -1057,10 +1008,7 @@ test("remember structuredContent: saved -> { status: 'saved', summary, kind, con
       const sc = buildRememberStructuredContent(rememberResult);
       assert.equal(sc.status, "saved");
       assert.equal(typeof sc.summary, "string");
-      assert.equal(
-        sc.summary,
-        "The project uses Postgres 16 for the primary store.",
-      );
+      assert.equal(sc.summary, "The project uses Postgres 16 for the primary store.");
       assert.equal(typeof sc.kind, "string");
       assert.ok((sc.kind as string).length > 0);
       assert.equal(typeof sc.confidence, "number");
@@ -1145,7 +1093,10 @@ test("remember structuredContent: rejected with clarification_needed -> { status
       assert.equal(sc.status, "rejected");
       assert.equal(typeof sc.reason, "string");
       assert.equal(typeof sc.clarification_needed, "object");
-      assert.equal(sc.clarification_needed!.question, "Is this a fact? Please rephrase or confirm so I can store it accurately.");
+      assert.equal(
+        sc.clarification_needed!.question,
+        "Is this a fact? Please rephrase or confirm so I can store it accurately."
+      );
       assert.equal(Array.isArray(sc.clarification_needed!.suggestions), true);
       assert.equal(sc.clarification_needed!.suggestions!.length, 2);
       // No summary / kind / confidence on rejected.
@@ -1218,22 +1169,14 @@ test("schema: structuredContent rejects unknown keys (strict())", () => {
     message: "should be rejected",
     memoryId: 42,
   });
-  assert.equal(
-    r1.success,
-    false,
-    "schema must reject `message` and `memoryId` on no_memory",
-  );
+  assert.equal(r1.success, false, "schema must reject `message` and `memoryId` on no_memory");
 
   const r2 = RECALL_STRUCTURED_CONTENT_SCHEMA.safeParse({
     status: "answered",
     answer: "ok",
     sourceIds: [1, 2],
   });
-  assert.equal(
-    r2.success,
-    false,
-    "schema must reject `sourceIds` on answered",
-  );
+  assert.equal(r2.success, false, "schema must reject `sourceIds` on answered");
 
   const r3 = REMEMBER_STRUCTURED_CONTENT_SCHEMA.safeParse({
     status: "saved",
@@ -1242,9 +1185,5 @@ test("schema: structuredContent rejects unknown keys (strict())", () => {
     memoryId: 42,
     modelId: "MiniMax-M3",
   });
-  assert.equal(
-    r3.success,
-    false,
-    "schema must reject `memoryId` and `modelId` on saved",
-  );
+  assert.equal(r3.success, false, "schema must reject `memoryId` and `modelId` on saved");
 });

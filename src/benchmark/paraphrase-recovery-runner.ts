@@ -76,11 +76,11 @@ import type { NoAnswerArtifact } from "./false-abstention-damage-runner.js";
 import { reconstructPerQuery } from "./false-abstention-damage-runner.js";
 import type { SemanticEvidenceMap } from "./false-abstention-damage.js";
 import {
-  runParaphraseRecoveryExperiment,
-  formatParaphraseRecoveryReport,
+  type ParaphraseRecoveryConfig,
   type ParaphraseRecoveryReport,
   type ParaphraseRecoveryVariant,
-  type ParaphraseRecoveryConfig,
+  formatParaphraseRecoveryReport,
+  runParaphraseRecoveryExperiment,
 } from "./paraphrase-recovery.js";
 
 // ---------------------------------------------------------------------------
@@ -94,9 +94,7 @@ import {
  * false-abstention-damage-runner module (the
  * shape is the same).
  */
-export function readParaphraseRecoveryNoAnswerArtifact(
-  filePath: string,
-): NoAnswerArtifact {
+export function readParaphraseRecoveryNoAnswerArtifact(filePath: string): NoAnswerArtifact {
   const text = fs.readFileSync(filePath, "utf8");
   const raw = JSON.parse(text);
   return raw as NoAnswerArtifact;
@@ -110,26 +108,24 @@ export function readParaphraseRecoveryNoAnswerArtifact(
  * false-abstention-damage-runner module
  * (the shape is the same).
  */
-export function readParaphraseRecoverySemanticEvidenceFile(
-  filePath: string,
-): SemanticEvidenceMap {
+export function readParaphraseRecoverySemanticEvidenceFile(filePath: string): SemanticEvidenceMap {
   const text = fs.readFileSync(filePath, "utf8");
   const raw = JSON.parse(text);
   if (typeof raw.source !== "string" || raw.source.length === 0) {
     throw new Error(
-      `readParaphraseRecoverySemanticEvidenceFile: ${filePath} must have a non-empty string 'source' field`,
+      `readParaphraseRecoverySemanticEvidenceFile: ${filePath} must have a non-empty string 'source' field`
     );
   }
   if (typeof raw.byQueryId !== "object" || raw.byQueryId === null) {
     throw new Error(
-      `readParaphraseRecoverySemanticEvidenceFile: ${filePath} must have an object 'byQueryId' field`,
+      `readParaphraseRecoverySemanticEvidenceFile: ${filePath} must have an object 'byQueryId' field`
     );
   }
   const map = new Map<string, "hit" | "miss">();
   for (const [k, v] of Object.entries(raw.byQueryId)) {
     if (v !== "hit" && v !== "miss") {
       throw new Error(
-        `readParaphraseRecoverySemanticEvidenceFile: ${filePath} byQueryId.${k} must be "hit" or "miss", got ${JSON.stringify(v)}`,
+        `readParaphraseRecoverySemanticEvidenceFile: ${filePath} byQueryId.${k} must be "hit" or "miss", got ${JSON.stringify(v)}`
       );
     }
     map.set(k, v);
@@ -150,7 +146,7 @@ export function readParaphraseRecoverySemanticEvidenceFile(
  */
 export function findParaphraseRecoveryMostRecentArtifact(
   dir: string,
-  prefix: string,
+  prefix: string
 ): string | undefined {
   if (!fs.existsSync(dir)) return undefined;
   const entries = fs
@@ -208,9 +204,7 @@ export function runParaphraseRecoveryAnalysis(args: {
   // evaluated, so a different policy is
   // safe to evaluate on the same input).
   const baselinePolicyId =
-    args.baselinePolicyId ??
-    (config?.baselinePolicyId ?? undefined) ??
-    "score-or-sufficiency-insufficient";
+    args.baselinePolicyId ?? config?.baselinePolicyId ?? "score-or-sufficiency-insufficient";
   const perQuery =
     baselinePolicyId === "score-or-sufficiency-insufficient" ||
     noAnswerArtifact.decisions.some((d) => d.policyId === baselinePolicyId)
@@ -221,9 +215,7 @@ export function runParaphraseRecoveryAnalysis(args: {
     perQuery,
     config: {
       ...(config ?? {}),
-      ...(args.baselinePolicyId !== undefined
-        ? { baselinePolicyId: args.baselinePolicyId }
-        : {}),
+      ...(args.baselinePolicyId !== undefined ? { baselinePolicyId: args.baselinePolicyId } : {}),
     },
     ...(semantic ? { semantic: { source: semantic.source, byQueryId: semantic.byQueryId } } : {}),
   });
@@ -248,7 +240,7 @@ const ARTIFACT_FILE_PREFIX = "retrieval-paraphrase-recovery";
  */
 export function writeParaphraseRecoveryReport(
   report: ParaphraseRecoveryReport,
-  dir: string,
+  dir: string
 ): string {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -294,15 +286,11 @@ export interface ParaphraseRecoveryCliArgs {
 function parseJsonArrayField<T = string>(s: string): T[] {
   const trimmed = s.trim();
   if (!trimmed.startsWith("[")) {
-    throw new Error(
-      `parseJsonArrayField: expected a JSON array, got: ${s.slice(0, 50)}`,
-    );
+    throw new Error(`parseJsonArrayField: expected a JSON array, got: ${s.slice(0, 50)}`);
   }
   const parsed = JSON.parse(trimmed);
   if (!Array.isArray(parsed)) {
-    throw new Error(
-      `parseJsonArrayField: expected a JSON array, got: ${typeof parsed}`,
-    );
+    throw new Error(`parseJsonArrayField: expected a JSON array, got: ${typeof parsed}`);
   }
   return parsed as T[];
 }
@@ -314,33 +302,24 @@ function parseJsonArrayField<T = string>(s: string): T[] {
  * (the function does its own argument
  * parsing).
  */
-export async function runParaphraseRecoveryCli(
-  args: ParaphraseRecoveryCliArgs,
-): Promise<{
+export async function runParaphraseRecoveryCli(args: ParaphraseRecoveryCliArgs): Promise<{
   report: ParaphraseRecoveryReport;
   written?: string;
 }> {
   const outDir = args.outDir ?? ".curion/benchmark";
   const defaultNoAnswer =
     args.noAnswerArtifact ??
-    findParaphraseRecoveryMostRecentArtifact(
-      outDir,
-      "retrieval-no-answer-abstention-",
-    );
+    findParaphraseRecoveryMostRecentArtifact(outDir, "retrieval-no-answer-abstention-");
   if (!defaultNoAnswer) {
     throw new Error(
       `runParaphraseRecoveryCli: no --no-answer-artifact given and no ` +
-        `retrieval-no-answer-abstention-*.json found under ${outDir}`,
+        `retrieval-no-answer-abstention-*.json found under ${outDir}`
     );
   }
-  const noAnswerArtifact = readParaphraseRecoveryNoAnswerArtifact(
-    defaultNoAnswer,
-  );
+  const noAnswerArtifact = readParaphraseRecoveryNoAnswerArtifact(defaultNoAnswer);
   let semantic: SemanticEvidenceMap | undefined;
   if (args.semanticEvidence) {
-    semantic = readParaphraseRecoverySemanticEvidenceFile(
-      args.semanticEvidence,
-    );
+    semantic = readParaphraseRecoverySemanticEvidenceFile(args.semanticEvidence);
   }
   let customVariants: ParaphraseRecoveryVariant[] | undefined;
   if (args.customVariants) {
@@ -348,7 +327,7 @@ export async function runParaphraseRecoveryCli(
     const parsed = JSON.parse(text);
     if (!Array.isArray(parsed)) {
       throw new Error(
-        `runParaphraseRecoveryCli: --custom-variants file must contain a JSON array, got ${typeof parsed}`,
+        `runParaphraseRecoveryCli: --custom-variants file must contain a JSON array, got ${typeof parsed}`
       );
     }
     customVariants = parsed as ParaphraseRecoveryVariant[];
@@ -373,22 +352,14 @@ export async function runParaphraseRecoveryCli(
     written = writeParaphraseRecoveryReport(report, outDir);
   }
   if (!args.noStdout) {
-    process.stderr.write(
-      `[paraphrase-recovery] no-answer artifact: ${defaultNoAnswer}\n`,
-    );
+    process.stderr.write(`[paraphrase-recovery] no-answer artifact: ${defaultNoAnswer}\n`);
     if (semantic) {
-      process.stderr.write(
-        `[paraphrase-recovery] semantic evidence:  ${args.semanticEvidence}\n`,
-      );
+      process.stderr.write(`[paraphrase-recovery] semantic evidence:  ${args.semanticEvidence}\n`);
     }
     if (written) {
-      process.stderr.write(
-        `[paraphrase-recovery] wrote:              ${written}\n`,
-      );
+      process.stderr.write(`[paraphrase-recovery] wrote:              ${written}\n`);
     }
-    process.stdout.write(
-      formatParaphraseRecoveryReport(report) + "\n",
-    );
+    process.stdout.write(formatParaphraseRecoveryReport(report) + "\n");
   }
   return { report, ...(written ? { written } : {}) };
 }
@@ -407,7 +378,7 @@ export async function runParaphraseRecoveryCli(
  * arguments does not matter.
  */
 export function parseParaphraseRecoveryCliArgs(
-  argv: ReadonlyArray<string>,
+  argv: ReadonlyArray<string>
 ): ParaphraseRecoveryCliArgs {
   const out: ParaphraseRecoveryCliArgs = {};
   for (let i = 0; i < argv.length; i++) {
@@ -445,7 +416,7 @@ export function parseParaphraseRecoveryCliArgs(
  * process exits normally.
  */
 export async function main(
-  argv: ReadonlyArray<string> = process.argv.slice(2),
+  argv: ReadonlyArray<string> = process.argv.slice(2)
 ): Promise<ParaphraseRecoveryReport> {
   const args = parseParaphraseRecoveryCliArgs(argv);
   const { report } = await runParaphraseRecoveryCli(args);
@@ -476,7 +447,7 @@ const isMainEntry = (() => {
 if (isMainEntry) {
   main().catch((err) => {
     process.stderr.write(
-      `[paraphrase-recovery] error: ${err instanceof Error ? err.message : String(err)}\n`,
+      `[paraphrase-recovery] error: ${err instanceof Error ? err.message : String(err)}\n`
     );
     process.exit(1);
   });

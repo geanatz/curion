@@ -37,36 +37,29 @@
  * touched. No raw input storage is added.
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
+import { test } from "node:test";
 
 import { runRememberController } from "../src/controller/remember-controller.ts";
-import { handleRemember } from "../src/tools/remember.ts";
-import { buildServer, PUBLIC_TOOL_NAMES } from "../src/server.ts";
 import {
-  setRelatedMemoriesImpl,
-  resetRelatedMemoriesImpl,
-} from "../src/retrieval/seam.ts";
-import {
-  buildPersistedMetadata,
-  hasMeaningfulRelationshipData,
   DERIVED_SCHEMA_VERSION,
   type RelationshipMetadataFields,
+  buildPersistedMetadata,
+  hasMeaningfulRelationshipData,
 } from "../src/retrieval/relationship.ts";
-import {
-  TEST_PRIMARY_KEY,
-  TEST_FALLBACK_KEY,
-  TEST_PRIMARY_BASE_URL,
-  TEST_PRIMARY_MODEL,
-  TEST_FALLBACK_BASE_URL,
-  TEST_FALLBACK_MODEL,
-} from "./shared-test-provider.ts";
-import {
-  scriptFetch,
-  okChatResponse,
-  safeAnalysis,
-} from "./_helpers/provider-stub.ts";
+import { resetRelatedMemoriesImpl, setRelatedMemoriesImpl } from "../src/retrieval/seam.ts";
+import { PUBLIC_TOOL_NAMES, buildServer } from "../src/server.ts";
+import { handleRemember } from "../src/tools/remember.ts";
+import { okChatResponse, safeAnalysis, scriptFetch } from "./_helpers/provider-stub.ts";
 import { mkStorage, rmStorage } from "./_helpers/test-storage.ts";
+import {
+  TEST_FALLBACK_BASE_URL,
+  TEST_FALLBACK_KEY,
+  TEST_FALLBACK_MODEL,
+  TEST_PRIMARY_BASE_URL,
+  TEST_PRIMARY_KEY,
+  TEST_PRIMARY_MODEL,
+} from "./shared-test-provider.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -117,12 +110,9 @@ test("buildPersistedMetadata: preserves all existing metadata keys", () => {
   assert.equal(typeof out.relationship, "object");
   assert.equal(
     (out.relationship as Record<string, unknown>).derivedSchemaVersion,
-    DERIVED_SCHEMA_VERSION,
+    DERIVED_SCHEMA_VERSION
   );
-  assert.equal(
-    (out.relationship as Record<string, unknown>).derivedSchemaVersion,
-    "ccm-draft-2",
-  );
+  assert.equal((out.relationship as Record<string, unknown>).derivedSchemaVersion, "ccm-draft-2");
 });
 
 test("buildPersistedMetadata: empty derived fields -> no relationship block", () => {
@@ -151,14 +141,8 @@ test("hasMeaningfulRelationshipData: false for empty arrays; true when any non-e
     derivedAt: 0,
   };
   assert.equal(hasMeaningfulRelationshipData(empty), false);
-  assert.equal(
-    hasMeaningfulRelationshipData({ ...empty, conflictsWith: [1] }),
-    true,
-  );
-  assert.equal(
-    hasMeaningfulRelationshipData({ ...empty, olderVariantsOf: [2] }),
-    true,
-  );
+  assert.equal(hasMeaningfulRelationshipData({ ...empty, conflictsWith: [1] }), true);
+  assert.equal(hasMeaningfulRelationshipData({ ...empty, olderVariantsOf: [2] }), true);
 });
 
 test("buildPersistedMetadata: does not overwrite a pre-existing relationship key", () => {
@@ -252,7 +236,7 @@ test("controller: default seam returns empty list -> no relationship block in me
     assert.equal(
       parsed.relationship,
       undefined,
-      "no relationship block expected when seam returns empty list",
+      "no relationship block expected when seam returns empty list"
     );
     // Existing keys are still there.
     assert.deepEqual(parsed.tags, ["postgres", "storage"]);
@@ -293,24 +277,20 @@ test("controller: seam override returns synthetic related memories -> relationsh
         safeAnalysis({
           summary: "we do not use Postgres for this service in production",
           tags: ["postgres", "storage"],
-        }),
-      ),
+        })
+      )
     );
     const pinnedTime = 1_700_000_000_000;
-    const outcome = await runRememberController(
-      handle,
-      "Some safe project fact.",
-      {
-        providerFetchImpl: fetchImpl,
-        providerPrimaryApiKey: TEST_PRIMARY_KEY,
-        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
-        providerPrimaryModel: TEST_PRIMARY_MODEL,
-        providerFallbackApiKey: TEST_FALLBACK_KEY,
-        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
-        providerFallbackModel: TEST_FALLBACK_MODEL,
-        now: pinnedNow(pinnedTime),
-      },
-    );
+    const outcome = await runRememberController(handle, "Some safe project fact.", {
+      providerFetchImpl: fetchImpl,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
+      now: pinnedNow(pinnedTime),
+    });
     assert.equal(outcome.status, "saved");
     if (outcome.status !== "saved") throw new Error("unreachable");
 
@@ -365,8 +345,8 @@ test("controller: stored metadata does not contain raw input string (Phase B inv
       okChatResponse(
         safeAnalysis({
           summary: "we do not use Postgres for this service in production",
-        }),
-      ),
+        })
+      )
     );
     const rawText =
       "We picked Postgres 16 for the primary data store because of better JSON support.";
@@ -388,16 +368,13 @@ test("controller: stored metadata does not contain raw input string (Phase B inv
       .get(outcome.record.id) as Record<string, unknown>;
     for (const [k, v] of Object.entries(dbRows)) {
       if (typeof v === "string") {
-        assert.ok(
-          !v.includes(rawText),
-          `persisted column '${k}' must not contain the raw input`,
-        );
+        assert.ok(!v.includes(rawText), `persisted column '${k}' must not contain the raw input`);
         // The provider-returned summary text must also not be
         // present in any non-summary column.
         if (k !== "summary") {
           assert.ok(
             !v.includes("we do not use Postgres"),
-            `non-summary column '${k}' must not echo the provider summary verbatim`,
+            `non-summary column '${k}' must not echo the provider summary verbatim`
           );
         }
       }
@@ -424,17 +401,15 @@ test("public remember tool result shape is unchanged with seam override (status,
       ],
       reason: "test seam override",
     }));
-    const { setStorageProvider, resetStorageProvider } = await import(
-      "../src/tools/remember.ts"
-    );
+    const { setStorageProvider, resetStorageProvider } = await import("../src/tools/remember.ts");
     setStorageProvider(() => ({ handle, ownsHandle: false }));
     try {
       const { fetchImpl } = scriptFetch(() =>
         okChatResponse(
           safeAnalysis({
             summary: "we do not use Postgres for this service in production",
-          }),
-        ),
+          })
+        )
       );
       // The tool layer accepts a fetch override indirectly by
       // calling the controller; the easiest path here is to use
@@ -462,10 +437,7 @@ test("public remember tool result shape is unchanged with seam override (status,
       // storage handle and is NOT part of the on-the-wire
       // public message (it remains on the returned
       // `record.id` for tests and structured transport).
-      assert.match(
-        r.message,
-        /^saved \([a-z]+, confidence \d+\.\d{2}\)$/,
-      );
+      assert.match(r.message, /^saved \([a-z]+, confidence \d+\.\d{2}\)$/);
       assert.ok(!r.message.includes("relationship"));
       assert.ok(!r.message.includes("conflictsWith"));
       assert.ok(!r.message.includes("olderVariantsOf"));
@@ -474,7 +446,7 @@ test("public remember tool result shape is unchanged with seam override (status,
       // No memory id in the public message.
       assert.ok(
         !/#\d+/.test(r.message),
-        `public message must not include a #N id; got ${JSON.stringify(r.message)}`,
+        `public message must not include a #N id; got ${JSON.stringify(r.message)}`
       );
     } finally {
       resetStorageProvider();
@@ -491,9 +463,11 @@ test("public tool surface is still exactly remember + recall", () => {
 
 test("remember tool: still exposes exactly one text param", () => {
   const server = buildServer();
-  const registered = (server as unknown as {
-    _registeredTools: Record<string, { inputSchema: unknown }>;
-  })._registeredTools;
+  const registered = (
+    server as unknown as {
+      _registeredTools: Record<string, { inputSchema: unknown }>;
+    }
+  )._registeredTools;
   const remember = registered["remember"] as {
     inputSchema: {
       _def?: { shape?: () => Record<string, unknown> };
@@ -507,9 +481,7 @@ test("remember tool: still exposes exactly one text param", () => {
 test("storage: memories table never has a raw/original text column (no schema migration)", () => {
   const { tmp, handle } = mkStorage("curion-mcp-rb-");
   try {
-    const cols = handle.db
-      .prepare("PRAGMA table_info(memories)")
-      .all() as Array<{ name: string }>;
+    const cols = handle.db.prepare("PRAGMA table_info(memories)").all() as Array<{ name: string }>;
     const names = cols.map((c) => c.name);
     for (const forbidden of [
       "raw_text",
@@ -522,10 +494,7 @@ test("storage: memories table never has a raw/original text column (no schema mi
       "body",
       "source",
     ]) {
-      assert.ok(
-        !names.includes(forbidden),
-        `memories must not have a '${forbidden}' column`,
-      );
+      assert.ok(!names.includes(forbidden), `memories must not have a '${forbidden}' column`);
     }
   } finally {
     rmStorage(tmp, handle);
@@ -552,8 +521,8 @@ test("controller: derivedAt is the value the controller passed via options.now",
       okChatResponse(
         safeAnalysis({
           summary: "we do not use Postgres for this service in production",
-        }),
-      ),
+        })
+      )
     );
     const t = 1_650_000_000_000;
     const outcome = await runRememberController(handle, "Some safe fact.", {
@@ -608,9 +577,7 @@ test("controller: pre-existing active rows are not state-transitioned by a new i
     // in Phase B (spec §7: all memories remain `active`).
     {
       const { fetchImpl } = scriptFetch(() =>
-        okChatResponse(
-          safeAnalysis({ summary: "A second fact for storage." }),
-        ),
+        okChatResponse(safeAnalysis({ summary: "A second fact for storage." }))
       );
       const r2 = await runRememberController(handle, "Second safe fact.", {
         providerFetchImpl: fetchImpl,
@@ -625,9 +592,9 @@ test("controller: pre-existing active rows are not state-transitioned by a new i
       assert.equal(r2.status, "saved");
     }
 
-    const states = handle.db
-      .prepare("SELECT state FROM memories ORDER BY id ASC")
-      .all() as Array<{ state: string }>;
+    const states = handle.db.prepare("SELECT state FROM memories ORDER BY id ASC").all() as Array<{
+      state: string;
+    }>;
     assert.equal(states.length, 2);
     for (const s of states) {
       assert.equal(s.state, "active");
@@ -698,13 +665,13 @@ test("relationship metadata write: remember-controller does not import benchmark
     assert.equal(
       text.includes(tok),
       false,
-      `remember-controller.ts must not reference benchmark experiment module "${tok}"`,
+      `remember-controller.ts must not reference benchmark experiment module "${tok}"`
     );
   }
   assert.equal(
     /from\s+["'][^"']*benchmark\//.test(text),
     false,
-    "remember-controller.ts must not import from src/benchmark/",
+    "remember-controller.ts must not import from src/benchmark/"
   );
 });
 
@@ -724,9 +691,7 @@ test("tool: handleRemember with seam override still returns one of the four stat
       ],
       reason: "test seam override",
     }));
-    const { setStorageProvider, resetStorageProvider } = await import(
-      "../src/tools/remember.ts"
-    );
+    const { setStorageProvider, resetStorageProvider } = await import("../src/tools/remember.ts");
     setStorageProvider(() => ({ handle, ownsHandle: false }));
     try {
       // Vague junk: short-circuits before provider.
@@ -808,8 +773,8 @@ test("controller: olderVariantsOf is non-empty when a related memory is an earli
           safeAnalysis({
             summary: olderSummary,
             tags: ["postgres", "storage"],
-          }),
-        ),
+          })
+        )
       );
       const olderOutcome = await runRememberController(
         handle,
@@ -823,7 +788,7 @@ test("controller: olderVariantsOf is non-empty when a related memory is an earli
           providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
           providerFallbackModel: TEST_FALLBACK_MODEL,
           now: pinnedNow(1_700_000_000_000),
-        },
+        }
       );
       assert.equal(olderOutcome.status, "saved");
       if (olderOutcome.status !== "saved") throw new Error("unreachable");
@@ -853,8 +818,8 @@ test("controller: olderVariantsOf is non-empty when a related memory is an earli
         safeAnalysis({
           summary: candidateSummary,
           tags: ["postgres", "storage"],
-        }),
-      ),
+        })
+      )
     );
     const pinnedTime = 1_700_000_000_001;
     const outcome = await runRememberController(
@@ -869,7 +834,7 @@ test("controller: olderVariantsOf is non-empty when a related memory is an earli
         providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
         providerFallbackModel: TEST_FALLBACK_MODEL,
         now: pinnedNow(pinnedTime),
-      },
+      }
     );
     assert.equal(outcome.status, "saved");
     if (outcome.status !== "saved") throw new Error("unreachable");
@@ -885,9 +850,9 @@ test("controller: olderVariantsOf is non-empty when a related memory is an earli
     // itself is `active`. The older row (id 1) must still be
     // `active` after this insert.
     assert.equal(row.state, "active");
-    const olderState = handle.db
-      .prepare("SELECT state FROM memories WHERE id = ?")
-      .get(1) as { state: string };
+    const olderState = handle.db.prepare("SELECT state FROM memories WHERE id = ?").get(1) as {
+      state: string;
+    };
     assert.equal(olderState.state, "active", "older row must remain active");
 
     const parsed = JSON.parse(row.metadata) as Record<string, unknown>;
@@ -906,26 +871,25 @@ test("controller: olderVariantsOf is non-empty when a related memory is an earli
     assert.deepEqual(
       rel.olderVariantsOf,
       [1],
-      "olderVariantsOf must include the earlier near-variant id",
+      "olderVariantsOf must include the earlier near-variant id"
     );
     assert.deepEqual(rel.conflictsWith, []);
     assert.ok(
-      typeof rel.detectionConfidence === "number" &&
-        rel.detectionConfidence >= 0.9,
-      "detectionConfidence must be at or above the older-variant τ'",
+      typeof rel.detectionConfidence === "number" && rel.detectionConfidence >= 0.9,
+      "detectionConfidence must be at or above the older-variant τ'"
     );
 
     // The returned record (from the controller) must carry the
     // updated metadata, not the pre-insert metadata.
     assert.equal(
-      (outcome.record.metadata as Record<string, unknown>).relationship !==
-        undefined,
+      (outcome.record.metadata as Record<string, unknown>).relationship !== undefined,
       true,
-      "controller-returned record must reflect the post-update metadata",
+      "controller-returned record must reflect the post-update metadata"
     );
-    const returnedRel = (
-      outcome.record.metadata as Record<string, unknown>
-    ).relationship as Record<string, unknown>;
+    const returnedRel = (outcome.record.metadata as Record<string, unknown>).relationship as Record<
+      string,
+      unknown
+    >;
     assert.deepEqual(returnedRel.olderVariantsOf, [1]);
 
     // The public message is unchanged: no relationship /
@@ -933,16 +897,13 @@ test("controller: olderVariantsOf is non-empty when a related memory is an earli
     // message uses the no-id form — the memory id is an
     // internal storage handle and is not part of the
     // on-the-wire public message.
-    assert.match(
-      outcome.message,
-      /^saved \([a-z]+, confidence \d+\.\d{2}\)$/,
-    );
+    assert.match(outcome.message, /^saved \([a-z]+, confidence \d+\.\d{2}\)$/);
     assert.ok(!outcome.message.includes("relationship"));
     assert.ok(!outcome.message.includes("olderVariantsOf"));
     // No memory id in the public message.
     assert.ok(
       !/#\d+/.test(outcome.message),
-      `public message must not include a #N id; got ${JSON.stringify(outcome.message)}`,
+      `public message must not include a #N id; got ${JSON.stringify(outcome.message)}`
     );
   } finally {
     resetRelatedMemoriesImpl();
@@ -983,8 +944,14 @@ test("controller: malformed related-memory id is skipped, not coerced to -1 and 
         // The MVP impl exposes `id` as `unknown` for the seam;
         // a permissive producer could send any of these.
         { id: "abc", memoryContent: "we use Postgres for this service in production" } as never,
-        { id: Number.NaN, memoryContent: "we use Postgres for this service in production" } as never,
-        { id: Number.POSITIVE_INFINITY, memoryContent: "we use Postgres for this service in production" } as never,
+        {
+          id: Number.NaN,
+          memoryContent: "we use Postgres for this service in production",
+        } as never,
+        {
+          id: Number.POSITIVE_INFINITY,
+          memoryContent: "we use Postgres for this service in production",
+        } as never,
         { memoryContent: "we use Postgres for this service in production" } as never,
       ] as never,
       reason: "test seam override (mixed good + malformed ids)",
@@ -995,8 +962,8 @@ test("controller: malformed related-memory id is skipped, not coerced to -1 and 
         safeAnalysis({
           summary: "we do not use Postgres for this service in production",
           tags: ["postgres", "storage"],
-        }),
-      ),
+        })
+      )
     );
     const outcome = await runRememberController(handle, "Some safe fact.", {
       providerFetchImpl: fetchImpl,
@@ -1029,7 +996,7 @@ test("controller: malformed related-memory id is skipped, not coerced to -1 and 
       for (const v of arr) {
         assert.ok(
           typeof v === "number" && Number.isFinite(v) && v > 0,
-          `related id list must contain only positive finite numbers, got: ${JSON.stringify(v)}`,
+          `related id list must contain only positive finite numbers, got: ${JSON.stringify(v)}`
         );
       }
     }

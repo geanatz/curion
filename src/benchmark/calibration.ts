@@ -93,8 +93,8 @@
  * existing JSON reports under `.curion/benchmark/`.
  */
 
-import type { QueryEval, BenchmarkMetrics } from "./metrics.js";
 import type { LexicalScoredCandidate } from "../retrieval/lexical.js";
+import type { BenchmarkMetrics, QueryEval } from "./metrics.js";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -524,9 +524,7 @@ export const DEFAULT_HYBRID_DENSE_CALIBRATION_SWEEP: CalibrationConfig["sweep"] 
  * candidates (rank order + parallel scores) and returns the
  * shape used by the per-query diagnostic block.
  */
-export function computeScoreDistribution(
-  scored: ReadonlyArray<LexicalScoredCandidate>,
-): {
+export function computeScoreDistribution(scored: ReadonlyArray<LexicalScoredCandidate>): {
   topScore: number;
   secondScore: number;
   scoreGap: number;
@@ -563,15 +561,13 @@ export function evaluateGates(
     scoreRatio: number;
   },
   gates: ReadonlyArray<CalibrationGate>,
-  direction: "higher-is-better" | "lower-is-better",
+  direction: "higher-is-better" | "lower-is-better"
 ): { abstained: boolean; triggered: string[] } {
   const triggered: string[] = [];
   for (const g of gates) {
     if (g.active === false) continue;
     const metric = metricForGate(g.kind, dist);
-    const abstain = direction === "higher-is-better"
-      ? metric < g.value
-      : metric > g.value;
+    const abstain = direction === "higher-is-better" ? metric < g.value : metric > g.value;
     if (abstain) triggered.push(gateLabel(g));
   }
   return { abstained: triggered.length > 0, triggered };
@@ -584,7 +580,7 @@ function metricForGate(
     secondScore: number;
     scoreGap: number;
     scoreRatio: number;
-  },
+  }
 ): number {
   switch (kind) {
     case "threshold":
@@ -634,7 +630,7 @@ export function buildQueryDiagnostic(
       contribution: number;
     }>;
     agreementCount: number;
-  },
+  }
 ): CalibrationQueryDiagnostic {
   const dist = computeScoreDistribution(scored);
   const { abstained, triggered } = evaluateGates(dist, gates, direction);
@@ -662,8 +658,16 @@ export function buildQueryDiagnostic(
     // per-query trace's existing fields are unchanged. We
     // attach the block as `readonly` to match the public
     // type's contract.
-    (out as { contributorSupport?: ReadonlyArray<{ source: "lexical" | "fts5" | "vector-dense"; rank: number | null; score: number | null; contribution: number }> }).contributorSupport =
-      hybridSupport.contributors;
+    (
+      out as {
+        contributorSupport?: ReadonlyArray<{
+          source: "lexical" | "fts5" | "vector-dense";
+          rank: number | null;
+          score: number | null;
+          contribution: number;
+        }>;
+      }
+    ).contributorSupport = hybridSupport.contributors;
     (out as { contributorAgreementCount?: number }).contributorAgreementCount =
       hybridSupport.agreementCount;
   }
@@ -688,7 +692,7 @@ export function buildQueryDiagnostic(
  */
 export function computeTradeoff(
   diagnostics: ReadonlyArray<CalibrationQueryDiagnostic>,
-  evals: ReadonlyArray<QueryEval>,
+  evals: ReadonlyArray<QueryEval>
 ): CalibrationVariantResult["metrics"] {
   // Build a lookup from queryId -> QueryEval so we can
   // re-derive the per-query hit / rank1 / currentTruthAt1
@@ -778,9 +782,7 @@ export function computeTradeoff(
  *   - noAnswerFixed: no-answer queries fixed by abstention
  *   - noAnswerRemainingFp: no-answer queries that still pass
  */
-export function computeRegressionCounts(
-  diagnostics: ReadonlyArray<CalibrationQueryDiagnostic>,
-): {
+export function computeRegressionCounts(diagnostics: ReadonlyArray<CalibrationQueryDiagnostic>): {
   positiveRegressions: number;
   noAnswerFixed: number;
   noAnswerRemainingFp: number;
@@ -862,7 +864,7 @@ export function buildSweepForVariant(
     };
   }>,
   sweep: CalibrationConfig["sweep"],
-  direction: "higher-is-better" | "lower-is-better",
+  direction: "higher-is-better" | "lower-is-better"
 ): {
   baseline: CalibrationVariantResult;
   sweep: CalibrationVariantResult[];
@@ -879,7 +881,7 @@ export function buildSweepForVariant(
       q.scored,
       gates,
       direction,
-      q.hybridSupport,
+      q.hybridSupport
     );
   });
   const baselineCounts = computeRegressionCounts(baselineDiagnostics);
@@ -918,8 +920,8 @@ export function buildSweepForVariant(
           q.scored,
           [g],
           direction,
-          q.hybridSupport,
-        ),
+          q.hybridSupport
+        )
       );
       const counts = computeRegressionCounts(diags);
       rows.push({
@@ -958,18 +960,18 @@ export function buildSweepForVariant(
  */
 export function pickBestRow(
   baseline: CalibrationVariantResult,
-  rows: ReadonlyArray<CalibrationVariantResult>,
+  rows: ReadonlyArray<CalibrationVariantResult>
 ): CalibrationVariantResult | null {
   if (rows.length === 0) return null;
-  const baseTnr = baseline.metrics.noAnswerTotal > 0
-    ? baseline.metrics.noAnswerCorrect / baseline.metrics.noAnswerTotal
-    : 0;
-  let best: CalibrationVariantResult | null = null;
-  let bestDelta = -Infinity;
-  for (const r of rows) {
-    const tnr = r.metrics.noAnswerTotal > 0
-      ? r.metrics.noAnswerCorrect / r.metrics.noAnswerTotal
+  const baseTnr =
+    baseline.metrics.noAnswerTotal > 0
+      ? baseline.metrics.noAnswerCorrect / baseline.metrics.noAnswerTotal
       : 0;
+  let best: CalibrationVariantResult | null = null;
+  let bestDelta = Number.NEGATIVE_INFINITY;
+  for (const r of rows) {
+    const tnr =
+      r.metrics.noAnswerTotal > 0 ? r.metrics.noAnswerCorrect / r.metrics.noAnswerTotal : 0;
     const delta = tnr - baseTnr;
     if (delta > bestDelta + 1e-12) {
       best = r;
@@ -1036,7 +1038,7 @@ export function computeContributorSupport(
     rank: number | null;
     score: number | null;
     contribution: number;
-  }>,
+  }>
 ): {
   contributors: ReadonlyArray<{
     source: "lexical" | "fts5" | "vector-dense";

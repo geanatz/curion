@@ -27,9 +27,9 @@
  * the wire-projection boundary only.
  */
 
-import type { RecallResult } from "./recall.js";
+import { stripProviderErrorPrefix, stripRejectedPrefix } from "./message-prefix.js";
 import type { RecallStructuredContent } from "./recall-structured-content.js";
-import { stripRejectedPrefix, stripProviderErrorPrefix } from "./message-prefix.js";
+import type { RecallResult } from "./recall.js";
 
 /**
  * Strip the literal `Note:` prefix (and a single leading space)
@@ -117,9 +117,7 @@ export function buildRecallPublicText(result: RecallResult): string {
  * `clarification_needed.question` is the user-facing prompt
  * the agent asks the user verbatim.
  */
-export function buildRecallStructuredContent(
-  result: RecallResult,
-): RecallStructuredContent {
+export function buildRecallStructuredContent(result: RecallResult): RecallStructuredContent {
   switch (result.status) {
     case "answered": {
       const notes = (result.notes ?? [])

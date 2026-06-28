@@ -103,14 +103,26 @@
  *      `multi-anchor-aware-combined`.
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { test } from "node:test";
 
+import { type QueryEval, evaluateQuery } from "../src/benchmark/metrics.js";
+import { BUILTIN_MULTI_ANCHOR_RERANK_VARIANTS } from "../src/benchmark/multi-anchor-current-previous.js";
+import type { BenchmarkQuery } from "../src/benchmark/queries.js";
+import {
+  parseGuardedRerankCliArgs,
+  runGuardedRerankCli,
+  writeGuardedRerankReport,
+} from "../src/benchmark/supersedes-promote-guard-runner.js";
 import {
   BUILTIN_GUARDED_RERANK_VARIANTS,
+  type GuardedRerankReport,
+  type GuardedRerankVariant,
+  type GuardedRerankVariantMetrics,
+  type SupersedesPromoteGuardRule,
   applySupersedesPromoteGuardRule,
   buildGuardedRerankReport,
   buildGuardedRerankVariantRow,
@@ -118,33 +130,15 @@ import {
   evaluateGuardedRerankForQuery,
   evaluateGuardedRerankVariant,
   formatGuardedRerankReport,
-  aggregateGuardedRerankPerQuery,
-  type GuardedRerankReport,
-  type GuardedRerankVariant,
-  type GuardedRerankVariantMetrics,
-  type SupersedesPromoteGuardRule,
 } from "../src/benchmark/supersedes-promote-guard.js";
+import { SIMULATED_SUPERSESSION_EDGES } from "../src/benchmark/supersession-edge-simulation.js";
 import {
-  parseGuardedRerankCliArgs,
-  runGuardedRerankAnalysis,
-  runGuardedRerankCli,
-  writeGuardedRerankReport,
-} from "../src/benchmark/supersedes-promote-guard-runner.js";
-import {
+  type BenchmarkArtifact,
+  alignQueriesToEvals,
   findMostRecentArtifact,
   readBenchmarkArtifact,
-  alignQueriesToEvals,
-  type BenchmarkArtifact,
 } from "../src/benchmark/temporal-truth-diagnostic-runner.js";
-import type { BenchmarkQuery } from "../src/benchmark/queries.js";
-import { evaluateQuery, type QueryEval } from "../src/benchmark/metrics.js";
 import { PUBLIC_TOOL_NAMES } from "../src/server.js";
-import {
-  BUILTIN_MULTI_ANCHOR_RERANK_VARIANTS,
-} from "../src/benchmark/multi-anchor-current-previous.js";
-import {
-  SIMULATED_SUPERSESSION_EDGES,
-} from "../src/benchmark/supersession-edge-simulation.js";
 import { walkTs } from "./_helpers/fs-walk.ts";
 
 // ---------------------------------------------------------------------------
@@ -166,7 +160,7 @@ function mkQueryEval(
     topIds: number[];
     topScores?: number[];
     labels?: string[];
-  }>,
+  }>
 ): { evals: QueryEval[]; queries: BenchmarkQuery[] } {
   const evals: QueryEval[] = [];
   const queries: BenchmarkQuery[] = [];
@@ -179,7 +173,7 @@ function mkQueryEval(
       s.expectedIds,
       s.currentTruthIds,
       s.topIds,
-      topScores,
+      topScores
     );
     const expectedSet = new Set(s.expectedIds);
     const currentTruthSet = new Set(s.currentTruthIds);
@@ -524,10 +518,9 @@ test("supersedes-promote-guard: aggregateGuardedRerankPerQuery is deterministic"
     { queryId: "q1", expectedIds: [1], currentTruthIds: [1], topIds: [1, 5, 6, 7, 8] },
     { queryId: "q2", expectedIds: [7], currentTruthIds: [7], topIds: [22, 5, 6, 7, 8] },
   ]);
-  const variant: GuardedRerankVariant =
-    BUILTIN_GUARDED_RERANK_VARIANTS.find(
-      (v) => v.id === "guarded-multi-anchor-linked-expansion",
-    )!;
+  const variant: GuardedRerankVariant = BUILTIN_GUARDED_RERANK_VARIANTS.find(
+    (v) => v.id === "guarded-multi-anchor-linked-expansion"
+  )!;
   const m1 = evaluateGuardedRerankVariant({ variant, evals, queries });
   const m2 = evaluateGuardedRerankVariant({ variant, evals, queries });
   // Same input -> same metrics.
@@ -538,8 +531,7 @@ test("supersedes-promote-guard: aggregator covers the documented metric fields",
   const { evals, queries } = mkQueryEval([
     { queryId: "q1", expectedIds: [1], currentTruthIds: [1], topIds: [1, 5, 6, 7, 8] },
   ]);
-  const variant: GuardedRerankVariant =
-    BUILTIN_GUARDED_RERANK_VARIANTS[0]!;
+  const variant: GuardedRerankVariant = BUILTIN_GUARDED_RERANK_VARIANTS[0]!;
   const m = evaluateGuardedRerankVariant({ variant, evals, queries });
   // The block carries the documented
   // fields. Note: per-query fields
@@ -728,23 +720,14 @@ test("supersedes-promote-guard: buildGuardedRerankReport has the documented top-
   // The report is well-formed.
   assert.equal(report.sourceVariant, "synthetic-lexical");
   assert.equal(report.temporalQueryCount, 1);
-  assert.equal(
-    report.supersessionEdgeMapSize,
-    SIMULATED_SUPERSESSION_EDGES.size,
-  );
+  assert.equal(report.supersessionEdgeMapSize, SIMULATED_SUPERSESSION_EDGES.size);
   assert.equal(report.downstreamRerankerId, "multi-anchor-aware-combined");
   // The variants are populated.
-  assert.equal(
-    report.variants.length,
-    BUILTIN_GUARDED_RERANK_VARIANTS.length,
-  );
+  assert.equal(report.variants.length, BUILTIN_GUARDED_RERANK_VARIANTS.length);
   // The gap breakdown is populated.
   for (const v of report.variants) {
     assert.ok(
-      Object.prototype.hasOwnProperty.call(
-        report.gapBreakdown.unchangedByVariant,
-        v.variant.id,
-      ),
+      Object.prototype.hasOwnProperty.call(report.gapBreakdown.unchangedByVariant, v.variant.id)
     );
   }
   // The multi-anchor subset is populated.
@@ -778,9 +761,7 @@ test("supersedes-promote-guard: production source tree does NOT import the new m
   // MUST NOT import the new modules. The
   // experiment is benchmark-only.
   const prodRoots = ["src/controller", "src/storage", "src/tools"];
-  const newModuleIdentifiers = [
-    "supersedes-promote-guard",
-  ];
+  const newModuleIdentifiers = ["supersedes-promote-guard"];
   for (const root of prodRoots) {
     if (!fs.existsSync(root)) continue;
     const files = walkTs(root);
@@ -789,7 +770,7 @@ test("supersedes-promote-guard: production source tree does NOT import the new m
       for (const ident of newModuleIdentifiers) {
         assert.ok(
           !text.includes(ident),
-          `production file ${f} must NOT import or reference ${ident}`,
+          `production file ${f} must NOT import or reference ${ident}`
         );
       }
     }
@@ -829,19 +810,13 @@ test("supersedes-promote-guard: end-to-end on the real lexical-baseline artifact
   // The report is well-formed.
   assert.equal(report.temporalQueryCount, 26);
   // The variants are populated.
-  assert.equal(
-    report.variants.length,
-    BUILTIN_GUARDED_RERANK_VARIANTS.length,
-  );
+  assert.equal(report.variants.length, BUILTIN_GUARDED_RERANK_VARIANTS.length);
   // The baseline + reranker-control are
   // both well-formed.
   const baseline = report.variants[0]!;
   assert.equal(baseline.variant.id, "baseline-no-rerank");
   const rerankerControl = report.variants[1]!;
-  assert.equal(
-    rerankerControl.variant.id,
-    "reranker-control-multi-anchor-aware-combined",
-  );
+  assert.equal(rerankerControl.variant.id, "reranker-control-multi-anchor-aware-combined");
   // The baseline + the reranker-control
   // hit 10/26 baseline (newer-wins tie-
   // breaker changed from 12 to 10);
@@ -860,13 +835,13 @@ test("supersedes-promote-guard: end-to-end on the real lexical-baseline artifact
   // the promotionsBlockedByGuard is
   // ≥1 (the guard fired).
   const guardedPrimary = report.variants.find(
-    (v) => v.variant.id === "guarded-multi-anchor-linked-expansion",
+    (v) => v.variant.id === "guarded-multi-anchor-linked-expansion"
   )!;
   assert.equal(guardedPrimary.metrics.regressionCount, 0);
   assert.equal(guardedPrimary.metrics.tempRateLimitRegressionCount, 0);
   assert.ok(
     guardedPrimary.metrics.promotionsBlockedByGuard >= 1,
-    "the guard must have fired (blocked at least one supersedes promotion)",
+    "the guard must have fired (blocked at least one supersedes promotion)"
   );
   // The temp-rate-limit per-query
   // output has
@@ -874,7 +849,7 @@ test("supersedes-promote-guard: end-to-end on the real lexical-baseline artifact
   // AND `afterTop1Id: 70` (the current
   // truth is preserved at rank 1).
   const tempRateLimit = guardedPrimary.metrics.perQuery.find(
-    (p) => p.queryId === "temp-rate-limit",
+    (p) => p.queryId === "temp-rate-limit"
   )!;
   assert.ok(tempRateLimit, "temp-rate-limit per-query output must exist");
   assert.equal(tempRateLimit.tempRateLimitRegression, false);
@@ -949,7 +924,7 @@ test("supersedes-promote-guard: oracle diagnostic ceiling", () => {
     recordCount: artifact.config.recordCount ?? null,
   });
   const oracle = report.variants.find(
-    (v) => v.variant.id === "oracle-guarded-candidate-injection-ceiling",
+    (v) => v.variant.id === "oracle-guarded-candidate-injection-ceiling"
   )!;
   // The oracle diagnostic eliminates
   // the regression.
@@ -1021,11 +996,7 @@ test("supersedes-promote-guard: parseGuardedRerankCliArgs with all flags", () =>
 });
 
 test("supersedes-promote-guard: parseGuardedRerankCliArgs ignores unknown flags", () => {
-  const args = parseGuardedRerankCliArgs([
-    "--unknown",
-    "foo",
-    "--help",
-  ]);
+  const args = parseGuardedRerankCliArgs(["--unknown", "foo", "--help"]);
   assert.deepEqual(args, {});
 });
 
@@ -1066,10 +1037,9 @@ test("supersedes-promote-guard: downstream reranker guard throws when the varian
   const { evals, queries } = mkQueryEval([
     { queryId: "q1", expectedIds: [1], currentTruthIds: [1], topIds: [1, 5, 6, 7, 8] },
   ]);
-  const variant: GuardedRerankVariant =
-    BUILTIN_GUARDED_RERANK_VARIANTS[0]!;
+  const variant: GuardedRerankVariant = BUILTIN_GUARDED_RERANK_VARIANTS[0]!;
   const wrongDownstream = BUILTIN_MULTI_ANCHOR_RERANK_VARIANTS.find(
-    (v) => v.id === "metadata-simulation-supersededBy-demote",
+    (v) => v.id === "metadata-simulation-supersededBy-demote"
   )!;
   assert.throws(
     () =>
@@ -1079,7 +1049,7 @@ test("supersedes-promote-guard: downstream reranker guard throws when the varian
         queries,
         downstreamVariant: wrongDownstream,
       }),
-    /downstreamVariant must be 'multi-anchor-aware-combined'/,
+    /downstreamVariant must be 'multi-anchor-aware-combined'/
   );
 });
 
@@ -1202,12 +1172,11 @@ test("supersedes-promote-guard: evaluateGuardedRerankForQuery is pure and does n
   const { evals, queries } = mkQueryEval([
     { queryId: "q1", expectedIds: [1], currentTruthIds: [1], topIds: [21, 5, 6, 7, 8] },
   ]);
-  const variant: GuardedRerankVariant =
-    BUILTIN_GUARDED_RERANK_VARIANTS.find(
-      (v) => v.id === "guarded-multi-anchor-linked-expansion",
-    )!;
+  const variant: GuardedRerankVariant = BUILTIN_GUARDED_RERANK_VARIANTS.find(
+    (v) => v.id === "guarded-multi-anchor-linked-expansion"
+  )!;
   const downstream = BUILTIN_MULTI_ANCHOR_RERANK_VARIANTS.find(
-    (v) => v.id === "multi-anchor-aware-combined",
+    (v) => v.id === "multi-anchor-aware-combined"
   )!;
   const a = evaluateGuardedRerankForQuery({
     variant,
@@ -1253,11 +1222,9 @@ test("supersedes-promote-guard: guarded-no-op is a no-op when no candidate is in
     queries,
     recordCount: artifact.config.recordCount ?? null,
   });
-  const noOp = report.variants.find(
-    (v) => v.variant.id === "guarded-no-op",
-  )!;
+  const noOp = report.variants.find((v) => v.variant.id === "guarded-no-op")!;
   const rerankerControl = report.variants.find(
-    (v) => v.variant.id === "reranker-control-multi-anchor-aware-combined",
+    (v) => v.variant.id === "reranker-control-multi-anchor-aware-combined"
   )!;
   // The guard is a pass-through when
   // no candidate is injected.
@@ -1274,8 +1241,7 @@ test("supersedes-promote-guard: buildGuardedRerankVariantRow returns a well-form
   const { evals, queries } = mkQueryEval([
     { queryId: "q1", expectedIds: [1], currentTruthIds: [1], topIds: [1, 5, 6, 7, 8] },
   ]);
-  const variant: GuardedRerankVariant =
-    BUILTIN_GUARDED_RERANK_VARIANTS[0]!;
+  const variant: GuardedRerankVariant = BUILTIN_GUARDED_RERANK_VARIANTS[0]!;
   const row = buildGuardedRerankVariantRow({
     variant,
     evals,
@@ -1291,7 +1257,7 @@ test("supersedes-promote-guard: buildGuardedRerankVariantRow returns a well-form
   // documented kinds.
   assert.ok(
     ["safe", "unsafe", "neutral"].includes(row.verdict),
-    `verdict must be one of safe/unsafe/neutral, got ${row.verdict}`,
+    `verdict must be one of safe/unsafe/neutral, got ${row.verdict}`
   );
 });
 
@@ -1320,10 +1286,9 @@ test("supersedes-promote-guard: perCategoryChange is populated", () => {
   const { evals, queries } = mkQueryEval([
     { queryId: "q1", expectedIds: [1], currentTruthIds: [1], topIds: [21, 5, 6, 7, 8] },
   ]);
-  const variant: GuardedRerankVariant =
-    BUILTIN_GUARDED_RERANK_VARIANTS.find(
-      (v) => v.id === "guarded-multi-anchor-linked-expansion",
-    )!;
+  const variant: GuardedRerankVariant = BUILTIN_GUARDED_RERANK_VARIANTS.find(
+    (v) => v.id === "guarded-multi-anchor-linked-expansion"
+  )!;
   const m = evaluateGuardedRerankVariant({ variant, evals, queries });
   // The per-category change block is
   // populated.
@@ -1354,10 +1319,9 @@ test("supersedes-promote-guard: per-query regression flag is set on temp-rate-li
       topIds: [70, 130, 20, 23, 45],
     },
   ]);
-  const variant: GuardedRerankVariant =
-    BUILTIN_GUARDED_RERANK_VARIANTS.find(
-      (v) => v.id === "reranker-control-multi-anchor-aware-combined",
-    )!;
+  const variant: GuardedRerankVariant = BUILTIN_GUARDED_RERANK_VARIANTS.find(
+    (v) => v.id === "reranker-control-multi-anchor-aware-combined"
+  )!;
   const m = evaluateGuardedRerankVariant({ variant, evals, queries });
   // The multi-anchor reranker's
   // `supersedes` promotion does not

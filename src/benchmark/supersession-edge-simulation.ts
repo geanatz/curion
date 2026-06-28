@@ -282,13 +282,13 @@
  *     verdict.
  */
 
-import type { BenchmarkQuery } from "./queries.js";
 import type { QueryEval } from "./metrics.js";
+import type { BenchmarkQuery } from "./queries.js";
 import { STALE_TEMPORAL_IDS } from "./temporal-truth-diagnostic.js";
 import {
-  classifyTemporalTruthFailure,
-  type TemporalTruthCategory,
   TEMPORAL_TRUTH_CATEGORIES,
+  type TemporalTruthCategory,
+  classifyTemporalTruthFailure,
 } from "./temporal-truth-diagnostic.js";
 
 // ---------------------------------------------------------------------------
@@ -417,10 +417,7 @@ export interface SupersessionEdge {
  * re-rank rules in this module do NOT consult
  * the date fields.
  */
-export const SIMULATED_SUPERSESSION_EDGES: ReadonlyMap<
-  number,
-  SupersessionEdge
-> = (() => {
+export const SIMULATED_SUPERSESSION_EDGES: ReadonlyMap<number, SupersessionEdge> = (() => {
   const out = new Map<number, SupersessionEdge>();
   // Each entry: recordId -> { supersedes, supersededBy, versionGroup }.
   // The convenience booleans are derived from the explicit
@@ -745,68 +742,67 @@ export interface SupersessionRerankVariant {
  * remaining variants are the metadata-simulation
  * edge-driven re-rank rules.
  */
-export const BUILTIN_SUPERSESSION_RERANK_VARIANTS: ReadonlyArray<SupersessionRerankVariant> =
-  [
-    // ---- Baseline (no re-rank) ----
-    {
-      id: "baseline-no-rerank",
-      description:
-        "Baseline: no re-ranking. The lexical baseline's existing top-K order is used as-is. The reference row; production-like. This is the row a production deployment would use today.",
-      category: "production-like",
-      rule: { kind: "none" },
+export const BUILTIN_SUPERSESSION_RERANK_VARIANTS: ReadonlyArray<SupersessionRerankVariant> = [
+  // ---- Baseline (no re-rank) ----
+  {
+    id: "baseline-no-rerank",
+    description:
+      "Baseline: no re-ranking. The lexical baseline's existing top-K order is used as-is. The reference row; production-like. This is the row a production deployment would use today.",
+    category: "production-like",
+    rule: { kind: "none" },
+  },
+  // ---- Oracle ceiling (from Experiment 6) ----
+  {
+    id: "oracle-current-truth-promote-all",
+    description:
+      "Oracle: promote every candidate whose id is in currentTruthIds to the TOP of the top-K, preserving the relative order of promoted and non-promoted candidates. Uses fixture truth (currentTruthIds). The 'if we knew which records are current, promote them all' ceiling. Clearly NOT production-like; research-only.",
+    category: "oracle",
+    rule: { kind: "oracle-current-truth-promote" },
+  },
+  // ---- Metadata-simulation: demote supersededBy ----
+  {
+    id: "metadata-simulation-supersededBy-demote",
+    description:
+      "Metadata-simulation: demote every candidate whose id is in the simulated supersededBy map to the BOTTOM of the top-K, preserving the relative order of demoted and non-demoted candidates. The edge map is SIMULATED_SUPERSESSION_EDGES (fixture-derived); the rule does NOT consult currentTruthIds. The 'if the production schema carried a supersededBy edge and a runtime re-ranker used it, what would happen?' reading. Honest framing: this is metadata-simulation, NOT production-like; a production deployment needs the edge data on every record at remember time.",
+    category: "metadata-simulation",
+    rule: { kind: "metadata-simulation-supersededBy-demote" },
+  },
+  // ---- Metadata-simulation: promote supersedes ----
+  {
+    id: "metadata-simulation-supersedes-promote",
+    description:
+      "Metadata-simulation: promote every candidate in the top-K that supersedes another candidate in the SAME top-K to the TOP, preserving the relative order of promoted and non-promoted candidates. A candidate that does not supersede another top-K candidate passes through unchanged. The edge map is SIMULATED_SUPERSESSION_EDGES; the rule does NOT consult currentTruthIds. The 'if the runtime re-ranker only promotes candidates that explicitly supersede another in the same top-K, what would happen?' reading.",
+    category: "metadata-simulation",
+    rule: { kind: "metadata-simulation-supersedes-promote" },
+  },
+  // ---- Metadata-simulation: versionGroup current preference ----
+  {
+    id: "metadata-simulation-version-group-current",
+    description:
+      "Metadata-simulation: within a versionGroup, prefer the currentInGroup member. The rule partitions the top-K by versionGroup; for each group, the currentInGroup member (if any) is moved to the FRONT of the group slot, preserving the relative order of the non-current members. Records outside any group pass through unchanged. The edge map is SIMULATED_SUPERSESSION_EDGES; the rule does NOT consult currentTruthIds. The 'if the runtime re-ranker preferred the current member of a version chain' reading.",
+    category: "metadata-simulation",
+    rule: { kind: "metadata-simulation-version-group-current" },
+  },
+  // ---- Metadata-simulation: combined (demote + promote) ----
+  {
+    id: "metadata-simulation-combined",
+    description:
+      "Metadata-simulation: the 'full supersession-aware' re-rank. First, demote every candidate whose id is in the simulated supersededBy map to the BOTTOM. Then, promote every candidate that supersedes another candidate in the same top-K to the TOP. The middle slot keeps its relative order. The edge map is SIMULATED_SUPERSESSION_EDGES; the rule does NOT consult currentTruthIds. The 'if the runtime re-ranker used BOTH the supersededBy demote and the supersedes promote, what would happen?' reading. This is the strongest metadata-simulation rule the experiment ships with.",
+    category: "metadata-simulation",
+    rule: { kind: "metadata-simulation-combined" },
+  },
+  // ---- Metadata-simulation: stale-id-derived (cross-experiment bridge) ----
+  {
+    id: "metadata-simulation-stale-id-derived",
+    description:
+      "Metadata-simulation (cross-experiment bridge): project the simulated supersededBy map to a flat staleLikeIds set (SIMULATED_SUPERSEDED_IDS) and apply the same demote rule Experiment 6's fixture-shaped-stale-demote rule uses. The variant is the bridge between the edge map and the flat STALE_TEMPORAL_IDS set: a reviewer who wants to ask 'is the edge map equivalent to the flat stale set on the lexical baseline?' reads this row. Honest framing: the edge data is fixture-derived; the rule is a one-way projection.",
+    category: "metadata-simulation",
+    rule: {
+      kind: "metadata-simulation-stale-id-derived",
+      staleLikeIds: SIMULATED_SUPERSEDED_IDS,
     },
-    // ---- Oracle ceiling (from Experiment 6) ----
-    {
-      id: "oracle-current-truth-promote-all",
-      description:
-        "Oracle: promote every candidate whose id is in currentTruthIds to the TOP of the top-K, preserving the relative order of promoted and non-promoted candidates. Uses fixture truth (currentTruthIds). The 'if we knew which records are current, promote them all' ceiling. Clearly NOT production-like; research-only.",
-      category: "oracle",
-      rule: { kind: "oracle-current-truth-promote" },
-    },
-    // ---- Metadata-simulation: demote supersededBy ----
-    {
-      id: "metadata-simulation-supersededBy-demote",
-      description:
-        "Metadata-simulation: demote every candidate whose id is in the simulated supersededBy map to the BOTTOM of the top-K, preserving the relative order of demoted and non-demoted candidates. The edge map is SIMULATED_SUPERSESSION_EDGES (fixture-derived); the rule does NOT consult currentTruthIds. The 'if the production schema carried a supersededBy edge and a runtime re-ranker used it, what would happen?' reading. Honest framing: this is metadata-simulation, NOT production-like; a production deployment needs the edge data on every record at remember time.",
-      category: "metadata-simulation",
-      rule: { kind: "metadata-simulation-supersededBy-demote" },
-    },
-    // ---- Metadata-simulation: promote supersedes ----
-    {
-      id: "metadata-simulation-supersedes-promote",
-      description:
-        "Metadata-simulation: promote every candidate in the top-K that supersedes another candidate in the SAME top-K to the TOP, preserving the relative order of promoted and non-promoted candidates. A candidate that does not supersede another top-K candidate passes through unchanged. The edge map is SIMULATED_SUPERSESSION_EDGES; the rule does NOT consult currentTruthIds. The 'if the runtime re-ranker only promotes candidates that explicitly supersede another in the same top-K, what would happen?' reading.",
-      category: "metadata-simulation",
-      rule: { kind: "metadata-simulation-supersedes-promote" },
-    },
-    // ---- Metadata-simulation: versionGroup current preference ----
-    {
-      id: "metadata-simulation-version-group-current",
-      description:
-        "Metadata-simulation: within a versionGroup, prefer the currentInGroup member. The rule partitions the top-K by versionGroup; for each group, the currentInGroup member (if any) is moved to the FRONT of the group slot, preserving the relative order of the non-current members. Records outside any group pass through unchanged. The edge map is SIMULATED_SUPERSESSION_EDGES; the rule does NOT consult currentTruthIds. The 'if the runtime re-ranker preferred the current member of a version chain' reading.",
-      category: "metadata-simulation",
-      rule: { kind: "metadata-simulation-version-group-current" },
-    },
-    // ---- Metadata-simulation: combined (demote + promote) ----
-    {
-      id: "metadata-simulation-combined",
-      description:
-        "Metadata-simulation: the 'full supersession-aware' re-rank. First, demote every candidate whose id is in the simulated supersededBy map to the BOTTOM. Then, promote every candidate that supersedes another candidate in the same top-K to the TOP. The middle slot keeps its relative order. The edge map is SIMULATED_SUPERSESSION_EDGES; the rule does NOT consult currentTruthIds. The 'if the runtime re-ranker used BOTH the supersededBy demote and the supersedes promote, what would happen?' reading. This is the strongest metadata-simulation rule the experiment ships with.",
-      category: "metadata-simulation",
-      rule: { kind: "metadata-simulation-combined" },
-    },
-    // ---- Metadata-simulation: stale-id-derived (cross-experiment bridge) ----
-    {
-      id: "metadata-simulation-stale-id-derived",
-      description:
-        "Metadata-simulation (cross-experiment bridge): project the simulated supersededBy map to a flat staleLikeIds set (SIMULATED_SUPERSEDED_IDS) and apply the same demote rule Experiment 6's fixture-shaped-stale-demote rule uses. The variant is the bridge between the edge map and the flat STALE_TEMPORAL_IDS set: a reviewer who wants to ask 'is the edge map equivalent to the flat stale set on the lexical baseline?' reads this row. Honest framing: the edge data is fixture-derived; the rule is a one-way projection.",
-      category: "metadata-simulation",
-      rule: {
-        kind: "metadata-simulation-stale-id-derived",
-        staleLikeIds: SIMULATED_SUPERSEDED_IDS,
-      },
-    },
-  ];
+  },
+];
 
 // ---------------------------------------------------------------------------
 // Re-rank rule application
@@ -927,9 +923,7 @@ export function applySupersessionRerankRule(args: {
       const id = ids[p]!;
       const edge = SIMULATED_SUPERSESSION_EDGES.get(id);
       const supersedesInTopK =
-        edge !== undefined &&
-        edge.supersedes !== null &&
-        topKSet.has(edge.supersedes);
+        edge !== undefined && edge.supersedes !== null && topKSet.has(edge.supersedes);
       if (supersedesInTopK) supersedesFirst.push(p);
       else middle.push(p);
     }
@@ -1008,9 +1002,7 @@ export function applySupersessionRerankRule(args: {
       const edge = SIMULATED_SUPERSESSION_EDGES.get(id);
       const isSuperseded = edge !== undefined && edge.isSuperseded;
       const supersedesInTopK =
-        edge !== undefined &&
-        edge.supersedes !== null &&
-        topKSet.has(edge.supersedes);
+        edge !== undefined && edge.supersedes !== null && topKSet.has(edge.supersedes);
       if (isSuperseded) supersededLast.push(p);
       else if (supersedesInTopK) supersedesFirst.push(p);
       else middle.push(p);
@@ -1047,7 +1039,7 @@ export function applySupersessionRerankRule(args: {
   throw new Error(
     `applySupersessionRerankRule: unknown rule kind "${
       (rule as { kind: string }).kind
-    }" for query "${e.queryId}"`,
+    }" for query "${e.queryId}"`
   );
 }
 
@@ -1365,7 +1357,7 @@ export function evaluateSupersessionRerankVariant(args: {
   if (evals.length !== queries.length) {
     throw new Error(
       `evaluateSupersessionRerankVariant: evals.length (${evals.length}) must match ` +
-        `queries.length (${queries.length}) for variant "${variant.id}"`,
+        `queries.length (${queries.length}) for variant "${variant.id}"`
     );
   }
 
@@ -1376,13 +1368,11 @@ export function evaluateSupersessionRerankVariant(args: {
     if (e.queryId !== q.id) {
       throw new Error(
         `evaluateSupersessionRerankVariant: evals[${i}].queryId="${e.queryId}" does ` +
-          `not match queries[${i}].id="${q.id}" for variant "${variant.id}"`,
+          `not match queries[${i}].id="${q.id}" for variant "${variant.id}"`
       );
     }
     if (q.family !== "temporal") continue; // temporal slice only
-    perQuery.push(
-      evaluateSupersessionRerankForQuery({ variant, eval: e, query: q }),
-    );
+    perQuery.push(evaluateSupersessionRerankForQuery({ variant, eval: e, query: q }));
   }
 
   return aggregateSupersessionRerankPerQuery(perQuery);
@@ -1441,16 +1431,14 @@ export function evaluateSupersessionRerankForQuery(args: {
   // Regression: baseline `currentTruthAt1`,
   // after NOT `currentTruthAt1`.
   const regression =
-    baselineDiag.top1IsCurrentTruth === true &&
-    afterDiag.top1IsCurrentTruth === false;
+    baselineDiag.top1IsCurrentTruth === true && afterDiag.top1IsCurrentTruth === false;
 
   // Unchanged because current missing: baseline
   // had no current in top-K, AND the re-ranker
   // did not surface a current-truth candidate
   // either.
   const unchangedBecauseCurrentMissing =
-    baselineDiag.topKHasCurrentTruth === false &&
-    afterDiag.topKHasCurrentTruth === false;
+    baselineDiag.topKHasCurrentTruth === false && afterDiag.topKHasCurrentTruth === false;
 
   // The clean / fixture-ambiguous split is on
   // the baseline's `isDivergentLabeled` flag.
@@ -1478,15 +1466,13 @@ export function evaluateSupersessionRerankForQuery(args: {
     baselineTop1Id: baselineDiag.top1Id,
     baselineCurrentTruthAt1: baselineDiag.top1IsCurrentTruth,
     baselineStaleTop1: baselineDiag.top1IsStale,
-    baselineStaleOverCurrent:
-      baselineDiag.top1IsStale && baselineDiag.topKHasCurrentTruth,
+    baselineStaleOverCurrent: baselineDiag.top1IsStale && baselineDiag.topKHasCurrentTruth,
     baselineCategory: baselineDiag.category,
     baselineIsDivergentLabeled: baselineDiag.isDivergentLabeled,
     afterTop1Id: afterDiag.top1Id,
     afterCurrentTruthAt1: afterDiag.top1IsCurrentTruth,
     afterStaleTop1: afterDiag.top1IsStale,
-    afterStaleOverCurrent:
-      afterDiag.top1IsStale && afterDiag.topKHasCurrentTruth,
+    afterStaleOverCurrent: afterDiag.top1IsStale && afterDiag.topKHasCurrentTruth,
     afterCategory: afterDiag.category,
     categoryChange,
     regression,
@@ -1506,7 +1492,7 @@ export function evaluateSupersessionRerankForQuery(args: {
  * list -> same metrics block.
  */
 export function aggregateSupersessionRerankPerQuery(
-  perQuery: ReadonlyArray<SupersessionRerankPerQuery>,
+  perQuery: ReadonlyArray<SupersessionRerankPerQuery>
 ): SupersessionRerankVariantMetrics {
   const total = perQuery.length;
   let cleanTotal = 0;
@@ -1556,8 +1542,7 @@ export function aggregateSupersessionRerankPerQuery(
       afterCurrentMissing += 1;
     }
     if (p.regression) regressionCount += 1;
-    if (p.unchangedBecauseCurrentMissing)
-      unchangedBecauseCurrentMissing += 1;
+    if (p.unchangedBecauseCurrentMissing) unchangedBecauseCurrentMissing += 1;
     if (p.hasExcludedCurrentAnchor) excludedCurrentAnchorCount += 1;
 
     if (p.isClean) {
@@ -1565,32 +1550,25 @@ export function aggregateSupersessionRerankPerQuery(
       if (p.afterCurrentTruthAt1) cleanAfterCurrentTruthAt1 += 1;
       if (p.regression) cleanRegressionCount += 1;
     } else {
-      if (p.baselineCurrentTruthAt1)
-        fixtureAmbiguousBaselineCurrentTruthAt1 += 1;
-      if (p.afterCurrentTruthAt1)
-        fixtureAmbiguousAfterCurrentTruthAt1 += 1;
+      if (p.baselineCurrentTruthAt1) fixtureAmbiguousBaselineCurrentTruthAt1 += 1;
+      if (p.afterCurrentTruthAt1) fixtureAmbiguousAfterCurrentTruthAt1 += 1;
       if (p.regression) fixtureAmbiguousRegressionCount += 1;
     }
 
-    perCategoryChange[p.categoryChange] =
-      (perCategoryChange[p.categoryChange] ?? 0) + 1;
+    perCategoryChange[p.categoryChange] = (perCategoryChange[p.categoryChange] ?? 0) + 1;
   }
 
   const safeDiv = (n: number, d: number): number => (d > 0 ? n / d : 0);
   const currentTruthAt1Delta = afterCurrentTruthAt1 - baselineCurrentTruthAt1;
   const currentTruthAt1RateDelta =
-    safeDiv(afterCurrentTruthAt1, total) -
-    safeDiv(baselineCurrentTruthAt1, total);
+    safeDiv(afterCurrentTruthAt1, total) - safeDiv(baselineCurrentTruthAt1, total);
   const staleTop1Delta = afterStaleTop1 - baselineStaleTop1;
-  const staleOverCurrentDelta =
-    afterStaleOverCurrent - baselineStaleOverCurrent;
+  const staleOverCurrentDelta = afterStaleOverCurrent - baselineStaleOverCurrent;
   const currentMissingDelta = afterCurrentMissing - baselineCurrentMissing;
 
-  const cleanCurrentTruthAt1Delta =
-    cleanAfterCurrentTruthAt1 - cleanBaselineCurrentTruthAt1;
+  const cleanCurrentTruthAt1Delta = cleanAfterCurrentTruthAt1 - cleanBaselineCurrentTruthAt1;
   const fixtureAmbiguousCurrentTruthAt1Delta =
-    fixtureAmbiguousAfterCurrentTruthAt1 -
-    fixtureAmbiguousBaselineCurrentTruthAt1;
+    fixtureAmbiguousAfterCurrentTruthAt1 - fixtureAmbiguousBaselineCurrentTruthAt1;
 
   return {
     total,
@@ -1649,9 +1627,10 @@ export function aggregateSupersessionRerankPerQuery(
  *     that did not help; the report surfaces the
  *     raw numbers so a reviewer can audit.
  */
-export function computeSupersessionRerankVerdict(
-  metrics: SupersessionRerankVariantMetrics,
-): { verdict: SupersessionRerankVerdict; note: string } {
+export function computeSupersessionRerankVerdict(metrics: SupersessionRerankVariantMetrics): {
+  verdict: SupersessionRerankVerdict;
+  note: string;
+} {
   if (metrics.regressionCount > 0) {
     return {
       verdict: "unsafe",
@@ -1859,15 +1838,13 @@ export function buildSupersessionRerankReport(args: {
   if (evals.length !== queries.length) {
     throw new Error(
       `buildSupersessionRerankReport: evals.length (${evals.length}) must match ` +
-        `queries.length (${queries.length})`,
+        `queries.length (${queries.length})`
     );
   }
   // Build the per-variant rows.
   const rows: SupersessionRerankVariantRow[] = [];
   for (const v of variants) {
-    rows.push(
-      buildSupersessionRerankVariantRow({ variant: v, evals, queries }),
-    );
+    rows.push(buildSupersessionRerankVariantRow({ variant: v, evals, queries }));
   }
   // Temporal slice size: count temporal
   // queries in the input. We count the
@@ -1945,7 +1922,7 @@ export function buildSupersessionRerankReport(args: {
     if (missQueries.length !== miss) {
       throw new Error(
         `buildSupersessionRerankReport: semantic overlay miss mismatch ` +
-          `(${missQueries.length} vs ${miss})`,
+          `(${missQueries.length} vs ${miss})`
       );
     }
   }
@@ -1966,9 +1943,7 @@ export function buildSupersessionRerankReport(args: {
     temporalQueryCount,
     edgeMapSize: SIMULATED_SUPERSESSION_EDGES.size,
     simulatedSupersededIds: [...SIMULATED_SUPERSEDED_IDS].sort((a, b) => a - b),
-    simulatedCurrentInGroupIds: [...SIMULATED_CURRENT_IN_GROUP_IDS].sort(
-      (a, b) => a - b,
-    ),
+    simulatedCurrentInGroupIds: [...SIMULATED_CURRENT_IN_GROUP_IDS].sort((a, b) => a - b),
     excludedRecordIds: [...EXCLUDED_FROM_EDGE_MAP].sort((a, b) => a - b),
     variants: rows,
     gapBreakdown: {
@@ -1992,31 +1967,25 @@ export function buildSupersessionRerankReport(args: {
  * reviewer can `diff` two runs. The function
  * is pure.
  */
-export function formatSupersessionRerankReport(
-  report: SupersessionRerankReport,
-): string {
+export function formatSupersessionRerankReport(report: SupersessionRerankReport): string {
   const out: string[] = [];
-  out.push(
-    `# Supersession / metadata edge simulation (source: ${report.sourceVariant})`,
-  );
+  out.push(`# Supersession / metadata edge simulation (source: ${report.sourceVariant})`);
   if (report.recordCount !== null) {
     out.push(`#   (records: ${report.recordCount})`);
   }
-  out.push(
-    `#   (temporal queries: ${report.temporalQueryCount})`,
-  );
+  out.push(`#   (temporal queries: ${report.temporalQueryCount})`);
   out.push(
     `#   (simulated edge map: ${report.edgeMapSize} entries; ` +
       `${report.simulatedSupersededIds.length} superseded ids; ` +
       `${report.simulatedCurrentInGroupIds.length} current-in-group ids; ` +
-      `${report.excludedRecordIds.length} explicitly excluded ids)`,
+      `${report.excludedRecordIds.length} explicitly excluded ids)`
   );
   out.push("");
 
   out.push("## Variant table (temporal slice)");
   out.push("");
   out.push(
-    "  category | variant | n | baseline@1 | after@1 | delta | staleTop1 baseline->after | staleOverCurrent baseline->after | currentMissing baseline->after | regressions | unchanged-missing | excluded-anchor | verdict",
+    "  category | variant | n | baseline@1 | after@1 | delta | staleTop1 baseline->after | staleOverCurrent baseline->after | currentMissing baseline->after | regressions | unchanged-missing | excluded-anchor | verdict"
   );
   for (const row of report.variants) {
     const m = row.metrics;
@@ -2035,14 +2004,14 @@ export function formatSupersessionRerankReport(
         `${String(m.regressionCount).padStart(11)} | ` +
         `${String(m.unchangedBecauseCurrentMissing).padStart(18)} | ` +
         `${String(m.excludedCurrentAnchorCount).padStart(16)} | ` +
-        `${row.verdict}`,
+        `${row.verdict}`
     );
   }
   out.push("");
   out.push("## Variant table (clean / fixture-ambiguous split)");
   out.push("");
   out.push(
-    "  category | variant | cleanN | cleanBaseline@1 | cleanAfter@1 | cleanDelta | cleanRegressions | ambigN | ambigBaseline@1 | ambigAfter@1 | ambigDelta | ambigRegressions",
+    "  category | variant | cleanN | cleanBaseline@1 | cleanAfter@1 | cleanDelta | cleanRegressions | ambigN | ambigBaseline@1 | ambigAfter@1 | ambigDelta | ambigRegressions"
   );
   for (const row of report.variants) {
     const m = row.metrics;
@@ -2057,7 +2026,7 @@ export function formatSupersessionRerankReport(
         `${String(m.fixtureAmbiguousBaselineCurrentTruthAt1).padStart(15)} | ` +
         `${String(m.fixtureAmbiguousAfterCurrentTruthAt1).padStart(12)} | ` +
         `${signedInt(m.fixtureAmbiguousCurrentTruthAt1Delta).padStart(10)} | ` +
-        `${String(m.fixtureAmbiguousRegressionCount).padStart(17)}`,
+        `${String(m.fixtureAmbiguousRegressionCount).padStart(17)}`
     );
   }
   out.push("");
@@ -2077,7 +2046,7 @@ export function formatSupersessionRerankReport(
     "  The table maps (baseline-category -> after-category) -> count for each variant. " +
       "The columns are the union of all observed change keys, sorted alphabetically. " +
       "The dominant 'X -> X' diagonal is the unchanged-count; the " +
-      "off-diagonal rows are the per-variant recoveries.",
+      "off-diagonal rows are the per-variant recoveries."
   );
   out.push("");
   // For each variant, list the (change -> count)
@@ -2105,7 +2074,7 @@ export function formatSupersessionRerankReport(
   out.push("## Gap the metadata cannot fix (excluded current-anchor queries)");
   out.push("");
   out.push(
-    `  total temporal queries whose currentTruthIds intersects EXCLUDED_FROM_EDGE_MAP: ${report.gapBreakdown.total}`,
+    `  total temporal queries whose currentTruthIds intersects EXCLUDED_FROM_EDGE_MAP: ${report.gapBreakdown.total}`
   );
   out.push("");
   out.push(
@@ -2115,7 +2084,7 @@ export function formatSupersessionRerankReport(
       "fact in their summary; marking them as `supersededBy` would be a " +
       "misread of their semantic content. The queries that name them " +
       "as the current truth are the `temp-current-vs-previous-*` " +
-      "queries the prior diagnostic surfaces.",
+      "queries the prior diagnostic surfaces."
   );
   out.push("");
   out.push("  per-variant (excludedCurrentAnchorCount):");
@@ -2128,45 +2097,31 @@ export function formatSupersessionRerankReport(
     out.push("    (no excluded-anchor queries on the temporal slice)");
   } else {
     const sorted = [...report.gapBreakdown.perQuery].sort((a, b) =>
-      a.queryId < b.queryId ? -1 : a.queryId > b.queryId ? 1 : 0,
+      a.queryId < b.queryId ? -1 : a.queryId > b.queryId ? 1 : 0
     );
     for (const p of sorted) {
       out.push(
         `    ${p.queryId.padEnd(48)}  family=${p.family.padEnd(10)}  ` +
-          `excluded=${JSON.stringify(p.excludedCurrentTruthIds)}`,
+          `excluded=${JSON.stringify(p.excludedCurrentTruthIds)}`
       );
     }
   }
   out.push("");
   out.push("## Simulated edge-map summary");
   out.push("");
-  out.push(
-    `  total entries:                 ${report.edgeMapSize}`,
-  );
-  out.push(
-    `  superseded ids (isSuperseded): ${report.simulatedSupersededIds.length}`,
-  );
-  out.push(
-    `  current-in-group ids:          ${report.simulatedCurrentInGroupIds.length}`,
-  );
-  out.push(
-    `  explicitly excluded ids:       ${report.excludedRecordIds.length}`,
-  );
+  out.push(`  total entries:                 ${report.edgeMapSize}`);
+  out.push(`  superseded ids (isSuperseded): ${report.simulatedSupersededIds.length}`);
+  out.push(`  current-in-group ids:          ${report.simulatedCurrentInGroupIds.length}`);
+  out.push(`  explicitly excluded ids:       ${report.excludedRecordIds.length}`);
   out.push("");
   out.push("  superseded ids (sorted):");
-  out.push(
-    `    [${report.simulatedSupersededIds.join(", ")}]`,
-  );
+  out.push(`    [${report.simulatedSupersededIds.join(", ")}]`);
   out.push("");
   out.push("  current-in-group ids (sorted):");
-  out.push(
-    `    [${report.simulatedCurrentInGroupIds.join(", ")}]`,
-  );
+  out.push(`    [${report.simulatedCurrentInGroupIds.join(", ")}]`);
   out.push("");
   out.push("  explicitly excluded ids (sorted):");
-  out.push(
-    `    [${report.excludedRecordIds.join(", ")}]`,
-  );
+  out.push(`    [${report.excludedRecordIds.join(", ")}]`);
   out.push("");
   // Sanity: the simulated superseded id set
   // should be a SUBSET of the prior
@@ -2186,10 +2141,10 @@ export function formatSupersessionRerankReport(
   out.push("## Cross-experiment sanity (vs STALE_TEMPORAL_IDS)");
   out.push("");
   out.push(
-    `  simulatedSupersededIds ∩ STALE_TEMPORAL_IDS: ${staleOverlap.length} (overlap ids: [${staleOverlap.join(", ")}])`,
+    `  simulatedSupersededIds ∩ STALE_TEMPORAL_IDS: ${staleOverlap.length} (overlap ids: [${staleOverlap.join(", ")}])`
   );
   out.push(
-    `  STALE_TEMPORAL_IDS \\ simulatedSupersededIds: ${staleOnly.length} (in STALE_TEMPORAL_IDS but not in simulatedSupersededIds: [${staleOnly.join(", ")}])`,
+    `  STALE_TEMPORAL_IDS \\ simulatedSupersededIds: ${staleOnly.length} (in STALE_TEMPORAL_IDS but not in simulatedSupersededIds: [${staleOnly.join(", ")}])`
   );
   out.push(
     "  The simulatedSupersededIds set is a NARROWER subset of " +
@@ -2202,7 +2157,7 @@ export function formatSupersessionRerankReport(
       "`metadata-simulation-stale-id-derived` row with an " +
       "override `staleLikeIds: STALE_TEMPORAL_IDS`; the default " +
       "uses the narrower simulatedSupersededIds set so the " +
-      "edge-map-derived baseline is the honest reading.",
+      "edge-map-derived baseline is the honest reading."
   );
   out.push("");
   if (report.semanticOverlay) {
@@ -2218,7 +2173,7 @@ export function formatSupersessionRerankReport(
         "for each variant, the count is the number of baseline-miss queries " +
         "whose after-re-rank top-1 IS a currentTruthId. A non-zero count means " +
         "'the current fact was in the top-K; the re-ranker could have recovered " +
-        "it regardless of the dense ranker's miss'.",
+        "it regardless of the dense ranker's miss'."
     );
     out.push("");
     out.push("  recovered-by-variant (baseline-miss queries, after-currentTruthAt1):");
@@ -2243,7 +2198,7 @@ export function formatSupersessionRerankReport(
       "The honest reading is: 'a production-side schema that carries " +
       "the edges at `remember` time would let a runtime re-ranker " +
       "reach the metadata-simulation ceiling WITHOUT depending on " +
-      "the fixture truth at all'.",
+      "the fixture truth at all'."
   );
   out.push("");
   return out.join("\n");

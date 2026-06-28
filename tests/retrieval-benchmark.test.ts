@@ -26,24 +26,21 @@
  *        sections.
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { test } from "node:test";
 
 import { BENCHMARK_RECORDS } from "../src/benchmark/corpus.ts";
+import { aggregateMetrics, evaluateQuery } from "../src/benchmark/metrics.ts";
 import { BENCHMARK_QUERIES } from "../src/benchmark/queries.ts";
 import {
-  aggregateMetrics,
-  evaluateQuery,
-} from "../src/benchmark/metrics.ts";
-import {
   buildCandidates,
-  runRetrievalBenchmark,
-  parseRetrievalCli,
   formatHumanReport,
+  parseRetrievalCli,
   resolveBenchmarkArtifactsDir,
+  runRetrievalBenchmark,
   writeBenchmarkReport,
 } from "../src/benchmark/retrieval-runner.ts";
 import { classifyInput } from "../src/safety/precheck.ts";
@@ -90,7 +87,10 @@ test("benchmark corpus: no record contains a credential-shaped fragment", () => 
     { re: /\bAIza[A-Za-z0-9_\-]{30,}\b/g, label: "google-api-key" },
     { re: /\bnvapi-[A-Za-z0-9_\-]{20,}\b/g, label: "nvidia-nim-key" },
     { re: /\bbearer\s+[A-Za-z0-9._\-+/=]{20,}\b/gi, label: "bearer-token" },
-    { re: /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----/g, label: "pem-private-key" },
+    {
+      re: /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----/g,
+      label: "pem-private-key",
+    },
   ];
   for (const r of BENCHMARK_RECORDS) {
     for (const { re, label } of shapes) {
@@ -98,7 +98,7 @@ test("benchmark corpus: no record contains a credential-shaped fragment", () => 
       re.lastIndex = 0;
       assert.ok(
         !re.test(r.summary),
-        `record ${r.id} summary matched secret pattern "${label}": ${r.summary.slice(0, 80)}`,
+        `record ${r.id} summary matched secret pattern "${label}": ${r.summary.slice(0, 80)}`
       );
     }
   }
@@ -125,7 +125,7 @@ test("benchmark corpus: summaries do not classify as `secret` or `mixed-safe-sen
     const c = classifyInput(r.summary);
     assert.ok(
       !forbidden.has(c.class),
-      `record ${r.id} classified as "${c.class}" (forbidden): reason=${c.reason}`,
+      `record ${r.id} classified as "${c.class}" (forbidden): reason=${c.reason}`
     );
   }
 });
@@ -138,10 +138,7 @@ test("benchmark queries: every expected id resolves to a real record", () => {
   const validIds = new Set(BENCHMARK_RECORDS.map((r) => r.id));
   for (const q of BENCHMARK_QUERIES) {
     for (const id of q.expectedIds) {
-      assert.ok(
-        validIds.has(id),
-        `query ${q.id} expected id ${id} does not exist in the corpus`,
-      );
+      assert.ok(validIds.has(id), `query ${q.id} expected id ${id} does not exist in the corpus`);
     }
   }
 });
@@ -149,15 +146,11 @@ test("benchmark queries: every expected id resolves to a real record", () => {
 test("benchmark queries: no-answer queries have empty expected ids; others have at least one", () => {
   for (const q of BENCHMARK_QUERIES) {
     if (q.family === "no-answer") {
-      assert.equal(
-        q.expectedIds.length,
-        0,
-        `no-answer query ${q.id} must have empty expectedIds`,
-      );
+      assert.equal(q.expectedIds.length, 0, `no-answer query ${q.id} must have empty expectedIds`);
     } else {
       assert.ok(
         q.expectedIds.length >= 1,
-        `positive query ${q.id} must have at least one expected id`,
+        `positive query ${q.id} must have at least one expected id`
       );
     }
   }
@@ -217,7 +210,7 @@ test("benchmark queries: every query has a currentTruthIds field consistent with
       assert.equal(
         q.currentTruthIds.length,
         0,
-        `no-answer query ${q.id} must have empty currentTruthIds`,
+        `no-answer query ${q.id} must have empty currentTruthIds`
       );
       continue;
     }
@@ -230,7 +223,7 @@ test("benchmark queries: every query has a currentTruthIds field consistent with
     for (const id of q.currentTruthIds) {
       assert.ok(
         expectedSet.has(id),
-        `query ${q.id} currentTruthId ${id} must also appear in expectedIds`,
+        `query ${q.id} currentTruthId ${id} must also appear in expectedIds`
       );
     }
     if (divergentIds.has(q.id)) {
@@ -240,7 +233,7 @@ test("benchmark queries: every query has a currentTruthIds field consistent with
       // surfaced.
       assert.ok(
         q.currentTruthIds.length < q.expectedIds.length,
-        `divergent query ${q.id} must have currentTruthIds strictly smaller than expectedIds`,
+        `divergent query ${q.id} must have currentTruthIds strictly smaller than expectedIds`
       );
       continue;
     }
@@ -248,14 +241,14 @@ test("benchmark queries: every query has a currentTruthIds field consistent with
     assert.equal(
       q.currentTruthIds.length,
       q.expectedIds.length,
-      `query ${q.id} currentTruthIds length must match expectedIds length`,
+      `query ${q.id} currentTruthIds length must match expectedIds length`
     );
     const a = [...q.currentTruthIds].sort((x, y) => x - y);
     const b = [...q.expectedIds].sort((x, y) => x - y);
     assert.deepEqual(
       a,
       b,
-      `query ${q.id} currentTruthIds must mirror expectedIds (got ${a} vs ${b})`,
+      `query ${q.id} currentTruthIds must mirror expectedIds (got ${a} vs ${b})`
     );
   }
 });
@@ -271,26 +264,24 @@ test("benchmark queries: at least one temporal query has diverging expectedIds/c
   // least one temporal query is divergent, and the divergent
   // set is small and labeled.
   const divergent = BENCHMARK_QUERIES.filter(
-    (q) =>
-      q.family === "temporal" &&
-      q.currentTruthIds.length < q.expectedIds.length,
+    (q) => q.family === "temporal" && q.currentTruthIds.length < q.expectedIds.length
   );
   assert.ok(
     divergent.length >= 1,
-    "expected at least one temporal query with currentTruthIds strictly smaller than expectedIds",
+    "expected at least one temporal query with currentTruthIds strictly smaller than expectedIds"
   );
   for (const q of divergent) {
     // The current-fact id must be in currentTruthIds.
     assert.ok(
       q.currentTruthIds.length >= 1,
-      `divergent temporal query ${q.id} must still have at least one currentTruthId`,
+      `divergent temporal query ${q.id} must still have at least one currentTruthId`
     );
     // Every currentTruthId is also an expectedId.
     const expectedSet = new Set(q.expectedIds);
     for (const id of q.currentTruthIds) {
       assert.ok(
         expectedSet.has(id),
-        `divergent temporal query ${q.id} currentTruthId ${id} must also be in expectedIds`,
+        `divergent temporal query ${q.id} currentTruthId ${id} must also be in expectedIds`
       );
     }
   }
@@ -305,7 +296,7 @@ test("benchmark queries: every currentTruthId resolves to a real record", () => 
     for (const id of q.currentTruthIds) {
       assert.ok(
         validIds.has(id),
-        `query ${q.id} currentTruthId ${id} does not exist in the corpus`,
+        `query ${q.id} currentTruthId ${id} does not exist in the corpus`
       );
     }
   }
@@ -332,10 +323,7 @@ test("benchmark queries: every family is one of the documented families", () => 
     "orientation",
   ]);
   for (const q of BENCHMARK_QUERIES) {
-    assert.ok(
-      allowed.has(q.family),
-      `query ${q.id} has unknown family: ${q.family}`,
-    );
+    assert.ok(allowed.has(q.family), `query ${q.id} has unknown family: ${q.family}`);
   }
 });
 
@@ -370,7 +358,7 @@ test("benchmark corpus: adversarial-expansion checkpoint has at least 132 record
   // pinned by the runner-shape test below.
   assert.ok(
     BENCHMARK_RECORDS.length >= 132,
-    `adversarial-expansion corpus should have at least 132 records, got ${BENCHMARK_RECORDS.length}`,
+    `adversarial-expansion corpus should have at least 132 records, got ${BENCHMARK_RECORDS.length}`
   );
   const ids = BENCHMARK_RECORDS.map((r) => r.id).sort((a, b) => a - b);
   for (let i = 0; i < ids.length; i++) {
@@ -381,7 +369,7 @@ test("benchmark corpus: adversarial-expansion checkpoint has at least 132 record
 test("benchmark queries: adversarial-expansion checkpoint has at least 176 queries covering all 6 families", () => {
   assert.ok(
     BENCHMARK_QUERIES.length >= 176,
-    `adversarial-expansion query set should have at least 176 queries, got ${BENCHMARK_QUERIES.length}`,
+    `adversarial-expansion query set should have at least 176 queries, got ${BENCHMARK_QUERIES.length}`
   );
   // Each of the 6 documented families must be present in
   // the adversarial-expansion set. The prior query sets
@@ -399,7 +387,7 @@ test("benchmark queries: adversarial-expansion checkpoint has at least 176 queri
   ]) {
     assert.ok(
       families.has(required),
-      `adversarial-expansion query set is missing the "${required}" family`,
+      `adversarial-expansion query set is missing the "${required}" family`
     );
   }
 });
@@ -415,17 +403,10 @@ test("benchmark queries: per-family distribution has a reasonable mix and at lea
   for (const q of BENCHMARK_QUERIES) {
     familyCounts[q.family] = (familyCounts[q.family] ?? 0) + 1;
   }
-  for (const f of [
-    "exact",
-    "paraphrase",
-    "temporal",
-    "multi-hop",
-    "no-answer",
-    "orientation",
-  ]) {
+  for (const f of ["exact", "paraphrase", "temporal", "multi-hop", "no-answer", "orientation"]) {
     assert.ok(
       (familyCounts[f] ?? 0) >= 6,
-      `family "${f}" has ${familyCounts[f] ?? 0} queries, expected at least 6 in the adversarial-expansion set`,
+      `family "${f}" has ${familyCounts[f] ?? 0} queries, expected at least 6 in the adversarial-expansion set`
     );
   }
 });
@@ -447,16 +428,11 @@ test("benchmark queries: every temporal query is a supersession-style query with
   const historicalCluster = new Set([21, 22, 23, 24, 57, 58, 59, 60, 93, 94, 95, 96]);
   for (const q of BENCHMARK_QUERIES) {
     if (q.family !== "temporal") continue;
-    assert.ok(
-      q.expectedIds.length >= 1,
-      `temporal query ${q.id} has empty expectedIds`,
-    );
-    const nonHistorical = q.expectedIds.filter(
-      (id) => !historicalCluster.has(id),
-    );
+    assert.ok(q.expectedIds.length >= 1, `temporal query ${q.id} has empty expectedIds`);
+    const nonHistorical = q.expectedIds.filter((id) => !historicalCluster.has(id));
     assert.ok(
       nonHistorical.length >= 1,
-      `temporal query ${q.id} expected ids are all in the historical cluster; temporal must test current vs old, not old vs older`,
+      `temporal query ${q.id} expected ids are all in the historical cluster; temporal must test current vs old, not old vs older`
     );
   }
 });
@@ -505,7 +481,7 @@ test("metrics: temporal wrong-rank1 case — current fact in top-K but old fact 
     [1], // expectedIds: current fact (Postgres 16)
     [1], // currentTruthIds: same as expected for temporal
     [21, 1, 4], // ranker puts the old fact (21, Postgres 14) at the top
-    [0.95, 0.5, 0.25],
+    [0.95, 0.5, 0.25]
   );
   // Hit@K still passes — the current fact is in the top-K.
   assert.equal(e.passed, true);
@@ -570,15 +546,7 @@ test("metrics: aggregateMetrics with a temporal wrong-rank1 query — rank1 and 
   const evals = [
     // Passes hit@K (current fact at rank 2). Fails rank1
     // because the old fact is at the top.
-    evaluateQuery(
-      "t1",
-      "temporal",
-      "q",
-      [1],
-      [1],
-      [21, 1, 4],
-      [0.95, 0.5, 0.25],
-    ),
+    evaluateQuery("t1", "temporal", "q", [1], [1], [21, 1, 4], [0.95, 0.5, 0.25]),
     // Passes hit@K and rank1.
     evaluateQuery("e1", "exact", "q", [2], [2], [2, 9], [0.8, 0.4]),
   ];
@@ -678,7 +646,7 @@ test("runner: runRetrievalBenchmark runs without DB and returns a well-formed re
       for (const id of e.currentTruthIds) {
         assert.ok(
           expectedSet.has(id),
-          `eval ${e.queryId} currentTruthId ${id} must be in expectedIds`,
+          `eval ${e.queryId} currentTruthId ${id} must be in expectedIds`
         );
       }
     }
@@ -705,7 +673,7 @@ test("runner: runRetrievalBenchmark runs without DB and returns a well-formed re
   const serialized = JSON.stringify(report);
   assert.ok(
     !/apiKey|authorization|bearer|sk-[A-Za-z0-9]{20,}/i.test(serialized),
-    "report must not contain credential-shaped fields",
+    "report must not contain credential-shaped fields"
   );
 });
 
@@ -718,21 +686,16 @@ test("runner: temporal wrong-rank1 gap is visible in the headline metrics", () =
   // the temporal family is designed to fail rank-1.
   const report = runRetrievalBenchmark();
   const temporalEvals = report.evals.filter((e) => e.family === "temporal");
-  assert.ok(
-    temporalEvals.length > 0,
-    "test assumes the benchmark has at least one temporal query",
-  );
+  assert.ok(temporalEvals.length > 0, "test assumes the benchmark has at least one temporal query");
   // At least one temporal query must be in the wrong-rank1
   // state — otherwise the metric isn't actually exercising the
   // gap it was added to surface.
-  const wrongRank1 = temporalEvals.filter(
-    (e) => !e.rank1 || !e.currentTruthAt1,
-  );
+  const wrongRank1 = temporalEvals.filter((e) => !e.rank1 || !e.currentTruthAt1);
   assert.ok(
     wrongRank1.length >= 1,
     "expected at least one temporal query with wrong rank-1; " +
       "if this fails, either the corpus drifted or the metric " +
-      "is no longer measuring the gap it was added for",
+      "is no longer measuring the gap it was added for"
   );
   // And at the aggregate level, the temporal family should
   // show rank1 < hit@K (or at least rank1 strictly less than
@@ -740,7 +703,7 @@ test("runner: temporal wrong-rank1 gap is visible in the headline metrics", () =
   const tMetrics = report.metrics.perFamily["temporal"]!;
   assert.ok(
     tMetrics.rank1 < tMetrics.hitAt5,
-    `temporal family rank1 (${tMetrics.rank1}) should be < hit@5 (${tMetrics.hitAt5})`,
+    `temporal family rank1 (${tMetrics.rank1}) should be < hit@5 (${tMetrics.hitAt5})`
   );
 });
 
@@ -769,15 +732,13 @@ test("runner: labeled temporal current-truth divergence query exercises the gap"
   const temporal = report.evals.filter((e) => e.family === "temporal");
   const divergentIds = new Set(
     BENCHMARK_QUERIES.filter(
-      (q) =>
-        q.family === "temporal" &&
-        q.currentTruthIds.length < q.expectedIds.length,
-    ).map((q) => q.id),
+      (q) => q.family === "temporal" && q.currentTruthIds.length < q.expectedIds.length
+    ).map((q) => q.id)
   );
   const divergentEvals = temporal.filter((e) => divergentIds.has(e.queryId));
   assert.ok(
     divergentEvals.length >= 1,
-    "expected at least one labeled divergent temporal eval in the runner output",
+    "expected at least one labeled divergent temporal eval in the runner output"
   );
   // The expanded checkpoint has two labeled divergent
   // queries (`temp-storage-raw-text` and
@@ -788,17 +749,17 @@ test("runner: labeled temporal current-truth divergence query exercises the gap"
   // either pair.
   assert.ok(
     divergentEvals.length >= 2,
-    `expected at least two labeled divergent temporal evals, got ${divergentEvals.length}`,
+    `expected at least two labeled divergent temporal evals, got ${divergentEvals.length}`
   );
   for (const id of ["temp-storage-raw-text", "temp-controller-validation"]) {
     assert.ok(
       divergentIds.has(id),
-      `expected the labeled divergent query "${id}" to be present in the divergent set`,
+      `expected the labeled divergent query "${id}" to be present in the divergent set`
     );
     const evalForQuery = report.evals.find((e) => e.queryId === id);
     assert.ok(
       evalForQuery,
-      `expected eval for the labeled divergent query "${id}" to be present in the runner output`,
+      `expected eval for the labeled divergent query "${id}" to be present in the runner output`
     );
   }
   // The aggregate must show the divergence: temporal
@@ -808,7 +769,7 @@ test("runner: labeled temporal current-truth divergence query exercises the gap"
   const tMetrics = report.metrics.perFamily["temporal"]!;
   assert.ok(
     tMetrics.currentTruthAt1 <= tMetrics.rank1,
-    `temporal currentTruthAt1 (${tMetrics.currentTruthAt1}) must be <= rank1 (${tMetrics.rank1})`,
+    `temporal currentTruthAt1 (${tMetrics.currentTruthAt1}) must be <= rank1 (${tMetrics.rank1})`
   );
   // At least one divergent temporal eval must have a
   // currentTruthAt1 < rank1 signal — that is, the rank-1
@@ -818,9 +779,7 @@ test("runner: labeled temporal current-truth divergence query exercises the gap"
   // build), but we pin the per-eval invariant: for at least
   // one divergent eval, `rank1 === true && currentTruthAt1
   // === false`.
-  const divergentStricterGap = divergentEvals.filter(
-    (e) => e.rank1 && !e.currentTruthAt1,
-  );
+  const divergentStricterGap = divergentEvals.filter((e) => e.rank1 && !e.currentTruthAt1);
   // The strictest form of the test would assert at least
   // one strict gap. The lexical baseline's behavior on the
   // divergent query varies; we use a softer "at least one
@@ -832,7 +791,7 @@ test("runner: labeled temporal current-truth divergence query exercises the gap"
   // contract on the lexical ranker.
   assert.ok(
     divergentEvals.length >= 1 && tMetrics.currentTruthAt1 <= tMetrics.rank1,
-    "divergent current-truth temporal eval must be exercised and aggregate currentTruthAt1 must be <= rank1",
+    "divergent current-truth temporal eval must be exercised and aggregate currentTruthAt1 must be <= rank1"
   );
   // Touch the local var to keep it referenced in case the
   // future expansion tightens this assertion.
@@ -862,12 +821,12 @@ test("runner: expanded checkpoint includes a labeled no-answer hard-negative que
   const evalForQuery = report.evals.find((e) => e.queryId === labeledId);
   assert.ok(
     evalForQuery,
-    `expected the labeled hard-negative query "${labeledId}" to be present in the runner output`,
+    `expected the labeled hard-negative query "${labeledId}" to be present in the runner output`
   );
   assert.equal(
     evalForQuery.family,
     "no-answer",
-    `the labeled hard-negative query "${labeledId}" must be in the no-answer family`,
+    `the labeled hard-negative query "${labeledId}" must be in the no-answer family`
   );
   // The query has no relevant memory, so the expected
   // contract is `passed === false` (the ranker returned
@@ -880,11 +839,11 @@ test("runner: expanded checkpoint includes a labeled no-answer hard-negative que
   assert.equal(
     evalForQuery.passed,
     false,
-    `the labeled hard-negative query "${labeledId}" must fail (no-answer TNR violation) at the default threshold`,
+    `the labeled hard-negative query "${labeledId}" must fail (no-answer TNR violation) at the default threshold`
   );
   assert.ok(
     evalForQuery.topIds.length >= 1,
-    `the labeled hard-negative query "${labeledId}" must have at least one confabulated candidate in topIds; got ${evalForQuery.topIds.length}`,
+    `the labeled hard-negative query "${labeledId}" must have at least one confabulated candidate in topIds; got ${evalForQuery.topIds.length}`
   );
   // The no-answer failure category must include this
   // query's contribution. The categoriser labels
@@ -892,14 +851,14 @@ test("runner: expanded checkpoint includes a labeled no-answer hard-negative que
   // and the aggregate count must be at least 1.
   assert.ok(
     (report.metrics.failureCategories["no-answer-fp:ranker-returned-hits"] ?? 0) >= 1,
-    "expected at least one no-answer-fp:ranker-returned-hits failure category entry",
+    "expected at least one no-answer-fp:ranker-returned-hits failure category entry"
   );
   // The no-answer TNR must be less than 1.0 because at
   // least one no-answer query (this one) confabulated.
   const naMetrics = report.metrics.perFamily["no-answer"]!;
   assert.ok(
     naMetrics.noAnswerCorrect < naMetrics.total,
-    `no-answer TNR must be < 1.0 when a hard-negative query confabulates (got ${naMetrics.noAnswerCorrect}/${naMetrics.total})`,
+    `no-answer TNR must be < 1.0 when a hard-negative query confabulates (got ${naMetrics.noAnswerCorrect}/${naMetrics.total})`
   );
 });
 
@@ -940,11 +899,11 @@ test("adversarial-expansion: explicit labels are present on the expected subsets
   const advPara = queriesByLabel["adversarialParaphrase"] ?? [];
   assert.ok(
     advPara.length >= 1,
-    `expected at least 1 labeled 'adversarialParaphrase' query, got ${advPara.length}`,
+    `expected at least 1 labeled 'adversarialParaphrase' query, got ${advPara.length}`
   );
   assert.ok(
     advPara.length >= 2,
-    `expected at least 2 labeled 'adversarialParaphrase' queries (the brief's upper bound is "at least 1-2"), got ${advPara.length}`,
+    `expected at least 2 labeled 'adversarialParaphrase' queries (the brief's upper bound is "at least 1-2"), got ${advPara.length}`
   );
   // The brief asks for at least 5 labeled divergent
   // temporal cases. The adversarial expansion adds 5
@@ -952,7 +911,7 @@ test("adversarial-expansion: explicit labels are present on the expected subsets
   const divT = queriesByLabel["divergentTemporal"] ?? [];
   assert.ok(
     divT.length >= 5,
-    `expected at least 5 labeled 'divergentTemporal' queries, got ${divT.length}`,
+    `expected at least 5 labeled 'divergentTemporal' queries, got ${divT.length}`
   );
   // At least 1 explicitly labeled hard-negative in the
   // no-answer family. The brief's hard-negative floor
@@ -961,27 +920,21 @@ test("adversarial-expansion: explicit labels are present on the expected subsets
   // adversarial expansion expands the labeled set to 15
   // hard-negatives.
   const hn = queriesByLabel["hardNegative"] ?? [];
-  assert.ok(
-    hn.length >= 1,
-    `expected at least 1 labeled 'hardNegative' query, got ${hn.length}`,
-  );
+  assert.ok(hn.length >= 1, `expected at least 1 labeled 'hardNegative' query, got ${hn.length}`);
   const labeledHardNegNoAnswer = hn.filter((qid) => {
     const q = BENCHMARK_QUERIES.find((q) => q.id === qid);
     return q?.family === "no-answer";
   });
   assert.ok(
     labeledHardNegNoAnswer.length >= 1,
-    `expected at least 1 labeled 'hardNegative' query in the no-answer family, got ${labeledHardNegNoAnswer.length}`,
+    `expected at least 1 labeled 'hardNegative' query in the no-answer family, got ${labeledHardNegNoAnswer.length}`
   );
   // At least 2 negation-shaped cases (the brief says "at
   // least 2 negation-shaped cases (answerable or
   // no-answer, not all no-answer)"). The adversarial
   // expansion adds 4 no-answer negation queries.
   const neg = queriesByLabel["negation"] ?? [];
-  assert.ok(
-    neg.length >= 2,
-    `expected at least 2 labeled 'negation' queries, got ${neg.length}`,
-  );
+  assert.ok(neg.length >= 2, `expected at least 2 labeled 'negation' queries, got ${neg.length}`);
   // Verify the negation set is NOT all no-answer (the
   // brief explicitly says "not all no-answer"). The
   // adversarial expansion has 4 negation queries, all
@@ -995,14 +948,11 @@ test("adversarial-expansion: explicit labels are present on the expected subsets
   // describes it as a soft constraint.)
   // The other adversarial labels are also present.
   const fP = queriesByLabel["falsePremise"] ?? [];
-  assert.ok(
-    fP.length >= 1,
-    `expected at least 1 labeled 'falsePremise' query, got ${fP.length}`,
-  );
+  assert.ok(fP.length >= 1, `expected at least 1 labeled 'falsePremise' query, got ${fP.length}`);
   const nmc = queriesByLabel["nearMissCurrentCluster"] ?? [];
   assert.ok(
     nmc.length >= 1,
-    `expected at least 1 labeled 'nearMissCurrentCluster' query, got ${nmc.length}`,
+    `expected at least 1 labeled 'nearMissCurrentCluster' query, got ${nmc.length}`
   );
   // The label set itself is documented; a future label
   // value would be a deliberate, visible change to the
@@ -1018,7 +968,7 @@ test("adversarial-expansion: explicit labels are present on the expected subsets
   for (const l of Object.keys(queriesByLabel)) {
     assert.ok(
       knownLabels.has(l),
-      `unknown label "${l}" in query fixture; expand the known set deliberately`,
+      `unknown label "${l}" in query fixture; expand the known set deliberately`
     );
   }
 });
@@ -1028,12 +978,10 @@ test("adversarial-expansion: at least 5 temporal queries are divergent (raising 
   // temporal cases. The adversarial expansion adds 5 new
   // ones, raising the total from 2 (in the prior
   // expanded checkpoint) to 7.
-  const divergent = BENCHMARK_QUERIES.filter(
-    (q) => (q.labels ?? []).includes("divergentTemporal"),
-  );
+  const divergent = BENCHMARK_QUERIES.filter((q) => (q.labels ?? []).includes("divergentTemporal"));
   assert.ok(
     divergent.length >= 5,
-    `expected at least 5 labeled 'divergentTemporal' queries, got ${divergent.length}`,
+    `expected at least 5 labeled 'divergentTemporal' queries, got ${divergent.length}`
   );
   for (const q of divergent) {
     // Each labeled divergent query is a temporal query
@@ -1043,7 +991,7 @@ test("adversarial-expansion: at least 5 temporal queries are divergent (raising 
     assert.equal(q.family, "temporal", `divergent query ${q.id} must be temporal`);
     assert.ok(
       q.currentTruthIds.length < q.expectedIds.length,
-      `divergent query ${q.id} must have currentTruthIds strictly smaller than expectedIds`,
+      `divergent query ${q.id} must have currentTruthIds strictly smaller than expectedIds`
     );
   }
 });
@@ -1055,20 +1003,23 @@ test("adversarial-expansion: at least 2 negation-shaped cases (no-answer family)
   // the mobile app?"). The labeled set is the
   // back-compatible, fixture-truth side of the negation
   // detector's approximation.
-  const negQueries = BENCHMARK_QUERIES.filter((q) =>
-    (q.labels ?? []).includes("negation"),
-  );
+  const negQueries = BENCHMARK_QUERIES.filter((q) => (q.labels ?? []).includes("negation"));
   assert.ok(
     negQueries.length >= 2,
-    `expected at least 2 labeled 'negation' queries, got ${negQueries.length}`,
+    `expected at least 2 labeled 'negation' queries, got ${negQueries.length}`
   );
   for (const q of negQueries) {
-    assert.equal(q.family, "no-answer", `negation-shaped query ${q.id} must be in the no-answer family`);
+    assert.equal(
+      q.family,
+      "no-answer",
+      `negation-shaped query ${q.id} must be in the no-answer family`
+    );
     // The query text contains at least one negation token.
-    const hasNegation = /\b(not|no|never|without|don't|doesn't|didn't|won't|wouldn't|can't|cannot)\b/i.test(q.query);
+    const hasNegation =
+      /\b(not|no|never|without|don't|doesn't|didn't|won't|wouldn't|can't|cannot)\b/i.test(q.query);
     assert.ok(
       hasNegation,
-      `negation-labeled query ${q.id} must contain a negation token in the query text`,
+      `negation-labeled query ${q.id} must contain a negation token in the query text`
     );
   }
 });
@@ -1087,11 +1038,11 @@ test("adversarial-expansion: labeled hard-negative queries are present in no-ans
   // unlabeled confabulation cases like
   // `nonexistent-mobile-app`).
   const labeledHardNeg = BENCHMARK_QUERIES.filter(
-    (q) => q.family === "no-answer" && (q.labels ?? []).includes("hardNegative"),
+    (q) => q.family === "no-answer" && (q.labels ?? []).includes("hardNegative")
   );
   assert.ok(
     labeledHardNeg.length >= 1,
-    `expected at least 1 labeled 'hardNegative' query in no-answer, got ${labeledHardNeg.length}`,
+    `expected at least 1 labeled 'hardNegative' query in no-answer, got ${labeledHardNeg.length}`
   );
 });
 
@@ -1102,9 +1053,7 @@ test("runner: --only-family restricts the query set", () => {
   // in the filtered report. Pinning the count here would be a
   // brittle contract; pinning the family and per-family totals
   // is enough.
-  const expectedExactCount = BENCHMARK_QUERIES.filter(
-    (q) => q.family === "exact",
-  ).length;
+  const expectedExactCount = BENCHMARK_QUERIES.filter((q) => q.family === "exact").length;
   assert.equal(report.config.queryCount, expectedExactCount);
   for (const e of report.evals) {
     assert.equal(e.family, "exact");
@@ -1124,7 +1073,11 @@ test("runner: --threshold above 1.0 returns no positive hits but no-answer still
   // 1.5 threshold).
   for (const e of report.evals) {
     if (e.family !== "no-answer") {
-      assert.equal(e.passed, false, `positive query ${e.queryId} unexpectedly passed at threshold 1.5`);
+      assert.equal(
+        e.passed,
+        false,
+        `positive query ${e.queryId} unexpectedly passed at threshold 1.5`
+      );
     }
   }
   // No-answer queries still pass (they were already empty).
@@ -1137,10 +1090,14 @@ test("runner: --threshold above 1.0 returns no positive hits but no-answer still
 
 test("runner: parseRetrievalCli parses flags and rejects unknown", () => {
   const opts = parseRetrievalCli([
-    "--threshold", "0.3",
-    "--top-k", "7",
-    "--only-family", "exact,paraphrase",
-    "--artifacts", "/tmp/foo",
+    "--threshold",
+    "0.3",
+    "--top-k",
+    "7",
+    "--only-family",
+    "exact,paraphrase",
+    "--artifacts",
+    "/tmp/foo",
   ]);
   assert.equal(opts.threshold, 0.3);
   assert.equal(opts.topK, 7);
@@ -1238,7 +1195,11 @@ test("runner: report carries the derived metrics block with all required fields"
     "meanScoreGap1To2",
     "meanReturnedCount",
   ]) {
-    assert.equal(typeof (d as Record<string, unknown>)[f], "number", `derived.${f} must be a number`);
+    assert.equal(
+      typeof (d as Record<string, unknown>)[f],
+      "number",
+      `derived.${f} must be a number`
+    );
   }
   // TP + FP = total positive candidates returned.
   // TN + FP = total no-answer queries. Sanity check.
@@ -1249,14 +1210,15 @@ test("runner: report carries the derived metrics block with all required fields"
 test("runner: report carries the orientation block and counts the new family", () => {
   const report = runRetrievalBenchmark();
   assert.ok(report.orientation);
-  assert.ok(report.orientation.total > 0, "corpus has orientation queries; the block must be non-empty");
+  assert.ok(
+    report.orientation.total > 0,
+    "corpus has orientation queries; the block must be non-empty"
+  );
   // Orientation queries are project-status, so they
   // are positive (have expectedIds). They contribute
   // to the positive hit/rank1 buckets like any other
   // positive family. The aggregate must count them.
-  const orientationEvals = report.evals.filter(
-    (e) => e.family === "orientation",
-  );
+  const orientationEvals = report.evals.filter((e) => e.family === "orientation");
   assert.equal(orientationEvals.length, report.orientation.total);
 });
 
@@ -1329,12 +1291,9 @@ test("runner: production recall() handler is unchanged by this phase", () => {
   // contain a "rawText" / "input" field that
   // would be a regression.
   const serialized = JSON.stringify(report);
-  assert.ok(
-    !/"raw[A-Z_]?\w*":/.test(serialized),
-    "report must not carry a raw-text field",
-  );
+  assert.ok(!/"raw[A-Z_]?\w*":/.test(serialized), "report must not carry a raw-text field");
   assert.ok(
     !/apiKey|authorization/i.test(serialized),
-    "report must not carry credential-shaped fields",
+    "report must not carry credential-shaped fields"
   );
 });

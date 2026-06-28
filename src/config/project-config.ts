@@ -24,10 +24,10 @@
  *   - Malformed values -> defaults to non-private.
  */
 
-import path from "node:path";
 import fs from "node:fs";
-import { resolveCurionDir, CURION_DIRNAME } from "../storage/storage.js";
+import path from "node:path";
 import { logger } from "../logging/logger.js";
+import { CURION_DIRNAME } from "../storage/storage.js";
 
 export interface ProjectConfig {
   version: number;
@@ -83,11 +83,12 @@ export function readProjectConfig(projectRoot: string): ProjectConfig {
         ? Math.trunc(obj.version)
         : CURRENT_CONFIG_VERSION;
     // `isPrivate` field: must be a boolean; default to false if missing or wrong type.
-    const isPrivate =
-      typeof obj.isPrivate === "boolean" ? obj.isPrivate : false;
+    const isPrivate = typeof obj.isPrivate === "boolean" ? obj.isPrivate : false;
     return { version, isPrivate };
   } catch (err) {
-    logger.debug(`project config: read error at ${configPath}, defaulting to non-private: ${(err as Error).message}`);
+    logger.debug(
+      `project config: read error at ${configPath}, defaulting to non-private: ${(err as Error).message}`
+    );
     return DEFAULT_CONFIG;
   }
 }

@@ -25,41 +25,35 @@
  * scripted `fetch` that records every call.
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
+import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { runRememberController } from "../src/controller/remember-controller.ts";
 import {
-  type StorageHandle,
-} from "../src/storage/storage.ts";
-import {
-  handleRemember,
-  setStorageProvider,
-  resetStorageProvider,
-} from "../src/tools/remember.ts";
-import {
-  handleRecall,
-  NO_RELEVANT_MEMORY,
-  setStorageProvider as setRecallStorageProvider,
-  resetStorageProvider as resetRecallStorageProvider,
-} from "../src/tools/recall.ts";
-import {
-  setListRegisteredProjectsStub,
   resetListRegisteredProjectsStub,
+  setListRegisteredProjectsStub,
 } from "../src/config/registry.ts";
-import { buildServer, PUBLIC_TOOL_NAMES } from "../src/server.ts";
+import { runRememberController } from "../src/controller/remember-controller.ts";
 import { classifyInput } from "../src/safety/precheck.ts";
+import { PUBLIC_TOOL_NAMES, buildServer } from "../src/server.ts";
+import type { StorageHandle } from "../src/storage/storage.ts";
 import {
-  TEST_PRIMARY_KEY,
-  TEST_FALLBACK_KEY,
-  TEST_PRIMARY_BASE_URL,
-  TEST_PRIMARY_MODEL,
-  TEST_FALLBACK_BASE_URL,
-  TEST_FALLBACK_MODEL,
-} from "./shared-test-provider.ts";
+  NO_RELEVANT_MEMORY,
+  handleRecall,
+  resetStorageProvider as resetRecallStorageProvider,
+  setStorageProvider as setRecallStorageProvider,
+} from "../src/tools/recall.ts";
+import { handleRemember, resetStorageProvider, setStorageProvider } from "../src/tools/remember.ts";
 import { mkStorage, rmStorage } from "./_helpers/test-storage.ts";
+import {
+  TEST_FALLBACK_BASE_URL,
+  TEST_FALLBACK_KEY,
+  TEST_FALLBACK_MODEL,
+  TEST_PRIMARY_BASE_URL,
+  TEST_PRIMARY_KEY,
+  TEST_PRIMARY_MODEL,
+} from "./shared-test-provider.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -89,7 +83,7 @@ function okChatResponse(content: string): Response {
       model: "m",
       choices: [{ message: { role: "assistant", content } }],
     }),
-    { status: 200, headers: { "content-type": "application/json" } },
+    { status: 200, headers: { "content-type": "application/json" } }
   );
 }
 
@@ -123,21 +117,12 @@ async function runController(handle: StorageHandle, opts: RunOpts) {
 }
 
 /** Scan every string column in `memories` for the given fragment. */
-function assertNoFragmentInMemories(
-  handle: StorageHandle,
-  fragment: string,
-  msg: string,
-): void {
-  const rows = handle.db
-    .prepare("SELECT * FROM memories")
-    .all() as Array<Record<string, unknown>>;
+function assertNoFragmentInMemories(handle: StorageHandle, fragment: string, msg: string): void {
+  const rows = handle.db.prepare("SELECT * FROM memories").all() as Array<Record<string, unknown>>;
   for (const row of rows) {
     for (const [k, v] of Object.entries(row)) {
       if (typeof v === "string") {
-        assert.ok(
-          !v.includes(fragment),
-          `${msg}: column '${k}' contains forbidden fragment`,
-        );
+        assert.ok(!v.includes(fragment), `${msg}: column '${k}' contains forbidden fragment`);
       }
     }
   }
@@ -162,11 +147,7 @@ test("classifyInput: prompt-injection variants are detected", () => {
   ];
   for (const s of samples) {
     const r = classifyInput(s);
-    assert.equal(
-      r.class,
-      "prompt-injection",
-      `expected prompt-injection for: ${s.slice(0, 60)}`,
-    );
+    assert.equal(r.class, "prompt-injection", `expected prompt-injection for: ${s.slice(0, 60)}`);
   }
 });
 
@@ -203,11 +184,7 @@ test("classifyInput: unsafe-preference variants are detected", () => {
   ];
   for (const s of samples) {
     const r = classifyInput(s);
-    assert.equal(
-      r.class,
-      "unsafe-preference",
-      `expected unsafe-preference for: ${s.slice(0, 60)}`,
-    );
+    assert.equal(r.class, "unsafe-preference", `expected unsafe-preference for: ${s.slice(0, 60)}`);
   }
 });
 
@@ -268,7 +245,7 @@ test("classifyInput: disable-redaction gap variants are detected (redacting/reda
     assert.equal(
       r.class,
       "unsafe-preference",
-      `expected unsafe-preference for: ${s.slice(0, 60)} (got ${r.class}: ${r.reason})`,
+      `expected unsafe-preference for: ${s.slice(0, 60)} (got ${r.class}: ${r.reason})`
     );
   }
 });
@@ -286,39 +263,33 @@ test("classifyInput: self-conflict retraction pivot is detected", () => {
   ];
   for (const s of samples) {
     const r = classifyInput(s);
-    assert.equal(
-      r.class,
-      "self-conflict",
-      `expected self-conflict for: ${s.slice(0, 80)}`,
-    );
+    assert.equal(r.class, "self-conflict", `expected self-conflict for: ${s.slice(0, 80)}`);
   }
 });
 
 test("classifyInput: self-conflict temporal-change pattern is detected", () => {
   const r = classifyInput(
-    "Previously the project used Postgres 14. Currently the project uses Postgres 16 for the primary store.",
+    "Previously the project used Postgres 14. Currently the project uses Postgres 16 for the primary store."
   );
   assert.equal(r.class, "self-conflict");
 });
 
 test("classifyInput: self-conflict stacked-tech-claim is detected", () => {
   const r = classifyInput(
-    "The project uses Postgres 16 for the primary store. But the legacy module actually uses MySQL 8 for backward compatibility.",
+    "The project uses Postgres 16 for the primary store. But the legacy module actually uses MySQL 8 for backward compatibility."
   );
   assert.equal(r.class, "self-conflict");
 });
 
 test("classifyInput: a single declarative project fact does not trip self-conflict", () => {
-  const r = classifyInput(
-    "The project uses Postgres 16 for the primary store.",
-  );
+  const r = classifyInput("The project uses Postgres 16 for the primary store.");
   assert.equal(r.class, "safe");
 });
 
 test("classifyInput: benign text that mentions both Postgres and MySQL without a conflict pivot stays safe", () => {
   // No pivot phrase; not a self-conflict. Falls through to safe.
   const r = classifyInput(
-    "Postgres 16 handles transactional data. MySQL 8 handles the legacy reporting tables.",
+    "Postgres 16 handles transactional data. MySQL 8 handles the legacy reporting tables."
   );
   // The two clauses are coordinated, not in conflict. The
   // detector should not fire; safe is acceptable here.
@@ -395,12 +366,14 @@ test("remember: self-conflict returns rejected with clarification_needed before 
     const { fetchImpl, calls } = scriptFetch(() => okChatResponse(safeAnalysis()));
     const outcome = await runController(handle, {
       fetchImpl,
-      text:
-        "The database uses Postgres 16. Actually, no — the database uses MySQL 8 because of legacy support.",
+      text: "The database uses Postgres 16. Actually, no — the database uses MySQL 8 because of legacy support.",
     });
     assert.equal(outcome.status, "rejected");
     if (outcome.status !== "rejected") throw new Error("unreachable");
-    assert.ok(outcome.clarification_needed, "rejected outcome must have clarification_needed for self-conflict");
+    assert.ok(
+      outcome.clarification_needed,
+      "rejected outcome must have clarification_needed for self-conflict"
+    );
     assert.match(outcome.clarification_needed!.question, /which one|canonical/i);
     assert.equal(calls.length, 0, "provider must not be called for self-conflict");
     const rows = handle.db.prepare("SELECT COUNT(*) AS c FROM memories").get() as { c: number };
@@ -419,10 +392,7 @@ test("remember: mixed safe+sensitive is rejected before any provider call; secre
   try {
     const { fetchImpl, calls } = scriptFetch(() => okChatResponse(safeAnalysis()));
     const secret = "glpat-abcdefghijklmnopqrst";
-    const text =
-      "Project uses Postgres 16. The CI token is " +
-      secret +
-      ". Tests run in 12s.";
+    const text = "Project uses Postgres 16. The CI token is " + secret + ". Tests run in 12s.";
     const outcome = await runController(handle, { fetchImpl, text });
     assert.equal(outcome.status, "rejected");
     if (outcome.status !== "rejected") throw new Error("unreachable");
@@ -430,7 +400,11 @@ test("remember: mixed safe+sensitive is rejected before any provider call; secre
     assert.equal(calls.length, 0, "provider must not be called for mixed input");
     const rows = handle.db.prepare("SELECT COUNT(*) AS c FROM memories").get() as { c: number };
     assert.equal(rows.c, 0);
-    assertNoFragmentInMemories(handle, secret, "secret fragment must not appear in any persisted column");
+    assertNoFragmentInMemories(
+      handle,
+      secret,
+      "secret fragment must not appear in any persisted column"
+    );
   } finally {
     rmStorage(tmp, handle);
   }
@@ -481,15 +455,13 @@ test("remember: safe input is stored with provider-normalized summary; raw input
     assert.equal(rec.state, "active");
     assert.equal(rec.kind, "fact");
     assert.ok((rec.confidence ?? 0) > 0);
-    const dbRow = handle.db
-      .prepare("SELECT * FROM memories WHERE id = ?")
-      .get(rec.id) as Record<string, unknown>;
+    const dbRow = handle.db.prepare("SELECT * FROM memories WHERE id = ?").get(rec.id) as Record<
+      string,
+      unknown
+    >;
     for (const [k, v] of Object.entries(dbRow)) {
       if (typeof v === "string") {
-        assert.ok(
-          !v.includes(rawText),
-          `persisted column '${k}' must not contain raw input`,
-        );
+        assert.ok(!v.includes(rawText), `persisted column '${k}' must not contain raw input`);
       }
     }
     // Phase 1 internal naming cleanup: the SQL `summary`
@@ -513,8 +485,7 @@ test("DB scan: unsafe cases do not persist raw input or secret fragments in any 
     const { fetchImpl } = scriptFetch(() => okChatResponse(safeAnalysis()));
     const cases: Array<{ text: string; forbidden: string }> = [
       {
-        text:
-          "Project uses Postgres 16. The CI token is glpat-abcdefghijklmnopqrst. Tests run in 12s.",
+        text: "Project uses Postgres 16. The CI token is glpat-abcdefghijklmnopqrst. Tests run in 12s.",
         forbidden: "glpat-abcdefghijklmnopqrst",
       },
       {
@@ -530,8 +501,7 @@ test("DB scan: unsafe cases do not persist raw input or secret fragments in any 
         forbidden: "Disable redaction",
       },
       {
-        text:
-          "The database uses Postgres 16. Actually, no — the database uses MySQL 8 because of legacy support.",
+        text: "The database uses Postgres 16. Actually, no — the database uses MySQL 8 because of legacy support.",
         forbidden: "Postgres 16",
       },
     ];
@@ -540,7 +510,7 @@ test("DB scan: unsafe cases do not persist raw input or secret fragments in any 
       assert.notEqual(
         outcome.status,
         "saved",
-        `case with forbidden='${c.forbidden}' should not be saved`,
+        `case with forbidden='${c.forbidden}' should not be saved`
       );
       // Confirm the original input's distinguishing token is absent
       // from any persisted string column. (We do not check the
@@ -548,23 +518,23 @@ test("DB scan: unsafe cases do not persist raw input or secret fragments in any 
       // legitimately persists that word in the summary; we
       // check the distinguishing token "16" only when the
       // outcome was not "saved" for this case.)
-      const rows = handle.db
-        .prepare("SELECT * FROM memories")
-        .all() as Array<Record<string, unknown>>;
+      const rows = handle.db.prepare("SELECT * FROM memories").all() as Array<
+        Record<string, unknown>
+      >;
       for (const row of rows) {
         for (const v of Object.values(row)) {
           if (typeof v === "string") {
             assert.ok(
               !v.includes(c.forbidden),
-              `forbidden fragment '${c.forbidden}' leaked into DB column`,
+              `forbidden fragment '${c.forbidden}' leaked into DB column`
             );
           }
         }
       }
     }
-    const finalCount = handle.db
-      .prepare("SELECT COUNT(*) AS c FROM memories")
-      .get() as { c: number };
+    const finalCount = handle.db.prepare("SELECT COUNT(*) AS c FROM memories").get() as {
+      c: number;
+    };
     assert.equal(finalCount.c, 0, "no rows should be persisted for any unsafe case");
   } finally {
     rmStorage(tmp, handle);
@@ -596,7 +566,7 @@ test("remember: raw-dump input is rejected before any provider call; reason ment
     assert.match(
       outcome.reason,
       /summar(?:y|ize)|raw (?:log|dump)|env dump/i,
-      "raw-dump rejection should explain that the user should summarize the point",
+      "raw-dump rejection should explain that the user should summarize the point"
     );
     const rows = handle.db.prepare("SELECT COUNT(*) AS c FROM memories").get() as { c: number };
     assert.equal(rows.c, 0);
@@ -632,8 +602,7 @@ test("tool: handleRemember short-circuits for prompt-injection, unsafe-preferenc
 
       // self-conflict
       const r3 = await handleRemember({
-        text:
-          "The database uses Postgres 16. Actually, no — the database uses MySQL 8 because of legacy support.",
+        text: "The database uses Postgres 16. Actually, no — the database uses MySQL 8 because of legacy support.",
       });
       assert.equal(r3.status, "rejected");
       assert.equal(typeof r3.clarification_needed, "object");
@@ -658,18 +627,16 @@ test("logging: unsafe input (secret + mixed) does not echo raw text or secret fr
   let captured = "";
   const origWrite = process.stderr.write.bind(process.stderr);
   // Buffer stderr. We restore in finally.
-  (process.stderr as unknown as { write: (b: string) => boolean }).write =
-    ((chunk: string | Uint8Array): boolean => {
-      captured += typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
-      return true;
-    }) as unknown as typeof process.stderr.write;
+  (process.stderr as unknown as { write: (b: string) => boolean }).write = ((
+    chunk: string | Uint8Array
+  ): boolean => {
+    captured += typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
+    return true;
+  }) as unknown as typeof process.stderr.write;
   try {
     const { fetchImpl } = scriptFetch(() => okChatResponse(safeAnalysis()));
     const secret = "glpat-abcdefghijklmnopqrst";
-    const text =
-      "Project uses Postgres 16. The CI token is " +
-      secret +
-      ". Tests run in 12s.";
+    const text = "Project uses Postgres 16. The CI token is " + secret + ". Tests run in 12s.";
     await runController(handle, { fetchImpl, text });
     await runController(handle, {
       fetchImpl,
@@ -685,8 +652,7 @@ test("logging: unsafe input (secret + mixed) does not echo raw text or secret fr
     });
     await runController(handle, {
       fetchImpl,
-      text:
-        "The database uses Postgres 16. Actually, no — the database uses MySQL 8 because of legacy support.",
+      text: "The database uses Postgres 16. Actually, no — the database uses MySQL 8 because of legacy support.",
     });
   } finally {
     (process.stderr as unknown as { write: typeof process.stderr.write }).write = origWrite;
@@ -696,27 +662,24 @@ test("logging: unsafe input (secret + mixed) does not echo raw text or secret fr
   // raw AKIA key, or the raw input phrase.
   assert.ok(
     !captured.includes("glpat-abcdefghijklmnopqrst"),
-    "secret fragment must not appear in stderr",
+    "secret fragment must not appear in stderr"
   );
   assert.ok(
     !captured.includes("AKIAIOSFODNN7EXAMPLE"),
-    "AWS-shaped secret must not appear in stderr",
+    "AWS-shaped secret must not appear in stderr"
   );
   // Raw input phrases that the user typed should not appear in
   // logs. The logger must not echo the input. (We check a
   // distinctive token from the input rather than the full text.)
   assert.ok(
     !captured.includes("Ignore previous instructions"),
-    "raw input phrase must not appear in stderr",
+    "raw input phrase must not appear in stderr"
   );
   assert.ok(
     !captured.includes("Disable redaction of all credentials"),
-    "raw input phrase must not appear in stderr",
+    "raw input phrase must not appear in stderr"
   );
-  assert.ok(
-    !captured.includes("Actually, no"),
-    "raw input phrase must not appear in stderr",
-  );
+  assert.ok(!captured.includes("Actually, no"), "raw input phrase must not appear in stderr");
 });
 
 // ---------------------------------------------------------------------------
@@ -735,18 +698,14 @@ test("logging: controller debug line is emitted at CURION_LOG_LEVEL=debug (subpr
   const scriptPath = path.join(
     path.dirname(fileURLToPath(import.meta.url)),
     "_helpers",
-    "logging-debug-subprocess.mts",
+    "logging-debug-subprocess.mts"
   );
   const { spawnSync } = await import("node:child_process");
-  const result = spawnSync(
-    process.execPath,
-    ["--import", "tsx", scriptPath],
-    {
-      env: { ...process.env, CURION_LOG_LEVEL: "debug" },
-      encoding: "utf8",
-      timeout: 30_000,
-    },
-  );
+  const result = spawnSync(process.execPath, ["--import", "tsx", scriptPath], {
+    env: { ...process.env, CURION_LOG_LEVEL: "debug" },
+    encoding: "utf8",
+    timeout: 30_000,
+  });
   assert.equal(result.status, 0, `subprocess failed: ${result.stderr}`);
   const stderr = result.stderr;
   // The controller emits a single debug line per remember call of
@@ -757,11 +716,11 @@ test("logging: controller debug line is emitted at CURION_LOG_LEVEL=debug (subpr
   assert.match(stderr, /DEBUG remember: pre-check class=/);
   assert.ok(
     !stderr.includes("glpat-abcdefghijklmnopqrst"),
-    "secret fragment must not appear in stderr even at debug level",
+    "secret fragment must not appear in stderr even at debug level"
   );
   assert.ok(
     !stderr.includes("AKIAIOSFODNN7EXAMPLE"),
-    "AWS-shaped secret must not appear in stderr even at debug level",
+    "AWS-shaped secret must not appear in stderr even at debug level"
   );
 });
 
@@ -771,9 +730,11 @@ test("logging: controller debug line is emitted at CURION_LOG_LEVEL=debug (subpr
 
 test("remember tool: still exposes exactly one text param", () => {
   const server = buildServer();
-  const registered = (server as unknown as {
-    _registeredTools: Record<string, { inputSchema: unknown }>;
-  })._registeredTools;
+  const registered = (
+    server as unknown as {
+      _registeredTools: Record<string, { inputSchema: unknown }>;
+    }
+  )._registeredTools;
   const remember = registered["remember"] as {
     inputSchema: {
       _def?: {
@@ -843,10 +804,7 @@ test("storage: memories table never has a raw/original text column", () => {
       "body",
       "source",
     ]) {
-      assert.ok(
-        !names.includes(forbidden),
-        `memories must not have a '${forbidden}' column`,
-      );
+      assert.ok(!names.includes(forbidden), `memories must not have a '${forbidden}' column`);
     }
   } finally {
     rmStorage(tmp, handle);

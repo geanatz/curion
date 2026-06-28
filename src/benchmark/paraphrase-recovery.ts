@@ -1,212 +1,11 @@
-/**
- * Benchmark-only paraphrase-specific recovery /
- * refined-threshold experiment.
- *
- * Why this exists:
- *   The prior no-answer abstention / calibration
- *   experiment surfaced a clean production-like
- *   policy (`score-or-sufficiency-insufficient`)
- *   that achieves TNR=100% on the lexical baseline
- *   at 18.5% positive abstention. The false-
- *   abstention damage analysis (the prior
- *   follow-on) classified the 24 FPs into actionable
- *   damage categories. The headline finding was:
- *
- *     - paraphrase damage: 8/32 = 25% positive
- *       abstention, 4/8 recoverable by a different
- *       threshold (`score-threshold-on-recoverable`
- *       is the actionable policy damage category),
- *       4/8 in the `multi-gate-conjunction-honest`
- *       category (a different ranker or different
- *       gate is needed for those).
- *     - orientation damage: 7/8 honest (no policy
- *       change helps).
- *     - the EmbeddingGemma hybrid-dense dense
- *       ranker rank-1-missed 20/24 of these FPs;
- *       a dense reranker is not a silver bullet.
- *
- *   The natural next question is: can a NARROW
- *   paraphrase-aware recovery rule reduce the
- *   recoverable paraphrase damage while
- *   PRESERVING the no-answer TNR at 100% and
- *   without introducing new no-answer failures?
- *   This module is the benchmark-only study of
- *   that question. It is NOT a deployment policy.
- *   The production `recall(text)` controller is
- *   unchanged.
- *
- * What this module does:
- *   - Defines a small, deterministic set of
- *     recovery POLICY VARIANTS. Each variant is
- *     the baseline `score-or-sufficiency-insufficient`
- *     policy with ONE narrow addition that
- *     conditions on a paraphrase-aware signal.
- *     The variants are MUTUALLY EXCLUSIVE: a
- *     reviewer reads the variant list to see
- *     "what would happen IF I added X escape
- *     hatch to the baseline?".
- *   - The variant categories are:
- *
- *       * `production-like` — uses ONLY runtime
- *         signals available at production time
- *         (the heuristic `isParaphraseTrap` /
- *         `isAdversarialParaphrase` flag, the
- *         rank-1 / hit-5 outcome, the score).
- *         A reviewer who wants to reason about a
- *         deployable rule reads ONLY this
- *         category.
- *       * `fixture-shaped` — keys on the
- *         benchmark's `family` field (the
- *         `family === "paraphrase"` gate). A
- *         production ranker has no such label on
- *         incoming queries, so this category is
- *         clearly NOT deployable; it is a
- *         research / oracle-like ceiling that
- *         measures "if a perfect paraphrase
- *         detector existed, how much damage
- *         could a narrow escape recover?".
- *       * `oracle` — keys on fixture-truth
- *         labels (`adversarialParaphrase` /
- *         `nearMissCurrentCluster`). A reviewer
- *         reads this category as a true ceiling.
- *
- *   - For every variant, computes per-query
- *     decisions, the same trade-off metrics the
- *     prior experiment uses, AND the DELTA vs
- *     the baseline (TNR delta, positive-
- *     abstention-rate delta, hit-5 retention
- *     delta, F1 delta, no-answer-correct
- *     changes).
- *   - Surfaces a "safety verdict" per variant:
- *     `safe` (no TNR regression, no new
- *     no-answer failures, modest positive
- *     abstention rate reduction), `unsafe`
- *     (TNR regression OR new no-answer failures),
- *     or `neutral` (no TNR regression but no
- *     benefit either).
- *   - Renders a human-readable report and a
- *     JSON artifact. Both are byte-stable for a
- *     fixed input.
- *
- * What this module does NOT do:
- *   - It does NOT call any provider, any
- *     ranker, or any external service. It
- *     consumes the same per-query input the
- *     prior no-answer abstention experiment
- *     builds.
- *   - It does NOT change the production
- *     `recall(text)` controller, the public MCP
- *     API, or the storage schema.
- *   - It does NOT run a new dense embedding
- *     benchmark. If the caller has a pre-computed
- *     semantic-evidence map, it can be passed in
- *     to add a `semanticRecoverable` annotation
- *     to each recovered FP; if not, the report
- *     is honest about the unavailability of
- *     semantic evidence.
- *   - It does NOT broadly relax the score
- *     threshold. The variants are NARROW: each
- *     variant is the baseline policy with ONE
- *     paraphrase-aware escape hatch. The
- *     baseline's 0.30 score threshold is
- *     preserved for the non-paraphrase set.
- *     A variant that lowers the threshold
- *     globally is a different experiment (and
- *     is documented as such on the
- *     `score-below-0.20-when-paraphrase` gate).
- *
- * Determinism:
- *   Every function in this module is pure. The
- *   variant descriptor is plain data; the
- *   per-query decision is computed from the
- *   per-query signal block; the per-variant
- *   metrics are aggregated from the per-query
- *   decisions. The same inputs always produce
- *   the same outputs.
- *
- * Variant design (the trade-off space):
- *   The recovery rule has to be NARROW. The
- *   baseline's 24 FPs cluster as:
- *
- *     1. 4 FPs in `score-threshold-on-recoverable`:
- *        the score gate fired but the ranker DID
- *        return the right answer at rank 1.
- *        Variant targets: relax the score gate
- *        for these.
- *     2. 9 FPs in `multi-gate-conjunction-honest`:
- *        both gates fired; the score gate's
- *        threshold is part of the cause. Variant
- *        targets: relax the score gate (still
- *        require the sufficiency-label gate, so
- *        TNR is preserved on no-answer queries
- *        whose sufficiency label is `sufficient`).
- *
- *   The variants are designed to recover (1) and
- *   potentially (2) WITHOUT relaxing the
- *   sufficiency-label gate. The reason is
- *   structural: the sufficiency-label gate is
- *   derived from the candidate-set diagnostic
- *   and is the more discriminating signal on
- *   the no-answer side. Relaxing it is unsafe;
- *   relaxing the score gate narrowly on the
- *   paraphrase side is the controlled test.
- *
- * Safety reading:
- *   The "safe" verdict is the headline: a
- *   variant that PRESERVES the baseline's
- *   no-answer TNR (no no-answer confabulation
- *   is newly retained) and INTRODUCES no new
- *   no-answer failures is the only kind of
- *   variant a reviewer should consider for
- *   deployment. A variant that drops TNR is
- *   marked `unsafe` regardless of how many
- *   paraphrase FPs it recovers; a variant that
- *   keeps TNR but does not recover anything is
- *   marked `neutral`.
- *
- *   The verdict is computed deterministically
- *   from the variant's metric block + the
- *   baseline's metric block. The block is
- *   surfaced on the report so a reviewer can
- *   audit the verdict by hand.
- *
- * Limitations:
- *   - The paraphrase detector
- *     (`isParaphraseTrap` / `isAdversarialParaphrase`)
- *     is a HEURISTIC. The flag is NOT a
- *     production-grade signal; the experiment
- *     uses it as a research-only stand-in for
- *     "is this a paraphrase-shaped query?". A
- *     deployment would need a corresponding
- *     production-side paraphrase detector.
- *   - The variant set is hand-curated, not
- *     learned. A future variant that the
- *     experiment surfaces as the right call
- *     is added to `BUILTIN_PARAPHRASE_RECOVERY_VARIANTS`
- *     by hand; the test pins the variant table
- *     so a future addition is a deliberate edit.
- *   - The semantic evidence, when supplied, is
- *     a pre-computed set of `queryId ->
- *     "hit"|"miss"`. The variant does NOT
- *     re-derive the dense ranker's behavior. A
- *     reviewer who wants to audit the evidence
- *     reads the `evidenceSource` string.
- */
-
-import type { AbstentionSignals, QueryEval } from "./metrics.js";
-import type { SufficiencyLabel } from "./sufficiency-diagnostic.js";
+import { type DamageCategory, classifyFalseAbstention } from "./false-abstention-damage.js";
 import {
   BUILTIN_NO_ANSWER_POLICIES,
-  evaluateNoAnswerPolicy,
   type NoAnswerPolicy,
   type NoAnswerPolicyDecision,
-  type NoAnswerPolicyGate,
   type NoAnswerPolicyPerQuery,
+  evaluateNoAnswerPolicy,
 } from "./no-answer-abstention.js";
-import {
-  classifyFalseAbstention,
-  type DamageCategory,
-} from "./false-abstention-damage.js";
 
 // ---------------------------------------------------------------------------
 // Variant types
@@ -354,68 +153,67 @@ export interface ParaphraseRecoveryVariant {
  * variants. The fifth is fixture-shaped. The
  * sixth is the oracle ceiling.
  */
-export const BUILTIN_PARAPHRASE_RECOVERY_VARIANTS: ReadonlyArray<ParaphraseRecoveryVariant> =
-  [
-    // ---- Baseline (no escape) ----
-    {
-      id: "baseline-score-or-sufficiency-insufficient",
-      description:
-        "Baseline: score-or-sufficiency-insufficient (no paraphrase escape). The accepted production-like policy. Reference row; production-like.",
-      category: "production-like",
-      escape: { kind: "none" },
+export const BUILTIN_PARAPHRASE_RECOVERY_VARIANTS: ReadonlyArray<ParaphraseRecoveryVariant> = [
+  // ---- Baseline (no escape) ----
+  {
+    id: "baseline-score-or-sufficiency-insufficient",
+    description:
+      "Baseline: score-or-sufficiency-insufficient (no paraphrase escape). The accepted production-like policy. Reference row; production-like.",
+    category: "production-like",
+    escape: { kind: "none" },
+  },
+  // ---- Production-like: detector-flagged + rank-1 / hit-5 ----
+  {
+    id: "paraphrase-detector-rank1-or-hit5",
+    description:
+      "Production-like: suppress the score gate iff the query is flagged by the heuristic paraphrase detector (isParaphraseTrap OR isAdversarialParaphrase) AND rank1||hit@5. The sufficiency-label gate is preserved; only the score gate is escaped. A reviewer who wants to reason about a deployable rule reads this row first.",
+    category: "production-like",
+    escape: { kind: "paraphrase-detector-rank1-or-hit5" },
+  },
+  {
+    id: "paraphrase-detector-rank1-only",
+    description:
+      "Production-like: stricter version of the previous variant: suppress iff the query is flagged by the heuristic paraphrase detector AND rank1===true. hit@5 alone is not enough.",
+    category: "production-like",
+    escape: { kind: "paraphrase-detector-rank1-only" },
+  },
+  {
+    id: "paraphrase-detector-loose-threshold-0.20",
+    description:
+      "Production-like: narrow threshold refinement. The global threshold stays at 0.30; the escape suppresses iff the query is flagged by the heuristic paraphrase detector AND 0.20 <= topScore < 0.30. The band is parameterized; this variant opens the 0.20-0.30 band for paraphrase-flagged queries only. A reviewer who wants a minimal rule reads this row.",
+    category: "production-like",
+    escape: {
+      kind: "paraphrase-detector-loose-threshold",
+      lowerBound: 0.2,
     },
-    // ---- Production-like: detector-flagged + rank-1 / hit-5 ----
-    {
-      id: "paraphrase-detector-rank1-or-hit5",
-      description:
-        "Production-like: suppress the score gate iff the query is flagged by the heuristic paraphrase detector (isParaphraseTrap OR isAdversarialParaphrase) AND rank1||hit@5. The sufficiency-label gate is preserved; only the score gate is escaped. A reviewer who wants to reason about a deployable rule reads this row first.",
-      category: "production-like",
-      escape: { kind: "paraphrase-detector-rank1-or-hit5" },
+  },
+  {
+    id: "paraphrase-detector-loose-threshold-0.25",
+    description:
+      "Production-like: same shape as the previous variant with a tighter lower bound (0.25). Tests how much of the recovery comes from the upper sub-band (0.25-0.30).",
+    category: "production-like",
+    escape: {
+      kind: "paraphrase-detector-loose-threshold",
+      lowerBound: 0.25,
     },
-    {
-      id: "paraphrase-detector-rank1-only",
-      description:
-        "Production-like: stricter version of the previous variant: suppress iff the query is flagged by the heuristic paraphrase detector AND rank1===true. hit@5 alone is not enough.",
-      category: "production-like",
-      escape: { kind: "paraphrase-detector-rank1-only" },
-    },
-    {
-      id: "paraphrase-detector-loose-threshold-0.20",
-      description:
-        "Production-like: narrow threshold refinement. The global threshold stays at 0.30; the escape suppresses iff the query is flagged by the heuristic paraphrase detector AND 0.20 <= topScore < 0.30. The band is parameterized; this variant opens the 0.20-0.30 band for paraphrase-flagged queries only. A reviewer who wants a minimal rule reads this row.",
-      category: "production-like",
-      escape: {
-        kind: "paraphrase-detector-loose-threshold",
-        lowerBound: 0.2,
-      },
-    },
-    {
-      id: "paraphrase-detector-loose-threshold-0.25",
-      description:
-        "Production-like: same shape as the previous variant with a tighter lower bound (0.25). Tests how much of the recovery comes from the upper sub-band (0.25-0.30).",
-      category: "production-like",
-      escape: {
-        kind: "paraphrase-detector-loose-threshold",
-        lowerBound: 0.25,
-      },
-    },
-    // ---- Fixture-shaped: family gate ----
-    {
-      id: "paraphrase-family-rank1-or-hit5",
-      description:
-        "Fixture-shaped (NOT production-like): suppress iff family==='paraphrase' AND rank1||hit@5. The family field is fixture truth; a real production ranker has no such label on incoming queries. This is the research / oracle-like ceiling: how much damage could a narrow escape recover IF a perfect paraphrase family detector were available?",
-      category: "fixture-shaped",
-      escape: { kind: "paraphrase-family-rank1-or-hit5" },
-    },
-    // ---- Oracle: fixture-truth label ----
-    {
-      id: "paraphrase-fixture-label-rank1-or-hit5",
-      description:
-        "Oracle (NOT production-like): suppress iff the query carries the adversarialParaphrase / nearMissCurrentCluster label AND rank1||hit@5. Fixture truth; the true ceiling. A reviewer who wants to know the maximum recoverable damage reads this row last.",
-      category: "oracle",
-      escape: { kind: "paraphrase-fixture-label-rank1-or-hit5" },
-    },
-  ];
+  },
+  // ---- Fixture-shaped: family gate ----
+  {
+    id: "paraphrase-family-rank1-or-hit5",
+    description:
+      "Fixture-shaped (NOT production-like): suppress iff family==='paraphrase' AND rank1||hit@5. The family field is fixture truth; a real production ranker has no such label on incoming queries. This is the research / oracle-like ceiling: how much damage could a narrow escape recover IF a perfect paraphrase family detector were available?",
+    category: "fixture-shaped",
+    escape: { kind: "paraphrase-family-rank1-or-hit5" },
+  },
+  // ---- Oracle: fixture-truth label ----
+  {
+    id: "paraphrase-fixture-label-rank1-or-hit5",
+    description:
+      "Oracle (NOT production-like): suppress iff the query carries the adversarialParaphrase / nearMissCurrentCluster label AND rank1||hit@5. Fixture truth; the true ceiling. A reviewer who wants to know the maximum recoverable damage reads this row last.",
+    category: "oracle",
+    escape: { kind: "paraphrase-fixture-label-rank1-or-hit5" },
+  },
+];
 
 /**
  * The baseline policy the variants are layered
@@ -656,10 +454,7 @@ export interface ParaphraseRecoveryVariantMetrics {
    * the paraphrase family" without
    * re-deriving.
    */
-  positiveAbstainedByFamily: Record<
-    string,
-    { total: number; abstained: number; rate: number }
-  >;
+  positiveAbstainedByFamily: Record<string, { total: number; abstained: number; rate: number }>;
   /**
    * Per-recovered-FP damage-category
    * breakdown. Surfaced so a reviewer can
@@ -680,8 +475,7 @@ export interface ParaphraseRecoveryVariantMetrics {
  * `ParaphraseRecoveryVariantMetrics` plus the
  * description and escape.
  */
-export interface ParaphraseRecoveryVariantRow
-  extends ParaphraseRecoveryVariantMetrics {
+export interface ParaphraseRecoveryVariantRow extends ParaphraseRecoveryVariantMetrics {
   description: string;
   escape: ParaphraseRecoveryEscape;
 }
@@ -695,10 +489,7 @@ export interface ParaphraseRecoveryVariantRow
  * one FP; `neutral` iff it preserves TNR but
  * recovers nothing; `unsafe` otherwise.
  */
-export type ParaphraseRecoveryVerdict =
-  | "safe"
-  | "neutral"
-  | "unsafe";
+export type ParaphraseRecoveryVerdict = "safe" | "neutral" | "unsafe";
 
 /**
  * The per-variant recovered-FP entries. The
@@ -839,7 +630,7 @@ export interface ParaphraseRecoveryReport {
  */
 function evaluateEscape(
   escape: ParaphraseRecoveryEscape,
-  p: NoAnswerPolicyPerQuery,
+  p: NoAnswerPolicyPerQuery
 ): { fires: boolean; reason: string } {
   if (escape.active === false) {
     return { fires: false, reason: "escape-inactive" };
@@ -849,8 +640,7 @@ function evaluateEscape(
       return { fires: false, reason: "escape-none" };
     case "paraphrase-detector-rank1-or-hit5": {
       const isParaphrase =
-        p.signals.isParaphraseTrap === true ||
-        p.signals.isAdversarialParaphrase === true;
+        p.signals.isParaphraseTrap === true || p.signals.isAdversarialParaphrase === true;
       const rank1OrHit5 = p.rank1 || p.hitAt5;
       return {
         fires: isParaphrase && rank1OrHit5,
@@ -861,8 +651,7 @@ function evaluateEscape(
     }
     case "paraphrase-detector-rank1-only": {
       const isParaphrase =
-        p.signals.isParaphraseTrap === true ||
-        p.signals.isAdversarialParaphrase === true;
+        p.signals.isParaphraseTrap === true || p.signals.isAdversarialParaphrase === true;
       return {
         fires: isParaphrase && p.rank1,
         reason: `escape-detector-rank1(${
@@ -872,8 +661,7 @@ function evaluateEscape(
     }
     case "paraphrase-detector-loose-threshold": {
       const isParaphrase =
-        p.signals.isParaphraseTrap === true ||
-        p.signals.isAdversarialParaphrase === true;
+        p.signals.isParaphraseTrap === true || p.signals.isAdversarialParaphrase === true;
       const inBand = p.signals.topScore >= escape.lowerBound;
       return {
         fires: isParaphrase && inBand,
@@ -895,8 +683,7 @@ function evaluateEscape(
     case "paraphrase-fixture-label-rank1-or-hit5": {
       const labels = p.queryLabels ?? [];
       const hasLabel =
-        labels.includes("adversarialParaphrase") ||
-        labels.includes("nearMissCurrentCluster");
+        labels.includes("adversarialParaphrase") || labels.includes("nearMissCurrentCluster");
       const rank1OrHit5 = p.rank1 || p.hitAt5;
       return {
         fires: hasLabel && rank1OrHit5,
@@ -946,7 +733,7 @@ export function evaluateParaphraseRecoveryVariant(
   variant: ParaphraseRecoveryVariant,
   baselinePolicy: NoAnswerPolicy,
   perQuery: ReadonlyArray<NoAnswerPolicyPerQuery>,
-  semantic?: { byQueryId: ReadonlyMap<string, "hit" | "miss"> },
+  semantic?: { byQueryId: ReadonlyMap<string, "hit" | "miss"> }
 ): ParaphraseRecoveryDecision[] {
   const baselineDecisions = evaluateNoAnswerPolicy(baselinePolicy, perQuery);
   const out: ParaphraseRecoveryDecision[] = new Array(perQuery.length);
@@ -987,7 +774,7 @@ export function evaluateParaphraseRecoveryVariant(
               ? { queryLabels: [...baselineDecision.queryLabels] }
               : {}),
           },
-          p,
+          p
         );
       } else {
         abstain = true;
@@ -1033,12 +820,8 @@ export function evaluateParaphraseRecoveryVariant(
       ...(baselineDecision.queryLabels !== undefined
         ? { queryLabels: [...baselineDecision.queryLabels] }
         : {}),
-      ...(p.signals.isParaphraseTrap
-        ? { isParaphraseTrap: true }
-        : {}),
-      ...(p.signals.isAdversarialParaphrase
-        ? { isAdversarialParaphrase: true }
-        : {}),
+      ...(p.signals.isParaphraseTrap ? { isParaphraseTrap: true } : {}),
+      ...(p.signals.isAdversarialParaphrase ? { isAdversarialParaphrase: true } : {}),
       ...(semanticAlsoMisses !== undefined ? { semanticAlsoMisses } : {}),
     };
     out[i] = decision;
@@ -1092,14 +875,7 @@ export function computeParaphraseRecoveryVariantMetrics(args: {
     f1: number;
   };
 }): ParaphraseRecoveryVariantMetrics {
-  const {
-    variant,
-    decisions,
-    perQuery,
-    baselinePolicy,
-    baselineDecisions,
-    baselineMetrics,
-  } = args;
+  const { variant, decisions, perQuery, baselinePolicy, baselineDecisions, baselineMetrics } = args;
   let total = 0;
   let noAnswerCount = 0;
   let positiveCount = 0;
@@ -1110,10 +886,7 @@ export function computeParaphraseRecoveryVariantMetrics(args: {
   let rank1Retained = 0;
   let currentTruthAt1Retained = 0;
   let recoveredFps = 0;
-  const positiveByFamily: Record<
-    string,
-    { total: number; abstained: number }
-  > = {};
+  const positiveByFamily: Record<string, { total: number; abstained: number }> = {};
   const recoveredByCategory: Record<DamageCategory, number> = {
     "ranker-empty-recoverable": 0,
     "score-threshold-on-recoverable": 0,
@@ -1145,8 +918,7 @@ export function computeParaphraseRecoveryVariantMetrics(args: {
         if (d.recoveredCategory !== undefined) {
           recoveredByCategory[d.recoveredCategory] += 1;
         }
-        recoveredByFamily[d.family] =
-          (recoveredByFamily[d.family] ?? 0) + 1;
+        recoveredByFamily[d.family] = (recoveredByFamily[d.family] ?? 0) + 1;
       }
       positiveByFamily[d.family] = fslot;
     } else {
@@ -1174,10 +946,8 @@ export function computeParaphraseRecoveryVariantMetrics(args: {
   }
   const baselineF1 = baselineMetrics.f1;
   // Per-family rates.
-  const positiveByFamilyRates: Record<
-    string,
-    { total: number; abstained: number; rate: number }
-  > = {};
+  const positiveByFamilyRates: Record<string, { total: number; abstained: number; rate: number }> =
+    {};
   for (const [family, slot] of Object.entries(positiveByFamily)) {
     positiveByFamilyRates[family] = {
       total: slot.total,
@@ -1191,21 +961,15 @@ export function computeParaphraseRecoveryVariantMetrics(args: {
   const fn = noAnswerCount - noAnswerAbstained;
   const precision = tp + fp > 0 ? tp / (tp + fp) : 0;
   const recall = tp + fn > 0 ? tp / (tp + fn) : 0;
-  const f1 =
-    precision + recall > 0
-      ? (2 * precision * recall) / (precision + recall)
-      : 0;
+  const f1 = precision + recall > 0 ? (2 * precision * recall) / (precision + recall) : 0;
   // Compute the headline baseline deltas.
   const baselinePositiveAbstainedRate = baselineMetrics.positiveAbstainedRate;
   const baselineNoAnswerAbstainedRate = baselineMetrics.noAnswerAbstainedRate;
-  const noAnswerAbstainedRate =
-    noAnswerCount > 0 ? noAnswerAbstained / noAnswerCount : 0;
-  const positiveAbstainedRate =
-    positiveCount > 0 ? positiveAbstained / positiveCount : 0;
+  const noAnswerAbstainedRate = noAnswerCount > 0 ? noAnswerAbstained / noAnswerCount : 0;
+  const positiveAbstainedRate = positiveCount > 0 ? positiveAbstained / positiveCount : 0;
   const hitAt5RetainedRate = hitAt5Retained / Math.max(1, positiveCount);
   const rank1RetainedRate = rank1Retained / Math.max(1, positiveCount);
-  const currentTruthAt1RetainedRate =
-    currentTruthAt1Retained / Math.max(1, positiveCount);
+  const currentTruthAt1RetainedRate = currentTruthAt1Retained / Math.max(1, positiveCount);
   // Safety verdict.
   const { verdict, verdictExplanation } = computeSafetyVerdict({
     noAnswerAbstainedRate,
@@ -1234,9 +998,7 @@ export function computeParaphraseRecoveryVariantMetrics(args: {
     currentTruthAt1RetainedRate,
     recoveredFps,
     recoveredFpsRate:
-      baselineFalseAbstainedTotal > 0
-        ? recoveredFps / baselineFalseAbstainedTotal
-        : 0,
+      baselineFalseAbstainedTotal > 0 ? recoveredFps / baselineFalseAbstainedTotal : 0,
     newNoAnswerFailures: noAnswerAbstainedFailed,
     baseline: {
       hitAt5: baselineMetrics.hitAt5Retained,
@@ -1251,8 +1013,10 @@ export function computeParaphraseRecoveryVariantMetrics(args: {
     delta: {
       noAnswerAbstainedRate: noAnswerAbstainedRate - baselineNoAnswerAbstainedRate,
       positiveAbstainedRate: positiveAbstainedRate - baselinePositiveAbstainedRate,
-      hitAt5RetainedRate: hitAt5RetainedRate - baselineMetrics.hitAt5Retained / Math.max(1, positiveCount),
-      rank1RetainedRate: rank1RetainedRate - baselineMetrics.rank1Retained / Math.max(1, positiveCount),
+      hitAt5RetainedRate:
+        hitAt5RetainedRate - baselineMetrics.hitAt5Retained / Math.max(1, positiveCount),
+      rank1RetainedRate:
+        rank1RetainedRate - baselineMetrics.rank1Retained / Math.max(1, positiveCount),
       currentTruthAt1RetainedRate:
         currentTruthAt1RetainedRate -
         baselineMetrics.currentTruthAt1Retained / Math.max(1, positiveCount),
@@ -1311,15 +1075,13 @@ export function computeSafetyVerdict(args: {
   if (newNoAnswerFailures > 0) {
     return {
       verdict: "unsafe",
-      verdictExplanation:
-        `unsafe: variant introduced ${newNoAnswerFailures} new no-answer confabulations (TNR regression)`,
+      verdictExplanation: `unsafe: variant introduced ${newNoAnswerFailures} new no-answer confabulations (TNR regression)`,
     };
   }
   if (noAnswerAbstainedRate + 1.0e-9 < baselineNoAnswerAbstainedRate) {
     return {
       verdict: "unsafe",
-      verdictExplanation:
-        `unsafe: variant's TNR (${(noAnswerAbstainedRate * 100).toFixed(1)}%) < baseline's (${(baselineNoAnswerAbstainedRate * 100).toFixed(1)}%); the escape caused the variant to retain a no-answer confabulation the baseline would have caught`,
+      verdictExplanation: `unsafe: variant's TNR (${(noAnswerAbstainedRate * 100).toFixed(1)}%) < baseline's (${(baselineNoAnswerAbstainedRate * 100).toFixed(1)}%); the escape caused the variant to retain a no-answer confabulation the baseline would have caught`,
     };
   }
   if (recoveredFps === 0) {
@@ -1331,8 +1093,7 @@ export function computeSafetyVerdict(args: {
   }
   return {
     verdict: "safe",
-    verdictExplanation:
-      `safe: TNR preserved (>= baseline), ${recoveredFps} FP(s) recovered, no new no-answer failures`,
+    verdictExplanation: `safe: TNR preserved (>= baseline), ${recoveredFps} FP(s) recovered, no new no-answer failures`,
   };
 }
 
@@ -1362,7 +1123,7 @@ export { buildNoAnswerPolicyPerQuery } from "./no-answer-abstention.js";
 function buildRecoveredFpEntries(
   decisions: ReadonlyArray<ParaphraseRecoveryDecision>,
   perQuery: ReadonlyArray<NoAnswerPolicyPerQuery>,
-  semantic?: { byQueryId: ReadonlyMap<string, "hit" | "miss"> },
+  semantic?: { byQueryId: ReadonlyMap<string, "hit" | "miss"> }
 ): ParaphraseRecoveryRecoveredFpEntry[] {
   const pqByQueryId = new Map<string, NoAnswerPolicyPerQuery>();
   for (const p of perQuery) pqByQueryId.set(p.queryId, p);
@@ -1380,8 +1141,7 @@ function buildRecoveredFpEntries(
     // authoritative source, but the per-FP
     // entry is self-contained for audit).
     const colonIdx = d.reason.indexOf(":");
-    const escapeReason =
-      colonIdx >= 0 ? d.reason.slice(colonIdx + 1) : d.reason;
+    const escapeReason = colonIdx >= 0 ? d.reason.slice(colonIdx + 1) : d.reason;
     let escapeKind: ParaphraseRecoveryEscape["kind"] = "none";
     if (escapeReason.startsWith("escape-detector-rank1|hit5")) {
       escapeKind = "paraphrase-detector-rank1-or-hit5";
@@ -1406,9 +1166,7 @@ function buildRecoveredFpEntries(
       category: d.recoveredCategory ?? "unclassified",
       // The explanation is the same table the
       // upstream damage module uses.
-      categoryExplanation: CATEGORY_EXPLANATION_FALLBACK(
-        d.recoveredCategory ?? "unclassified",
-      ),
+      categoryExplanation: CATEGORY_EXPLANATION_FALLBACK(d.recoveredCategory ?? "unclassified"),
       topScore: pq.signals.topScore,
       rank1: d.rank1,
       hitAt5: d.hitAt5,
@@ -1494,15 +1252,12 @@ export function runParaphraseRecoveryExperiment(args: {
   semantic?: { byQueryId: ReadonlyMap<string, "hit" | "miss">; source: string };
 }): ParaphraseRecoveryReport {
   const { perQuery, config = {}, semantic } = args;
-  const baselinePolicyId =
-    config.baselinePolicyId ?? BASELINE_POLICY_ID;
-  const baselinePolicy = BUILTIN_NO_ANSWER_POLICIES.find(
-    (p) => p.id === baselinePolicyId,
-  );
+  const baselinePolicyId = config.baselinePolicyId ?? BASELINE_POLICY_ID;
+  const baselinePolicy = BUILTIN_NO_ANSWER_POLICIES.find((p) => p.id === baselinePolicyId);
   if (!baselinePolicy) {
     throw new Error(
       `runParaphraseRecoveryExperiment: baselinePolicyId="${baselinePolicyId}" is not in BUILTIN_NO_ANSWER_POLICIES; ` +
-        `available: ${BUILTIN_NO_ANSWER_POLICIES.map((p) => p.id).join(", ")}`,
+        `available: ${BUILTIN_NO_ANSWER_POLICIES.map((p) => p.id).join(", ")}`
     );
   }
   // Compute the baseline's per-query decisions
@@ -1534,13 +1289,9 @@ export function runParaphraseRecoveryExperiment(args: {
     }
   }
   const baselineNoAnswerAbstainedRate =
-    baselineNoAnswerCount > 0
-      ? baselineNoAnswerAbstained / baselineNoAnswerCount
-      : 0;
+    baselineNoAnswerCount > 0 ? baselineNoAnswerAbstained / baselineNoAnswerCount : 0;
   const baselinePositiveAbstainedRate =
-    baselinePositiveCount > 0
-      ? baselinePositiveAbstained / baselinePositiveCount
-      : 0;
+    baselinePositiveCount > 0 ? baselinePositiveAbstained / baselinePositiveCount : 0;
   {
     const tp = baselineNoAnswerAbstained;
     const fp = baselinePositiveAbstained;
@@ -1549,8 +1300,7 @@ export function runParaphraseRecoveryExperiment(args: {
     baselineRecall = tp + fn > 0 ? tp / (tp + fn) : 0;
     baselineF1 =
       baselinePrecision + baselineRecall > 0
-        ? (2 * baselinePrecision * baselineRecall) /
-          (baselinePrecision + baselineRecall)
+        ? (2 * baselinePrecision * baselineRecall) / (baselinePrecision + baselineRecall)
         : 0;
   }
   const baselineMetrics = {
@@ -1569,9 +1319,7 @@ export function runParaphraseRecoveryExperiment(args: {
   };
   // Build the variant list.
   const customVariants = config.customVariants ?? [];
-  const filterIds = config.onlyVariantIds
-    ? new Set(config.onlyVariantIds)
-    : null;
+  const filterIds = config.onlyVariantIds ? new Set(config.onlyVariantIds) : null;
   const variants: ParaphraseRecoveryVariant[] = [];
   for (const v of customVariants) {
     if (filterIds === null || filterIds.has(v.id)) variants.push(v);
@@ -1594,7 +1342,7 @@ export function runParaphraseRecoveryExperiment(args: {
       variant,
       baselinePolicy,
       perQuery,
-      semantic ? { byQueryId: semantic.byQueryId } : undefined,
+      semantic ? { byQueryId: semantic.byQueryId } : undefined
     );
     const metrics = computeParaphraseRecoveryVariantMetrics({
       variant,
@@ -1614,7 +1362,7 @@ export function runParaphraseRecoveryExperiment(args: {
       entries: buildRecoveredFpEntries(
         decisions,
         perQuery,
-        semantic ? { byQueryId: semantic.byQueryId } : undefined,
+        semantic ? { byQueryId: semantic.byQueryId } : undefined
       ),
     });
     variantDecisions.push({ variantId: variant.id, decisions });
@@ -1636,12 +1384,8 @@ export function runParaphraseRecoveryExperiment(args: {
       noAnswerCount,
       positiveCount,
       variantCount: variants.length,
-      productionLikeCount: variants.filter(
-        (v) => v.category === "production-like",
-      ).length,
-      fixtureShapedCount: variants.filter(
-        (v) => v.category === "fixture-shaped",
-      ).length,
+      productionLikeCount: variants.filter((v) => v.category === "production-like").length,
+      fixtureShapedCount: variants.filter((v) => v.category === "fixture-shaped").length,
       oracleCount: variants.filter((v) => v.category === "oracle").length,
       ...(semantic ? { evidenceSource: semantic.source } : {}),
     },
@@ -1674,13 +1418,9 @@ export function runParaphraseRecoveryExperiment(args: {
  *   5. The per-variant recovered-FP details.
  *   6. The honest reading block.
  */
-export function formatParaphraseRecoveryReport(
-  report: ParaphraseRecoveryReport,
-): string {
+export function formatParaphraseRecoveryReport(report: ParaphraseRecoveryReport): string {
   const lines: string[] = [];
-  lines.push(
-    "=== curion paraphrase-specific recovery / refined-threshold experiment ===",
-  );
+  lines.push("=== curion paraphrase-specific recovery / refined-threshold experiment ===");
   lines.push(`generated at: ${report.generatedAt}`);
   lines.push("");
   lines.push("--- config ---");
@@ -1693,104 +1433,63 @@ export function formatParaphraseRecoveryReport(
     `  variants evaluated:    ${String(report.config.variantCount).padStart(3)} ` +
       `(production-like=${report.config.productionLikeCount}, ` +
       `fixture-shaped=${report.config.fixtureShapedCount}, ` +
-      `oracle=${report.config.oracleCount})`,
+      `oracle=${report.config.oracleCount})`
   );
   if (report.config.evidenceSource) {
     lines.push(`  semantic evidence:     ${report.config.evidenceSource}`);
   }
   lines.push("");
   lines.push("READ THIS FIRST: this is a BENCHMARK-ONLY study.");
-  lines.push(
-    "  The experiment tests whether a NARROW paraphrase-aware",
-  );
-  lines.push(
-    "  escape hatch layered on top of the accepted production-",
-  );
-  lines.push(
-    "  like policy (`score-or-sufficiency-insufficient`) can",
-  );
-  lines.push(
-    "  reduce the recoverable paraphrase damage WITHOUT",
-  );
-  lines.push(
-    "  regressing the no-answer TNR. The variants are NOT",
-  );
-  lines.push(
-    "  wired into the production `recall(text)` controller,",
-  );
-  lines.push(
-    "  the public MCP API, or the storage schema. The experiment",
-  );
-  lines.push(
-    "  is a trade-off analysis: how much paraphrase damage can",
-  );
-  lines.push(
-    "  a narrow escape recover, and at what safety cost?",
-  );
-  lines.push(
-    "  Three variant categories are reported:",
-  );
-  lines.push(
-    "    - `production-like` — runtime-only signals",
-  );
-  lines.push(
-    "      (the heuristic `isParaphraseTrap` /",
-  );
-  lines.push(
-    "      `isAdversarialParaphrase` flag, the rank-1 / hit-5",
-  );
-  lines.push(
-    "      outcome, the score). A reviewer who wants to reason",
-  );
-  lines.push(
-    "      about a deployable rule reads ONLY this category.",
-  );
-  lines.push(
-    "    - `fixture-shaped` — keys on a fixture-truth signal",
-  );
-  lines.push(
-    "      (the benchmark's `family` field). A real production",
-  );
-  lines.push(
-    "      ranker has no such label on incoming queries. These",
-  );
-  lines.push(
-    "      rows are research / oracle-like ceilings and are",
-  );
-  lines.push(
-    "      clearly NOT deployable.",
-  );
-  lines.push(
-    "    - `oracle` — keys on the explicit fixture-truth labels",
-  );
-  lines.push(
-    "      (`adversarialParaphrase` / `nearMissCurrentCluster`).",
-  );
-  lines.push(
-    "      Clearly non-production. The true ceiling reading.",
-  );
+  lines.push("  The experiment tests whether a NARROW paraphrase-aware");
+  lines.push("  escape hatch layered on top of the accepted production-");
+  lines.push("  like policy (`score-or-sufficiency-insufficient`) can");
+  lines.push("  reduce the recoverable paraphrase damage WITHOUT");
+  lines.push("  regressing the no-answer TNR. The variants are NOT");
+  lines.push("  wired into the production `recall(text)` controller,");
+  lines.push("  the public MCP API, or the storage schema. The experiment");
+  lines.push("  is a trade-off analysis: how much paraphrase damage can");
+  lines.push("  a narrow escape recover, and at what safety cost?");
+  lines.push("  Three variant categories are reported:");
+  lines.push("    - `production-like` — runtime-only signals");
+  lines.push("      (the heuristic `isParaphraseTrap` /");
+  lines.push("      `isAdversarialParaphrase` flag, the rank-1 / hit-5");
+  lines.push("      outcome, the score). A reviewer who wants to reason");
+  lines.push("      about a deployable rule reads ONLY this category.");
+  lines.push("    - `fixture-shaped` — keys on a fixture-truth signal");
+  lines.push("      (the benchmark's `family` field). A real production");
+  lines.push("      ranker has no such label on incoming queries. These");
+  lines.push("      rows are research / oracle-like ceilings and are");
+  lines.push("      clearly NOT deployable.");
+  lines.push("    - `oracle` — keys on the explicit fixture-truth labels");
+  lines.push("      (`adversarialParaphrase` / `nearMissCurrentCluster`).");
+  lines.push("      Clearly non-production. The true ceiling reading.");
   lines.push("");
   // ---- Baseline reference row ----
   const b = report.baselineMetrics;
   lines.push("--- baseline reference row ---");
   lines.push(`  policy:                 ${b.policyId}`);
-  lines.push(`  no-answer abstained:    ${b.noAnswerAbstained} / ${report.config.noAnswerCount} (${(b.noAnswerAbstainedRate * 100).toFixed(1)}%)`);
-  lines.push(`  positive abstained:     ${b.positiveAbstained} / ${report.config.positiveCount} (${(b.positiveAbstainedRate * 100).toFixed(1)}%)`);
+  lines.push(
+    `  no-answer abstained:    ${b.noAnswerAbstained} / ${report.config.noAnswerCount} (${(b.noAnswerAbstainedRate * 100).toFixed(1)}%)`
+  );
+  lines.push(
+    `  positive abstained:     ${b.positiveAbstained} / ${report.config.positiveCount} (${(b.positiveAbstainedRate * 100).toFixed(1)}%)`
+  );
   lines.push(`  hit@5 retained:         ${b.hitAt5Retained}`);
   lines.push(`  rank1 retained:         ${b.rank1Retained}`);
   lines.push(`  currentTruthAt1 retained: ${b.currentTruthAt1Retained}`);
-  lines.push(`  precision / recall / F1: ${b.precision.toFixed(2)} / ${b.recall.toFixed(2)} / ${b.f1.toFixed(2)}`);
+  lines.push(
+    `  precision / recall / F1: ${b.precision.toFixed(2)} / ${b.recall.toFixed(2)} / ${b.f1.toFixed(2)}`
+  );
   lines.push(`  false abstained total:  ${b.falseAbstainedTotal}`);
   lines.push("");
   // ---- Headline variant table ----
   lines.push("--- variant frontier ---");
   lines.push(
-    "  category   variant                                       TNR%   posAbst%  hit5Ret%  rank1Ret%  curT1Ret%  recoveredFps  rec-rate%  P     R     F1    verdict",
+    "  category   variant                                       TNR%   posAbst%  hit5Ret%  rank1Ret%  curT1Ret%  recoveredFps  rec-rate%  P     R     F1    verdict"
   );
   for (const row of report.variants) {
-    const variantLabel = row.variantId.length > 45
-      ? row.variantId.slice(0, 42) + "..."
-      : row.variantId;
+    const variantLabel =
+      row.variantId.length > 45 ? row.variantId.slice(0, 42) + "..." : row.variantId;
     const cat =
       row.category === "oracle"
         ? "oracle   "
@@ -1808,65 +1507,34 @@ export function formatParaphraseRecoveryReport(
         `        ${String(row.recoveredFps).padStart(3)}` +
         `        ${recPct.padStart(5)}` +
         `   ${row.precision.toFixed(2)}  ${row.recall.toFixed(2)}  ${row.f1.toFixed(2)}` +
-        `  ${row.verdict}`,
+        `  ${row.verdict}`
     );
   }
   lines.push("");
-  lines.push(
-    "  TNR%        = no-answer queries the variant abstained on (TNR equivalent).",
-  );
-  lines.push(
-    "  posAbst%    = positive queries the variant abstained on (a damage metric).",
-  );
-  lines.push(
-    "  hit5Ret%    = hit@5 retained on positive queries.",
-  );
-  lines.push(
-    "  rank1Ret%   = rank1 retained on positive queries.",
-  );
-  lines.push(
-    "  curT1Ret%   = currentTruthAt1 retained on positive queries.",
-  );
-  lines.push(
-    "  recoveredFps = FPs the variant recovered (baseline abstained, variant retained).",
-  );
-  lines.push(
-    "  rec-rate%   = recoveredFps / baseline false-abstained total.",
-  );
-  lines.push(
-    "  P/R/F1      = precision / recall / F1 on the 'should-abstain' binary task.",
-  );
-  lines.push(
-    "  verdict     = `safe` (TNR preserved AND recovered>=1), `neutral`",
-  );
-  lines.push(
-    "                (TNR preserved but recovered=0), or `unsafe`",
-  );
-  lines.push(
-    "                (TNR regression or new no-answer failures).",
-  );
-  lines.push(
-    "  category    = `prod` (production-like; runtime-only signals),",
-  );
-  lines.push(
-    "                `fixture` (fixture-shaped; gates on a fixture-truth",
-  );
-  lines.push(
-    "                signal such as the benchmark's `family` field — NOT",
-  );
-  lines.push(
-    "                deployable), or `oracle` (clearly non-production).",
-  );
+  lines.push("  TNR%        = no-answer queries the variant abstained on (TNR equivalent).");
+  lines.push("  posAbst%    = positive queries the variant abstained on (a damage metric).");
+  lines.push("  hit5Ret%    = hit@5 retained on positive queries.");
+  lines.push("  rank1Ret%   = rank1 retained on positive queries.");
+  lines.push("  curT1Ret%   = currentTruthAt1 retained on positive queries.");
+  lines.push("  recoveredFps = FPs the variant recovered (baseline abstained, variant retained).");
+  lines.push("  rec-rate%   = recoveredFps / baseline false-abstained total.");
+  lines.push("  P/R/F1      = precision / recall / F1 on the 'should-abstain' binary task.");
+  lines.push("  verdict     = `safe` (TNR preserved AND recovered>=1), `neutral`");
+  lines.push("                (TNR preserved but recovered=0), or `unsafe`");
+  lines.push("                (TNR regression or new no-answer failures).");
+  lines.push("  category    = `prod` (production-like; runtime-only signals),");
+  lines.push("                `fixture` (fixture-shaped; gates on a fixture-truth");
+  lines.push("                signal such as the benchmark's `family` field — NOT");
+  lines.push("                deployable), or `oracle` (clearly non-production).");
   lines.push("");
   // ---- Per-variant delta table ----
   lines.push("--- delta vs baseline ---");
   lines.push(
-    "  variant                                       dTNR%    dPosAbst%  dHit5Ret  dRank1Ret  dCurT1Ret  recoveredFps",
+    "  variant                                       dTNR%    dPosAbst%  dHit5Ret  dRank1Ret  dCurT1Ret  recoveredFps"
   );
   for (const row of report.variants) {
-    const variantLabel = row.variantId.length > 45
-      ? row.variantId.slice(0, 42) + "..."
-      : row.variantId;
+    const variantLabel =
+      row.variantId.length > 45 ? row.variantId.slice(0, 42) + "..." : row.variantId;
     const dTNR = row.delta.noAnswerAbstainedRate * 100;
     const dPos = row.delta.positiveAbstainedRate * 100;
     const dHit = row.delta.hitAt5RetainedRate * 100;
@@ -1879,28 +1547,18 @@ export function formatParaphraseRecoveryReport(
         `    ${(dHit >= 0 ? "+" : "") + dHit.toFixed(1).padStart(5)}` +
         `       ${(dRank >= 0 ? "+" : "") + dRank.toFixed(1).padStart(5)}` +
         `       ${(dCur >= 0 ? "+" : "") + dCur.toFixed(1).padStart(5)}` +
-        `        ${String(row.delta.recoveredFps).padStart(3)}`,
+        `        ${String(row.delta.recoveredFps).padStart(3)}`
     );
   }
   lines.push("");
+  lines.push("  dTNR%        = (variant TNR) - (baseline TNR). Positive is better.");
+  lines.push("  dPosAbst%    = (variant pos-abst%) - (baseline pos-abst%). Negative is better.");
+  lines.push("  dHit5Ret     = (variant hit@5 retained%) - (baseline hit@5 retained%).");
+  lines.push("  dRank1Ret    = (variant rank1 retained%) - (baseline rank1 retained%).");
   lines.push(
-    "  dTNR%        = (variant TNR) - (baseline TNR). Positive is better.",
+    "  dCurT1Ret    = (variant currentTruthAt1 retained%) - (baseline currentTruthAt1 retained%)."
   );
-  lines.push(
-    "  dPosAbst%    = (variant pos-abst%) - (baseline pos-abst%). Negative is better.",
-  );
-  lines.push(
-    "  dHit5Ret     = (variant hit@5 retained%) - (baseline hit@5 retained%).",
-  );
-  lines.push(
-    "  dRank1Ret    = (variant rank1 retained%) - (baseline rank1 retained%).",
-  );
-  lines.push(
-    "  dCurT1Ret    = (variant currentTruthAt1 retained%) - (baseline currentTruthAt1 retained%).",
-  );
-  lines.push(
-    "  recoveredFps = (variant recovered FPs) - (baseline recovered FPs = 0).",
-  );
+  lines.push("  recoveredFps = (variant recovered FPs) - (baseline recovered FPs = 0).");
   lines.push("");
   // ---- Per-variant verdict block ----
   lines.push("--- per-variant verdict ---");
@@ -1912,9 +1570,7 @@ export function formatParaphraseRecoveryReport(
   // ---- Per-variant recovered-FP details ----
   for (const recBlock of report.recoveredByVariant) {
     if (recBlock.entries.length === 0) continue;
-    lines.push(
-      `--- recovered FPs (variant: ${recBlock.variantId}) ---`,
-    );
+    lines.push(`--- recovered FPs (variant: ${recBlock.variantId}) ---`);
     for (const e of recBlock.entries) {
       const sem = e.semanticAlsoMisses
         ? "  semantic=also-miss"
@@ -1922,132 +1578,56 @@ export function formatParaphraseRecoveryReport(
           ? "  semantic=recoverable"
           : "";
       const labels =
-        e.queryLabels && e.queryLabels.length > 0
-          ? `  labels=${e.queryLabels.join("|")}`
-          : "";
+        e.queryLabels && e.queryLabels.length > 0 ? `  labels=${e.queryLabels.join("|")}` : "";
       lines.push(
         `  [${e.family.padEnd(11)}] ${e.queryId.padEnd(42)}  ` +
           `topScore=${e.topScore.toFixed(3)}  ` +
           `rank1=${e.rank1 ? "T" : "F"}  ` +
           `hit5=${e.hitAt5 ? "T" : "F"}  ` +
           `cat=${e.category.padEnd(30)}  ` +
-          `escape=${e.escapeKind}${sem}${labels}`,
+          `escape=${e.escapeKind}${sem}${labels}`
       );
     }
     lines.push("");
   }
   // ---- Honest reading block ----
   lines.push("--- honest reading ---");
-  lines.push(
-    "  The experiment is a NARROW recovery study. The variants",
-  );
-  lines.push(
-    "  are deliberately small: each variant is the baseline",
-  );
-  lines.push(
-    "  policy plus ONE paraphrase-aware escape hatch. A",
-  );
-  lines.push(
-    "  reviewer who wants to reason about a deployable rule",
-  );
-  lines.push(
-    "    reads the `production-like` rows ONLY.",
-  );
-  lines.push(
-    "  The `safe` verdict is the headline: a variant that",
-  );
-  lines.push(
-    "    preserves the baseline's no-answer TNR AND recovers",
-  );
-  lines.push(
-    "    at least one FP is the only kind of variant a reviewer",
-  );
-  lines.push(
-    "    should consider for deployment. A variant that drops TNR",
-  );
-  lines.push(
-    "    is marked `unsafe` regardless of how many paraphrase",
-  );
-  lines.push(
-    "    FPs it recovers; a variant that keeps TNR but does not",
-  );
-  lines.push(
-    "    recover anything is marked `neutral`.",
-  );
-  lines.push(
-    "  The structural safety property of the variants is that",
-  );
-  lines.push(
-    "    the escape is a one-way suppression: the variant cannot",
-  );
-  lines.push(
-    "    INTRODUCE a new abstention on a query the baseline would",
-  );
-  lines.push(
-    "    have retained. The only way the variant's positive-",
-  );
-  lines.push(
-    "    abstention rate is LOWER than the baseline's is by",
-  );
-  lines.push(
-    "    recovering FPs the baseline made. A variant that",
-  );
-  lines.push(
-    "    recovers zero FPs is identical to the baseline on the",
-  );
-  lines.push(
-    "    positive set.",
-  );
-  lines.push(
-    "  The semantic-evidence rollup (when supplied) is the only",
-  );
-  lines.push(
-    "    way to see \"would a dense reranker have recovered",
-  );
-  lines.push(
-    "    this?\". When supplied, the per-FP entry's",
-  );
-  lines.push(
-    "    `semanticAlsoMisses` field tells the reviewer",
-  );
-  lines.push(
-    "    whether the EmbeddingGemma hybrid-dense dense ranker",
-  );
-  lines.push(
-    "    also rank-1-missed the query. The damage-analysis",
-  );
-  lines.push(
-    "    finding is that 20/24 FPs were also missed by the",
-  );
-  lines.push(
-    "    dense ranker, so a dense reranker is not a silver",
-  );
-  lines.push(
-    "    bullet; the per-FP `semantic=also-miss` annotation is",
-  );
-  lines.push(
-    "    the honest reading.",
-  );
-  lines.push(
-    "  The paraphrase detector (`isParaphraseTrap` /",
-  );
-  lines.push(
-    "    `isAdversarialParaphrase`) is a HEURISTIC. The flag is",
-  );
-  lines.push(
-    "    NOT a production-grade signal; the experiment uses it",
-  );
-  lines.push(
-    "    as a research-only stand-in for 'is this a paraphrase-",
-  );
-  lines.push(
-    "    shaped query?'. A deployment would need a corresponding",
-  );
-  lines.push(
-    "    production-side paraphrase detector with documented",
-  );
-  lines.push(
-    "    precision / recall on the production corpus.",
-  );
+  lines.push("  The experiment is a NARROW recovery study. The variants");
+  lines.push("  are deliberately small: each variant is the baseline");
+  lines.push("  policy plus ONE paraphrase-aware escape hatch. A");
+  lines.push("  reviewer who wants to reason about a deployable rule");
+  lines.push("    reads the `production-like` rows ONLY.");
+  lines.push("  The `safe` verdict is the headline: a variant that");
+  lines.push("    preserves the baseline's no-answer TNR AND recovers");
+  lines.push("    at least one FP is the only kind of variant a reviewer");
+  lines.push("    should consider for deployment. A variant that drops TNR");
+  lines.push("    is marked `unsafe` regardless of how many paraphrase");
+  lines.push("    FPs it recovers; a variant that keeps TNR but does not");
+  lines.push("    recover anything is marked `neutral`.");
+  lines.push("  The structural safety property of the variants is that");
+  lines.push("    the escape is a one-way suppression: the variant cannot");
+  lines.push("    INTRODUCE a new abstention on a query the baseline would");
+  lines.push("    have retained. The only way the variant's positive-");
+  lines.push("    abstention rate is LOWER than the baseline's is by");
+  lines.push("    recovering FPs the baseline made. A variant that");
+  lines.push("    recovers zero FPs is identical to the baseline on the");
+  lines.push("    positive set.");
+  lines.push("  The semantic-evidence rollup (when supplied) is the only");
+  lines.push('    way to see "would a dense reranker have recovered');
+  lines.push("    this?\". When supplied, the per-FP entry's");
+  lines.push("    `semanticAlsoMisses` field tells the reviewer");
+  lines.push("    whether the EmbeddingGemma hybrid-dense dense ranker");
+  lines.push("    also rank-1-missed the query. The damage-analysis");
+  lines.push("    finding is that 20/24 FPs were also missed by the");
+  lines.push("    dense ranker, so a dense reranker is not a silver");
+  lines.push("    bullet; the per-FP `semantic=also-miss` annotation is");
+  lines.push("    the honest reading.");
+  lines.push("  The paraphrase detector (`isParaphraseTrap` /");
+  lines.push("    `isAdversarialParaphrase`) is a HEURISTIC. The flag is");
+  lines.push("    NOT a production-grade signal; the experiment uses it");
+  lines.push("    as a research-only stand-in for 'is this a paraphrase-");
+  lines.push("    shaped query?'. A deployment would need a corresponding");
+  lines.push("    production-side paraphrase detector with documented");
+  lines.push("    precision / recall on the production corpus.");
   return lines.join("\n");
 }

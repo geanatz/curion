@@ -198,10 +198,7 @@ export interface PolicyMetrics {
   positiveAbstained: number;
   positiveAbstainedRate: number;
   /** Per-family positive abstention breakdown. */
-  positiveAbstainedByFamily: Record<
-    string,
-    { total: number; abstained: number; rate: number }
-  >;
+  positiveAbstainedByFamily: Record<string, { total: number; abstained: number; rate: number }>;
   /** hit@5 retention on positive queries
    *  (the audit's "all" slice positive set). */
   hitAt5Retained: number;
@@ -430,7 +427,7 @@ export function evaluatePolicy(
      * backward-compatible default).
      */
     queryLabels?: string[];
-  }>,
+  }>
 ): PolicyDecision[] {
   const out: PolicyDecision[] = new Array(perQuery.length);
   for (let i = 0; i < perQuery.length; i++) {
@@ -476,9 +473,7 @@ export function evaluatePolicy(
       rank1: p.rank1,
       currentTruthAt1: p.currentTruthAt1,
       hitAt5: p.hitAt5,
-      ...(p.queryLabels !== undefined
-        ? { queryLabels: [...p.queryLabels] }
-        : {}),
+      ...(p.queryLabels !== undefined ? { queryLabels: [...p.queryLabels] } : {}),
     };
   }
   return out;
@@ -504,7 +499,7 @@ export function evaluatePolicy(
  */
 export function computePolicyMetrics(
   policy: AbstentionPolicy,
-  decisions: ReadonlyArray<PolicyDecision>,
+  decisions: ReadonlyArray<PolicyDecision>
 ): PolicyMetrics {
   let total = 0;
   let noAnswerCount = 0;
@@ -524,10 +519,7 @@ export function computePolicyMetrics(
   let gateAgreement = 0;
   let gateHardNeg = 0;
   let gateFalsePrem = 0;
-  const positiveAbstainedByFamily: Record<
-    string,
-    { total: number; abstained: number }
-  > = {};
+  const positiveAbstainedByFamily: Record<string, { total: number; abstained: number }> = {};
   const falsePositives: Array<{ queryId: string; family: string; reason: string }> = [];
   const falseNegatives: Array<{ queryId: string; family: string; reason: string }> = [];
   for (const d of decisions) {
@@ -622,9 +614,7 @@ export function computePolicyMetrics(
     currentTruthAt1Retained,
     currentTruthAt1Lost,
     currentTruthAt1RetainedRate:
-      baselineCurrentTruthAt1 > 0
-        ? currentTruthAt1Retained / baselineCurrentTruthAt1
-        : 0,
+      baselineCurrentTruthAt1 > 0 ? currentTruthAt1Retained / baselineCurrentTruthAt1 : 0,
     baseline: {
       hitAt5: baselineHitAt5,
       rank1: baselineRank1,
@@ -681,7 +671,7 @@ export function buildPolicyPerQuery(
    * surface the labeled adversarial property
    * subsets on the policy artifact.
    */
-  labelsByQueryId: ReadonlyMap<string, string[]> = new Map(),
+  labelsByQueryId: ReadonlyMap<string, string[]> = new Map()
 ): Array<{
   queryId: string;
   family: string;
@@ -711,9 +701,7 @@ export function buildPolicyPerQuery(
     // query), and an empty source presence. The
     // evaluator's per-policy gate counts will reflect
     // the absence of the signal block.
-    const signals =
-      signalsByQueryId.get(e.queryId) ??
-      emptyAbstentionSignals();
+    const signals = signalsByQueryId.get(e.queryId) ?? emptyAbstentionSignals();
     // Compute hit@5 from the eval (the contract the
     // audit's "all" slice uses). A no-answer query has
     // `expectedIds.length === 0` and `topIds.length ===

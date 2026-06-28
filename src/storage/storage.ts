@@ -20,8 +20,8 @@
  *   - All schema changes are versioned in `_meta.schema_version`.
  */
 
-import path from "node:path";
 import fs from "node:fs";
+import path from "node:path";
 import Database from "better-sqlite3";
 import { logger } from "../logging/logger.js";
 
@@ -196,19 +196,15 @@ export function initStorage(config: StorageConfig = {}): StorageHandle {
     db.exec(
       `INSERT OR IGNORE INTO memories_fts(rowid, memory_id, terms)
          SELECT rowid, id, COALESCE(summary, '')
-           FROM memories;`,
+           FROM memories;`
     );
   } catch (err) {
     // FTS5 is part of SQLite; if missing, retrieval benchmarks will
     // surface the limitation. We log and continue.
-    logger.warn(
-      `FTS5 virtual table unavailable: ${(err as Error).message}`,
-    );
+    logger.warn(`FTS5 virtual table unavailable: ${(err as Error).message}`);
   }
 
-  const insertMeta = db.prepare(
-    "INSERT OR REPLACE INTO _meta (key, value) VALUES (?, ?)",
-  );
+  const insertMeta = db.prepare("INSERT OR REPLACE INTO _meta (key, value) VALUES (?, ?)");
   insertMeta.run("schema_version", "v2-mvp-1");
   insertMeta.run("created_at", String(Date.now()));
 
@@ -230,7 +226,7 @@ function ensureColumn(
   db: Database.Database,
   table: string,
   column: string,
-  typeAndDefault: string,
+  typeAndDefault: string
 ): void {
   const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{
     name: string;
@@ -289,11 +285,7 @@ export const MEMORY_KINDS: readonly MemoryKind[] = [
 ];
 
 /** Allowed list of internal states, exported for validation. */
-export const MEMORY_STATES: readonly MemoryState[] = [
-  "active",
-  "superseded",
-  "invalidated",
-];
+export const MEMORY_STATES: readonly MemoryState[] = ["active", "superseded", "invalidated"];
 
 /**
  * Persisted record shape. The `memoryContent` field is the
@@ -397,10 +389,7 @@ export interface SafeMemorySummary {
  * The binding name on the parameterized statement (`@summary`)
  * matches the SQL column name and is preserved.
  */
-export function insertMemoryRecord(
-  handle: StorageHandle,
-  input: MemoryRecordInput,
-): MemoryRecord {
+export function insertMemoryRecord(handle: StorageHandle, input: MemoryRecordInput): MemoryRecord {
   const now = Date.now();
   const stmt = handle.db.prepare(`
     INSERT INTO memories (
@@ -478,7 +467,7 @@ export function insertMemoryRecord(
 export function updateMemoryMetadata(
   handle: StorageHandle,
   id: number,
-  patch: Record<string, unknown>,
+  patch: Record<string, unknown>
 ): MemoryRecord {
   if (typeof id !== "number" || !Number.isFinite(id)) {
     throw new Error("updateMemoryMetadata: id must be a finite number");
@@ -487,7 +476,7 @@ export function updateMemoryMetadata(
   const stmt = handle.db.prepare(
     `UPDATE memories
         SET metadata = @metadata, updated_at = @updated_at
-      WHERE id = @id`,
+      WHERE id = @id`
   );
   stmt.run({
     id,
@@ -504,7 +493,7 @@ export function updateMemoryMetadata(
       `SELECT id, kind, state, summary, provider_id, model_id,
               confidence, safety_flags, metadata, created_at, updated_at
          FROM memories
-        WHERE id = ?`,
+        WHERE id = ?`
     )
     .get(id) as
     | {
@@ -522,9 +511,7 @@ export function updateMemoryMetadata(
       }
     | undefined;
   if (!row) {
-    throw new Error(
-      `updateMemoryMetadata: no row found for id ${id} after update`,
-    );
+    throw new Error(`updateMemoryMetadata: no row found for id ${id} after update`);
   }
   let parsedMetadata: Record<string, unknown> = {};
   if (typeof row.metadata === "string" && row.metadata.length > 0) {
@@ -551,12 +538,8 @@ export function updateMemoryMetadata(
   }
   return {
     id: row.id,
-    kind: (MEMORY_KINDS.includes(row.kind as MemoryKind)
-      ? (row.kind as MemoryKind)
-      : "finding"),
-    state: (MEMORY_STATES.includes(row.state as MemoryState)
-      ? (row.state as MemoryState)
-      : "active"),
+    kind: MEMORY_KINDS.includes(row.kind as MemoryKind) ? (row.kind as MemoryKind) : "finding",
+    state: MEMORY_STATES.includes(row.state as MemoryState) ? (row.state as MemoryState) : "active",
     // Phase 1 internal naming cleanup: bind the SQL `summary`
     // column back to the TypeScript `memoryContent` field.
     memoryContent: row.summary ?? "",
@@ -589,7 +572,7 @@ export function updateMemoryMetadata(
 export function addSupersededByToMemory(
   handle: StorageHandle,
   id: number,
-  supersededById: number,
+  supersededById: number
 ): void {
   if (typeof id !== "number" || !Number.isFinite(id) || id <= 0) return;
   if (
@@ -600,9 +583,9 @@ export function addSupersededByToMemory(
     return;
   }
 
-  const row = handle.db
-    .prepare("SELECT metadata FROM memories WHERE id = ?")
-    .get(id) as { metadata: string | null } | undefined;
+  const row = handle.db.prepare("SELECT metadata FROM memories WHERE id = ?").get(id) as
+    | { metadata: string | null }
+    | undefined;
 
   if (!row) return; // row missing or deleted — safe no-op
 
@@ -623,8 +606,7 @@ export function addSupersededByToMemory(
 
   const supersededByArr = Array.isArray(existingBlock.supersededBy)
     ? (existingBlock.supersededBy as unknown[]).filter(
-        (x): x is number =>
-          typeof x === "number" && Number.isFinite(x) && x > 0,
+        (x): x is number => typeof x === "number" && Number.isFinite(x) && x > 0
       )
     : [];
 
@@ -698,7 +680,7 @@ export function closeStorage(handle: StorageHandle): void {
  */
 export function listActiveMemorySummaries(
   handle: StorageHandle,
-  options: { limit?: number; orderBy?: "asc" | "desc" } = {},
+  options: { limit?: number; orderBy?: "asc" | "desc" } = {}
 ): SafeMemorySummary[] {
   const limit = options.limit ?? 200;
   const order = options.orderBy === "desc" ? "DESC" : "ASC";
@@ -709,16 +691,16 @@ export function listActiveMemorySummaries(
          FROM memories
          WHERE state = 'active'
          ORDER BY id ${order}
-         LIMIT ?`,
+         LIMIT ?`
     )
     .all(limit) as Array<{
-      id: number;
-      kind: string;
-      state: string;
-      summary: string | null;
-      confidence: number | null;
-      metadata: string | null;
-    }>;
+    id: number;
+    kind: string;
+    state: string;
+    summary: string | null;
+    confidence: number | null;
+    metadata: string | null;
+  }>;
   const out: SafeMemorySummary[] = [];
   for (const r of rows) {
     // Defensive: if a future row has null memory content (SQL
@@ -732,9 +714,7 @@ export function listActiveMemorySummaries(
       try {
         const parsed = JSON.parse(r.metadata) as Record<string, unknown>;
         if (Array.isArray(parsed.tags)) {
-          tags = parsed.tags
-            .filter((t): t is string => typeof t === "string")
-            .slice(0, 16);
+          tags = parsed.tags.filter((t): t is string => typeof t === "string").slice(0, 16);
         }
         if (typeof parsed.classification === "string") {
           classification = parsed.classification;
@@ -745,12 +725,8 @@ export function listActiveMemorySummaries(
     }
     out.push({
       id: r.id,
-      kind: (MEMORY_KINDS.includes(r.kind as MemoryKind)
-        ? (r.kind as MemoryKind)
-        : "finding"),
-      state: (MEMORY_STATES.includes(r.state as MemoryState)
-        ? (r.state as MemoryState)
-        : "active"),
+      kind: MEMORY_KINDS.includes(r.kind as MemoryKind) ? (r.kind as MemoryKind) : "finding",
+      state: MEMORY_STATES.includes(r.state as MemoryState) ? (r.state as MemoryState) : "active",
       // Phase 1 internal naming cleanup: SQL `summary` -> TS
       // `memoryContent`. The DB column name is preserved.
       memoryContent: r.summary,
@@ -820,7 +796,7 @@ function cleanFts5Query(query: string): string {
 export function listActiveMemorySummariesByFts5(
   handle: StorageHandle,
   query: string,
-  options: { limit?: number } = {},
+  options: { limit?: number } = {}
 ): SafeMemorySummary[] {
   const limit = options.limit ?? 200;
   const sanitized = cleanFts5Query(query);
@@ -846,16 +822,16 @@ export function listActiveMemorySummariesByFts5(
                WHERE fts.terms MATCH ?
             )
           ORDER BY m.id ASC
-          LIMIT ?`,
+          LIMIT ?`
       )
       .all(sanitized, limit) as Array<{
-        id: number;
-        kind: string;
-        state: string;
-        summary: string | null;
-        confidence: number | null;
-        metadata: string | null;
-      }>;
+      id: number;
+      kind: string;
+      state: string;
+      summary: string | null;
+      confidence: number | null;
+      metadata: string | null;
+    }>;
     const out: SafeMemorySummary[] = [];
     for (const r of rows) {
       if (typeof r.summary !== "string" || r.summary.length === 0) continue;
@@ -878,12 +854,8 @@ export function listActiveMemorySummariesByFts5(
       }
       out.push({
         id: r.id,
-        kind: MEMORY_KINDS.includes(r.kind as MemoryKind)
-          ? (r.kind as MemoryKind)
-          : "finding",
-        state: MEMORY_STATES.includes(r.state as MemoryState)
-          ? (r.state as MemoryState)
-          : "active",
+        kind: MEMORY_KINDS.includes(r.kind as MemoryKind) ? (r.kind as MemoryKind) : "finding",
+        state: MEMORY_STATES.includes(r.state as MemoryState) ? (r.state as MemoryState) : "active",
         memoryContent: r.summary,
         tags,
         classification,
@@ -894,9 +866,7 @@ export function listActiveMemorySummariesByFts5(
   } catch (err) {
     // FTS5 is part of SQLite; if the MATCH fails (e.g. malformed
     // query after sanitization, or FTS5 unavailable), return empty.
-    logger.debug(
-      `listActiveMemorySummariesByFts5: FTS5 query failed: ${(err as Error).message}`,
-    );
+    logger.debug(`listActiveMemorySummariesByFts5: FTS5 query failed: ${(err as Error).message}`);
     return [];
   }
 }
@@ -994,7 +964,7 @@ export interface MemoryRelationshipBlockRow {
  */
 export function listActiveMemoryRelationshipBlocks(
   handle: StorageHandle,
-  options: { limit?: number } = {},
+  options: { limit?: number } = {}
 ): MemoryRelationshipBlockRow[] {
   const limit = options.limit ?? 200;
   const rows = handle.db
@@ -1003,12 +973,12 @@ export function listActiveMemoryRelationshipBlocks(
          FROM memories
          WHERE state = 'active'
          ORDER BY id ASC
-         LIMIT ?`,
+         LIMIT ?`
     )
     .all(limit) as Array<{
-      id: number;
-      metadata: string | null;
-    }>;
+    id: number;
+    metadata: string | null;
+  }>;
   const out: MemoryRelationshipBlockRow[] = [];
   for (const r of rows) {
     let block: MemoryRelationshipBlockRow["block"] = {
@@ -1029,9 +999,7 @@ export function listActiveMemoryRelationshipBlocks(
           const o = rel as Record<string, unknown>;
           block = {
             derivedSchemaVersion:
-              typeof o.derivedSchemaVersion === "string"
-                ? o.derivedSchemaVersion
-                : "ccm-draft-1",
+              typeof o.derivedSchemaVersion === "string" ? o.derivedSchemaVersion : "ccm-draft-1",
             derivedAt:
               typeof o.derivedAt === "number" && Number.isFinite(o.derivedAt)
                 ? Math.trunc(o.derivedAt)
@@ -1141,7 +1109,7 @@ export function storeEmbedding(
     vec: number[];
     modelId: string;
     summaryHash: string;
-  },
+  }
 ): EmbeddingRecord | null {
   try {
     const now = Date.now();
@@ -1152,7 +1120,7 @@ export function storeEmbedding(
         `INSERT OR REPLACE INTO embeddings
            (memory_id, dim, vec, model_id, schema_version, summary_hash, created_at, updated_at)
          VALUES
-           (@memory_id, @dim, @vec, @model_id, 'v1', @summary_hash, @created_at, @updated_at)`,
+           (@memory_id, @dim, @vec, @model_id, 'v1', @summary_hash, @created_at, @updated_at)`
       )
       .run({
         memory_id: input.memoryId,
@@ -1181,15 +1149,12 @@ export function storeEmbedding(
 /**
  * Retrieve the stored embedding for a memory, or null if none exists.
  */
-export function getEmbedding(
-  handle: StorageHandle,
-  memoryId: number,
-): EmbeddingRecord | null {
+export function getEmbedding(handle: StorageHandle, memoryId: number): EmbeddingRecord | null {
   const row = handle.db
     .prepare(
       `SELECT memory_id, dim, vec, model_id, summary_hash, created_at, updated_at
          FROM embeddings
-        WHERE memory_id = ?`,
+        WHERE memory_id = ?`
     )
     .get(memoryId) as
     | {
@@ -1220,9 +1185,7 @@ export function getEmbedding(
  */
 export function deleteEmbedding(handle: StorageHandle, memoryId: number): void {
   try {
-    handle.db
-      .prepare("DELETE FROM embeddings WHERE memory_id = ?")
-      .run(memoryId);
+    handle.db.prepare("DELETE FROM embeddings WHERE memory_id = ?").run(memoryId);
   } catch {
     // ignore
   }
@@ -1235,7 +1198,7 @@ export function deleteEmbedding(handle: StorageHandle, memoryId: number): void {
  */
 export function getEmbeddingsForMemories(
   handle: StorageHandle,
-  memoryIds: ReadonlyArray<number>,
+  memoryIds: ReadonlyArray<number>
 ): Map<number, EmbeddingRecord> {
   if (memoryIds.length === 0) return new Map();
   const placeholders = memoryIds.map(() => "?").join(",");
@@ -1243,7 +1206,7 @@ export function getEmbeddingsForMemories(
     .prepare(
       `SELECT memory_id, dim, vec, model_id, summary_hash, created_at, updated_at
          FROM embeddings
-        WHERE memory_id IN (${placeholders})`,
+        WHERE memory_id IN (${placeholders})`
     )
     .all(...memoryIds) as Array<{
     memory_id: number;

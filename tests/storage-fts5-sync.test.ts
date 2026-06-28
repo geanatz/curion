@@ -26,14 +26,14 @@
  *      triggers).
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
+import { test } from "node:test";
 
 import {
-  initStorage,
-  closeStorage,
-  insertMemoryRecord,
   type StorageHandle,
+  closeStorage,
+  initStorage,
+  insertMemoryRecord,
 } from "../src/storage/storage.ts";
 import { mkStorage, rmStorage } from "./_helpers/test-storage.ts";
 
@@ -46,26 +46,16 @@ import { mkStorage, rmStorage } from "./_helpers/test-storage.ts";
  * the FTS5-internal `rowid`, which is set explicitly by the
  * triggers to match `memories.rowid`, so this is a stable lookup.
  */
-function ftsRowCount(
-  handle: StorageHandle,
-  memoryId: number,
-): number {
+function ftsRowCount(handle: StorageHandle, memoryId: number): number {
   const row = handle.db
-    .prepare(
-      `SELECT COUNT(*) AS c FROM memories_fts WHERE memory_id = ?`,
-    )
+    .prepare(`SELECT COUNT(*) AS c FROM memories_fts WHERE memory_id = ?`)
     .get(memoryId) as { c: number };
   return row.c;
 }
 
-function ftsTerms(
-  handle: StorageHandle,
-  memoryId: number,
-): string | null {
+function ftsTerms(handle: StorageHandle, memoryId: number): string | null {
   const row = handle.db
-    .prepare(
-      `SELECT terms FROM memories_fts WHERE memory_id = ?`,
-    )
+    .prepare(`SELECT terms FROM memories_fts WHERE memory_id = ?`)
     .get(memoryId) as { terms: string | null } | undefined;
   return row?.terms ?? null;
 }
@@ -103,7 +93,7 @@ test("FTS5 sync: INSERT trigger populates memories_fts with the summary", () => 
     // separate internal structure).
     assert.equal(
       ftsTerms(handle, record.id),
-      "The libpurple protocols are upstreamed into the libgnt fork.",
+      "The libpurple protocols are upstreamed into the libgnt fork."
     );
 
     // A FTS5 MATCH query against a distinctive token from the
@@ -112,7 +102,7 @@ test("FTS5 sync: INSERT trigger populates memories_fts with the summary", () => 
       .prepare(
         `SELECT memory_id FROM memories_fts
           WHERE memories_fts MATCH ?
-          ORDER BY rowid ASC`,
+          ORDER BY rowid ASC`
       )
       .all(`"libpurple"`) as Array<{ memory_id: number }>;
     assert.equal(match.length, 1);
@@ -148,7 +138,7 @@ test("FTS5 sync: UPDATE trigger refreshes memories_fts when summary changes", ()
     const beforeMatch = handle.db
       .prepare(
         `SELECT memory_id FROM memories_fts
-          WHERE memories_fts MATCH ?`,
+          WHERE memories_fts MATCH ?`
       )
       .all(`"ouroboros"`) as Array<{ memory_id: number }>;
     assert.equal(beforeMatch.length, 1);
@@ -163,32 +153,24 @@ test("FTS5 sync: UPDATE trigger refreshes memories_fts when summary changes", ()
       .prepare(
         `UPDATE memories
             SET summary = ?, updated_at = ?
-          WHERE id = ?`,
+          WHERE id = ?`
       )
-      .run(
-        "The phoenix protocol reboots itself on a daily cycle.",
-        now,
-        record.id,
-      );
+      .run("The phoenix protocol reboots itself on a daily cycle.", now, record.id);
 
     // The old word must no longer match.
     const afterOldMatch = handle.db
       .prepare(
         `SELECT memory_id FROM memories_fts
-          WHERE memories_fts MATCH ?`,
+          WHERE memories_fts MATCH ?`
       )
       .all(`"ouroboros"`) as Array<{ memory_id: number }>;
-    assert.equal(
-      afterOldMatch.length,
-      0,
-      "old summary term must be removed from the FTS5 index",
-    );
+    assert.equal(afterOldMatch.length, 0, "old summary term must be removed from the FTS5 index");
 
     // The new word must now match.
     const afterNewMatch = handle.db
       .prepare(
         `SELECT memory_id FROM memories_fts
-          WHERE memories_fts MATCH ?`,
+          WHERE memories_fts MATCH ?`
       )
       .all(`"phoenix"`) as Array<{ memory_id: number }>;
     assert.equal(afterNewMatch.length, 1);
@@ -197,7 +179,7 @@ test("FTS5 sync: UPDATE trigger refreshes memories_fts when summary changes", ()
     // The `terms` column must reflect the new summary verbatim.
     assert.equal(
       ftsTerms(handle, record.id),
-      "The phoenix protocol reboots itself on a daily cycle.",
+      "The phoenix protocol reboots itself on a daily cycle."
     );
 
     // No duplicate rows for the same memory_id.
@@ -240,7 +222,7 @@ test("FTS5 sync: DELETE trigger removes the corresponding memories_fts row", () 
     const match = handle.db
       .prepare(
         `SELECT memory_id FROM memories_fts
-          WHERE memories_fts MATCH ?`,
+          WHERE memories_fts MATCH ?`
       )
       .all(`"zephyr-7b"`) as Array<{ memory_id: number }>;
     assert.equal(match.length, 0);
@@ -261,13 +243,13 @@ test("FTS5 sync: initStorage creates the three sync triggers and backfills pre-e
       .prepare(
         `SELECT name FROM sqlite_master
           WHERE type = 'trigger' AND name IN ('memories_ai', 'memories_au', 'memories_ad')
-          ORDER BY name ASC`,
+          ORDER BY name ASC`
       )
       .all() as Array<{ name: string }>;
     assert.deepEqual(
       triggerRows.map((r) => r.name),
       ["memories_ad", "memories_ai", "memories_au"],
-      "all three sync triggers must be present after initStorage",
+      "all three sync triggers must be present after initStorage"
     );
 
     // The one-shot backfill on startup must index pre-existing
@@ -292,20 +274,20 @@ test("FTS5 sync: initStorage creates the three sync triggers and backfills pre-e
         probeHandle.db
           .prepare(
             `INSERT INTO memories (kind, created_at, updated_at, summary, state)
-                    VALUES (?, ?, ?, ?, ?)`,
+                    VALUES (?, ?, ?, ?, ?)`
           )
           .run(
             "fact",
             Date.now(),
             Date.now(),
             "The cinnabar fruit only ripens under a gibbous moon.",
-            "active",
+            "active"
           );
         // Without the triggers and without the rebuild, the
         // FTS5 table is empty.
-        const ftsCount = probeHandle.db
-          .prepare(`SELECT COUNT(*) AS c FROM memories_fts`)
-          .get() as { c: number };
+        const ftsCount = probeHandle.db.prepare(`SELECT COUNT(*) AS c FROM memories_fts`).get() as {
+          c: number;
+        };
         assert.equal(ftsCount.c, 0);
       } finally {
         closeStorage(probeHandle);
@@ -318,18 +300,14 @@ test("FTS5 sync: initStorage creates the three sync triggers and backfills pre-e
     // dropped must now be in `memories_fts`.
     const reopened = initStorage({ projectRoot: tmp });
     try {
-      const ftsCount = reopened.db
-        .prepare(`SELECT COUNT(*) AS c FROM memories_fts`)
-        .get() as { c: number };
-      assert.equal(
-        ftsCount.c,
-        1,
-        "the one-shot backfill on startup must index pre-existing rows",
-      );
+      const ftsCount = reopened.db.prepare(`SELECT COUNT(*) AS c FROM memories_fts`).get() as {
+        c: number;
+      };
+      assert.equal(ftsCount.c, 1, "the one-shot backfill on startup must index pre-existing rows");
       const match = reopened.db
         .prepare(
           `SELECT memory_id FROM memories_fts
-            WHERE memories_fts MATCH ?`,
+            WHERE memories_fts MATCH ?`
         )
         .all(`"cinnabar"`) as Array<{ memory_id: number }>;
       assert.equal(match.length, 1);
@@ -379,16 +357,13 @@ test("FTS5: listActiveMemorySummariesByFts5 retrieves all matched memories witho
     assert.equal(
       matched.length,
       MEMORY_COUNT,
-      `FTS5 should return all ${MEMORY_COUNT} matched memories; no 50-cap should apply`,
+      `FTS5 should return all ${MEMORY_COUNT} matched memories; no 50-cap should apply`
     );
 
     // Verify all inserted ids are present in the matched results.
     const matchedIds = new Set(matched.map((m: { id: number }) => m.id));
     for (const id of insertedIds) {
-      assert.ok(
-        matchedIds.has(id),
-        `inserted memory id ${id} should be in FTS5 results`,
-      );
+      assert.ok(matchedIds.has(id), `inserted memory id ${id} should be in FTS5 results`);
     }
   } finally {
     rmStorage(tmp, handle);
@@ -412,7 +387,9 @@ test("FTS5: listActiveMemorySummariesByFts5 returns empty for no-match query wit
 
     // Query for a term that does not exist.
     const { listActiveMemorySummariesByFts5 } = await import("../src/storage/storage.ts");
-    const matched = listActiveMemorySummariesByFts5(handle, "nonexistent-term-xyz-123", { limit: 200 });
+    const matched = listActiveMemorySummariesByFts5(handle, "nonexistent-term-xyz-123", {
+      limit: 200,
+    });
     assert.equal(matched.length, 0, "FTS5 should return empty array for no-match query");
   } finally {
     rmStorage(tmp, handle);

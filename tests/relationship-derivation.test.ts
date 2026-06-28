@@ -27,16 +27,16 @@
  *      omitted), with no clock read.
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
+import { test } from "node:test";
 
 import {
-  deriveRelationshipMetadata,
   CONFLICT_CONFIDENCE_THRESHOLD,
-  OLDER_VARIANT_CONFIDENCE_THRESHOLD,
-  MAX_RELATED_IDS,
   DERIVED_SCHEMA_VERSION,
+  MAX_RELATED_IDS,
+  OLDER_VARIANT_CONFIDENCE_THRESHOLD,
   type RelationshipMetadataFields,
+  deriveRelationshipMetadata,
 } from "../src/retrieval/relationship.ts";
 import type { SafeMemorySummary } from "../src/storage/storage.ts";
 
@@ -92,7 +92,11 @@ test("deriveRelationshipMetadata: omitted asOf -> derivedAt defaults to 0 (no cl
 test("deriveRelationshipMetadata: NaN / non-finite asOf is clamped to 0", () => {
   const candidate = mkSummary({ id: 201, memoryContent: "x" });
   const outNaN = deriveRelationshipMetadata({ candidate, others: [], asOf: Number.NaN });
-  const outInf = deriveRelationshipMetadata({ candidate, others: [], asOf: Number.POSITIVE_INFINITY });
+  const outInf = deriveRelationshipMetadata({
+    candidate,
+    others: [],
+    asOf: Number.POSITIVE_INFINITY,
+  });
   assert.equal(outNaN.derivedAt, 0);
   assert.equal(outInf.derivedAt, 0);
 });
@@ -153,7 +157,7 @@ test("deriveRelationshipMetadata: high overlap + asymmetric negation -> conflict
   assert.deepEqual(out.conflictsWith, [21]);
   assert.ok(
     out.detectionConfidence >= CONFLICT_CONFIDENCE_THRESHOLD,
-    `expected detectionConfidence >= ${CONFLICT_CONFIDENCE_THRESHOLD}, got ${out.detectionConfidence}`,
+    `expected detectionConfidence >= ${CONFLICT_CONFIDENCE_THRESHOLD}, got ${out.detectionConfidence}`
   );
 });
 
@@ -253,7 +257,7 @@ test("deriveRelationshipMetadata: near-paraphrase of earlier-id summary -> older
   assert.deepEqual(out.olderVariantsOf, [40]);
   assert.ok(
     out.detectionConfidence >= OLDER_VARIANT_CONFIDENCE_THRESHOLD,
-    `expected detectionConfidence >= ${OLDER_VARIANT_CONFIDENCE_THRESHOLD}, got ${out.detectionConfidence}`,
+    `expected detectionConfidence >= ${OLDER_VARIANT_CONFIDENCE_THRESHOLD}, got ${out.detectionConfidence}`
   );
 });
 
@@ -332,15 +336,15 @@ test("deriveRelationshipMetadata: both conflict and older-variant can fire in on
   });
   assert.ok(
     out.conflictsWith.includes(91),
-    `expected conflictsWith to include 91, got ${out.conflictsWith}`,
+    `expected conflictsWith to include 91, got ${out.conflictsWith}`
   );
   assert.ok(
     out.olderVariantsOf.includes(90),
-    `expected olderVariantsOf to include 90, got ${out.olderVariantsOf}`,
+    `expected olderVariantsOf to include 90, got ${out.olderVariantsOf}`
   );
   assert.ok(
     out.detectionConfidence >= OLDER_VARIANT_CONFIDENCE_THRESHOLD,
-    `expected detectionConfidence >= ${OLDER_VARIANT_CONFIDENCE_THRESHOLD}, got ${out.detectionConfidence}`,
+    `expected detectionConfidence >= ${OLDER_VARIANT_CONFIDENCE_THRESHOLD}, got ${out.detectionConfidence}`
   );
 });
 
@@ -400,19 +404,19 @@ test("deriveRelationshipMetadata: bounded output -> conflictsWith length <= MAX_
       mkSummary({
         id: 301 + i,
         memoryContent: "we use Postgres for this service in production",
-      }),
+      })
     );
   }
   const out = deriveRelationshipMetadata({ candidate, others, asOf: 1 });
   assert.ok(
     out.conflictsWith.length <= MAX_RELATED_IDS,
-    `expected conflictsWith.length <= ${MAX_RELATED_IDS}, got ${out.conflictsWith.length}`,
+    `expected conflictsWith.length <= ${MAX_RELATED_IDS}, got ${out.conflictsWith.length}`
   );
   // Ids are sorted ascending.
   for (let i = 1; i < out.conflictsWith.length; i++) {
     assert.ok(
       out.conflictsWith[i - 1] < out.conflictsWith[i],
-      "expected conflictsWith to be sorted ascending",
+      "expected conflictsWith to be sorted ascending"
     );
   }
 });
@@ -496,13 +500,9 @@ test("deriveRelationshipMetadata: output never references raw input", () => {
   assert.equal(
     serialised.includes("PRIVATE RAW USER TEXT"),
     false,
-    "output must not contain raw input text",
+    "output must not contain raw input text"
   );
-  assert.equal(
-    serialised.includes("rawInput"),
-    false,
-    "output must not contain the rawInput key",
-  );
+  assert.equal(serialised.includes("rawInput"), false, "output must not contain the rawInput key");
 });
 
 // ---------------------------------------------------------------------------
@@ -539,7 +539,7 @@ test("deriveRelationshipMetadata: relationship module does not import benchmark 
     assert.equal(
       text.includes(tok),
       false,
-      `relationship.ts must not reference benchmark experiment module "${tok}"`,
+      `relationship.ts must not reference benchmark experiment module "${tok}"`
     );
   }
   // And the module must not import from the benchmark
@@ -547,7 +547,7 @@ test("deriveRelationshipMetadata: relationship module does not import benchmark 
   assert.equal(
     /from\s+["'][^"']*benchmark\//.test(text),
     false,
-    "relationship.ts must not import from src/benchmark/",
+    "relationship.ts must not import from src/benchmark/"
   );
 });
 
@@ -600,7 +600,7 @@ test("deriveRelationshipMetadata: output shape is the spec'd block (5 fields)", 
       "derivedSchemaVersion",
       "detectionConfidence",
       "olderVariantsOf",
-    ].sort(),
+    ].sort()
   );
 });
 

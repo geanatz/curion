@@ -30,15 +30,15 @@
  * the project storage.
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
+import { test } from "node:test";
 
-import { tokenizeStemmed } from "../src/retrieval/lexical.ts";
 import {
   rankLexicalStemmed,
   scoreStemmedCandidate,
   scoreStemmedCandidateDetailed,
 } from "../src/benchmark/variants/lexical-stemmed.ts";
+import { tokenizeStemmed } from "../src/retrieval/lexical.ts";
 
 // ---------------------------------------------------------------------------
 // 1. tokenizeStemmed basic cases
@@ -51,9 +51,7 @@ test("tokenizeStemmed: lowercases, drops stopwords and pure-digit tokens, and ru
   // ("cores" -> "core", which is correct; and the `uses`
   // check, which is correct because the length guard
   // prevents stripping the trailing `s`).
-  const toks = tokenizeStemmed(
-    "The project USES Postgres 16 cores for the testing",
-  );
+  const toks = tokenizeStemmed("The project USES Postgres 16 cores for the testing");
   // "USES" lowercased to "uses"; the length guard (4 < 5)
   // prevents the `s` suffix from being stripped.
   assert.ok(toks.includes("uses"), `'uses' should survive unchanged, got ${JSON.stringify(toks)}`);
@@ -65,11 +63,17 @@ test("tokenizeStemmed: lowercases, drops stopwords and pure-digit tokens, and ru
   // "project" has no suffix match -> not stemmed.
   assert.ok(toks.includes("project"));
   // "postgres" ends with "s" and is long enough -> "postgre".
-  assert.ok(toks.includes("postgre"), `'postgre' expected (postgres -> postgre), got ${JSON.stringify(toks)}`);
+  assert.ok(
+    toks.includes("postgre"),
+    `'postgre' expected (postgres -> postgre), got ${JSON.stringify(toks)}`
+  );
   // "cores" ends with "s" and is long enough -> "core".
   assert.ok(toks.includes("core"), `'core' expected (cores -> core), got ${JSON.stringify(toks)}`);
   // "testing" ends with "ing" and is long enough -> "test".
-  assert.ok(toks.includes("test"), `'test' expected (testing -> test), got ${JSON.stringify(toks)}`);
+  assert.ok(
+    toks.includes("test"),
+    `'test' expected (testing -> test), got ${JSON.stringify(toks)}`
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -91,8 +95,14 @@ test("tokenizeStemmed: length guard prevents stemming of short tokens", () => {
   // assert both that "go" is NOT in the output and that a
   // 4-char non-stopword word IS in the output unchanged.
   const toks2 = tokenizeStemmed("go uses");
-  assert.ok(!toks2.includes("go"), `"go" is dropped by the underlying tokenize (length < 3), got ${JSON.stringify(toks2)}`);
-  assert.ok(toks2.includes("uses"), `"uses" must survive the length guard, got ${JSON.stringify(toks2)}`);
+  assert.ok(
+    !toks2.includes("go"),
+    `"go" is dropped by the underlying tokenize (length < 3), got ${JSON.stringify(toks2)}`
+  );
+  assert.ok(
+    toks2.includes("uses"),
+    `"uses" must survive the length guard, got ${JSON.stringify(toks2)}`
+  );
 
   // "house" is 5 chars (>= 5) and ends with "e" which is
   // NOT in the suffix list, so "house" is NOT stemmed.
@@ -191,15 +201,13 @@ test("rankLexicalStemmed: ties on score are broken by descending id (newer memor
   assert.equal(r.length, 2);
   assert.deepEqual(
     r.map((x) => x.id),
-    [2, 1],
+    [2, 1]
   );
 });
 
 test("rankLexicalStemmed: returns an empty array for a query that stems to nothing", () => {
   // "the and for" stems to [] (all stopwords).
-  const r = rankLexicalStemmed("the and for", [
-    { id: 1, text: "postgres storage" },
-  ]);
+  const r = rankLexicalStemmed("the and for", [{ id: 1, text: "postgres storage" }]);
   assert.deepEqual(r, []);
 });
 
@@ -220,7 +228,7 @@ test("rankLexicalStemmed: respects the threshold option", () => {
   const r = rankLexicalStemmed(
     "friendly team",
     [{ id: 1, text: "we have a friend on the project" }],
-    { threshold: 0.9 },
+    { threshold: 0.9 }
   );
   assert.deepEqual(r, []);
 });
@@ -241,10 +249,7 @@ test("scoreStemmedCandidateDetailed: returns the overlap count alongside the sco
   // dropped by length).
   // Overlap: 2/2 ("friend" and "dogs" both match). Score:
   // 1.0.
-  const d = scoreStemmedCandidateDetailed(
-    "friendly dogs",
-    "we have a friend and dogs here",
-  );
+  const d = scoreStemmedCandidateDetailed("friendly dogs", "we have a friend and dogs here");
   assert.equal(d.overlap, 2);
   assert.equal(d.score, 1);
 });

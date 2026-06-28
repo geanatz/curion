@@ -44,38 +44,38 @@
  * hybrid tests focus on the fusion layer.
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { test } from "node:test";
 
 import { BENCHMARK_RECORDS } from "../src/benchmark/corpus.ts";
+import { aggregateMetrics } from "../src/benchmark/metrics.ts";
 import { BENCHMARK_QUERIES } from "../src/benchmark/queries.ts";
 import { buildCandidates } from "../src/benchmark/retrieval-runner.ts";
-import type { LexicalCandidate } from "../src/retrieval/lexical.ts";
 import {
+  formatComparisonReport,
+  formatHumanReport,
+  isComparisonReport,
+  isSingleVariantReport,
+  parseRetrievalCli,
+  resolveBenchmarkArtifactsDir,
+  runRetrievalBenchmark,
+  writeBenchmarkReport,
+  writeComparisonReport,
+} from "../src/benchmark/retrieval-runner.ts";
+import {
+  DEFAULT_HYBRID_THRESHOLD,
+  DEFAULT_HYBRID_TOP_K,
+  DEFAULT_RRF_K,
+  RRF_SWEEP_K_VALUES,
   fuseRankings,
   rankHybrid,
   rankHybridAsLexical,
   rrfContribution,
-  DEFAULT_RRF_K,
-  DEFAULT_HYBRID_THRESHOLD,
-  DEFAULT_HYBRID_TOP_K,
-  RRF_SWEEP_K_VALUES,
 } from "../src/benchmark/variants/hybrid.ts";
-import {
-  runRetrievalBenchmark,
-  parseRetrievalCli,
-  isSingleVariantReport,
-  isComparisonReport,
-  resolveBenchmarkArtifactsDir,
-  writeBenchmarkReport,
-  writeComparisonReport,
-  formatComparisonReport,
-  formatHumanReport,
-} from "../src/benchmark/retrieval-runner.ts";
-import { aggregateMetrics } from "../src/benchmark/metrics.ts";
+import type { LexicalCandidate } from "../src/retrieval/lexical.ts";
 import { PUBLIC_TOOL_NAMES } from "../src/server.ts";
 import { walkTs } from "./_helpers/fs-walk.ts";
 
@@ -88,16 +88,12 @@ test("rrfContribution: returns weight / (k + rank) when rank is present", () => 
   // -> 1 / 61.
   assert.ok(
     Math.abs(rrfContribution(1, 1, 60) - 1 / 61) < 1e-12,
-    "rank-1 with default k=60 should equal 1/61",
+    "rank-1 with default k=60 should equal 1/61"
   );
   // rank 3, weight 1, k=60 -> 1/63.
-  assert.ok(
-    Math.abs(rrfContribution(3, 1, 60) - 1 / 63) < 1e-12,
-  );
+  assert.ok(Math.abs(rrfContribution(3, 1, 60) - 1 / 63) < 1e-12);
   // rank 1, weight 2, k=60 -> 2/61.
-  assert.ok(
-    Math.abs(rrfContribution(1, 2, 60) - 2 / 61) < 1e-12,
-  );
+  assert.ok(Math.abs(rrfContribution(1, 2, 60) - 2 / 61) < 1e-12);
 });
 
 test("rrfContribution: returns 0 when rank is null (candidate absent from source)", () => {
@@ -114,19 +110,31 @@ test("rrfContribution: throws on invalid k (non-positive, non-finite)", () => {
   assert.throws(() => rrfContribution(1, 1, 0), /k must be a positive finite number/);
   assert.throws(() => rrfContribution(1, 1, -1), /k must be a positive finite number/);
   assert.throws(() => rrfContribution(1, 1, Number.NaN), /k must be a positive finite number/);
-  assert.throws(() => rrfContribution(1, 1, Number.POSITIVE_INFINITY), /k must be a positive finite number/);
+  assert.throws(
+    () => rrfContribution(1, 1, Number.POSITIVE_INFINITY),
+    /k must be a positive finite number/
+  );
 });
 
 test("rrfContribution: throws on invalid weight (negative, non-finite)", () => {
   assert.throws(() => rrfContribution(1, -0.1, 60), /weight must be a non-negative finite number/);
-  assert.throws(() => rrfContribution(1, Number.NaN, 60), /weight must be a non-negative finite number/);
-  assert.throws(() => rrfContribution(1, Number.POSITIVE_INFINITY, 60), /weight must be a non-negative finite number/);
+  assert.throws(
+    () => rrfContribution(1, Number.NaN, 60),
+    /weight must be a non-negative finite number/
+  );
+  assert.throws(
+    () => rrfContribution(1, Number.POSITIVE_INFINITY, 60),
+    /weight must be a non-negative finite number/
+  );
 });
 
 test("rrfContribution: throws on invalid rank (non-positive, non-finite, non-integer)", () => {
   assert.throws(() => rrfContribution(0, 1, 60), /rank must be a positive integer or null/);
   assert.throws(() => rrfContribution(-1, 1, 60), /rank must be a positive integer or null/);
-  assert.throws(() => rrfContribution(Number.NaN, 1, 60), /rank must be a positive integer or null/);
+  assert.throws(
+    () => rrfContribution(Number.NaN, 1, 60),
+    /rank must be a positive integer or null/
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -156,7 +164,7 @@ test("fuseRankings: unions per-variant ids, sums contributions, sorts by RRF des
       { label: "vector", list: vec, weight: 1 },
     ],
     60,
-    5,
+    5
   );
   // 6 distinct ids across the three lists; top-5 keeps
   // the five highest RRF scores.
@@ -216,7 +224,7 @@ test("fuseRankings: tie-break is id-descending when RRF scores are equal", () =>
       { label: "vector", list: [], weight: 1 },
     ],
     60,
-    5,
+    5
   );
   assert.equal(fused.length, 2);
   assert.equal(fused[0]!.id, 7);
@@ -241,7 +249,7 @@ test("fuseRankings: weight 0 silences a variant; weight 2 doubles its contributi
       { label: "vector", list: [], weight: 0 },
     ],
     60,
-    5,
+    5
   );
   assert.equal(fused[0]!.id, 1);
   assert.equal(fused[1]!.id, 2);
@@ -270,7 +278,7 @@ test("fuseRankings: k=20 makes rank-1 dominate; k=100 flattens high ranks", () =
       { label: "vector", list: [], weight: 1 },
     ],
     20,
-    5,
+    5
   );
   const ftsK100 = fuseRankings(
     [
@@ -279,7 +287,7 @@ test("fuseRankings: k=20 makes rank-1 dominate; k=100 flattens high ranks", () =
       { label: "vector", list: [], weight: 1 },
     ],
     100,
-    5,
+    5
   );
   // Both runs have id=1 first and id=2 second, but the
   // lead changes with k.
@@ -293,7 +301,7 @@ test("fuseRankings: k=20 makes rank-1 dominate; k=100 flattens high ranks", () =
   // The lead with k=20 is much larger.
   assert.ok(
     leadK20 > leadK100 * 10,
-    `expected k=20 lead to dominate k=100 lead by 10x, got ${leadK20} vs ${leadK100}`,
+    `expected k=20 lead to dominate k=100 lead by 10x, got ${leadK20} vs ${leadK100}`
   );
   // And the absolute values match the math.
   assert.ok(Math.abs(leadK20 - (1 / 21 - 1 / 22)) < 1e-12);
@@ -308,7 +316,7 @@ test("fuseRankings: empty input rankings return an empty result", () => {
       { label: "vector", list: [], weight: 1 },
     ],
     60,
-    5,
+    5
   );
   assert.equal(fused.length, 0);
 });
@@ -316,31 +324,16 @@ test("fuseRankings: empty input rankings return an empty result", () => {
 test("fuseRankings: validates k and topK", () => {
   const list = [{ id: 1, score: 0.5 }];
   assert.throws(
-    () =>
-      fuseRankings(
-        [{ label: "lexical", list, weight: 1 }],
-        0,
-        5,
-      ),
-    /k must be a positive finite number/,
+    () => fuseRankings([{ label: "lexical", list, weight: 1 }], 0, 5),
+    /k must be a positive finite number/
   );
   assert.throws(
-    () =>
-      fuseRankings(
-        [{ label: "lexical", list, weight: 1 }],
-        60,
-        0,
-      ),
-    /topK must be a positive integer/,
+    () => fuseRankings([{ label: "lexical", list, weight: 1 }], 60, 0),
+    /topK must be a positive integer/
   );
   assert.throws(
-    () =>
-      fuseRankings(
-        [{ label: "lexical", list, weight: -0.1 }],
-        60,
-        5,
-      ),
-    /weight must be a non-negative finite number/,
+    () => fuseRankings([{ label: "lexical", list, weight: -0.1 }], 60, 5),
+    /weight must be a non-negative finite number/
   );
 });
 
@@ -353,11 +346,7 @@ test("fuseRankings: duplicate ids in a single source keep the first rank", () =>
     { id: 1, score: 0.9 },
     { id: 1, score: 0.7 },
   ];
-  const fused = fuseRankings(
-    [{ label: "lexical", list, weight: 1 }],
-    60,
-    5,
-  );
+  const fused = fuseRankings([{ label: "lexical", list, weight: 1 }], 60, 5);
   assert.equal(fused.length, 1);
   assert.equal(fused[0]!.id, 1);
   const lex = fused[0]!.contributors.find((x) => x.source === "lexical")!;
@@ -495,15 +484,15 @@ test("rankHybrid: invalid k / weight throws at the public boundary", () => {
   const candidates = buildCandidates(BENCHMARK_RECORDS);
   assert.throws(
     () => rankHybrid("Postgres", candidates, { k: 0 }),
-    /k must be a positive finite number/,
+    /k must be a positive finite number/
   );
   assert.throws(
     () => rankHybrid("Postgres", candidates, { k: -1 }),
-    /k must be a positive finite number/,
+    /k must be a positive finite number/
   );
   assert.throws(
     () => rankHybrid("Postgres", candidates, { weights: { lexical: -0.1 } }),
-    /weights must be non-negative finite numbers/,
+    /weights must be non-negative finite numbers/
   );
 });
 
@@ -549,43 +538,37 @@ test("hybrid variant is benchmark-only: production recall() controller is not mo
   // the point: it makes the "benchmark-only" contract
   // visible in CI.
   const recallSrc = fs.readFileSync(
-    path.join(
-      import.meta.dirname,
-      "..",
-      "src",
-      "controller",
-      "recall-controller.ts",
-    ),
-    "utf8",
+    path.join(import.meta.dirname, "..", "src", "controller", "recall-controller.ts"),
+    "utf8"
   );
   assert.match(recallSrc, /rankLexical/, "recall controller must still import rankLexical");
   assert.doesNotMatch(
     recallSrc,
     /rankHybrid/,
-    "recall controller must NOT import rankHybrid — hybrid is benchmark-only",
+    "recall controller must NOT import rankHybrid — hybrid is benchmark-only"
   );
   assert.doesNotMatch(
     recallSrc,
     /benchmark\/variants\/hybrid/,
-    "recall controller must NOT import the hybrid benchmark module",
+    "recall controller must NOT import the hybrid benchmark module"
   );
   const seamSrc = fs.readFileSync(
     path.join(import.meta.dirname, "..", "src", "retrieval", "seam.ts"),
-    "utf8",
+    "utf8"
   );
   assert.doesNotMatch(
     seamSrc,
     /rankHybrid/,
-    "retrieval/seam.ts must NOT call rankHybrid — it is the production seam",
+    "retrieval/seam.ts must NOT call rankHybrid — it is the production seam"
   );
   assert.doesNotMatch(
     seamSrc,
     /benchmark\/variants\/hybrid/,
-    "retrieval/seam.ts must NOT import the hybrid benchmark module",
+    "retrieval/seam.ts must NOT import the hybrid benchmark module"
   );
   const serverSrc = fs.readFileSync(
     path.join(import.meta.dirname, "..", "src", "server.ts"),
-    "utf8",
+    "utf8"
   );
   assert.match(serverSrc, /"remember"/);
   assert.match(serverSrc, /"recall"/);
@@ -599,7 +582,7 @@ test("hybrid variant is benchmark-only: production recall() controller is not mo
   assert.deepEqual(
     serverSrc.match(/server\.registerTool\(\s*"(\w+)"/g),
     ['server.registerTool(\n    "remember"', 'server.registerTool(\n    "recall"'],
-    "public MCP tool surface must remain exactly remember + recall",
+    "public MCP tool surface must remain exactly remember + recall"
   );
 });
 
@@ -620,36 +603,28 @@ test("hybrid variant: only the benchmark runner imports the hybrid module", () =
   // self-contained per the brief); they must be excluded from
   // the symbol-usage check so the guard stays focused on actual
   // benchmark-only symbol leaks.
-  const selfContainedFiles = new Set<string>([
-    path.join("retrieval", "semantic", "score.ts"),
-  ]);
+  const selfContainedFiles = new Set<string>([path.join("retrieval", "semantic", "score.ts")]);
   for (const file of walkTs(root, { excludeDts: false })) {
     if (allowedImporters.has(file)) continue;
     const src = fs.readFileSync(path.join(root, file), "utf8");
     const importsHybridModule =
-      src.includes("from \"./hybrid\"") ||
-      src.includes("from \"./hybrid.js\"") ||
-      src.includes("from \"../benchmark/variants/hybrid") ||
-      src.includes("from \"../../benchmark/variants/hybrid");
+      src.includes('from "./hybrid"') ||
+      src.includes('from "./hybrid.js"') ||
+      src.includes('from "../benchmark/variants/hybrid') ||
+      src.includes('from "../../benchmark/variants/hybrid');
     // Direct symbol usage outside the module's own file is
     // also a leak — except for self-contained production files
     // that define their own RRF helper copy.
     const usesHybridSymbol =
-      (!selfContainedFiles.has(file) &&
-        (src.match(/\brankHybrid\b/) !== null ||
-          src.match(/\brankHybridAsLexical\b/) !== null ||
-          src.match(/\bfuseRankings\b/) !== null ||
-          src.match(/\brrfContribution\b/) !== null ||
-          src.match(/\bHybridWeights\b/) !== null ||
-          src.match(/\bHybridRankingOptions\b/) !== null));
-    assert.ok(
-      !importsHybridModule,
-      `unexpected import of hybrid module in ${file}`,
-    );
-    assert.ok(
-      !usesHybridSymbol,
-      `unexpected hybrid symbol usage in ${file}`,
-    );
+      !selfContainedFiles.has(file) &&
+      (src.match(/\brankHybrid\b/) !== null ||
+        src.match(/\brankHybridAsLexical\b/) !== null ||
+        src.match(/\bfuseRankings\b/) !== null ||
+        src.match(/\brrfContribution\b/) !== null ||
+        src.match(/\bHybridWeights\b/) !== null ||
+        src.match(/\bHybridRankingOptions\b/) !== null);
+    assert.ok(!importsHybridModule, `unexpected import of hybrid module in ${file}`);
+    assert.ok(!usesHybridSymbol, `unexpected hybrid symbol usage in ${file}`);
   }
 });
 
@@ -666,14 +641,10 @@ test("public MCP contract unchanged: exactly two tools, one text param each", ()
   assert.equal(PUBLIC_TOOL_NAMES.length, 2);
   const serverSrc = fs.readFileSync(
     path.join(import.meta.dirname, "..", "src", "server.ts"),
-    "utf8",
+    "utf8"
   );
   const toolCallCount = (serverSrc.match(/server\.registerTool\(/g) ?? []).length;
-  assert.equal(
-    toolCallCount,
-    2,
-    `server.ts must register exactly 2 tools, found ${toolCallCount}`,
-  );
+  assert.equal(toolCallCount, 2, `server.ts must register exactly 2 tools, found ${toolCallCount}`);
 });
 
 // ---------------------------------------------------------------------------
@@ -716,22 +687,17 @@ test("CLI: --hybrid-k with a non-hybrid variant emits a stderr note (Reviewer fo
   try {
     for (const v of ["lexical", "fts5", "vector"] as const) {
       captured.length = 0;
-      const opts = parseRetrievalCli([
-        "--variant",
-        v,
-        "--hybrid-k",
-        "20",
-      ]);
+      const opts = parseRetrievalCli(["--variant", v, "--hybrid-k", "20"]);
       assert.equal(opts.hybridK, 20, `--hybrid-k must still parse for ${v}`);
       assert.equal(opts.variant, v);
       const joined = captured.join("");
       assert.ok(
         joined.includes("--hybrid-k 20 is ignored"),
-        `expected stderr note for ${v}, got: ${JSON.stringify(joined)}`,
+        `expected stderr note for ${v}, got: ${JSON.stringify(joined)}`
       );
       assert.ok(
         joined.includes(`--variant ${v}`),
-        `stderr note must mention the active variant, got: ${JSON.stringify(joined)}`,
+        `stderr note must mention the active variant, got: ${JSON.stringify(joined)}`
       );
     }
     // And the warning does NOT fire for hybrid / all /
@@ -746,7 +712,7 @@ test("CLI: --hybrid-k with a non-hybrid variant emits a stderr note (Reviewer fo
       assert.equal(
         captured.length,
         0,
-        `unexpected stderr note for ${JSON.stringify(argv)}: ${captured.join("")}`,
+        `unexpected stderr note for ${JSON.stringify(argv)}: ${captured.join("")}`
       );
     }
   } finally {
@@ -762,14 +728,7 @@ test("runner: --variant hybrid produces a single-variant report with the `hybrid
   assert.equal(report.config.threshold, 0);
   assert.equal(report.config.topK, 5);
   // Every family is present.
-  for (const f of [
-    "exact",
-    "paraphrase",
-    "temporal",
-    "multi-hop",
-    "no-answer",
-    "orientation",
-  ]) {
+  for (const f of ["exact", "paraphrase", "temporal", "multi-hop", "no-answer", "orientation"]) {
     assert.ok(report.metrics.perFamily[f] !== undefined, `missing family: ${f}`);
   }
 });
@@ -885,19 +844,13 @@ test("runner: formatComparisonReport includes the hybrid section and the hybrid 
     "### hybrid ###",
     "hybrid-benchmark",
   ]) {
-    assert.ok(
-      out.includes(section),
-      `comparison report missing section: ${section}`,
-    );
+    assert.ok(out.includes(section), `comparison report missing section: ${section}`);
   }
   // The headline table has a hybrid column. Every row
   // exposes lexical/fts5/vector/hybrid numbers plus a
   // delta.
   for (const metric of ["rank1 (positive)", "hit@5 (positive)", "no-answer TNR"]) {
-    assert.ok(
-      out.includes(metric),
-      `comparison table missing metric: ${metric}`,
-    );
+    assert.ok(out.includes(metric), `comparison table missing metric: ${metric}`);
   }
 });
 
@@ -910,10 +863,7 @@ test("runner: hybrid report metrics are well-formed (rank1/hit@5/TNR match aggre
   if (!isSingleVariantReport(report)) return;
   const m = report.metrics;
   // Aggregate counts add up.
-  const totalPerFamily = Object.values(m.perFamily).reduce(
-    (s, p) => s + p.total,
-    0,
-  );
+  const totalPerFamily = Object.values(m.perFamily).reduce((s, p) => s + p.total, 0);
   assert.equal(totalPerFamily, m.totalQueries);
   // Headline counts are within bounds.
   assert.ok(m.rank1 >= 0 && m.rank1 <= m.positiveTotal);
@@ -937,22 +887,17 @@ test("runner: hybrid report carries richer diagnostics (per-query contributor ra
   for (const e of report.evals) {
     assert.ok(
       Array.isArray(e.hybridContributors),
-      `eval ${e.queryId} must carry hybridContributors`,
+      `eval ${e.queryId} must carry hybridContributors`
     );
     assert.equal(
       e.hybridContributors!.length,
       3,
-      "hybridContributors must have one entry per source",
+      "hybridContributors must have one entry per source"
     );
     for (const c of e.hybridContributors!) {
-      assert.ok(
-        c.source === "lexical" || c.source === "fts5" || c.source === "vector",
-      );
+      assert.ok(c.source === "lexical" || c.source === "fts5" || c.source === "vector");
       assert.equal(typeof c.contribution, "number");
-      assert.ok(
-        c.contribution >= 0,
-        `contribution must be non-negative (got ${c.contribution})`,
-      );
+      assert.ok(c.contribution >= 0, `contribution must be non-negative (got ${c.contribution})`);
     }
   }
   // Per-family delta table against the best baseline
@@ -961,7 +906,7 @@ test("runner: hybrid report carries richer diagnostics (per-query contributor ra
   // can see the trade-off).
   assert.ok(
     Array.isArray(report.hybridPerFamilyDelta),
-    "hybrid report must carry hybridPerFamilyDelta",
+    "hybrid report must carry hybridPerFamilyDelta"
   );
   assert.ok(report.hybridPerFamilyDelta!.length > 0);
   for (const row of report.hybridPerFamilyDelta!) {
@@ -1028,14 +973,7 @@ test("runner: query-level fix/regression table surfaces the deltas per family (h
   const table = report.hybridPerFamilyDelta!;
   // Every family has exactly one row.
   const families = new Set(table.map((r) => r.family));
-  for (const f of [
-    "exact",
-    "paraphrase",
-    "temporal",
-    "multi-hop",
-    "no-answer",
-    "orientation",
-  ]) {
+  for (const f of ["exact", "paraphrase", "temporal", "multi-hop", "no-answer", "orientation"]) {
     assert.ok(families.has(f), `hybridPerFamilyDelta missing family: ${f}`);
   }
   // For every row, the best baseline rank1 is the max
@@ -1081,7 +1019,7 @@ test("runner: --variant hybrid single-variant report carries real (non-zero) bas
   assert.deepEqual(
     singleTable,
     all.hybridPerFamilyDelta,
-    "single-variant hybrid per-family delta must match the comparison report's per-family delta",
+    "single-variant hybrid per-family delta must match the comparison report's per-family delta"
   );
   // The "all zero" regression guard. On the 60-record
   // corpus at least one family has a non-zero baseline
@@ -1090,14 +1028,11 @@ test("runner: --variant hybrid single-variant report carries real (non-zero) bas
   // assertion fails and the regression is visible in CI.
   const allBestZero = singleTable.every(
     (r) =>
-      r.lexicalRank1 === 0 &&
-      r.fts5Rank1 === 0 &&
-      r.vectorRank1 === 0 &&
-      r.bestBaselineRank1 === 0,
+      r.lexicalRank1 === 0 && r.fts5Rank1 === 0 && r.vectorRank1 === 0 && r.bestBaselineRank1 === 0
   );
   assert.ok(
     !allBestZero,
-    "single-variant hybrid per-family delta must not be all-zero baselines (Reviewer regression guard)",
+    "single-variant hybrid per-family delta must not be all-zero baselines (Reviewer regression guard)"
   );
   // Per-row sanity: bestBaselineRank1 is the max of the
   // three baselines, and deltaHybridVsBest is the
@@ -1106,17 +1041,17 @@ test("runner: --variant hybrid single-variant report carries real (non-zero) bas
     assert.equal(
       row.bestBaselineRank1,
       Math.max(row.lexicalRank1, row.fts5Rank1, row.vectorRank1),
-      `bestBaselineRank1 must be max of baselines for family ${row.family}`,
+      `bestBaselineRank1 must be max of baselines for family ${row.family}`
     );
     assert.equal(
       row.deltaHybridVsBest,
       row.hybridRank1 - row.bestBaselineRank1,
-      `deltaHybridVsBest must be hybrid - best for family ${row.family}`,
+      `deltaHybridVsBest must be hybrid - best for family ${row.family}`
     );
     assert.equal(
       row.deltaHybridVsLexical,
       row.hybridRank1 - row.lexicalRank1,
-      `deltaHybridVsLexical must be hybrid - lexical for family ${row.family}`,
+      `deltaHybridVsLexical must be hybrid - lexical for family ${row.family}`
     );
   }
 });
@@ -1133,8 +1068,8 @@ test("runner: hybrid hybridReport never contains credential-shaped or raw-text f
   const serialized = JSON.stringify(report);
   assert.ok(
     !/apiKey|authorization|bearer|sk-[A-Za-z0-9_\-]{20,}|AKIA[0-9A-Z]{16}|glpat-[A-Za-z0-9_\-]{20,}/i.test(
-      serialized,
+      serialized
     ),
-    "hybrid report must not contain credential-shaped fragments",
+    "hybrid report must not contain credential-shaped fragments"
   );
 });

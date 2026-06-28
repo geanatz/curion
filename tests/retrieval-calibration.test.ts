@@ -46,32 +46,23 @@
  * query set + ranker).
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
+import { test } from "node:test";
 
 import {
+  type CalibrationVariantResult,
   DEFAULT_CALIBRATION_SWEEP,
   buildQueryDiagnostic,
-  buildSweepForVariant,
   computeRegressionCounts,
   computeScoreDistribution,
   computeTradeoff,
   evaluateGates,
   gateLabel,
   pickBestRow,
-  type CalibrationGate,
-  type CalibrationVariantResult,
 } from "../src/benchmark/calibration.ts";
-import { rankFts5, normalizeFts5Score } from "../src/benchmark/variants/fts5.ts";
-import {
-  rankVector,
-  DEFAULT_VECTOR_THRESHOLD,
-  HashedBagOfWordsEmbedder,
-} from "../src/benchmark/variants/vector.ts";
-import { rankLexical } from "../src/retrieval/lexical.ts";
 import { BENCHMARK_RECORDS } from "../src/benchmark/corpus.ts";
+import { type QueryEval, aggregateMetrics } from "../src/benchmark/metrics.ts";
 import { BENCHMARK_QUERIES } from "../src/benchmark/queries.ts";
-import { aggregateMetrics, type QueryEval } from "../src/benchmark/metrics.ts";
 import {
   buildCandidates,
   formatCalibrationReport,
@@ -81,24 +72,22 @@ import {
   runCalibration,
   runRetrievalBenchmark,
 } from "../src/benchmark/retrieval-runner.ts";
+import { normalizeFts5Score, rankFts5 } from "../src/benchmark/variants/fts5.ts";
+import {
+  DEFAULT_VECTOR_THRESHOLD,
+  HashedBagOfWordsEmbedder,
+  rankVector,
+} from "../src/benchmark/variants/vector.ts";
+import { rankLexical } from "../src/retrieval/lexical.ts";
 
 // ---------------------------------------------------------------------------
 // 0. Stable defaults
 // ---------------------------------------------------------------------------
 
 test("calibration: default sweep grid is stable", () => {
-  assert.deepEqual(
-    [...(DEFAULT_CALIBRATION_SWEEP.threshold ?? [])],
-    [0.1, 0.2, 0.3, 0.4, 0.5],
-  );
-  assert.deepEqual(
-    [...(DEFAULT_CALIBRATION_SWEEP.margin ?? [])],
-    [0.0, 0.05, 0.1, 0.2, 0.3],
-  );
-  assert.deepEqual(
-    [...(DEFAULT_CALIBRATION_SWEEP.ratio ?? [])],
-    [1.0, 1.25, 1.5, 2.0, 3.0],
-  );
+  assert.deepEqual([...(DEFAULT_CALIBRATION_SWEEP.threshold ?? [])], [0.1, 0.2, 0.3, 0.4, 0.5]);
+  assert.deepEqual([...(DEFAULT_CALIBRATION_SWEEP.margin ?? [])], [0.0, 0.05, 0.1, 0.2, 0.3]);
+  assert.deepEqual([...(DEFAULT_CALIBRATION_SWEEP.ratio ?? [])], [1.0, 1.25, 1.5, 2.0, 3.0]);
 });
 
 // ---------------------------------------------------------------------------
@@ -209,7 +198,7 @@ test("calibration: multiple gates OR-combine", () => {
       { kind: "margin", value: 0.05 },
       { kind: "ratio", value: 2.0 },
     ],
-    "higher-is-better",
+    "higher-is-better"
   );
   assert.equal(r.abstained, true);
   assert.deepEqual(r.triggered, ["ratio@2"]);
@@ -220,7 +209,7 @@ test("calibration: inactive gates are skipped", () => {
   const r = evaluateGates(
     dist,
     [{ kind: "threshold", value: 0.5, active: false }],
-    "higher-is-better",
+    "higher-is-better"
   );
   assert.equal(r.abstained, false);
   assert.deepEqual(r.triggered, []);
@@ -228,10 +217,7 @@ test("calibration: inactive gates are skipped", () => {
 
 test("calibration: gateLabel falls back to kind@value", () => {
   assert.equal(gateLabel({ kind: "threshold", value: 0.4 }), "threshold@0.4");
-  assert.equal(
-    gateLabel({ kind: "threshold", value: 0.4, label: "aggressive" }),
-    "aggressive",
-  );
+  assert.equal(gateLabel({ kind: "threshold", value: 0.4, label: "aggressive" }), "aggressive");
 });
 
 // ---------------------------------------------------------------------------
@@ -249,7 +235,7 @@ test("calibration: positive query abstention is a regression", () => {
     true,
     [{ id: 1, score: 0.5 }],
     [{ kind: "threshold", value: 1.0 }],
-    "higher-is-better",
+    "higher-is-better"
   );
   assert.equal(d.abstained, true);
   assert.equal(d.abstentionWasCorrect, false);
@@ -267,7 +253,7 @@ test("calibration: positive query no-abstain is correct", () => {
     true,
     [{ id: 1, score: 0.8 }],
     [{ kind: "threshold", value: 0.5 }],
-    "higher-is-better",
+    "higher-is-better"
   );
   assert.equal(d.abstained, false);
   assert.equal(d.abstentionWasCorrect, true);
@@ -284,7 +270,7 @@ test("calibration: no-answer query abstention is a fix", () => {
     false,
     [{ id: 1, score: 0.5 }],
     [{ kind: "threshold", value: 1.0 }],
-    "higher-is-better",
+    "higher-is-better"
   );
   assert.equal(d.abstained, true);
   assert.equal(d.abstentionWasCorrect, true);
@@ -305,7 +291,7 @@ test("calibration: no-answer query naturally empty is naturallyAbstained", () =>
     false,
     [],
     [{ kind: "threshold", value: 0.1 }],
-    "higher-is-better",
+    "higher-is-better"
   );
   assert.equal(d.abstained, true);
   assert.equal(d.abstentionWasCorrect, true);
@@ -323,7 +309,7 @@ test("calibration: per-query score diagnostics are correct", () => {
       { id: 3, score: 0.1 },
     ],
     [],
-    "higher-is-better",
+    "higher-is-better"
   );
   assert.equal(d.topScore, 0.6);
   assert.equal(d.secondScore, 0.3);
@@ -526,7 +512,7 @@ test("calibration: tradeoff metrics match the after-abstain top-K", () => {
         { id: 4, score: 0.1 },
       ],
       [{ kind: "threshold", value: 0.6 }],
-      "higher-is-better",
+      "higher-is-better"
     ),
     // p2: original [11,1,2,3,4] with top=0.9. Gate @ 0.6 does not abstain.
     buildQueryDiagnostic(
@@ -541,7 +527,7 @@ test("calibration: tradeoff metrics match the after-abstain top-K", () => {
         { id: 4, score: 0.1 },
       ],
       [{ kind: "threshold", value: 0.6 }],
-      "higher-is-better",
+      "higher-is-better"
     ),
     // n1: ranker naturally empty.
     buildQueryDiagnostic(
@@ -550,7 +536,7 @@ test("calibration: tradeoff metrics match the after-abstain top-K", () => {
       false,
       [],
       [{ kind: "threshold", value: 0.6 }],
-      "higher-is-better",
+      "higher-is-better"
     ),
     // n2: ranker returned [1,2,3,4,5]. Gate does not trigger.
     buildQueryDiagnostic(
@@ -565,7 +551,7 @@ test("calibration: tradeoff metrics match the after-abstain top-K", () => {
         { id: 5, score: 0.1 },
       ],
       [{ kind: "threshold", value: 0.6 }],
-      "higher-is-better",
+      "higher-is-better"
     ),
   ];
   const m = computeTradeoff(diags, evals);
@@ -576,7 +562,11 @@ test("calibration: tradeoff metrics match the after-abstain top-K", () => {
   // n1 is naturally empty (no ranker hits) and n2 is
   // forced to abstain by the threshold gate (0.1 < 0.6).
   // Both count as "no-answer correct" under the gate.
-  assert.equal(m.noAnswerCorrect, 2, "n1 (naturally empty) and n2 (forced abstain) are both correct");
+  assert.equal(
+    m.noAnswerCorrect,
+    2,
+    "n1 (naturally empty) and n2 (forced abstain) are both correct"
+  );
   assert.equal(m.noAnswerTotal, 2);
 });
 
@@ -585,7 +575,7 @@ test("calibration: tradeoff metrics match the after-abstain top-K", () => {
 // ---------------------------------------------------------------------------
 
 const fakeRow = (
-  overrides: Partial<CalibrationVariantResult> & { gateValue: number | null; gateLabel: string },
+  overrides: Partial<CalibrationVariantResult> & { gateValue: number | null; gateLabel: string }
 ): CalibrationVariantResult => ({
   variant: "lexical",
   gateLabel: overrides.gateLabel,
@@ -731,9 +721,7 @@ test("calibration runner: report shape is well-formed for all variants", () => {
   // Sweep: at least one row per (variant, kind).
   for (const v of ["lexical", "fts5", "vector"] as const) {
     for (const k of ["threshold", "margin", "ratio"] as const) {
-      const has = report.sweep.some(
-        (r) => r.variant === v && r.gateKind === k,
-      );
+      const has = report.sweep.some((r) => r.variant === v && r.gateKind === k);
       assert.ok(has, `expected sweep row for ${v}/${k}`);
     }
   }
@@ -769,11 +757,12 @@ test("calibration runner: baseline row matches the ranker at threshold=0 (not th
     const candidates = buildCandidates(BENCHMARK_RECORDS);
     const queries = BENCHMARK_QUERIES;
     const topK = 5;
-    const rankFn = v === "fts5"
-      ? (q: string, c: typeof candidates) => rankFts5(q, c, { threshold: 0, topK })
-      : v === "vector"
-        ? (q: string, c: typeof candidates) => rankVector(q, c, { threshold: 0, topK })
-        : (q: string, c: typeof candidates) => rankLexical(q, c, { threshold: 0, topK });
+    const rankFn =
+      v === "fts5"
+        ? (q: string, c: typeof candidates) => rankFts5(q, c, { threshold: 0, topK })
+        : v === "vector"
+          ? (q: string, c: typeof candidates) => rankVector(q, c, { threshold: 0, topK })
+          : (q: string, c: typeof candidates) => rankLexical(q, c, { threshold: 0, topK });
     const evals: QueryEval[] = queries.map((q) => {
       const ranked = rankFn(q.query, candidates);
       return {
@@ -796,25 +785,26 @@ test("calibration runner: baseline row matches the ranker at threshold=0 (not th
       e.rank1 = top0 !== undefined && expected.has(top0);
       const ct = new Set(e.currentTruthIds);
       e.currentTruthAt1 = top0 !== undefined && ct.has(top0);
-      e.passed = e.expectedIds.length === 0
-        ? e.topIds.length === 0
-        : e.topIds.slice(0, 5).some((id) => expected.has(id));
+      e.passed =
+        e.expectedIds.length === 0
+          ? e.topIds.length === 0
+          : e.topIds.slice(0, 5).some((id) => expected.has(id));
     }
     const m = aggregateMetrics(evals);
     assert.equal(
       base.metrics.noAnswerCorrect,
       m.noAnswerCorrect,
-      `${v}: calibration baseline noAnswerCorrect disagrees with direct threshold=0 re-run`,
+      `${v}: calibration baseline noAnswerCorrect disagrees with direct threshold=0 re-run`
     );
     assert.equal(
       base.metrics.hitAt5,
       m.hitAt5,
-      `${v}: calibration baseline hit@5 disagrees with direct threshold=0 re-run`,
+      `${v}: calibration baseline hit@5 disagrees with direct threshold=0 re-run`
     );
     assert.equal(
       base.metrics.rank1,
       m.rank1,
-      `${v}: calibration baseline rank1 disagrees with direct threshold=0 re-run`,
+      `${v}: calibration baseline rank1 disagrees with direct threshold=0 re-run`
     );
   }
 });
@@ -828,9 +818,7 @@ test("calibration runner: per-query diagnostics have the required fields", () =>
     assert.equal(typeof d.topScore, "number");
     assert.equal(typeof d.secondScore, "number");
     assert.equal(typeof d.scoreGap, "number");
-    assert.ok(
-      Number.isFinite(d.scoreRatio) || d.scoreRatio === Number.POSITIVE_INFINITY,
-    );
+    assert.ok(Number.isFinite(d.scoreRatio) || d.scoreRatio === Number.POSITIVE_INFINITY);
     assert.equal(typeof d.abstained, "boolean");
     assert.ok(Array.isArray(d.abstainedByGate));
     assert.equal(typeof d.abstentionWasCorrect, "boolean");
@@ -865,20 +853,16 @@ test("calibration runner: per-query positive regressions are subset of positive 
     const report = runCalibration({ variant: v });
     const best = report.bestByVariant[v];
     assert.ok(best);
-    const positiveTotal = BENCHMARK_QUERIES.filter(
-      (q) => q.family !== "no-answer",
-    ).length;
+    const positiveTotal = BENCHMARK_QUERIES.filter((q) => q.family !== "no-answer").length;
     assert.ok(
       best.positiveRegressions <= positiveTotal,
-      `${v}: regressions (${best.positiveRegressions}) > positive total (${positiveTotal})`,
+      `${v}: regressions (${best.positiveRegressions}) > positive total (${positiveTotal})`
     );
     // noAnswerFixed must never exceed noAnswerTotal.
-    const noAnswerTotal = BENCHMARK_QUERIES.filter(
-      (q) => q.family === "no-answer",
-    ).length;
+    const noAnswerTotal = BENCHMARK_QUERIES.filter((q) => q.family === "no-answer").length;
     assert.ok(
       best.noAnswerFixed <= noAnswerTotal,
-      `${v}: noAnswerFixed (${best.noAnswerFixed}) > no-answer total (${noAnswerTotal})`,
+      `${v}: noAnswerFixed (${best.noAnswerFixed}) > no-answer total (${noAnswerTotal})`
     );
   }
 });
@@ -926,17 +910,14 @@ test("calibration: FTS5 ranker call returns higher-is-better scores in [0, 1]", 
   });
   assert.ok(ranked.length > 0, "FTS5 must return at least one hit for this query");
   for (const r of ranked) {
-    assert.ok(
-      r.score >= 0 && r.score <= 1,
-      `FTS5 score out of [0, 1]: ${r.score}`,
-    );
+    assert.ok(r.score >= 0 && r.score <= 1, `FTS5 score out of [0, 1]: ${r.score}`);
   }
   // Order: score desc. The FTS5 variant sorts by score
   // desc, so the first element is the maximum.
   for (let i = 1; i < ranked.length; i++) {
     assert.ok(
       ranked[i - 1]!.score >= ranked[i]!.score,
-      `FTS5 not sorted by score desc: [${i - 1}]=${ranked[i - 1]!.score} < [${i}]=${ranked[i]!.score}`,
+      `FTS5 not sorted by score desc: [${i - 1}]=${ranked[i - 1]!.score} < [${i}]=${ranked[i]!.score}`
     );
   }
 });
@@ -964,7 +945,7 @@ test("calibration: vector with default threshold 0 returns a hit for every posit
     });
     assert.ok(
       ranked.length > 0,
-      `vector returned empty for positive query ${q.id} at default threshold; expected at least one hit`,
+      `vector returned empty for positive query ${q.id} at default threshold; expected at least one hit`
     );
   }
 });
@@ -992,7 +973,7 @@ test("calibration: vector at threshold 0 still returns hits for no-answer querie
   // tokenize() drops every token (e.g. all stopwords).
   assert.ok(
     hits >= 5,
-    `vector at threshold 0 returned hits for ${hits} no-answer queries; expected most of 10`,
+    `vector at threshold 0 returned hits for ${hits} no-answer queries; expected most of 10`
   );
 });
 
@@ -1021,7 +1002,11 @@ test("cli: --calibrate parses and is opt-in", () => {
   // a future edit cannot leave the artifact without a
   // direction.)
   assert.ok(opts.calibrationConfig);
-  assert.equal(opts.calibrationConfig.direction, undefined, "direction defaults to higher-is-better");
+  assert.equal(
+    opts.calibrationConfig.direction,
+    undefined,
+    "direction defaults to higher-is-better"
+  );
 });
 
 test("cli: --calibrate-direction parses both directions", () => {
@@ -1034,13 +1019,17 @@ test("cli: --calibrate-direction parses both directions", () => {
 test("cli: --calibrate-direction rejects unknown values", () => {
   assert.throws(
     () => parseRetrievalCli(["--calibrate-direction", "sideways"]),
-    /higher-is-better\|lower-is-better/,
+    /higher-is-better\|lower-is-better/
   );
 });
 
 test("cli: --calibrate without --variant defaults to all variants", () => {
   const opts = parseRetrievalCli(["--calibrate"]);
-  assert.equal(opts.variant, undefined, "no --variant means the calibration runner defaults to all");
+  assert.equal(
+    opts.variant,
+    undefined,
+    "no --variant means the calibration runner defaults to all"
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -1078,26 +1067,15 @@ test("calibration: --variant all --calibrate includes exactly the three calibrat
   // calibration loop will be caught here.
   const report = runCalibration({ variant: "all" });
   for (const row of report.baseline) {
-    assert.notEqual(
-      row.variant,
-      "hybrid",
-      "calibration baseline must not contain a hybrid row",
-    );
+    assert.notEqual(row.variant, "hybrid", "calibration baseline must not contain a hybrid row");
   }
   for (const row of report.sweep) {
-    assert.notEqual(
-      row.variant,
-      "hybrid",
-      "calibration sweep must not contain a hybrid row",
-    );
+    assert.notEqual(row.variant, "hybrid", "calibration sweep must not contain a hybrid row");
   }
   // And `bestByVariant` is documented as exactly the
   // three calibratable variants; the hybrid key does
   // not exist.
-  assert.ok(
-    !("hybrid" in report.bestByVariant),
-    "bestByVariant must not have a hybrid key",
-  );
+  assert.ok(!("hybrid" in report.bestByVariant), "bestByVariant must not have a hybrid key");
 });
 
 // ---------------------------------------------------------------------------
@@ -1122,7 +1100,7 @@ test("calibration report: per-query diagnostic counts reflect total, not slice l
   const makeDiag = (
     queryId: string,
     isPositive: boolean,
-    abstained: boolean,
+    abstained: boolean
   ): import("../src/benchmark/calibration.ts").CalibrationQueryDiagnostic => ({
     queryId,
     family: isPositive ? "exact" : "no-answer",
@@ -1143,8 +1121,7 @@ test("calibration report: per-query diagnostic counts reflect total, not slice l
   // 24 positive queries forced to abstain (regressions).
   // 3 no-answer queries fixed by abstention.
   // 1 no-answer query still confabulating.
-  const diags: import("../src/benchmark/calibration.ts").CalibrationQueryDiagnostic[] =
-    [];
+  const diags: import("../src/benchmark/calibration.ts").CalibrationQueryDiagnostic[] = [];
   for (let i = 0; i < 24; i++) diags.push(makeDiag(`p${i}`, true, true));
   for (let i = 0; i < 3; i++) diags.push(makeDiag(`nfix${i}`, false, true));
   diags.push(makeDiag("nrem0", false, false));
@@ -1221,19 +1198,19 @@ test("calibration report: per-query diagnostic counts reflect total, not slice l
   assert.match(
     out,
     /positive queries forced to abstain: 24 \(showing first 20\)/,
-    `regression count should reflect true total (24) and label truncation, got:\n${out}`,
+    `regression count should reflect true total (24) and label truncation, got:\n${out}`
   );
   // The other two sections have counts <= the limit and
   // must NOT carry a "showing first" label.
   assert.match(
     out,
     /no-answer queries fixed by abstention: 3(?!\s*\(showing first)/,
-    `fixed count should be 3 with no truncation label, got:\n${out}`,
+    `fixed count should be 3 with no truncation label, got:\n${out}`
   );
   assert.match(
     out,
     /no-answer queries still confabulating: 1(?!\s*\(showing first)/,
-    `remaining count should be 1 with no truncation label, got:\n${out}`,
+    `remaining count should be 1 with no truncation label, got:\n${out}`
   );
   // The on-disk JSON artifact is unaffected: the diagnostics
   // array still carries all 28 entries, and the headline
@@ -1251,7 +1228,7 @@ test("calibration report: counts match headlines when below the per-query limit"
   const makeDiag = (
     queryId: string,
     isPositive: boolean,
-    abstained: boolean,
+    abstained: boolean
   ): import("../src/benchmark/calibration.ts").CalibrationQueryDiagnostic => ({
     queryId,
     family: isPositive ? "exact" : "no-answer",
@@ -1270,8 +1247,7 @@ test("calibration report: counts match headlines when below the per-query limit"
   });
   // 5 positive regressions, 2 no-answer fixed, 1 no-answer
   // remaining. All under perQueryLimit=20.
-  const diags: import("../src/benchmark/calibration.ts").CalibrationQueryDiagnostic[] =
-    [];
+  const diags: import("../src/benchmark/calibration.ts").CalibrationQueryDiagnostic[] = [];
   for (let i = 0; i < 5; i++) diags.push(makeDiag(`p${i}`, true, true));
   for (let i = 0; i < 2; i++) diags.push(makeDiag(`nfix${i}`, false, true));
   diags.push(makeDiag("nrem0", false, false));
@@ -1343,17 +1319,17 @@ test("calibration report: counts match headlines when below the per-query limit"
   assert.match(
     out,
     /positive queries forced to abstain: 5(?!\s*\(showing first)/,
-    `regression count should be 5 with no truncation label, got:\n${out}`,
+    `regression count should be 5 with no truncation label, got:\n${out}`
   );
   assert.match(
     out,
     /no-answer queries fixed by abstention: 2(?!\s*\(showing first)/,
-    `fixed count should be 2 with no truncation label, got:\n${out}`,
+    `fixed count should be 2 with no truncation label, got:\n${out}`
   );
   assert.match(
     out,
     /no-answer queries still confabulating: 1(?!\s*\(showing first)/,
-    `remaining count should be 1 with no truncation label, got:\n${out}`,
+    `remaining count should be 1 with no truncation label, got:\n${out}`
   );
 });
 
@@ -1363,7 +1339,7 @@ test("calibration report: custom perQueryLimit narrows the displayed slice but n
   const makeDiag = (
     queryId: string,
     isPositive: boolean,
-    abstained: boolean,
+    abstained: boolean
   ): import("../src/benchmark/calibration.ts").CalibrationQueryDiagnostic => ({
     queryId,
     family: isPositive ? "exact" : "no-answer",
@@ -1381,8 +1357,7 @@ test("calibration report: custom perQueryLimit narrows the displayed slice but n
     naturallyAbstained: false,
   });
   // 8 regressions, 7 fixed, 6 remaining.
-  const diags: import("../src/benchmark/calibration.ts").CalibrationQueryDiagnostic[] =
-    [];
+  const diags: import("../src/benchmark/calibration.ts").CalibrationQueryDiagnostic[] = [];
   for (let i = 0; i < 8; i++) diags.push(makeDiag(`p${i}`, true, true));
   for (let i = 0; i < 7; i++) diags.push(makeDiag(`nfix${i}`, false, true));
   for (let i = 0; i < 6; i++) diags.push(makeDiag(`nrem${i}`, false, false));
@@ -1451,18 +1426,9 @@ test("calibration report: custom perQueryLimit narrows the displayed slice but n
 
   const out = formatCalibrationReport(report, { perQueryLimit: 5 });
   // All three sections truncate under perQueryLimit=5.
-  assert.match(
-    out,
-    /positive queries forced to abstain: 8 \(showing first 5\)/,
-  );
-  assert.match(
-    out,
-    /no-answer queries fixed by abstention: 7 \(showing first 5\)/,
-  );
-  assert.match(
-    out,
-    /no-answer queries still confabulating: 6 \(showing first 5\)/,
-  );
+  assert.match(out, /positive queries forced to abstain: 8 \(showing first 5\)/);
+  assert.match(out, /no-answer queries fixed by abstention: 7 \(showing first 5\)/);
+  assert.match(out, /no-answer queries still confabulating: 6 \(showing first 5\)/);
 });
 
 // ---------------------------------------------------------------------------
@@ -1486,7 +1452,7 @@ test("calibration: does not change the existing single-variant or comparison rep
   //      because the new conflict and false-premise-anchor
   //      records share tokens with existing no-answer
   //      queries.
-   //   2. The new queries (80 added) include 54 positive
+  //   2. The new queries (80 added) include 54 positive
   //      queries targeting the new clusters (the ranker
   //      finds them) and 22 no-answer queries (most of
   //      which confabulate because the new cluster-31
@@ -1502,9 +1468,21 @@ test("calibration: does not change the existing single-variant or comparison rep
   // README's headline table together.
   const single = runRetrievalBenchmark({ variant: "lexical" });
   assert.ok(isSingleVariantReport(single));
-  assert.equal(single.metrics.hitAt5, 105, "lexical hit@5 (post-adversarial-expansion, newer-first tiebreaker)");
-  assert.equal(single.metrics.rank1, 72, "lexical rank1 (post-adversarial-expansion, newer-first tiebreaker)");
-  assert.equal(single.metrics.noAnswerCorrect, 3, "lexical noAnswerCorrect (post-adversarial-expansion)");
+  assert.equal(
+    single.metrics.hitAt5,
+    105,
+    "lexical hit@5 (post-adversarial-expansion, newer-first tiebreaker)"
+  );
+  assert.equal(
+    single.metrics.rank1,
+    72,
+    "lexical rank1 (post-adversarial-expansion, newer-first tiebreaker)"
+  );
+  assert.equal(
+    single.metrics.noAnswerCorrect,
+    3,
+    "lexical noAnswerCorrect (post-adversarial-expansion)"
+  );
 
   const all = runRetrievalBenchmark({ variant: "all" });
   assert.ok(isComparisonReport(all));

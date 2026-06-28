@@ -15,26 +15,26 @@
  *   7. Trace event `recall.superseded-demotion` is emitted with correct payload.
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
+import { test } from "node:test";
 
 import { runRecallController } from "../src/controller/recall-controller.ts";
-import {
-  insertMemoryRecord,
-  updateMemoryMetadata,
-  type StorageHandle,
-  type MemoryRecord,
-} from "../src/storage/storage.ts";
 import { DEMOTION_FACTOR } from "../src/retrieval/superseded-demotion.ts";
 import {
-  TEST_PRIMARY_KEY,
-  TEST_FALLBACK_KEY,
-  TEST_PRIMARY_BASE_URL,
-  TEST_PRIMARY_MODEL,
-  TEST_FALLBACK_BASE_URL,
-  TEST_FALLBACK_MODEL,
-} from "./shared-test-provider.ts";
+  type MemoryRecord,
+  type StorageHandle,
+  insertMemoryRecord,
+  updateMemoryMetadata,
+} from "../src/storage/storage.ts";
 import { mkStorage, rmStorage } from "./_helpers/test-storage.ts";
+import {
+  TEST_FALLBACK_BASE_URL,
+  TEST_FALLBACK_KEY,
+  TEST_FALLBACK_MODEL,
+  TEST_PRIMARY_BASE_URL,
+  TEST_PRIMARY_KEY,
+  TEST_PRIMARY_MODEL,
+} from "./shared-test-provider.ts";
 
 // ---------------------------------------------------------------------------
 // Scripted fetch (unused in most tests — no_memory when scores are low)
@@ -55,7 +55,7 @@ function scriptFetch() {
         model: "m",
         choices: [{ message: { role: "assistant", content: "This should not be returned." } }],
       }),
-      { status: 200, headers: { "content-type": "application/json" } },
+      { status: 200, headers: { "content-type": "application/json" } }
     );
   };
   return { fetchImpl, calls };
@@ -94,7 +94,7 @@ function mkRelationshipBlock(partial: RelationshipBlock): RelationshipBlock {
 function insertWithRelationship(
   handle: StorageHandle,
   memoryContent: string,
-  relationship?: RelationshipBlock,
+  relationship?: RelationshipBlock
 ): MemoryRecord {
   const rec = insertMemoryRecord(handle, {
     kind: "fact",
@@ -162,12 +162,12 @@ test("recall: A supersedes B -> B demoted below A (supersedes path)", async () =
     const recB = insertWithRelationship(
       handle,
       "The project uses Postgres 16 for the primary data store.",
-      mkRelationshipBlock({ supersededBy: [] }), // placeholder; patched below
+      mkRelationshipBlock({ supersededBy: [] }) // placeholder; patched below
     );
     const recA = insertWithRelationship(
       handle,
       "Postgres 16 is the primary database for this project.",
-      mkRelationshipBlock({ supersedes: [recB.id] }),
+      mkRelationshipBlock({ supersedes: [recB.id] })
     );
     // Patch B's supersededBy to point to A.
     updateMemoryMetadata(handle, recB.id, {
@@ -238,12 +238,12 @@ test("recall: stale supersededBy current -> stale demoted (supersededBy path)", 
     const recB = insertWithRelationship(
       handle,
       "Postgres 16 is used for the main database.",
-      mkRelationshipBlock({ supersededBy: [] }), // placeholder
+      mkRelationshipBlock({ supersededBy: [] }) // placeholder
     );
     const recA = insertWithRelationship(
       handle,
       "The project uses Postgres 16 as its primary database.",
-      mkRelationshipBlock({ supersedes: [recB.id] }),
+      mkRelationshipBlock({ supersedes: [recB.id] })
     );
     // Patch B's supersededBy to point to A.
     updateMemoryMetadata(handle, recB.id, {
@@ -286,7 +286,7 @@ test("recall: supersedes target not in candidate list -> no demotion (safe ignor
     const recA = insertWithRelationship(
       handle,
       "The project uses Postgres 16 for the primary database.",
-      mkRelationshipBlock({ supersedes: [9999] }), // 9999 does not exist
+      mkRelationshipBlock({ supersedes: [9999] }) // 9999 does not exist
     );
 
     const { fetchImpl } = scriptFetch();
@@ -321,7 +321,7 @@ test("recall: supersededBy referrer not in candidate list -> stale not demoted",
     const recB = insertWithRelationship(
       handle,
       "Postgres 16 is used for the primary database.",
-      mkRelationshipBlock({ supersededBy: [9998] }), // 9998 does not exist
+      mkRelationshipBlock({ supersededBy: [9998] }) // 9998 does not exist
     );
 
     const { fetchImpl } = scriptFetch();
@@ -358,7 +358,7 @@ test("recall: self-supersession (A supersedes A) -> safely ignored, no crash", a
     const rec = insertWithRelationship(
       handle,
       "The project uses Postgres 16 for the primary database.",
-      mkRelationshipBlock({ supersedes: [] }), // placeholder; patched below
+      mkRelationshipBlock({ supersedes: [] }) // placeholder; patched below
     );
     updateMemoryMetadata(handle, rec.id, {
       ...rec.metadata,
@@ -394,7 +394,7 @@ test("recall: self-supersededBy (A supersededBy A) -> safely ignored, no crash",
     const rec = insertWithRelationship(
       handle,
       "Postgres 16 is the project database.",
-      mkRelationshipBlock({ supersededBy: [0] }), // placeholder; patched below
+      mkRelationshipBlock({ supersededBy: [0] }) // placeholder; patched below
     );
     updateMemoryMetadata(handle, rec.id, {
       ...rec.metadata,
@@ -433,13 +433,13 @@ test("recall: duplicate supersedes entries -> no crash, correct demotion", async
     const recB = insertWithRelationship(
       handle,
       "Postgres 16 is the primary database.",
-      mkRelationshipBlock({ supersededBy: [] }),
+      mkRelationshipBlock({ supersededBy: [] })
     );
     const recA = insertWithRelationship(
       handle,
       "The project uses Postgres 16 for storage.",
       // Duplicate entries: [recB.id, recB.id]
-      mkRelationshipBlock({ supersedes: [recB.id, recB.id] }),
+      mkRelationshipBlock({ supersedes: [recB.id, recB.id] })
     );
     updateMemoryMetadata(handle, recB.id, {
       ...recB.metadata,
@@ -481,18 +481,10 @@ test("recall: unrelated candidates preserve lexical order when no supersession a
     const rec1 = insertWithRelationship(
       handle,
       "The project uses Postgres 16.",
-      undefined, // no relationship
+      undefined // no relationship
     );
-    const rec2 = insertWithRelationship(
-      handle,
-      "Postgres 16 is the primary database.",
-      undefined,
-    );
-    const rec3 = insertWithRelationship(
-      handle,
-      "Postgres is a relational database.",
-      undefined,
-    );
+    const rec2 = insertWithRelationship(handle, "Postgres 16 is the primary database.", undefined);
+    const rec3 = insertWithRelationship(handle, "Postgres is a relational database.", undefined);
 
     const { fetchImpl } = scriptFetch();
     const out = await runRecallController(handle, "Postgres database", {
@@ -534,12 +526,12 @@ test("recall: stale with higher raw score still demoted below current", async ()
     const recB = insertWithRelationship(
       handle,
       "Postgres 16 is used for this project's primary database server.",
-      mkRelationshipBlock({ supersededBy: [] }),
+      mkRelationshipBlock({ supersededBy: [] })
     );
     const recA = insertWithRelationship(
       handle,
       "The project uses Postgres 16.",
-      mkRelationshipBlock({ supersedes: [recB.id] }),
+      mkRelationshipBlock({ supersedes: [recB.id] })
     );
     updateMemoryMetadata(handle, recB.id, {
       ...recB.metadata,
@@ -581,16 +573,8 @@ test("recall: no demotions -> trace emits compact count (no demotions array)", a
   const { tmp, handle } = mkStorage();
   try {
     // Two unrelated memories, no supersession.
-    insertWithRelationship(
-      handle,
-      "The project uses Postgres 16 for the database.",
-      undefined,
-    );
-    insertWithRelationship(
-      handle,
-      "The project uses Redis for caching.",
-      undefined,
-    );
+    insertWithRelationship(handle, "The project uses Postgres 16 for the database.", undefined);
+    insertWithRelationship(handle, "The project uses Redis for caching.", undefined);
 
     const { fetchImpl } = scriptFetch();
     const { trace, stages } = makeInMemoryTraceContext();
@@ -610,7 +594,10 @@ test("recall: no demotions -> trace emits compact count (no demotions array)", a
     assert.equal(out.status, "answered");
     const demotionStage = stages.find((s) => s.kind === "recall.superseded-demotion");
     // When no demotions, we emit a compact `{demotions: 0}` form.
-    assert.ok(demotionStage !== undefined, "trace must emit superseded-demotion stage even when no demotions");
+    assert.ok(
+      demotionStage !== undefined,
+      "trace must emit superseded-demotion stage even when no demotions"
+    );
     const payload = demotionStage.payload as { demotions: number };
     assert.equal(payload.demotions, 0, "compact count of 0 when no demotions");
   } finally {

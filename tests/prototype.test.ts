@@ -15,11 +15,11 @@
  * No test in this file requires real network access or real API keys.
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { test } from "node:test";
 
 import {
   SECRET_ENV_VARS,
@@ -29,10 +29,18 @@ import {
   loadPrototypeConfig,
   redactValue,
 } from "../src/config/env-loader.ts";
+import { PROTOTYPE_FIXTURES, fixtureById } from "../src/prototype/fixtures.ts";
 import {
+  type ProviderAttempt,
+  formatHumanReport,
+  parseCli,
+  resolveArtifactsDir,
+  runExperiments,
+} from "../src/prototype/runner.ts";
+import {
+  type ChatCompletionResponse,
   buildResponseFormat,
   chatCompletion,
-  type ChatCompletionResponse,
 } from "../src/providers/http-client.ts";
 import {
   MEMORY_ANALYSIS_JSON_SCHEMA,
@@ -40,14 +48,6 @@ import {
   buildStructuredPrompt,
   parseMemoryAnalysis,
 } from "../src/providers/structured-output.ts";
-import { PROTOTYPE_FIXTURES, fixtureById } from "../src/prototype/fixtures.ts";
-import {
-  formatHumanReport,
-  parseCli,
-  resolveArtifactsDir,
-  runExperiments,
-  type ProviderAttempt,
-} from "../src/prototype/runner.ts";
 
 // ---------------------------------------------------------------------------
 // env-loader
@@ -55,17 +55,11 @@ import {
 
 test("env-loader: SECRET_ENV_VARS contains canonical and legacy secret names", () => {
   // Canonical role-based names.
-  for (const v of [
-    "CURION_PRIMARY_API_KEY",
-    "CURION_FALLBACK_API_KEY",
-  ]) {
+  for (const v of ["CURION_PRIMARY_API_KEY", "CURION_FALLBACK_API_KEY"]) {
     assert.ok(SECRET_ENV_VARS.includes(v), `expected ${v} in SECRET_ENV_VARS`);
   }
   // Legacy vendor-specific names (kept for backward compat in secret detection).
-  for (const v of [
-    "MINIMAX_API_KEY",
-    "NVIDIA_NIM_API_KEY",
-  ]) {
+  for (const v of ["MINIMAX_API_KEY", "NVIDIA_NIM_API_KEY"]) {
     assert.ok(SECRET_ENV_VARS.includes(v), `expected ${v} in SECRET_ENV_VARS`);
   }
 });
@@ -104,7 +98,7 @@ test("env-loader: describeEnv redacts secrets and labels missing", () => {
   for (const k of Object.keys(out)) {
     assert.ok(
       !out[k].includes("sk-abcdefghijklmnopqrstuvwxyz1234567890"),
-      `secret leaked under key ${k}`,
+      `secret leaked under key ${k}`
     );
   }
 });
@@ -119,10 +113,10 @@ test("env-loader: loadDotEnv parses simple KEY=value lines", () => {
       "",
       "CURION_LOG_LEVEL=debug",
       "export CURION_FOO=bar",
-      "CURION_QUOTED=\"hello world\"",
+      'CURION_QUOTED="hello world"',
       "CURION_SQ='single quoted'",
       "NOT_A_VALID_LINE",
-    ].join("\n"),
+    ].join("\n")
   );
   const before = { ...process.env };
   try {
@@ -222,7 +216,7 @@ test("env-loader: loadPrototypeConfig reports presence not values", () => {
 test("http-client: returns missing-config when apiKey is empty", async () => {
   const r = await chatCompletion(
     { model: "x", messages: [{ role: "user", content: "hi" }] },
-    { baseUrl: "https://example.com/v1", apiKey: "", timeoutMs: 1000 },
+    { baseUrl: "https://example.com/v1", apiKey: "", timeoutMs: 1000 }
   );
   assert.equal(r.ok, false);
   if (!r.ok) {
@@ -232,8 +226,7 @@ test("http-client: returns missing-config when apiKey is empty", async () => {
 });
 
 test("http-client: classifies 401 as auth error", async () => {
-  const fetchImpl: typeof fetch = async () =>
-    new Response("nope", { status: 401 });
+  const fetchImpl: typeof fetch = async () => new Response("nope", { status: 401 });
   const r = await chatCompletion(
     { model: "x", messages: [{ role: "user", content: "hi" }] },
     {
@@ -241,7 +234,7 @@ test("http-client: classifies 401 as auth error", async () => {
       apiKey: "k",
       timeoutMs: 1000,
       fetchImpl,
-    },
+    }
   );
   assert.equal(r.ok, false);
   if (!r.ok) {
@@ -252,8 +245,7 @@ test("http-client: classifies 401 as auth error", async () => {
 });
 
 test("http-client: classifies 429 as rate-limit", async () => {
-  const fetchImpl: typeof fetch = async () =>
-    new Response("slow down", { status: 429 });
+  const fetchImpl: typeof fetch = async () => new Response("slow down", { status: 429 });
   const r = await chatCompletion(
     { model: "x", messages: [{ role: "user", content: "hi" }] },
     {
@@ -261,7 +253,7 @@ test("http-client: classifies 429 as rate-limit", async () => {
       apiKey: "k",
       timeoutMs: 1000,
       fetchImpl,
-    },
+    }
   );
   assert.equal(r.ok, false);
   if (!r.ok) {
@@ -270,8 +262,7 @@ test("http-client: classifies 429 as rate-limit", async () => {
 });
 
 test("http-client: classifies 5xx as server error", async () => {
-  const fetchImpl: typeof fetch = async () =>
-    new Response("oops", { status: 500 });
+  const fetchImpl: typeof fetch = async () => new Response("oops", { status: 500 });
   const r = await chatCompletion(
     { model: "x", messages: [{ role: "user", content: "hi" }] },
     {
@@ -279,7 +270,7 @@ test("http-client: classifies 5xx as server error", async () => {
       apiKey: "k",
       timeoutMs: 1000,
       fetchImpl,
-    },
+    }
   );
   assert.equal(r.ok, false);
   if (!r.ok) {
@@ -304,7 +295,7 @@ test("http-client: classifies AbortError as timeout", async () => {
       apiKey: "k",
       timeoutMs: 50,
       fetchImpl,
-    },
+    }
   );
   assert.equal(r.ok, false);
   if (!r.ok) {
@@ -326,7 +317,7 @@ test("http-client: parses OpenAI-compatible content from a 200 response", async 
         ],
         usage: { prompt_tokens: 4, completion_tokens: 2, total_tokens: 6 },
       }),
-      { status: 200, headers: { "content-type": "application/json" } },
+      { status: 200, headers: { "content-type": "application/json" } }
     );
   const r = await chatCompletion(
     { model: "test-model", messages: [{ role: "user", content: "hi" }] },
@@ -335,7 +326,7 @@ test("http-client: parses OpenAI-compatible content from a 200 response", async 
       apiKey: "k",
       timeoutMs: 1000,
       fetchImpl,
-    },
+    }
   );
   assert.equal(r.ok, true);
   if (r.ok) {
@@ -425,11 +416,7 @@ test("structured-output: parser accepts strict-mode shape with null optional fie
   assert.deepEqual(r.value?.entities, []);
   // `classification: null` is treated as absent: the key is removed
   // so the zod `optional()` field stays `undefined`.
-  assert.equal(
-    r.value?.classification,
-    undefined,
-    "classification: null becomes absent",
-  );
+  assert.equal(r.value?.classification, undefined, "classification: null becomes absent");
 });
 
 test("structured-output: parser normalizes only entities: null", () => {
@@ -473,7 +460,10 @@ test("structured-output: parser still rejects a non-null invalid entity", () => 
   });
   const r = parseMemoryAnalysis(text);
   assert.equal(r.ok, false);
-  assert.ok(r.errors.some((e) => e.startsWith("entities:")), "expected entities error");
+  assert.ok(
+    r.errors.some((e) => e.startsWith("entities:")),
+    "expected entities error"
+  );
 });
 
 test("structured-output: parser returns clean error on empty input", () => {
@@ -630,11 +620,9 @@ test("runner: live mode with stubbed fetch parses a model response", async () =>
         JSON.stringify({
           id: "x",
           model: "m",
-          choices: [
-            { message: { role: "assistant", content: "```json\n" + valid + "\n```" } },
-          ],
+          choices: [{ message: { role: "assistant", content: "```json\n" + valid + "\n```" } }],
         }),
-        { status: 200, headers: { "content-type": "application/json" } },
+        { status: 200, headers: { "content-type": "application/json" } }
       );
     const report = await runExperiments({
       live: true,
@@ -664,7 +652,7 @@ test("runner: live mode with stubbed fetch that returns fenced-but-broken JSON a
   try {
     process.env.CURION_PROVIDER_FALLBACK_KEY = "nvapi-test-not-real";
     // Trailing comma and stray fence: should be repaired.
-    const broken = "```json\n{ \"summary\": \"rep\", \"confidence\": 0.4, \"tags\": [], }\n```";
+    const broken = '```json\n{ "summary": "rep", "confidence": 0.4, "tags": [], }\n```';
     const fetchImpl: typeof fetch = async () =>
       new Response(
         JSON.stringify({
@@ -672,7 +660,7 @@ test("runner: live mode with stubbed fetch that returns fenced-but-broken JSON a
           model: "m",
           choices: [{ message: { role: "assistant", content: broken } }],
         }),
-        { status: 200, headers: { "content-type": "application/json" } },
+        { status: 200, headers: { "content-type": "application/json" } }
       );
     const report = await runExperiments({
       live: true,
@@ -710,7 +698,7 @@ test("runner: report records maxTokens per attempt and in config", async () => {
           model: "m",
           choices: [{ message: { role: "assistant", content: valid } }],
         }),
-        { status: 200, headers: { "content-type": "application/json" } },
+        { status: 200, headers: { "content-type": "application/json" } }
       );
     const report = await runExperiments({
       live: true,
@@ -745,13 +733,12 @@ test("runner: report is sanitized — no API key value is present", async () => 
             {
               message: {
                 role: "assistant",
-                content:
-                  '{"summary": "sanitized", "confidence": 0.5, "tags": []}',
+                content: '{"summary": "sanitized", "confidence": 0.5, "tags": []}',
               },
             },
           ],
         }),
-        { status: 200, headers: { "content-type": "application/json" } },
+        { status: 200, headers: { "content-type": "application/json" } }
       );
     const report = await runExperiments({
       live: true,
@@ -761,10 +748,7 @@ test("runner: report is sanitized — no API key value is present", async () => 
       dotenvSkip: true,
     });
     const serialized = JSON.stringify(report);
-    assert.ok(
-      !serialized.includes(fakeKey),
-      "report JSON must not contain the API key value",
-    );
+    assert.ok(!serialized.includes(fakeKey), "report JSON must not contain the API key value");
   } finally {
     for (const k of Object.keys(process.env)) {
       if (!(k in before)) delete process.env[k];
@@ -829,7 +813,7 @@ test("runner: dry-run default also works when dotenv is present and loaded", asy
         "MINIMAX_API_KEY=sk-test-not-real-very-specific-value-12345",
         "NVIDIA_NIM_API_KEY=nvapi-test-not-real-very-specific-value-12345",
         "CURION_NIM_MODELS=openai/gpt-oss-120b,meta/llama-3.3-70b-instruct",
-      ].join("\n"),
+      ].join("\n")
     );
     process.chdir(tmp);
     const report = await runExperiments({
@@ -903,10 +887,7 @@ test("env-loader: loadPrototypeConfig exposes Groq presence and config with docu
     const cfg2 = loadPrototypeConfig({ skip: true });
     assert.equal(cfg2.hasGroqKey, true);
     // No property on the config carries the key value.
-    assert.equal(
-      JSON.stringify(cfg2).includes("gsk_test_not_real_1234567890abcdef"),
-      false,
-    );
+    assert.equal(JSON.stringify(cfg2).includes("gsk_test_not_real_1234567890abcdef"), false);
   });
 });
 
@@ -950,7 +931,7 @@ test("structured-output: MEMORY_ANALYSIS_JSON_SCHEMA is strict-mode compatible",
   assert.deepEqual(
     [...required].sort(),
     [...Object.keys(props)].sort(),
-    "every property must be in required",
+    "every property must be in required"
   );
   // Optional fields are expressed as nullable.
   for (const optional of ["entities", "classification"]) {
@@ -963,10 +944,7 @@ test("structured-output: MEMORY_ANALYSIS_JSON_SCHEMA is strict-mode compatible",
   assert.equal(entityItems.additionalProperties, false);
   const entityRequired = entityItems.required as string[];
   const entityProps = entityItems.properties as Record<string, unknown>;
-  assert.deepEqual(
-    [...entityRequired].sort(),
-    [...Object.keys(entityProps)].sort(),
-  );
+  assert.deepEqual([...entityRequired].sort(), [...Object.keys(entityProps)].sort());
 });
 
 test("http-client: buildResponseFormat maps json_object and text", () => {
@@ -1029,12 +1007,7 @@ test("runner: --only-provider groq restricts the matrix to one provider per fixt
 });
 
 test("runner: parseCli accepts groq in --only-provider and recognizes Groq-only flags", () => {
-  const a = parseCli([
-    "--only-provider",
-    "minimax,groq",
-    "--groq-reasoning-effort",
-    "low",
-  ]);
+  const a = parseCli(["--only-provider", "minimax,groq", "--groq-reasoning-effort", "low"]);
   assert.deepEqual(a.onlyProviders, ["minimax", "groq"]);
   assert.equal(a.groqReasoningEffortOverride, "low");
   const b = parseCli(["--only-provider", "groq", "--no-groq-strict-schema"]);
@@ -1061,7 +1034,7 @@ test("runner: live mode with Groq key sends model + reasoning_effort + strict js
           model: "openai/gpt-oss-120b",
           choices: [{ message: { role: "assistant", content: valid } }],
         }),
-        { status: 200, headers: { "content-type": "application/json" } },
+        { status: 200, headers: { "content-type": "application/json" } }
       );
     };
     const report = await runExperiments({
@@ -1077,7 +1050,7 @@ test("runner: live mode with Groq key sends model + reasoning_effort + strict js
     // Key is NOT in the body.
     assert.ok(
       !log.body!.includes("gsk-test-not-real-very-specific-value-12345"),
-      "api key must not appear in request body",
+      "api key must not appear in request body"
     );
     // URL is the Groq OpenAI-compatible base.
     assert.match(log.url!, /^https:\/\/api\.groq\.com\/openai\/v1\/chat\/completions/);
@@ -1125,7 +1098,7 @@ test("runner: Groq live stub with strict json_schema and null optional fields pa
           model: "openai/gpt-oss-120b",
           choices: [{ message: { role: "assistant", content: strictNullPayload } }],
         }),
-        { status: 200, headers: { "content-type": "application/json" } },
+        { status: 200, headers: { "content-type": "application/json" } }
       );
     };
     const report = await runExperiments({
@@ -1173,7 +1146,7 @@ test("runner: Groq attempt reports responseFormatType=json_schema and reasoning_
           model: "m",
           choices: [{ message: { role: "assistant", content: valid } }],
         }),
-        { status: 200, headers: { "content-type": "application/json" } },
+        { status: 200, headers: { "content-type": "application/json" } }
       );
     const report = await runExperiments({
       live: true,
@@ -1215,7 +1188,7 @@ test("runner: Groq --no-groq-strict-schema drops the schema payload but keeps re
           model: "m",
           choices: [{ message: { role: "assistant", content: valid } }],
         }),
-        { status: 200, headers: { "content-type": "application/json" } },
+        { status: 200, headers: { "content-type": "application/json" } }
       );
     };
     const report = await runExperiments({
@@ -1261,7 +1234,7 @@ test("runner: empty --groq-reasoning-effort omits the param from the request bod
           model: "m",
           choices: [{ message: { role: "assistant", content: valid } }],
         }),
-        { status: 200, headers: { "content-type": "application/json" } },
+        { status: 200, headers: { "content-type": "application/json" } }
       );
     };
     await runExperiments({
@@ -1305,7 +1278,7 @@ test("runner: MiniMax and NIM requests do NOT include reasoning_effort", async (
           model: "m",
           choices: [{ message: { role: "assistant", content: valid } }],
         }),
-        { status: 200, headers: { "content-type": "application/json" } },
+        { status: 200, headers: { "content-type": "application/json" } }
       );
     };
     await runExperiments({
@@ -1319,11 +1292,7 @@ test("runner: MiniMax and NIM requests do NOT include reasoning_effort", async (
     assert.equal(log.length, 2);
     for (const entry of log) {
       const parsed = JSON.parse(entry.body);
-      assert.equal(
-        parsed.reasoning_effort,
-        undefined,
-        `reasoning_effort leaked to ${entry.url}`,
-      );
+      assert.equal(parsed.reasoning_effort, undefined, `reasoning_effort leaked to ${entry.url}`);
       // The legacy non-Groq path still uses response_format: json_object.
       assert.equal(parsed.response_format?.type, "json_object");
     }
@@ -1352,7 +1321,7 @@ test("runner: Groq sanitized report excludes the Groq key value", async () => {
           model: "m",
           choices: [{ message: { role: "assistant", content: valid } }],
         }),
-        { status: 200, headers: { "content-type": "application/json" } },
+        { status: 200, headers: { "content-type": "application/json" } }
       );
     const report = await runExperiments({
       live: true,
@@ -1364,7 +1333,7 @@ test("runner: Groq sanitized report excludes the Groq key value", async () => {
     const serialized = JSON.stringify(report);
     assert.ok(
       !serialized.includes(fakeKey),
-      "Groq key value must not appear anywhere in the report",
+      "Groq key value must not appear anywhere in the report"
     );
   } finally {
     for (const k of Object.keys(process.env)) {

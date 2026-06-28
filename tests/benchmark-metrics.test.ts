@@ -33,13 +33,21 @@
  * fails a test.
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
+import { test } from "node:test";
 
+import {
+  ANSWER_QUALITY_DISABLED_LABEL,
+  ANSWER_QUALITY_LABELS,
+  buildAnswerQualityScaffold as buildAnswerQualityScaffoldFromModule,
+  makeAnswerQualityEvaluation,
+} from "../src/benchmark/answer-quality.ts";
+import { BENCHMARK_RECORDS } from "../src/benchmark/corpus.ts";
 import {
   BENCHMARK_K_VALUES,
   HEADLINE_K,
   HEADLINE_MRR_K,
+  type QueryEval,
   aggregateMetrics,
   aggregateOrientationMetrics,
   bootstrapCi,
@@ -48,24 +56,16 @@ import {
   countPositiveWithEmptyTopK,
   evaluateQuery,
   getKnownDistractorIds,
-  type QueryEval,
 } from "../src/benchmark/metrics.ts";
-import {
-  buildAnswerQualityScaffold as buildAnswerQualityScaffoldFromModule,
-  ANSWER_QUALITY_DISABLED_LABEL,
-  ANSWER_QUALITY_LABELS,
-  makeAnswerQualityEvaluation,
-} from "../src/benchmark/answer-quality.ts";
+import { BENCHMARK_QUERIES } from "../src/benchmark/queries.ts";
 import {
   buildCandidates,
-  formatHumanReport,
   formatComparisonReport,
+  formatHumanReport,
   isComparisonReport,
   isSingleVariantReport,
   runRetrievalBenchmark,
 } from "../src/benchmark/retrieval-runner.ts";
-import { BENCHMARK_RECORDS } from "../src/benchmark/corpus.ts";
-import { BENCHMARK_QUERIES } from "../src/benchmark/queries.ts";
 
 // ---------------------------------------------------------------------------
 // 0. Stable constants
@@ -148,12 +148,12 @@ test("metrics: MRR@5 uses the reciprocal rank of the FIRST expected id in top-K"
 test("metrics: no-answer confusion matrix is well-formed on a balanced synthetic set", () => {
   const evals: QueryEval[] = [
     // Positive queries:
-    evaluateQuery("p1", "exact", "q", [1], [1], [1, 2], [0.8, 0.4]),    // TP
+    evaluateQuery("p1", "exact", "q", [1], [1], [1, 2], [0.8, 0.4]), // TP
     evaluateQuery("p2", "exact", "q", [1], [1], [1, 2, 3], [0.8, 0.4, 0.2]), // TP
-    evaluateQuery("p3", "exact", "q", [1], [1], [], []),                  // FN (positive, empty top-K)
+    evaluateQuery("p3", "exact", "q", [1], [1], [], []), // FN (positive, empty top-K)
     // No-answer queries:
-    evaluateQuery("n1", "no-answer", "q", [], [], [], []),                  // TN
-    evaluateQuery("n2", "no-answer", "q", [], [], [9], [0.3]),              // FP
+    evaluateQuery("n1", "no-answer", "q", [], [], [], []), // TN
+    evaluateQuery("n2", "no-answer", "q", [], [], [9], [0.3]), // FP
   ];
   const m = aggregateMetrics(evals);
   const d = m.derived;
@@ -234,9 +234,7 @@ test("metrics: currentTruth@1/@3/@5 diagnostics — current fact at different ra
 });
 
 test("metrics: currentTruth@K does NOT count no-answer queries", () => {
-  const evals: QueryEval[] = [
-    evaluateQuery("n1", "no-answer", "q", [], [], [], []),
-  ];
+  const evals: QueryEval[] = [evaluateQuery("n1", "no-answer", "q", [], [], [], [])];
   const m = aggregateMetrics(evals);
   const d = m.derived;
   assert.equal(d.positiveTotalForCurrentTruth, 0);
@@ -323,18 +321,12 @@ test("categorizeFailure: returns a stable label for each documented family", () 
       evaluateQuery("x", "multi-hop", "q", [1, 2], [1, 2], [99, 100], [0.8, 0.6]),
       "multi-hop:no-relevant-in-top-k",
     ],
-    [
-      evaluateQuery("x", "exact", "q", [1], [1], [99, 100], [0.8, 0.6]),
-      "exact:relevant-missing",
-    ],
+    [evaluateQuery("x", "exact", "q", [1], [1], [99, 100], [0.8, 0.6]), "exact:relevant-missing"],
     [
       evaluateQuery("x", "orientation", "q", [1], [1], [13, 14], [0.8, 0.6]),
       "orientation:project-status-not-surfaced",
     ],
-    [
-      evaluateQuery("x", "no-answer", "q", [], [], [9], [0.3]),
-      "no-answer-fp:ranker-returned-hits",
-    ],
+    [evaluateQuery("x", "no-answer", "q", [], [], [9], [0.3]), "no-answer-fp:ranker-returned-hits"],
   ];
   for (const [e, label] of cases) {
     assert.equal(categorizeFailure(e), label);
@@ -456,7 +448,7 @@ test("answer-quality guard: runner single-variant report is disabled for every v
     assert.equal(
       report.answerQuality.enabled,
       false,
-      `${v} report.answerQuality.enabled must be false in this phase`,
+      `${v} report.answerQuality.enabled must be false in this phase`
     );
     assert.equal(report.answerQuality.provider, null);
     assert.equal(report.answerQuality.evaluations, null);
@@ -491,7 +483,7 @@ test("answer-quality guard: human report always labels the scaffold as disabled"
   assert.match(
     singleText,
     /answer-quality: disabled/,
-    "single-variant human report must include the disabled label",
+    "single-variant human report must include the disabled label"
   );
   // The comparison human report must also include the
   // disabled label, since it embeds three per-variant
@@ -503,7 +495,7 @@ test("answer-quality guard: human report always labels the scaffold as disabled"
   assert.match(
     compareText,
     /answer-quality: disabled/,
-    "comparison human report must include the disabled label",
+    "comparison human report must include the disabled label"
   );
 });
 
@@ -579,11 +571,7 @@ test("runner: report carries orientation, answerQuality, and derived metrics", (
   // We test against the in-process benchmark so a future
   // schema change to the report (orientation, answerQuality,
   // derived) fails fast.
-  const variants: Array<"lexical" | "fts5" | "vector"> = [
-    "lexical",
-    "fts5",
-    "vector",
-  ];
+  const variants: Array<"lexical" | "fts5" | "vector"> = ["lexical", "fts5", "vector"];
   for (const v of variants) {
     const report = runRetrievalBenchmark({ variant: v });
     assert.ok(isSingleVariantReport(report), `${v} should be a single-variant report`);
@@ -711,9 +699,7 @@ test("benchmark: orientation queries have well-formed expected/current-truth ids
   // fact, just like the temporal family in the prior
   // phase).
   const validIds = new Set(BENCHMARK_RECORDS.map((r) => r.id));
-  const orientation = BENCHMARK_QUERIES.filter(
-    (q) => q.family === "orientation",
-  );
+  const orientation = BENCHMARK_QUERIES.filter((q) => q.family === "orientation");
   assert.ok(orientation.length > 0, "corpus has no orientation queries");
   for (const q of orientation) {
     assert.ok(q.expectedIds.length > 0, `orientation query ${q.id} has empty expectedIds`);
@@ -739,9 +725,7 @@ test("runner: buildCandidates keeps the corpus stable for orientation queries", 
   // ids.
   const cs = buildCandidates(BENCHMARK_RECORDS);
   const candIds = new Set(cs.map((c) => c.id));
-  const orientation = BENCHMARK_QUERIES.filter(
-    (q) => q.family === "orientation",
-  );
+  const orientation = BENCHMARK_QUERIES.filter((q) => q.family === "orientation");
   for (const q of orientation) {
     for (const id of q.expectedIds) {
       assert.ok(candIds.has(id), `candidate list missing id ${id} for orientation query ${q.id}`);

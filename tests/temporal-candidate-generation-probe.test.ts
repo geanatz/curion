@@ -98,30 +98,16 @@
  *      `multi-anchor-aware-combined`.
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { test } from "node:test";
 
-import {
-  BUILTIN_CANDIDATE_GENERATION_VARIANTS,
-  SIMULATED_LINKED_EXPANSION,
-  SIMULATED_LINKED_EXPANSION_INJECTED_IDS,
-  DOWNSTREAM_RERANKER_VARIANT,
-  applyCandidateExpansionRule,
-  buildCandidateGenerationReport,
-  buildCandidateGenerationVariantRow,
-  computeCandidateGenerationVerdict,
-  evaluateCandidateGenerationForQuery,
-  evaluateCandidateGenerationVariant,
-  formatCandidateGenerationReport,
-  aggregateCandidateGenerationPerQuery,
-  type CandidateGenerationReport,
-  type CandidateExpansionRule,
-  type CandidateGenerationVariant,
-  type CandidateGenerationVariantMetrics,
-} from "../src/benchmark/temporal-candidate-generation-probe.js";
+import { type QueryEval, evaluateQuery } from "../src/benchmark/metrics.js";
+import { BUILTIN_MULTI_ANCHOR_RERANK_VARIANTS } from "../src/benchmark/multi-anchor-current-previous.js";
+import type { BenchmarkQuery } from "../src/benchmark/queries.js";
+import { SIMULATED_SUPERSESSION_EDGES } from "../src/benchmark/supersession-edge-simulation.js";
 import {
   parseCandidateGenerationCliArgs,
   runCandidateGenerationAnalysis,
@@ -129,20 +115,28 @@ import {
   writeCandidateGenerationReport,
 } from "../src/benchmark/temporal-candidate-generation-probe-runner.js";
 import {
+  BUILTIN_CANDIDATE_GENERATION_VARIANTS,
+  type CandidateExpansionRule,
+  type CandidateGenerationReport,
+  type CandidateGenerationVariant,
+  type CandidateGenerationVariantMetrics,
+  DOWNSTREAM_RERANKER_VARIANT,
+  SIMULATED_LINKED_EXPANSION,
+  SIMULATED_LINKED_EXPANSION_INJECTED_IDS,
+  applyCandidateExpansionRule,
+  buildCandidateGenerationReport,
+  computeCandidateGenerationVerdict,
+  evaluateCandidateGenerationForQuery,
+  evaluateCandidateGenerationVariant,
+  formatCandidateGenerationReport,
+} from "../src/benchmark/temporal-candidate-generation-probe.js";
+import {
+  type BenchmarkArtifact,
+  alignQueriesToEvals,
   findMostRecentArtifact,
   readBenchmarkArtifact,
-  alignQueriesToEvals,
-  type BenchmarkArtifact,
 } from "../src/benchmark/temporal-truth-diagnostic-runner.js";
-import type { BenchmarkQuery } from "../src/benchmark/queries.js";
-import { evaluateQuery, type QueryEval } from "../src/benchmark/metrics.js";
 import { PUBLIC_TOOL_NAMES } from "../src/server.js";
-import {
-  BUILTIN_MULTI_ANCHOR_RERANK_VARIANTS,
-} from "../src/benchmark/multi-anchor-current-previous.js";
-import {
-  SIMULATED_SUPERSESSION_EDGES,
-} from "../src/benchmark/supersession-edge-simulation.js";
 import { walkTs } from "./_helpers/fs-walk.ts";
 
 // ---------------------------------------------------------------------------
@@ -164,7 +158,7 @@ function mkQueryEval(
     topIds: number[];
     topScores?: number[];
     labels?: string[];
-  }>,
+  }>
 ): { evals: QueryEval[]; queries: BenchmarkQuery[] } {
   const evals: QueryEval[] = [];
   const queries: BenchmarkQuery[] = [];
@@ -177,7 +171,7 @@ function mkQueryEval(
       s.expectedIds,
       s.currentTruthIds,
       s.topIds,
-      topScores,
+      topScores
     );
     const expectedSet = new Set(s.expectedIds);
     const currentTruthSet = new Set(s.currentTruthIds);
@@ -232,12 +226,12 @@ test("temporal-candidate-generation-probe: SIMULATED_LINKED_EXPANSION contains t
     if (edge.supersededBy !== null) {
       assert.ok(
         SIMULATED_LINKED_EXPANSION.has(id),
-        `SIMULATED_LINKED_EXPANSION must contain ${id}`,
+        `SIMULATED_LINKED_EXPANSION must contain ${id}`
       );
       const linked = SIMULATED_LINKED_EXPANSION.get(id)!;
       assert.ok(
         linked.includes(edge.supersededBy),
-        `SIMULATED_LINKED_EXPANSION.get(${id}) must include the supersededBy id ${edge.supersededBy}`,
+        `SIMULATED_LINKED_EXPANSION.get(${id}) must include the supersededBy id ${edge.supersededBy}`
       );
     }
   }
@@ -248,22 +242,10 @@ test("temporal-candidate-generation-probe: SIMULATED_LINKED_EXPANSION contains t
   // hand-curated: 117 -> [1], 118 -> [7],
   // 119 -> [69], 120 -> [11]. The test
   // pins the contract.
-  assert.deepEqual(
-    [...SIMULATED_LINKED_EXPANSION.get(117)!],
-    [1],
-  );
-  assert.deepEqual(
-    [...SIMULATED_LINKED_EXPANSION.get(118)!],
-    [7],
-  );
-  assert.deepEqual(
-    [...SIMULATED_LINKED_EXPANSION.get(119)!],
-    [69],
-  );
-  assert.deepEqual(
-    [...SIMULATED_LINKED_EXPANSION.get(120)!],
-    [11],
-  );
+  assert.deepEqual([...SIMULATED_LINKED_EXPANSION.get(117)!], [1]);
+  assert.deepEqual([...SIMULATED_LINKED_EXPANSION.get(118)!], [7]);
+  assert.deepEqual([...SIMULATED_LINKED_EXPANSION.get(119)!], [69]);
+  assert.deepEqual([...SIMULATED_LINKED_EXPANSION.get(120)!], [11]);
 });
 
 test("temporal-candidate-generation-probe: SIMULATED_LINKED_EXPANSION_INJECTED_IDS is the union of the map values", () => {
@@ -275,7 +257,7 @@ test("temporal-candidate-generation-probe: SIMULATED_LINKED_EXPANSION_INJECTED_I
   }
   assert.deepEqual(
     [...SIMULATED_LINKED_EXPANSION_INJECTED_IDS].sort((a, b) => a - b),
-    [...expected].sort((a, b) => a - b),
+    [...expected].sort((a, b) => a - b)
   );
 });
 
@@ -295,7 +277,7 @@ test("temporal-candidate-generation-probe: SIMULATED_LINKED_EXPANSION does NOT c
   for (const id of [1, 2, 3, 6, 7, 11, 50, 90, 95]) {
     assert.ok(
       !SIMULATED_LINKED_EXPANSION.has(id),
-      `SIMULATED_LINKED_EXPANSION must NOT contain ${id}`,
+      `SIMULATED_LINKED_EXPANSION must NOT contain ${id}`
     );
   }
 });
@@ -530,11 +512,9 @@ test("temporal-candidate-generation-probe: multi-anchor-linked-expansion does NO
       topIds: [1, 21, 5, 6, 7],
     },
   ]);
-  const variant: CandidateGenerationVariant =
-    BUILTIN_CANDIDATE_GENERATION_VARIANTS.find(
-      (v) =>
-        v.id === "metadata-simulation-multi-anchor-linked-expansion",
-    )!;
+  const variant: CandidateGenerationVariant = BUILTIN_CANDIDATE_GENERATION_VARIANTS.find(
+    (v) => v.id === "metadata-simulation-multi-anchor-linked-expansion"
+  )!;
   const metrics = evaluateCandidateGenerationVariant({
     variant,
     evals,
@@ -558,10 +538,9 @@ test("temporal-candidate-generation-probe: oracle-candidate-injection-ceiling re
       topIds: [1, 57, 93, 113, 124],
     },
   ]);
-  const variant: CandidateGenerationVariant =
-    BUILTIN_CANDIDATE_GENERATION_VARIANTS.find(
-      (v) => v.id === "oracle-candidate-injection-ceiling",
-    )!;
+  const variant: CandidateGenerationVariant = BUILTIN_CANDIDATE_GENERATION_VARIANTS.find(
+    (v) => v.id === "oracle-candidate-injection-ceiling"
+  )!;
   const metrics = evaluateCandidateGenerationVariant({
     variant,
     evals,
@@ -590,10 +569,9 @@ test("temporal-candidate-generation-probe: downstream reranker guard throws when
   const { evals, queries } = mkQueryEval([
     { queryId: "q1", expectedIds: [1], currentTruthIds: [1], topIds: [1, 5, 6, 7, 8] },
   ]);
-  const variant: CandidateGenerationVariant =
-    BUILTIN_CANDIDATE_GENERATION_VARIANTS[0]!;
+  const variant: CandidateGenerationVariant = BUILTIN_CANDIDATE_GENERATION_VARIANTS[0]!;
   const wrongDownstream = BUILTIN_MULTI_ANCHOR_RERANK_VARIANTS.find(
-    (v) => v.id === "metadata-simulation-supersededBy-demote",
+    (v) => v.id === "metadata-simulation-supersededBy-demote"
   )!;
   assert.throws(
     () =>
@@ -603,7 +581,7 @@ test("temporal-candidate-generation-probe: downstream reranker guard throws when
         queries,
         downstreamVariant: wrongDownstream,
       }),
-    /downstreamVariant must be 'multi-anchor-aware-combined'/,
+    /downstreamVariant must be 'multi-anchor-aware-combined'/
   );
 });
 
@@ -615,11 +593,9 @@ test("temporal-candidate-generation-probe: evaluateCandidateGenerationForQuery i
   const { evals, queries } = mkQueryEval([
     { queryId: "q1", expectedIds: [1], currentTruthIds: [1], topIds: [21, 5, 6, 7, 8] },
   ]);
-  const variant: CandidateGenerationVariant =
-    BUILTIN_CANDIDATE_GENERATION_VARIANTS.find(
-      (v) =>
-        v.id === "metadata-simulation-multi-anchor-linked-expansion",
-    )!;
+  const variant: CandidateGenerationVariant = BUILTIN_CANDIDATE_GENERATION_VARIANTS.find(
+    (v) => v.id === "metadata-simulation-multi-anchor-linked-expansion"
+  )!;
   const a = evaluateCandidateGenerationForQuery({
     variant,
     eval: evals[0]!,
@@ -655,11 +631,9 @@ test("temporal-candidate-generation-probe: aggregateCandidateGenerationPerQuery 
     { queryId: "q1", expectedIds: [1], currentTruthIds: [1], topIds: [1, 5, 6, 7, 8] },
     { queryId: "q2", expectedIds: [7], currentTruthIds: [7], topIds: [22, 5, 6, 7, 8] },
   ]);
-  const variant: CandidateGenerationVariant =
-    BUILTIN_CANDIDATE_GENERATION_VARIANTS.find(
-      (v) =>
-        v.id === "metadata-simulation-multi-anchor-linked-expansion",
-    )!;
+  const variant: CandidateGenerationVariant = BUILTIN_CANDIDATE_GENERATION_VARIANTS.find(
+    (v) => v.id === "metadata-simulation-multi-anchor-linked-expansion"
+  )!;
   const m1 = evaluateCandidateGenerationVariant({ variant, evals, queries });
   const m2 = evaluateCandidateGenerationVariant({ variant, evals, queries });
   // Same input -> same metrics.
@@ -670,8 +644,7 @@ test("temporal-candidate-generation-probe: aggregator covers the documented metr
   const { evals, queries } = mkQueryEval([
     { queryId: "q1", expectedIds: [1], currentTruthIds: [1], topIds: [1, 5, 6, 7, 8] },
   ]);
-  const variant: CandidateGenerationVariant =
-    BUILTIN_CANDIDATE_GENERATION_VARIANTS[0]!;
+  const variant: CandidateGenerationVariant = BUILTIN_CANDIDATE_GENERATION_VARIANTS[0]!;
   const m = evaluateCandidateGenerationVariant({ variant, evals, queries });
   // The block carries the documented
   // fields.
@@ -913,10 +886,7 @@ test("temporal-candidate-generation-probe: buildCandidateGenerationReport has th
     "categoryChangeKeys",
   ];
   for (const k of requiredTopLevel) {
-    assert.ok(
-      Object.keys(report).includes(k as string),
-      `report must include ${k}`,
-    );
+    assert.ok(Object.keys(report).includes(k as string), `report must include ${k}`);
   }
   // The variants are in declaration
   // order; the first variant is the
@@ -962,9 +932,7 @@ test("temporal-candidate-generation-probe: production source tree does NOT impor
   // MUST NOT import the new modules. The
   // experiment is benchmark-only.
   const prodRoots = ["src/controller", "src/storage", "src/tools"];
-  const newModuleIdentifiers = [
-    "temporal-candidate-generation-probe",
-  ];
+  const newModuleIdentifiers = ["temporal-candidate-generation-probe"];
   for (const root of prodRoots) {
     if (!fs.existsSync(root)) continue;
     const files = walkTs(root);
@@ -973,7 +941,7 @@ test("temporal-candidate-generation-probe: production source tree does NOT impor
       for (const ident of newModuleIdentifiers) {
         assert.ok(
           !text.includes(ident),
-          `production file ${f} must NOT import or reference ${ident}`,
+          `production file ${f} must NOT import or reference ${ident}`
         );
       }
     }
@@ -1013,19 +981,13 @@ test("temporal-candidate-generation-probe: end-to-end on the real lexical-baseli
   // The report is well-formed.
   assert.equal(report.temporalQueryCount, 26);
   // The variants are populated.
-  assert.equal(
-    report.variants.length,
-    BUILTIN_CANDIDATE_GENERATION_VARIANTS.length,
-  );
+  assert.equal(report.variants.length, BUILTIN_CANDIDATE_GENERATION_VARIANTS.length);
   // The baseline + reranker-control are
   // both well-formed.
   const baseline = report.variants[0]!;
   assert.equal(baseline.variant.id, "baseline-no-rerank");
   const rerankerControl = report.variants[1]!;
-  assert.equal(
-    rerankerControl.variant.id,
-    "reranker-control-multi-anchor-aware-combined",
-  );
+  assert.equal(rerankerControl.variant.id, "reranker-control-multi-anchor-aware-combined");
   // The baseline + the reranker-control
   // hit 10/26 baseline (newer-wins tie-
   // breaker changed from 12 to 10);
@@ -1057,8 +1019,7 @@ test("temporal-candidate-generation-probe: end-to-end on the real lexical-baseli
   // deterministic rule (regressionCount
   // > 0).
   const multiAnchorLinked = report.variants.find(
-    (v) =>
-      v.variant.id === "metadata-simulation-multi-anchor-linked-expansion",
+    (v) => v.variant.id === "metadata-simulation-multi-anchor-linked-expansion"
   )!;
   // The honest assertion: the
   // multi-anchor linked-expansion
@@ -1069,9 +1030,8 @@ test("temporal-candidate-generation-probe: end-to-end on the real lexical-baseli
   // variant table is the source of
   // truth.
   assert.ok(
-    multiAnchorLinked.metrics.afterCurrentTruthAt1 >=
-      rerankerControl.metrics.afterCurrentTruthAt1,
-    "multi-anchor linked-expansion should not regress below the reranker-control",
+    multiAnchorLinked.metrics.afterCurrentTruthAt1 >= rerankerControl.metrics.afterCurrentTruthAt1,
+    "multi-anchor linked-expansion should not regress below the reranker-control"
   );
   // The regression on temp-rate-limit
   // is the documented honest finding:
@@ -1086,13 +1046,11 @@ test("temporal-candidate-generation-probe: end-to-end on the real lexical-baseli
   //
   // The verdict is on the row, not
   // the metrics. Look up the row.
-  const expectedVerdict = multiAnchorLinked.metrics.regressionCount > 0
-    ? "unsafe"
-    : "safe";
+  const expectedVerdict = multiAnchorLinked.metrics.regressionCount > 0 ? "unsafe" : "safe";
   assert.equal(
     multiAnchorLinked.verdict,
     expectedVerdict,
-    "verdict is unsafe when regressionCount > 0",
+    "verdict is unsafe when regressionCount > 0"
   );
   // The recovered-by-expansion count
   // is the candidate-generation analog
@@ -1103,7 +1061,7 @@ test("temporal-candidate-generation-probe: end-to-end on the real lexical-baseli
   // of the +4 gap" reading.
   assert.ok(
     multiAnchorLinked.metrics.recoveredByExpansion > 0,
-    "multi-anchor linked-expansion should recover at least one missing case",
+    "multi-anchor linked-expansion should recover at least one missing case"
   );
   // The oracle candidate-injection
   // ceiling is the maximum the
@@ -1135,7 +1093,7 @@ test("temporal-candidate-generation-probe: end-to-end on the real lexical-baseli
   // metadata, what would the after-
   // rerank look like?".
   const oracle = report.variants.find(
-    (v) => v.variant.id === "oracle-candidate-injection-ceiling",
+    (v) => v.variant.id === "oracle-candidate-injection-ceiling"
   )!;
   // The candidate-injection oracle
   // reaches the +4-gap closure (the
@@ -1215,11 +1173,7 @@ test("temporal-candidate-generation-probe: parseCandidateGenerationCliArgs with 
 });
 
 test("temporal-candidate-generation-probe: parseCandidateGenerationCliArgs ignores unknown flags", () => {
-  const args = parseCandidateGenerationCliArgs([
-    "--unknown",
-    "foo",
-    "--help",
-  ]);
+  const args = parseCandidateGenerationCliArgs(["--unknown", "foo", "--help"]);
   assert.deepEqual(args, {});
 });
 
@@ -1270,8 +1224,7 @@ test("temporal-candidate-generation-probe: clean vs fixture-ambiguous split is o
       labels: ["divergentTemporal"],
     },
   ]);
-  const variant: CandidateGenerationVariant =
-    BUILTIN_CANDIDATE_GENERATION_VARIANTS[0]!;
+  const variant: CandidateGenerationVariant = BUILTIN_CANDIDATE_GENERATION_VARIANTS[0]!;
   const metrics = evaluateCandidateGenerationVariant({ variant, evals, queries });
   // The clean query counts on the
   // clean slice; the ambiguous query

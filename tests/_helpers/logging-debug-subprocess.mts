@@ -20,7 +20,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { runRememberController } from "../../src/controller/remember-controller.ts";
-import { initStorage, type StorageHandle } from "../../src/storage/storage.ts";
+import { type StorageHandle, initStorage } from "../../src/storage/storage.ts";
 
 function okChatResponse(content: string): Response {
   return new Response(
@@ -29,20 +29,21 @@ function okChatResponse(content: string): Response {
       model: "m",
       choices: [{ message: { role: "assistant", content } }],
     }),
-    { status: 200, headers: { "content-type": "application/json" } },
+    { status: 200, headers: { "content-type": "application/json" } }
   );
 }
 
 function scriptFetch(): typeof fetch {
-  const fetchImpl: typeof fetch = async () => okChatResponse(
-    JSON.stringify({
-      summary: "Safe project fact.",
-      confidence: 0.9,
-      tags: ["project"],
-      entities: [],
-      classification: "fact",
-    }),
-  );
+  const fetchImpl: typeof fetch = async () =>
+    okChatResponse(
+      JSON.stringify({
+        summary: "Safe project fact.",
+        confidence: 0.9,
+        tags: ["project"],
+        entities: [],
+        classification: "fact",
+      })
+    );
   return fetchImpl;
 }
 
@@ -65,7 +66,7 @@ async function main(): Promise<void> {
         providerFetchImpl: fetchImpl,
         providerPrimaryApiKey: primary,
         providerFallbackApiKey: fallback,
-      },
+      }
     );
   } finally {
     try {

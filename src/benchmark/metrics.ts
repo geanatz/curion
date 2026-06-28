@@ -501,7 +501,7 @@ export function buildHybridPerFamilyDelta(
   hybrid: BenchmarkMetrics,
   lexical: BenchmarkMetrics,
   fts5: BenchmarkMetrics,
-  vector: BenchmarkMetrics,
+  vector: BenchmarkMetrics
 ): HybridPerFamilyDeltaRow[] {
   const families = new Set<string>();
   for (const f of Object.keys(hybrid.perFamily)) families.add(f);
@@ -958,7 +958,7 @@ function makeLcg(seed: number): () => number {
 
 export function bootstrapCi(
   outcomes: ReadonlyArray<boolean>,
-  options: { resamples?: number; seed?: number } = {},
+  options: { resamples?: number; seed?: number } = {}
 ): BootstrapCi {
   const resamples = options.resamples ?? DEFAULT_BOOTSTRAP_RESAMPLES;
   const seed = options.seed ?? DEFAULT_BOOTSTRAP_SEED;
@@ -1028,7 +1028,7 @@ export function evaluateQuery(
   expectedIds: number[],
   currentTruthIds: number[],
   topIds: number[],
-  topScores: number[],
+  topScores: number[]
 ): QueryEval {
   const expected = new Set(expectedIds);
   const currentTruth = new Set(currentTruthIds);
@@ -1408,8 +1408,7 @@ export function aggregateMetrics(evals: QueryEval[]): BenchmarkMetrics {
     // categoriser handles this case in the `temporal`
     // branch.
     const isCategorizedAsFailure =
-      !e.passed ||
-      (e.family === "temporal" && e.passed && !e.currentTruthAt1);
+      !e.passed || (e.family === "temporal" && e.passed && !e.currentTruthAt1);
     if (isCategorizedAsFailure) {
       const cat = categorizeFailure(e);
       failureCategories[cat] = (failureCategories[cat] ?? 0) + 1;
@@ -1424,8 +1423,7 @@ export function aggregateMetrics(evals: QueryEval[]): BenchmarkMetrics {
     const pAt5 = slot.tp + slot.fp > 0 ? slot.tp / (slot.tp + slot.fp) : 0;
     const rAt5 = slot.tp + slot.fn > 0 ? slot.tp / (slot.tp + slot.fn) : 0;
     const f1 = pAt5 + rAt5 > 0 ? (2 * pAt5 * rAt5) / (pAt5 + rAt5) : 0;
-    const mrr =
-      slot.total > 0 ? (slot.mrrSum ?? 0) / Math.max(1, slot.total) : 0;
+    const mrr = slot.total > 0 ? (slot.mrrSum ?? 0) / Math.max(1, slot.total) : 0;
     perFamily[name] = {
       total: slot.total,
       passed: slot.passed,
@@ -1455,9 +1453,7 @@ export function aggregateMetrics(evals: QueryEval[]): BenchmarkMetrics {
   const precisionAtK = tp + fp > 0 ? tp / (tp + fp) : 0;
   const recallAtK = tp + fn > 0 ? tp / (tp + fn) : 0;
   const f1At5 =
-    precisionAtK + recallAtK > 0
-      ? (2 * precisionAtK * recallAtK) / (precisionAtK + recallAtK)
-      : 0;
+    precisionAtK + recallAtK > 0 ? (2 * precisionAtK * recallAtK) / (precisionAtK + recallAtK) : 0;
   const mrrAtK = mrrDenom > 0 ? mrrSum / mrrDenom : 0;
 
   // No-answer confusion matrix in the binary
@@ -1471,24 +1467,16 @@ export function aggregateMetrics(evals: QueryEval[]): BenchmarkMetrics {
   const noAnswerFn = countPositiveWithEmptyTopK(evals);
   const noAnswerTn = noAnswerCorrect;
   const noAnswerFp = noAnswerTotal - noAnswerCorrect;
-  const specificity = noAnswerTn + noAnswerFp > 0
-    ? noAnswerTn / (noAnswerTn + noAnswerFp)
-    : 0;
-  const fpr = noAnswerTn + noAnswerFp > 0
-    ? noAnswerFp / (noAnswerFp + noAnswerTn)
-    : 0;
-  const answerCoverage = positiveTotal > 0
-    ? noAnswerTp / Math.max(1, positiveTotal)
-    : 0;
+  const specificity = noAnswerTn + noAnswerFp > 0 ? noAnswerTn / (noAnswerTn + noAnswerFp) : 0;
+  const fpr = noAnswerTn + noAnswerFp > 0 ? noAnswerFp / (noAnswerFp + noAnswerTn) : 0;
+  const answerCoverage = positiveTotal > 0 ? noAnswerTp / Math.max(1, positiveTotal) : 0;
   // Abstention precision: TN / (TN + FN). If the
   // system abstained (empty top-K), was it right?
-  const abstentionPrecision = noAnswerTn + noAnswerFn > 0
-    ? noAnswerTn / (noAnswerTn + noAnswerFn)
-    : 0;
+  const abstentionPrecision =
+    noAnswerTn + noAnswerFn > 0 ? noAnswerTn / (noAnswerTn + noAnswerFn) : 0;
 
-  const currentTruthRecallAt5 = positiveTotal > 0
-    ? currentTruthHitsAt5 / Math.max(1, positiveTotal)
-    : 0;
+  const currentTruthRecallAt5 =
+    positiveTotal > 0 ? currentTruthHitsAt5 / Math.max(1, positiveTotal) : 0;
 
   const derived: DerivedMetrics = {
     precisionAtK,
@@ -1502,8 +1490,7 @@ export function aggregateMetrics(evals: QueryEval[]): BenchmarkMetrics {
     multiHopComplete,
     multiHopTotal,
     multiHopAnyRate: multiHopTotal > 0 ? multiHopAny / multiHopTotal : 0,
-    multiHopCompleteRate:
-      multiHopTotal > 0 ? multiHopComplete / multiHopTotal : 0,
+    multiHopCompleteRate: multiHopTotal > 0 ? multiHopComplete / multiHopTotal : 0,
     noAnswerTp,
     noAnswerFp,
     noAnswerTn,
@@ -1520,12 +1507,10 @@ export function aggregateMetrics(evals: QueryEval[]): BenchmarkMetrics {
     positiveTotalForCurrentTruth: positiveTotal,
     meanTopScorePass: countPass > 0 ? sumTopScorePass / countPass : 0,
     meanTopScoreFail: countFail > 0 ? sumTopScoreFail / countFail : 0,
-    meanScoreGap1To2:
-      gapSampleCount > 0 ? sumGap1To2 / gapSampleCount : 0,
+    meanScoreGap1To2: gapSampleCount > 0 ? sumGap1To2 / gapSampleCount : 0,
     meanReturnedCount: countAll > 0 ? sumReturnedCount / countAll : 0,
     meanTopScore: countAll > 0 ? sumTopScoreAll / countAll : 0,
-    meanTopScoreNoAnswer:
-      countNoAnswer > 0 ? sumTopScoreNoAnswer / countNoAnswer : 0,
+    meanTopScoreNoAnswer: countNoAnswer > 0 ? sumTopScoreNoAnswer / countNoAnswer : 0,
     scoreSampleCountPass: countPass,
     scoreSampleCountFail: countFail,
     scoreSampleCountNoAnswer: countNoAnswer,
@@ -1605,7 +1590,7 @@ function freshPerFamily(): PerFamilyRawSlot {
  */
 export function aggregateOrientationMetrics(
   evals: QueryEval[],
-  options: { distractorIds?: ReadonlySet<number> } = {},
+  options: { distractorIds?: ReadonlySet<number> } = {}
 ): OrientationMetrics {
   const distractors = options.distractorIds ?? getKnownDistractorIds();
   const orientation = evals.filter((e) => e.family === "orientation");
@@ -1651,8 +1636,7 @@ export function aggregateOrientationMetrics(
     noisyReturnRate: total > 0 ? noisyReturnQueries / total : 0,
     meanNoisePerQuery: total > 0 ? sumNoisePerQuery / total : 0,
     currentTruthCoverageAt5,
-    currentTruthCoverageAt5Rate:
-      total > 0 ? currentTruthCoverageAt5 / total : 0,
+    currentTruthCoverageAt5Rate: total > 0 ? currentTruthCoverageAt5 / total : 0,
   };
 }
 
@@ -1665,9 +1649,7 @@ export function aggregateOrientationMetrics(
  * this in this phase. A future phase can wrap the function
  * with a judge; the public shape is stable.
  */
-export function buildAnswerQualityScaffold(
-  options: { note?: string } = {},
-): AnswerQualityScaffold {
+export function buildAnswerQualityScaffold(options: { note?: string } = {}): AnswerQualityScaffold {
   return {
     enabled: false,
     provider: null,

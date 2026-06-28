@@ -78,18 +78,18 @@
  *      (no recency claim).
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { test } from "node:test";
 import url from "node:url";
 
 import {
-  detectResolvedHistory,
-  RESOLVED_HISTORY_CONFIDENCE_THRESHOLD,
-  RESOLVED_HISTORY_ANSWER_OVERLAP_THRESHOLD,
   MAX_RESOLVED_HISTORY_IDS,
+  RESOLVED_HISTORY_ANSWER_OVERLAP_THRESHOLD,
+  RESOLVED_HISTORY_CONFIDENCE_THRESHOLD,
   type ResolvedHistoryCandidate,
+  detectResolvedHistory,
 } from "../src/retrieval/resolved-history.ts";
 
 // ---------------------------------------------------------------------------
@@ -98,9 +98,7 @@ import {
 
 let nextId = 1;
 
-function mkCandidate(
-  overrides: Partial<ResolvedHistoryCandidate> = {},
-): ResolvedHistoryCandidate {
+function mkCandidate(overrides: Partial<ResolvedHistoryCandidate> = {}): ResolvedHistoryCandidate {
   const id = overrides.id ?? nextId++;
   return {
     id,
@@ -176,8 +174,7 @@ test("detectResolvedHistory: SG1 explicit previous+current pair resolves", () =>
   const a = mkCandidate({
     id: 10,
     memoryContent:
-      "Render was the previous hosting platform. The current " +
-      "hosting platform is Fly.io.",
+      "Render was the previous hosting platform. The current " + "hosting platform is Fly.io.",
   });
   const b = mkCandidate({
     id: 11,
@@ -195,7 +192,7 @@ test("detectResolvedHistory: SG1 explicit previous+current pair resolves", () =>
   assert.deepEqual(out.memoryIds, [10, 11]);
   assert.ok(
     out.confidence >= RESOLVED_HISTORY_CONFIDENCE_THRESHOLD,
-    `expected confidence >= ${RESOLVED_HISTORY_CONFIDENCE_THRESHOLD}, got ${out.confidence}`,
+    `expected confidence >= ${RESOLVED_HISTORY_CONFIDENCE_THRESHOLD}, got ${out.confidence}`
   );
   assert.ok(out.confidence <= 1, "confidence bounded to [0, 1]");
 });
@@ -284,14 +281,12 @@ test("detectResolvedHistory: SG4 three-step timeline resolves the (history, curr
   // pair and emits `memoryIds: [history, current]`.
   const history = mkCandidate({
     id: 50,
-    memoryContent:
-      "Render was the previous hosting platform. It is no longer used.",
+    memoryContent: "Render was the previous hosting platform. It is no longer used.",
   });
   const intermediate = mkCandidate({
     id: 51,
     memoryContent:
-      "Fly.io replaced Render as the hosting platform. " +
-      "It has since been superseded.",
+      "Fly.io replaced Render as the hosting platform. " + "It has since been superseded.",
   });
   const current = mkCandidate({
     id: 52,
@@ -314,7 +309,7 @@ test("detectResolvedHistory: SG4 three-step timeline resolves the (history, curr
   assert.deepEqual(out.memoryIds, [50, 52]);
   assert.ok(
     out.confidence >= RESOLVED_HISTORY_CONFIDENCE_THRESHOLD,
-    `expected confidence >= ${RESOLVED_HISTORY_CONFIDENCE_THRESHOLD}, got ${out.confidence}`,
+    `expected confidence >= ${RESOLVED_HISTORY_CONFIDENCE_THRESHOLD}, got ${out.confidence}`
   );
 });
 
@@ -397,9 +392,7 @@ test("detectResolvedHistory: SG7 superseded/no-longer wording resolves", () => {
   // answer aligns with the current side.
   const a = mkCandidate({
     id: 80,
-    memoryContent:
-      "The old hosting platform was Render. It has been " +
-      "superseded by Fly.io.",
+    memoryContent: "The old hosting platform was Render. It has been " + "superseded by Fly.io.",
   });
   const b = mkCandidate({
     id: 81,
@@ -418,7 +411,7 @@ test("detectResolvedHistory: SG7 superseded/no-longer wording resolves", () => {
   assert.deepEqual(out.memoryIds, [80, 81]);
   assert.ok(
     out.confidence >= RESOLVED_HISTORY_CONFIDENCE_THRESHOLD,
-    `expected confidence >= ${RESOLVED_HISTORY_CONFIDENCE_THRESHOLD}, got ${out.confidence}`,
+    `expected confidence >= ${RESOLVED_HISTORY_CONFIDENCE_THRESHOLD}, got ${out.confidence}`
   );
 });
 
@@ -714,14 +707,14 @@ test("detectResolvedHistory: output never references raw text", () => {
     assert.equal(
       (out as unknown as Record<string, unknown>)[forbidden],
       undefined,
-      `signal must not include a '${forbidden}' field`,
+      `signal must not include a '${forbidden}' field`
     );
   }
   // The synthesized answer text must not be echoed
   // in the signal content (ids only).
   assert.ok(
     !json.includes("Fly.io is the current"),
-    "signal must not include the synthesized answer text",
+    "signal must not include the synthesized answer text"
   );
 });
 
@@ -747,13 +740,13 @@ test("resolved-history detector: does not import benchmark experiment modules", 
     assert.equal(
       text.includes(tok),
       false,
-      `resolved-history.ts must not reference benchmark experiment module "${tok}"`,
+      `resolved-history.ts must not reference benchmark experiment module "${tok}"`
     );
   }
   assert.equal(
     /from\s+["'][^"']*benchmark\//.test(text),
     false,
-    "resolved-history.ts must not import from src/benchmark/",
+    "resolved-history.ts must not import from src/benchmark/"
   );
 });
 
@@ -809,8 +802,7 @@ test("detectResolvedHistory: co-carried markers on a row do not block pairing wh
   const a = mkCandidate({
     id: 200,
     memoryContent:
-      "Render was the previous hosting platform. The current " +
-      "hosting platform is Fly.io.",
+      "Render was the previous hosting platform. The current " + "hosting platform is Fly.io.",
   });
   const b = mkCandidate({
     id: 201,
@@ -930,10 +922,7 @@ test("detectResolvedHistory: signal shape -> kind / reason / memoryIds / confide
   for (let i = 1; i < out.memoryIds.length; i += 1) {
     const prev = out.memoryIds[i - 1];
     const cur = out.memoryIds[i];
-    assert.ok(
-      prev !== undefined && cur !== undefined && prev < cur,
-      "memoryIds must be ascending",
-    );
+    assert.ok(prev !== undefined && cur !== undefined && prev < cur, "memoryIds must be ascending");
   }
 });
 

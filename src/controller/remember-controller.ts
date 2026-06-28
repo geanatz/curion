@@ -23,31 +23,31 @@
  * the model and never echoes it back).
  */
 
+import { logger } from "../logging/logger.js";
 import {
-  analyzeMemoryWithFallback,
   type MemoryAnalysisResult,
   type RelatedMemory,
+  analyzeMemoryWithFallback,
 } from "../providers/memory-analysis.js";
 import type { MemoryAnalysis } from "../providers/structured-output.js";
-import { classifyInput, redactSummary } from "../safety/precheck.js";
-import { findRelatedMemories } from "../retrieval/seam.js";
 import {
+  type RelationshipMetadataFields,
   buildPersistedMetadata,
   deriveRelationshipMetadata,
-  type RelationshipMetadataFields,
 } from "../retrieval/relationship.js";
+import { findRelatedMemories } from "../retrieval/seam.js";
 import { detectSupersession } from "../retrieval/supersession.js";
+import { classifyInput, redactSummary } from "../safety/precheck.js";
 import {
-  addSupersededByToMemory,
-  insertMemoryRecord,
-  updateMemoryMetadata,
   MEMORY_KINDS,
   type MemoryKind,
   type MemoryRecord,
   type SafeMemorySummary,
   type StorageHandle,
+  addSupersededByToMemory,
+  insertMemoryRecord,
+  updateMemoryMetadata,
 } from "../storage/storage.js";
-import { logger } from "../logging/logger.js";
 import type { Clarification } from "../tools/remember-structured-content.js";
 
 // ---------------------------------------------------------------------------
@@ -57,7 +57,12 @@ import type { Clarification } from "../tools/remember-structured-content.js";
 /** Public outcome of the controller. */
 export type RememberOutcome =
   | { status: "saved"; record: MemoryRecord; message: string }
-  | { status: "rejected"; reason: string; safetyClass: string; clarification_needed?: Clarification }
+  | {
+      status: "rejected";
+      reason: string;
+      safetyClass: string;
+      clarification_needed?: Clarification;
+    }
   | { status: "provider_error"; reason: string };
 
 /** Controller options. Most fields have safe defaults. */
@@ -160,9 +165,7 @@ const CLASSIFICATION_TO_KIND: Record<string, MemoryKind> = {
  * `MemoryKind` enum. Unknown values map to `finding` (the safe
  * fallback). The match is case-insensitive and trimmed.
  */
-function mapProviderKindToInternal(
-  providerKind: string | undefined,
-): MemoryKind {
+function mapProviderKindToInternal(providerKind: string | undefined): MemoryKind {
   if (!providerKind) return "finding";
   const key = providerKind.trim().toLowerCase();
   if (!key) return "finding";
@@ -189,23 +192,18 @@ function mapProviderKindToInternal(
 export async function runRememberController(
   storage: StorageHandle,
   rawInput: string,
-  options: RememberControllerOptions = {},
+  options: RememberControllerOptions = {}
 ): Promise<RememberOutcome> {
-  const confidenceThreshold =
-    options.confidenceThreshold ?? DEFAULT_CONFIDENCE_THRESHOLD;
-  const maxSummaryLength =
-    options.maxSummaryLength ?? DEFAULT_MAX_SUMMARY_LENGTH;
+  const confidenceThreshold = options.confidenceThreshold ?? DEFAULT_CONFIDENCE_THRESHOLD;
+  const maxSummaryLength = options.maxSummaryLength ?? DEFAULT_MAX_SUMMARY_LENGTH;
 
   // -- 1. Safety pre-check (no provider call yet) --------------------
   const safety = classifyInput(rawInput);
-  logger.debug(
-    `remember: pre-check class=${safety.class} reason=${safety.reason}`,
-  );
+  logger.debug(`remember: pre-check class=${safety.class} reason=${safety.reason}`);
   if (safety.class === "secret") {
     return {
       status: "rejected",
-      reason:
-        "input contains a secret-shaped fragment; refusing to store or forward it",
+      reason: "input contains a secret-shaped fragment; refusing to store or forward it",
       safetyClass: "secret",
     };
   }
@@ -228,8 +226,7 @@ export async function runRememberController(
   if (safety.class === "unsafe-preference") {
     return {
       status: "rejected",
-      reason:
-        "input asks to weaken safety or persistence policy; refusing to store or forward it",
+      reason: "input asks to weaken safety or persistence policy; refusing to store or forward it",
       safetyClass: "unsafe-preference",
     };
   }
@@ -250,8 +247,7 @@ export async function runRememberController(
   if (safety.class === "self-conflict") {
     return {
       status: "rejected",
-      reason:
-        "input contains opposing project facts; please resubmit the single canonical fact",
+      reason: "input contains opposing project facts; please resubmit the single canonical fact",
       safetyClass: "self-conflict",
       clarification_needed: {
         question:
@@ -304,9 +300,7 @@ export async function runRememberController(
   // Build the adapter options object with only defined fields, so
   // the adapter does not receive undefined values for keys that
   // have defaults.
-  const adapterOptions: Parameters<
-    typeof analyzeMemoryWithFallback
-  >[2] = {};
+  const adapterOptions: Parameters<typeof analyzeMemoryWithFallback>[2] = {};
   if (options.providerFetchImpl !== undefined) {
     adapterOptions.fetchImpl = options.providerFetchImpl;
   }
@@ -332,7 +326,7 @@ export async function runRememberController(
   const result: MemoryAnalysisResult = await analyzeMemoryWithFallback(
     rawInput,
     relatedForProvider,
-    adapterOptions,
+    adapterOptions
   );
 
   if (!result.ok) {
@@ -343,15 +337,11 @@ export async function runRememberController(
   }
 
   // -- 4. Controller validation + normalization ----------------------
-  const normalized = validateAndNormalize(
-    result.value,
-    maxSummaryLength,
-  );
+  const normalized = validateAndNormalize(result.value, maxSummaryLength);
   if (!normalized.ok) {
     return normalized.outcome;
   }
-  const { memoryContent, kind, confidence, tags, classification, entities } =
-    normalized;
+  const { memoryContent, kind, confidence, tags, classification, entities } = normalized;
 
   // -- 5. Confidence gate --------------------------------------------
   if (confidence < confidenceThreshold) {
@@ -474,18 +464,14 @@ export async function runRememberController(
   // Pass rawInputText so the detector can use the user's explicit
   // supersession language (e.g. "supersedes") even if the provider
   // summary rephrased it (e.g. to "superseding").
-  const { memories: supersessionCandidates } = findRelatedMemories(
-    storage,
-    {
-      text: rawInput,
-      candidateText: memoryContent,
-      topK: 16,
-    },
-  );
-  const supersessionCandidateSummaries: SafeMemorySummary[] =
-    supersessionCandidates
-      .map(toSafeMemorySummary)
-      .filter((s): s is SafeMemorySummary => s !== null);
+  const { memories: supersessionCandidates } = findRelatedMemories(storage, {
+    text: rawInput,
+    candidateText: memoryContent,
+    topK: 16,
+  });
+  const supersessionCandidateSummaries: SafeMemorySummary[] = supersessionCandidates
+    .map(toSafeMemorySummary)
+    .filter((s): s is SafeMemorySummary => s !== null);
 
   const supersession = detectSupersession({
     candidate: candidateSummary,
@@ -586,7 +572,7 @@ interface NormalizedFail {
 
 function validateAndNormalize(
   value: MemoryAnalysis,
-  maxSummaryLength: number,
+  maxSummaryLength: number
 ): NormalizedOk | NormalizedFail {
   // Whitespace + punctuation normalization (minimal). The
   // provider field is still `MemoryAnalysis.summary`; we map
@@ -632,8 +618,7 @@ function validateAndNormalize(
       ok: false,
       outcome: {
         status: "rejected",
-        reason:
-          "provider summary contained insufficient non-secret content after redaction",
+        reason: "provider summary contained insufficient non-secret content after redaction",
         safetyClass: "secret-echoed-by-provider",
       },
     };
@@ -643,8 +628,7 @@ function validateAndNormalize(
       ok: false,
       outcome: {
         status: "rejected",
-        reason:
-          "provider summary looks like a raw dump rather than a normalized summary",
+        reason: "provider summary looks like a raw dump rather than a normalized summary",
         safetyClass: "raw-dump-echo",
       },
     };

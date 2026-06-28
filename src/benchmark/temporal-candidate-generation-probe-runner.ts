@@ -75,17 +75,17 @@ import path from "node:path";
 import { BENCHMARK_QUERIES } from "./queries.js";
 import type { BenchmarkQuery } from "./queries.js";
 import {
+  type CandidateGenerationReport,
   buildCandidateGenerationReport,
   formatCandidateGenerationReport,
-  type CandidateGenerationReport,
 } from "./temporal-candidate-generation-probe.js";
 import {
-  alignQueriesToEvals,
-  readBenchmarkArtifact,
-  readSemanticEvidenceFile,
-  findMostRecentArtifact,
   type BenchmarkArtifact,
   type SemanticEvidenceMap,
+  alignQueriesToEvals,
+  findMostRecentArtifact,
+  readBenchmarkArtifact,
+  readSemanticEvidenceFile,
 } from "./temporal-truth-diagnostic-runner.js";
 
 // ---------------------------------------------------------------------------
@@ -142,7 +142,7 @@ const ARTIFACT_FILE_PREFIX = "retrieval-temporal-candidate-generation-probe";
  */
 export function writeCandidateGenerationReport(
   report: CandidateGenerationReport,
-  dir: string,
+  dir: string
 ): string {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -173,20 +173,17 @@ export interface CandidateGenerationCliArgs {
 /**
  * Run the CLI.
  */
-export async function runCandidateGenerationCli(
-  args: CandidateGenerationCliArgs,
-): Promise<{
+export async function runCandidateGenerationCli(args: CandidateGenerationCliArgs): Promise<{
   report: CandidateGenerationReport;
   written?: string;
 }> {
   const outDir = args.outDir ?? ".curion/benchmark";
   const defaultBenchmark =
-    args.benchmarkArtifact ??
-    findMostRecentArtifact(outDir, "retrieval-baseline-");
+    args.benchmarkArtifact ?? findMostRecentArtifact(outDir, "retrieval-baseline-");
   if (!defaultBenchmark) {
     throw new Error(
       `runCandidateGenerationCli: no --benchmark-artifact given and no ` +
-        `retrieval-baseline-*.json found under ${outDir}`,
+        `retrieval-baseline-*.json found under ${outDir}`
     );
   }
   const benchmarkArtifact = readBenchmarkArtifact(defaultBenchmark);
@@ -205,21 +202,19 @@ export async function runCandidateGenerationCli(
   }
   if (!args.noStdout) {
     process.stderr.write(
-      `[temporal-candidate-generation-probe] benchmark artifact: ${defaultBenchmark}\n`,
+      `[temporal-candidate-generation-probe] benchmark artifact: ${defaultBenchmark}\n`
     );
     if (semantic) {
       process.stderr.write(
-        `[temporal-candidate-generation-probe] semantic evidence:  ${args.semanticEvidence}\n`,
+        `[temporal-candidate-generation-probe] semantic evidence:  ${args.semanticEvidence}\n`
       );
     }
     if (written) {
       process.stderr.write(
-        `[temporal-candidate-generation-probe] wrote:              ${written}\n`,
+        `[temporal-candidate-generation-probe] wrote:              ${written}\n`
       );
     }
-    process.stdout.write(
-      formatCandidateGenerationReport(report) + "\n",
-    );
+    process.stdout.write(formatCandidateGenerationReport(report) + "\n");
   }
   return { report, ...(written ? { written } : {}) };
 }
@@ -232,7 +227,7 @@ export async function runCandidateGenerationCli(
  * Minimal argument parser.
  */
 export function parseCandidateGenerationCliArgs(
-  argv: ReadonlyArray<string>,
+  argv: ReadonlyArray<string>
 ): CandidateGenerationCliArgs {
   const out: CandidateGenerationCliArgs = {};
   for (let i = 0; i < argv.length; i++) {
@@ -262,7 +257,7 @@ export function parseCandidateGenerationCliArgs(
  * Process argv-based main entry point.
  */
 export async function main(
-  argv: ReadonlyArray<string> = process.argv.slice(2),
+  argv: ReadonlyArray<string> = process.argv.slice(2)
 ): Promise<CandidateGenerationReport> {
   const args = parseCandidateGenerationCliArgs(argv);
   const { report } = await runCandidateGenerationCli(args);
@@ -281,10 +276,7 @@ const isMainEntry = (() => {
   if (!Array.isArray(process.argv)) return false;
   const entry = process.argv[1];
   if (!entry) return false;
-  if (
-    !/temporal-candidate-generation-probe-runner\.(ts|js)$/.test(entry)
-  )
-    return false;
+  if (!/temporal-candidate-generation-probe-runner\.(ts|js)$/.test(entry)) return false;
   try {
     const url = new URL(import.meta.url);
     return url.pathname === entry || url.pathname.endsWith(entry);
@@ -296,7 +288,7 @@ const isMainEntry = (() => {
 if (isMainEntry) {
   main().catch((err) => {
     process.stderr.write(
-      `[temporal-candidate-generation-probe] error: ${err instanceof Error ? err.message : String(err)}\n`,
+      `[temporal-candidate-generation-probe] error: ${err instanceof Error ? err.message : String(err)}\n`
     );
     process.exit(1);
   });

@@ -26,21 +26,14 @@
  * curator framing is no longer present in the prompt.
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
+import { test } from "node:test";
 
 import {
-  analyzeMemoryWithFallback,
   type MemoryAnalysisResult,
+  analyzeMemoryWithFallback,
 } from "../src/providers/memory-analysis.ts";
-import {
-  TEST_PRIMARY_KEY,
-  TEST_FALLBACK_KEY,
-  TEST_PRIMARY_BASE_URL,
-  TEST_PRIMARY_MODEL,
-  TEST_FALLBACK_BASE_URL,
-  TEST_FALLBACK_MODEL,
-} from "./shared-test-provider.ts";
+import { TEST_FALLBACK_KEY, TEST_PRIMARY_KEY } from "./shared-test-provider.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers (mirror the pattern used in tests/provider-adapter.test.ts)
@@ -53,7 +46,7 @@ import {
  */
 function scriptedFetch(
   responses: Array<() => Response>,
-  log: Array<{ url: string; body: string }>,
+  log: Array<{ url: string; body: string }>
 ): typeof fetch {
   let i = 0;
   const f: typeof fetch = async (input, init) => {
@@ -78,7 +71,7 @@ function okChatResponse(content: string): Response {
       model: "m",
       choices: [{ message: { role: "assistant", content } }],
     }),
-    { status: 200, headers: { "content-type": "application/json" } },
+    { status: 200, headers: { "content-type": "application/json" } }
   );
 }
 
@@ -89,9 +82,7 @@ const VALID_JSON = JSON.stringify({
 });
 
 /** Run the adapter with a one-shot scripted fetch and return the log + result. */
-async function runOnce(
-  text: string,
-): Promise<{
+async function runOnce(text: string): Promise<{
   log: Array<{ url: string; body: string }>;
   result: MemoryAnalysisResult;
 }> {
@@ -125,18 +116,18 @@ test("write-path prompt: user preference input -> prompt contains narrative guid
   assert.match(
     body,
     /narrative memory/,
-    "user message must include the new narrative-voice prompt text",
+    "user message must include the new narrative-voice prompt text"
   );
   // The legacy curator framing must be gone.
   assert.doesNotMatch(
     body,
     /1-2 sentence summary of the input/,
-    "legacy curator framing must be removed from the prompt",
+    "legacy curator framing must be removed from the prompt"
   );
   // The user input must be present in the request body.
   assert.ok(
     body.includes("TypeScript") && body.includes("strict"),
-    "user input must be passed through to the provider",
+    "user input must be passed through to the provider"
   );
 });
 
@@ -157,7 +148,7 @@ test("write-path prompt: project fact input -> prompt contains narrative guidanc
     body.includes("lexical-only") &&
       body.includes("production recall") &&
       body.includes("src/benchmark/"),
-    "concrete terms from the input must be passed through to the provider",
+    "concrete terms from the input must be passed through to the provider"
   );
 });
 
@@ -178,7 +169,7 @@ test("write-path prompt: decision input -> prompt contains narrative guidance an
     body.includes("Anthropic") &&
       body.includes("contextualized chunk pattern") &&
       body.includes("write path improvement"),
-    "decision and concrete reference must be passed through to the provider",
+    "decision and concrete reference must be passed through to the provider"
   );
 });
 
@@ -199,7 +190,7 @@ test("write-path prompt: constraint input -> prompt contains narrative guidance 
     body.includes("500 characters") &&
       body.includes("storage budget") &&
       body.includes("synthesis prompt"),
-    "constraint must be passed through to the provider",
+    "constraint must be passed through to the provider"
   );
 });
 
@@ -236,18 +227,18 @@ test("write-path prompt: pinned narrative guidance text is present verbatim", as
   // text. If the prompt is later regressed, this test will fail.
   assert.ok(
     body.includes(
-      "Write a 1-3 sentence narrative memory that preserves the useful context from the input.",
+      "Write a 1-3 sentence narrative memory that preserves the useful context from the input."
     ),
-    "exact narrative guidance phrase must be present",
+    "exact narrative guidance phrase must be present"
   );
   assert.ok(
     body.includes(
-      'Do not start with \\"The user asked\\", \\"This memory captures\\", or similar curator framings.',
+      'Do not start with \\"The user asked\\", \\"This memory captures\\", or similar curator framings.'
     ),
-    "curator-framing prohibition must be present (JSON-escaped)",
+    "curator-framing prohibition must be present (JSON-escaped)"
   );
   assert.ok(
     body.includes("Do not include memory IDs or internal storage references."),
-    "no-IDs prohibition must be present",
+    "no-IDs prohibition must be present"
   );
 });

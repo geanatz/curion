@@ -84,8 +84,8 @@
  *   coverage.
  */
 
-import type { BenchmarkQuery } from "./queries.js";
 import type { BenchmarkMemoryRecord } from "./corpus.js";
+import type { BenchmarkQuery } from "./queries.js";
 
 // ---------------------------------------------------------------------------
 // Heuristics
@@ -242,16 +242,86 @@ function buildRecordTokenSet(record: BenchmarkMemoryRecord): Set<string> {
  * prevents that.
  */
 const DETECTOR_STOPWORDS: ReadonlySet<string> = new Set([
-  "the", "and", "for", "are", "but", "not", "you", "all", "any",
-  "can", "had", "her", "was", "one", "our", "out", "day", "get",
-  "has", "him", "his", "how", "man", "new", "now", "old", "see",
-  "two", "way", "who", "boy", "did", "its", "let", "put", "say",
-  "she", "too", "use", "this", "that", "with", "from", "have",
-  "they", "their", "there", "what", "when", "your", "were", "been",
-  "will", "would", "could", "should", "about", "into", "than",
-  "then", "them", "these", "those", "because", "where", "which",
-  "while", "whom", "ever", "very", "just", "also", "over",
-  "such", "some", "only", "more", "most", "other", "each",
+  "the",
+  "and",
+  "for",
+  "are",
+  "but",
+  "not",
+  "you",
+  "all",
+  "any",
+  "can",
+  "had",
+  "her",
+  "was",
+  "one",
+  "our",
+  "out",
+  "day",
+  "get",
+  "has",
+  "him",
+  "his",
+  "how",
+  "man",
+  "new",
+  "now",
+  "old",
+  "see",
+  "two",
+  "way",
+  "who",
+  "boy",
+  "did",
+  "its",
+  "let",
+  "put",
+  "say",
+  "she",
+  "too",
+  "use",
+  "this",
+  "that",
+  "with",
+  "from",
+  "have",
+  "they",
+  "their",
+  "there",
+  "what",
+  "when",
+  "your",
+  "were",
+  "been",
+  "will",
+  "would",
+  "could",
+  "should",
+  "about",
+  "into",
+  "than",
+  "then",
+  "them",
+  "these",
+  "those",
+  "because",
+  "where",
+  "which",
+  "while",
+  "whom",
+  "ever",
+  "very",
+  "just",
+  "also",
+  "over",
+  "such",
+  "some",
+  "only",
+  "more",
+  "most",
+  "other",
+  "each",
 ]);
 
 /**
@@ -385,9 +455,7 @@ export const HARD_NEGATIVE_MIN_OVERLAP = 2;
  * extend the detector can edit this list; the tests
  * pin it.
  */
-export const LEGACY_DISTRACTOR_IDS: ReadonlySet<number> = new Set([
-  21, 22, 23, 24, 93, 94, 95, 96,
-]);
+export const LEGACY_DISTRACTOR_IDS: ReadonlySet<number> = new Set([21, 22, 23, 24, 93, 94, 95, 96]);
 
 /**
  * Pre-built set of record ids the
@@ -399,9 +467,7 @@ export const LEGACY_DISTRACTOR_IDS: ReadonlySet<number> = new Set([
  * A reviewer who wants to extend the detector can
  * edit this list; the tests pin it.
  */
-export const NEAR_MISS_CURRENT_CLUSTER_IDS: ReadonlySet<number> = new Set([
-  109, 110, 111, 112,
-]);
+export const NEAR_MISS_CURRENT_CLUSTER_IDS: ReadonlySet<number> = new Set([109, 110, 111, 112]);
 
 /**
  * Pre-built set of record ids the
@@ -412,9 +478,7 @@ export const NEAR_MISS_CURRENT_CLUSTER_IDS: ReadonlySet<number> = new Set([
  * vocabulary. A reviewer who wants to extend the
  * detector can edit this list; the tests pin it.
  */
-export const PARAPHRASE_TWIN_IDS: ReadonlySet<number> = new Set([
-  113, 114, 115, 116,
-]);
+export const PARAPHRASE_TWIN_IDS: ReadonlySet<number> = new Set([113, 114, 115, 116]);
 
 /**
  * Run the query-shape detector on a single query
@@ -435,7 +499,7 @@ export const PARAPHRASE_TWIN_IDS: ReadonlySet<number> = new Set([
  */
 export function detectQueryShape(
   query: BenchmarkQuery,
-  corpusTokenSets: ReadonlyArray<{ id: number; tokens: Set<string> }>,
+  corpusTokenSets: ReadonlyArray<{ id: number; tokens: Set<string> }>
 ): QueryShapeFlags {
   const qText = (query.query ?? "").toLowerCase();
   const qTokens = tokenizeText(qText);
@@ -613,7 +677,7 @@ function escapeRegExp(s: string): string {
  * scan. The function is pure.
  */
 export function buildCorpusTokenSets(
-  records: ReadonlyArray<BenchmarkMemoryRecord>,
+  records: ReadonlyArray<BenchmarkMemoryRecord>
 ): Array<{ id: number; tokens: Set<string> }> {
   const out: Array<{ id: number; tokens: Set<string> }> = new Array(records.length);
   for (let i = 0; i < records.length; i++) {

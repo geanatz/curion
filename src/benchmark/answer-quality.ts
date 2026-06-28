@@ -44,15 +44,9 @@
  *     `qualityOffTopicRate` triple in the metrics block.
  */
 
-import type {
-  AnswerQualityEvaluation,
-  AnswerQualityScaffold,
-} from "./metrics.js";
+import type { AnswerQualityEvaluation, AnswerQualityScaffold } from "./metrics.js";
 
-export type {
-  AnswerQualityEvaluation,
-  AnswerQualityScaffold,
-};
+export type { AnswerQualityEvaluation, AnswerQualityScaffold };
 
 /**
  * Construct a disabled scaffold. The runner always calls
@@ -60,9 +54,7 @@ export type {
  * constructor to take a `judge` and return an enabled
  * scaffold; the public signature stays stable.
  */
-export function buildAnswerQualityScaffold(
-  options: { note?: string } = {},
-): AnswerQualityScaffold {
+export function buildAnswerQualityScaffold(options: { note?: string } = {}): AnswerQualityScaffold {
   return {
     enabled: false,
     provider: null,
@@ -108,7 +100,7 @@ export function makeAnswerQualityEvaluation(
   queryId: string,
   label: string,
   score: number,
-  reason: string,
+  reason: string
 ): AnswerQualityEvaluation {
   return { queryId, label, score, reason };
 }

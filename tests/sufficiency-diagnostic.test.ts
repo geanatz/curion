@@ -57,31 +57,24 @@
  * (real corpus + query set + ranker).
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { test } from "node:test";
 
+import { BENCHMARK_RECORDS } from "../src/benchmark/corpus.ts";
+import { type QueryEval, evaluateQuery } from "../src/benchmark/metrics.ts";
+import { BENCHMARK_QUERIES, type BenchmarkQuery } from "../src/benchmark/queries.ts";
+import { buildCandidates } from "../src/benchmark/retrieval-runner.ts";
+import { runRetrievalBenchmark } from "../src/benchmark/retrieval-runner.ts";
 import {
-  buildSufficiencyReport,
+  SUFFICIENCY_LABELS,
   buildSufficiencyComparison,
+  buildSufficiencyReport,
   classifyCandidateSetSufficiency,
   formatSufficiencyReport,
-  SUFFICIENCY_LABELS,
-  type SufficiencyLabel,
 } from "../src/benchmark/sufficiency-diagnostic.ts";
-import {
-  evaluateQuery,
-  type QueryEval,
-} from "../src/benchmark/metrics.ts";
-import {
-  BENCHMARK_QUERIES,
-  type BenchmarkQuery,
-} from "../src/benchmark/queries.ts";
 import { rankLexical } from "../src/retrieval/lexical.ts";
-import { buildCandidates } from "../src/benchmark/retrieval-runner.ts";
-import { BENCHMARK_RECORDS } from "../src/benchmark/corpus.ts";
-import { runRetrievalBenchmark } from "../src/benchmark/retrieval-runner.ts";
 import { PUBLIC_TOOL_NAMES } from "../src/server.ts";
 
 // ---------------------------------------------------------------------------
@@ -94,11 +87,7 @@ import { PUBLIC_TOOL_NAMES } from "../src/server.ts";
  * `evaluateQuery`'s own rules so the test can pin a
  * specific eval state without re-deriving it.
  */
-function evalFrom(
-  q: BenchmarkQuery,
-  topIds: number[],
-  topScores: number[],
-): QueryEval {
+function evalFrom(q: BenchmarkQuery, topIds: number[], topScores: number[]): QueryEval {
   return evaluateQuery(
     q.id,
     q.family,
@@ -106,7 +95,7 @@ function evalFrom(
     q.expectedIds,
     q.currentTruthIds,
     topIds,
-    topScores,
+    topScores
   );
 }
 
@@ -133,7 +122,7 @@ test("sufficiency: SUFFICIENCY_LABELS is the documented stable set", () => {
       "partial",
       "sufficient",
       "wrong-current-truth",
-    ].sort(),
+    ].sort()
   );
 });
 
@@ -440,19 +429,13 @@ test("sufficiency: buildSufficiencyReport throws on queryId mismatch", () => {
     ...evalFrom(q, [1], [0.9]),
     queryId: "totally-different-id",
   };
-  assert.throws(
-    () => buildSufficiencyReport("lexical", [e], [q]),
-    /does not match/,
-  );
+  assert.throws(() => buildSufficiencyReport("lexical", [e], [q]), /does not match/);
 });
 
 test("sufficiency: buildSufficiencyReport throws on length mismatch", () => {
   const q = queryById("exact-postgres-storage");
   const e = evalFrom(q, [1], [0.9]);
-  assert.throws(
-    () => buildSufficiencyReport("lexical", [e], []),
-    /must match/,
-  );
+  assert.throws(() => buildSufficiencyReport("lexical", [e], []), /must match/);
 });
 
 // ---------------------------------------------------------------------------
@@ -502,18 +485,9 @@ test("sufficiency: buildSufficiencyReport emits per-label and per-family counts"
   for (const family of Object.keys(r.perFamily)) {
     const fkey = family as keyof typeof r.perFamily;
     const slot = r.perFamily[fkey]!;
-    const familyTotal = (Object.values(slot) as number[]).reduce(
-      (a, b) => a + b,
-      0,
-    );
-    const familyContrib = r.diagnostics.filter(
-      (d) => d.family === fkey,
-    ).length;
-    assert.equal(
-      familyTotal,
-      familyContrib,
-      `family "${family}" totals disagree`,
-    );
+    const familyTotal = (Object.values(slot) as number[]).reduce((a, b) => a + b, 0);
+    const familyContrib = r.diagnostics.filter((d) => d.family === fkey).length;
+    assert.equal(familyTotal, familyContrib, `family "${family}" totals disagree`);
   }
 });
 
@@ -549,18 +523,9 @@ test("sufficiency: buildSufficiencyComparison produces a per-label cross-variant
   // Every (label, variant) pair is present in
   // the table, even when 0.
   for (const label of SUFFICIENCY_LABELS) {
-    assert.ok(
-      cmp.crossVariantPerLabel[label],
-      `cross-variant table missing label ${label}`,
-    );
-    assert.equal(
-      typeof cmp.crossVariantPerLabel[label].lexical,
-      "number",
-    );
-    assert.equal(
-      typeof cmp.crossVariantPerLabel[label].hybrid,
-      "number",
-    );
+    assert.ok(cmp.crossVariantPerLabel[label], `cross-variant table missing label ${label}`);
+    assert.equal(typeof cmp.crossVariantPerLabel[label].lexical, "number");
+    assert.equal(typeof cmp.crossVariantPerLabel[label].hybrid, "number");
   }
 });
 
@@ -641,30 +606,19 @@ test("sufficiency: lexical baseline on the fixture corpus produces a well-formed
     const topIds = ranked.map((r) => r.id);
     const topScores = ranked.map((r) => r.score);
     evals.push(
-      evaluateQuery(
-        q.id,
-        q.family,
-        q.query,
-        q.expectedIds,
-        q.currentTruthIds,
-        topIds,
-        topScores,
-      ),
+      evaluateQuery(q.id, q.family, q.query, q.expectedIds, q.currentTruthIds, topIds, topScores)
     );
   }
   const r = buildSufficiencyReport("lexical", evals, BENCHMARK_QUERIES);
   assert.equal(r.variant, "lexical");
   assert.equal(r.diagnostics.length, BENCHMARK_QUERIES.length);
-  const totalFromLabels = (Object.values(r.perLabel) as number[]).reduce(
-    (a, b) => a + b,
-    0,
-  );
+  const totalFromLabels = (Object.values(r.perLabel) as number[]).reduce((a, b) => a + b, 0);
   assert.equal(totalFromLabels, BENCHMARK_QUERIES.length);
   // At least one positive-family query is
   // `sufficient` on the lexical baseline.
   assert.ok(
     r.perLabel.sufficient > 0,
-    `expected at least one sufficient query, got ${r.perLabel.sufficient}`,
+    `expected at least one sufficient query, got ${r.perLabel.sufficient}`
   );
   // The per-family block has all six families
   // the fixture exercises.
@@ -687,26 +641,18 @@ test("sufficiency: comparison report on real lexical + hybrid evals is well-form
   // every (label, variant) pair.
   const lex = runRetrievalBenchmark({ variant: "lexical" });
   const hyb = runRetrievalBenchmark({ variant: "hybrid" });
-  const lexDiag = buildSufficiencyReport(
-    "lexical",
-    lex.evals,
-    BENCHMARK_QUERIES,
-  );
-  const hybDiag = buildSufficiencyReport(
-    "hybrid",
-    hyb.evals,
-    BENCHMARK_QUERIES,
-  );
+  const lexDiag = buildSufficiencyReport("lexical", lex.evals, BENCHMARK_QUERIES);
+  const hybDiag = buildSufficiencyReport("hybrid", hyb.evals, BENCHMARK_QUERIES);
   const cmp = buildSufficiencyComparison([lexDiag, hybDiag]);
   assert.equal(cmp.variants.length, 2);
   for (const label of SUFFICIENCY_LABELS) {
     assert.ok(
       cmp.crossVariantPerLabel[label].lexical !== undefined,
-      `lexical column missing for ${label}`,
+      `lexical column missing for ${label}`
     );
     assert.ok(
       cmp.crossVariantPerLabel[label].hybrid !== undefined,
-      `hybrid column missing for ${label}`,
+      `hybrid column missing for ${label}`
     );
   }
   // The cross-variant tables are well-formed
@@ -726,11 +672,11 @@ test("sufficiency: comparison report on real lexical + hybrid evals is well-form
     const hybCount = cmp.crossVariantPerLabel[label].hybrid;
     assert.ok(
       Number.isFinite(lexCount) && lexCount >= 0,
-      `lexical ${label} count not finite/non-negative: ${lexCount}`,
+      `lexical ${label} count not finite/non-negative: ${lexCount}`
     );
     assert.ok(
       Number.isFinite(hybCount) && hybCount >= 0,
-      `hybrid ${label} count not finite/non-negative: ${hybCount}`,
+      `hybrid ${label} count not finite/non-negative: ${hybCount}`
     );
   }
 });
@@ -766,7 +712,7 @@ test("sufficiency: production source tree must NOT import the diagnostic module"
     assert.doesNotMatch(
       src,
       /sufficiency-diagnostic|classifyCandidateSetSufficiency|buildSufficiencyReport|SUFFICIENCY_LABELS/,
-      `${rel} must NOT import the sufficiency diagnostic module`,
+      `${rel} must NOT import the sufficiency diagnostic module`
     );
   }
 });
@@ -780,6 +726,6 @@ test("sufficiency: public MCP API is unchanged (remember + recall only)", () => 
   assert.deepEqual(
     [...PUBLIC_TOOL_NAMES],
     ["remember", "recall"],
-    "public MCP tool surface must remain exactly remember + recall",
+    "public MCP tool surface must remain exactly remember + recall"
   );
 });

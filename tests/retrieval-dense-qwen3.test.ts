@@ -74,32 +74,27 @@
  *      registers exactly `remember` + `recall`.
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
+import { test } from "node:test";
 
+import { BENCHMARK_RECORDS } from "../src/benchmark/corpus.ts";
+import { buildCandidates } from "../src/benchmark/retrieval-runner.ts";
+import { parseRetrievalCli } from "../src/benchmark/retrieval-runner.ts";
 import {
-  createDenseEmbedder,
+  type DenseEmbedder,
+  type EmbedderMetadata,
   StubDeterministicDenseEmbedder,
   TransformersJsEmbedder,
-  type EmbedderMetadata,
-  type DenseEmbedder,
+  createDenseEmbedder,
 } from "../src/benchmark/variants/dense-embedder.ts";
-import {
-  Qwen3Embedder,
-  type Qwen3TextKind,
-} from "../src/benchmark/variants/qwen3-embedder.ts";
-import { buildCandidates } from "../src/benchmark/retrieval-runner.ts";
 import {
   rankDenseVectorAsync,
   rankDenseVectorWithMetadataAsync,
-  type DenseVectorRankingOptions,
 } from "../src/benchmark/variants/dense-vector.ts";
-import { parseRetrievalCli } from "../src/benchmark/retrieval-runner.ts";
+import { Qwen3Embedder, type Qwen3TextKind } from "../src/benchmark/variants/qwen3-embedder.ts";
 import { PUBLIC_TOOL_NAMES } from "../src/server.ts";
-import { BENCHMARK_RECORDS } from "../src/benchmark/corpus.ts";
 import { walkTs } from "./_helpers/fs-walk.ts";
 
 // ---------------------------------------------------------------------------
@@ -113,31 +108,24 @@ test("Qwen3Embedder: construction exposes the documented metadata", () => {
   assert.equal(
     m.modelId,
     "onnx-community/Qwen3-Embedding-0.6B-ONNX",
-    "default model id must be the pinned Qwen3-Embedding-0.6B ONNX",
+    "default model id must be the pinned Qwen3-Embedding-0.6B ONNX"
   );
   assert.equal(m.dim, 1024, "Qwen3-Embedding-0.6B produces 1024-dim vectors");
-  assert.equal(
-    m.quantized,
-    true,
-    "default dtype q8 means the embedder reports quantized=true",
-  );
+  assert.equal(m.quantized, true, "default dtype q8 means the embedder reports quantized=true");
   assert.equal(m.status, "skipped", "construction is in skipped status until init()");
   // The description surfaces the key knobs so a
   // reviewer reading the metadata can audit the
   // configuration.
   assert.ok(
     typeof m.description === "string" && m.description.includes("q8"),
-    `description must mention the q8 dtype; got: ${m.description}`,
+    `description must mention the q8 dtype; got: ${m.description}`
   );
   assert.ok(
     m.description.includes("last_token"),
-    `description must mention the last_token pooling; got: ${m.description}`,
+    `description must mention the last_token pooling; got: ${m.description}`
   );
   // The cache dir is the documented default.
-  assert.equal(
-    m.cacheDir,
-    `${process.cwd()}/.curion/transformers-cache`,
-  );
+  assert.equal(m.cacheDir, `${process.cwd()}/.curion/transformers-cache`);
 });
 
 test("Qwen3Embedder: custom modelId, dtype, task, pooling, cacheDir are honored", () => {
@@ -176,11 +164,11 @@ test("Qwen3Embedder.buildQueryPrefix: produces the documented Instruct+Query for
   // a single newline between the two halves.
   const prefix = Qwen3Embedder.buildQueryPrefix(
     "Given a web search query, retrieve relevant passages that best answer the query",
-    "What is the team's release schedule?",
+    "What is the team's release schedule?"
   );
   assert.equal(
     prefix,
-    "Instruct: Given a web search query, retrieve relevant passages that best answer the query\nQuery:What is the team's release schedule?",
+    "Instruct: Given a web search query, retrieve relevant passages that best answer the query\nQuery:What is the team's release schedule?"
   );
 });
 
@@ -381,7 +369,9 @@ test("Qwen3Embedder: init() without a real library reports `error` metadata", as
   // to assert; the live integration test covers
   // the success path.
   if (!(await isQwen3LibraryMissing())) {
-    t.skip("@huggingface/transformers is installed; the init-failure path is exercised in CI where the package is absent");
+    t.skip(
+      "@huggingface/transformers is installed; the init-failure path is exercised in CI where the package is absent"
+    );
     return;
   }
   const embedder = new Qwen3Embedder({
@@ -398,20 +388,16 @@ test("Qwen3Embedder: init() without a real library reports `error` metadata", as
   assert.equal(
     embedder.metadata.status,
     "error",
-    "init() must flip status to 'error' when the library is not installed",
+    "init() must flip status to 'error' when the library is not installed"
   );
   // The error message is captured so a reviewer
   // can audit the failure on the artifact.
   assert.ok(
-    typeof embedder.metadata.errorMessage === "string" &&
-      embedder.metadata.errorMessage.length > 0,
-    "errorMessage must be a non-empty string on init failure",
+    typeof embedder.metadata.errorMessage === "string" && embedder.metadata.errorMessage.length > 0,
+    "errorMessage must be a non-empty string on init failure"
   );
   // The loadMs is captured even on failure.
-  assert.ok(
-    typeof embedder.metadata.loadMs === "number" &&
-      embedder.metadata.loadMs >= 0,
-  );
+  assert.ok(typeof embedder.metadata.loadMs === "number" && embedder.metadata.loadMs >= 0);
 });
 
 test("Qwen3Embedder: embed() / embedBatch() fall back to the stub when init() failed", async (t) => {
@@ -421,7 +407,9 @@ test("Qwen3Embedder: embed() / embedBatch() fall back to the stub when init() fa
   // the embedder is live; the fallback path is
   // not exercised and this test is skipped.
   if (!(await isQwen3LibraryMissing())) {
-    t.skip("@huggingface/transformers is installed; the init-failure fallback is exercised in CI where the package is absent");
+    t.skip(
+      "@huggingface/transformers is installed; the init-failure fallback is exercised in CI where the package is absent"
+    );
     return;
   }
   // The benchmark runner relies on this: when
@@ -486,23 +474,18 @@ test("createDenseEmbedder: 'qwen3:pooling=<unknown>' falls back to the default",
   // An unknown pooling value is silently
   // ignored (the Qwen3 embedder constructor
   // uses its default `last_token`).
-  const { embedder } = await createDenseEmbedder(
-    "qwen3:pooling=unknown",
-    { skip: true },
-  );
+  const { embedder } = await createDenseEmbedder("qwen3:pooling=unknown", { skip: true });
   assert.equal(embedder.metadata.backend, "qwen3");
   assert.ok(embedder.metadata.description.includes("last_token"));
 });
 
 test("createDenseEmbedder: object spec with backend=qwen3 dispatches to Qwen3", async () => {
-  const { embedder } = await createDenseEmbedder(
-    { backend: "qwen3", cacheDir: "/tmp/curion-qwen3-obj-spec-cache" },
-  );
+  const { embedder } = await createDenseEmbedder({
+    backend: "qwen3",
+    cacheDir: "/tmp/curion-qwen3-obj-spec-cache",
+  });
   assert.equal(embedder.metadata.backend, "qwen3");
-  assert.equal(
-    embedder.metadata.cacheDir,
-    "/tmp/curion-qwen3-obj-spec-cache",
-  );
+  assert.equal(embedder.metadata.cacheDir, "/tmp/curion-qwen3-obj-spec-cache");
 });
 
 test("createDenseEmbedder: 'qwen3' without skip calls init() and may report error when library is missing", async (t) => {
@@ -511,7 +494,9 @@ test("createDenseEmbedder: 'qwen3' without skip calls init() and may report erro
   // `init()` succeeds and the contract under
   // test is not exercised; skip in that env.
   if (!(await isQwen3LibraryMissing())) {
-    t.skip("@huggingface/transformers is installed; the init-failure factory contract is exercised in CI where the package is absent");
+    t.skip(
+      "@huggingface/transformers is installed; the init-failure factory contract is exercised in CI where the package is absent"
+    );
     return;
   }
   // The `skip` default is `false`. The factory
@@ -527,8 +512,7 @@ test("createDenseEmbedder: 'qwen3' without skip calls init() and may report erro
   assert.equal(embedder.metadata.backend, "qwen3");
   assert.equal(embedder.metadata.status, "error");
   assert.ok(
-    typeof embedder.metadata.errorMessage === "string" &&
-      embedder.metadata.errorMessage.length > 0,
+    typeof embedder.metadata.errorMessage === "string" && embedder.metadata.errorMessage.length > 0
   );
 });
 
@@ -545,10 +529,7 @@ test("createDenseEmbedder: existing 'stub-dense' / 'transformersjs' specs contin
   // still dispatch to it.
   const xjs = await createDenseEmbedder("transformersjs", { skip: true });
   assert.equal(xjs.embedder.metadata.backend, "transformersjs");
-  assert.equal(
-    xjs.embedder.metadata.modelId,
-    "Xenova/all-MiniLM-L6-v2",
-  );
+  assert.equal(xjs.embedder.metadata.modelId, "Xenova/all-MiniLM-L6-v2");
 });
 
 test("createDenseEmbedder: object spec with backend=stub-dense dispatches to stub-dense", async () => {
@@ -559,10 +540,7 @@ test("createDenseEmbedder: object spec with backend=stub-dense dispatches to stu
 });
 
 test("createDenseEmbedder: unknown spec is rejected", async () => {
-  await assert.rejects(
-    async () => createDenseEmbedder("not-a-real-spec"),
-    /unknown spec/,
-  );
+  await assert.rejects(async () => createDenseEmbedder("not-a-real-spec"), /unknown spec/);
 });
 
 // ---------------------------------------------------------------------------
@@ -622,7 +600,7 @@ test("rankDenseVectorWithMetadataAsync: kind='query' dispatches to embedQuery fo
   // The embedBatch call is the document path.
   assert.ok(
     recorded.some((r) => r.method === "embedBatch"),
-    "ranker must call embedBatch for the documents",
+    "ranker must call embedBatch for the documents"
   );
 });
 
@@ -661,11 +639,7 @@ test("rankDenseVectorWithMetadataAsync: kind=undefined (default) does not invoke
     embedder: fakeQwen3,
     // kind is undefined -> default "document"
   });
-  assert.equal(
-    embedQueryCalls,
-    0,
-    "default kind should not call embedQuery",
-  );
+  assert.equal(embedQueryCalls, 0, "default kind should not call embedQuery");
 });
 
 test("rankDenseVectorWithMetadataAsync: kind-agnostic embedders (stub / MiniLM) continue to use embedBatch", async () => {
@@ -695,22 +669,12 @@ test("rankDenseVectorWithMetadataAsync: kind-agnostic embedders (stub / MiniLM) 
 // ---------------------------------------------------------------------------
 
 test("parseRetrievalCli: --embedder qwen3 is accepted", () => {
-  const opts = parseRetrievalCli([
-    "--variant",
-    "vector-dense",
-    "--embedder",
-    "qwen3",
-  ]);
+  const opts = parseRetrievalCli(["--variant", "vector-dense", "--embedder", "qwen3"]);
   assert.equal(opts.denseEmbedderSpec, "qwen3");
 });
 
 test("parseRetrievalCli: --embedder qwen3-hf is accepted (alias)", () => {
-  const opts = parseRetrievalCli([
-    "--variant",
-    "vector-dense",
-    "--embedder",
-    "qwen3-hf",
-  ]);
+  const opts = parseRetrievalCli(["--variant", "vector-dense", "--embedder", "qwen3-hf"]);
   assert.equal(opts.denseEmbedderSpec, "qwen3-hf");
 });
 
@@ -721,10 +685,7 @@ test("parseRetrievalCli: --embedder qwen3:model=...,dtype=... parses the tail", 
     "--embedder",
     "qwen3:model=org/custom,dtype=fp16,pooling=mean",
   ]);
-  assert.equal(
-    opts.denseEmbedderSpec,
-    "qwen3:model=org/custom,dtype=fp16,pooling=mean",
-  );
+  assert.equal(opts.denseEmbedderSpec, "qwen3:model=org/custom,dtype=fp16,pooling=mean");
 });
 
 test("parseRetrievalCli: --embedder qwen3 --dense-cache-dir composes backend=qwen3 + cacheDir", () => {
@@ -789,7 +750,7 @@ test("parseRetrievalCli: --embedder qwen3:model=...,task=... --dense-skip preser
   assert.equal(
     spec.spec,
     "qwen3:model=org/custom,dtype=fp16,task=Custom%20task,pooling=mean",
-    "the original spec string must be preserved as baseObj.spec",
+    "the original spec string must be preserved as baseObj.spec"
   );
 });
 
@@ -840,44 +801,26 @@ test("StubDeterministicDenseEmbedder: continues to be the deterministic control"
 
 test("Qwen3 benchmark is benchmark-only: production recall() controller is not modified", () => {
   const recallSrc = fs.readFileSync(
-    path.join(
-      import.meta.dirname,
-      "..",
-      "src",
-      "controller",
-      "recall-controller.ts",
-    ),
-    "utf8",
+    path.join(import.meta.dirname, "..", "src", "controller", "recall-controller.ts"),
+    "utf8"
   );
-  assert.doesNotMatch(
-    recallSrc,
-    /qwen3|Qwen3/i,
-    "recall controller must NOT import Qwen3 modules",
-  );
+  assert.doesNotMatch(recallSrc, /qwen3|Qwen3/i, "recall controller must NOT import Qwen3 modules");
   const seamSrc = fs.readFileSync(
     path.join(import.meta.dirname, "..", "src", "retrieval", "seam.ts"),
-    "utf8",
+    "utf8"
   );
-  assert.doesNotMatch(
-    seamSrc,
-    /qwen3|Qwen3/i,
-    "retrieval/seam.ts must NOT import Qwen3 modules",
-  );
+  assert.doesNotMatch(seamSrc, /qwen3|Qwen3/i, "retrieval/seam.ts must NOT import Qwen3 modules");
   // The MCP server still exposes exactly two tools.
   const serverSrc = fs.readFileSync(
     path.join(import.meta.dirname, "..", "src", "server.ts"),
-    "utf8",
+    "utf8"
   );
   const toolCallCount = (serverSrc.match(/server\.registerTool\(/g) ?? []).length;
-  assert.equal(
-    toolCallCount,
-    2,
-    `server.ts must register exactly 2 tools, found ${toolCallCount}`,
-  );
+  assert.equal(toolCallCount, 2, `server.ts must register exactly 2 tools, found ${toolCallCount}`);
   assert.deepEqual(
     [...PUBLIC_TOOL_NAMES],
     ["remember", "recall"],
-    "public MCP tool surface must remain exactly remember + recall",
+    "public MCP tool surface must remain exactly remember + recall"
   );
 });
 
@@ -945,32 +888,20 @@ test("Qwen3 benchmark: only the benchmark directory imports the Qwen3 module", (
     if (allowedImporters.has(rel)) continue;
     const src = fs.readFileSync(path.join(root, rel), "utf8");
     const importsQwen3 =
-      src.includes("from \"./qwen3-embedder\"") ||
-      src.includes("from \"./qwen3-embedder.js\"") ||
-      src.includes("from \"../benchmark/variants/qwen3-embedder") ||
-      src.includes("from \"../../benchmark/variants/qwen3-embedder");
+      src.includes('from "./qwen3-embedder"') ||
+      src.includes('from "./qwen3-embedder.js"') ||
+      src.includes('from "../benchmark/variants/qwen3-embedder') ||
+      src.includes('from "../../benchmark/variants/qwen3-embedder');
     const usesQwen3Symbol =
       src.match(/\bQwen3Embedder\b/) !== null ||
       src.match(/\bbuildQueryPrefix\b/) !== null ||
       src.match(/\bqwen3-embedder\b/) !== null;
-    assert.ok(
-      !importsQwen3,
-      `unexpected import of qwen3 module in ${rel}`,
-    );
-    assert.ok(
-      !usesQwen3Symbol,
-      `unexpected Qwen3 symbol usage in ${rel}`,
-    );
+    assert.ok(!importsQwen3, `unexpected import of qwen3 module in ${rel}`);
+    assert.ok(!usesQwen3Symbol, `unexpected Qwen3 symbol usage in ${rel}`);
     for (const prefix of productionDirPrefixes) {
       if (rel === prefix || rel.startsWith(prefix + path.sep)) {
-        assert.ok(
-          !importsQwen3,
-          `production file ${rel} must not import qwen3 modules`,
-        );
-        assert.ok(
-          !usesQwen3Symbol,
-          `production file ${rel} must not use Qwen3 symbols`,
-        );
+        assert.ok(!importsQwen3, `production file ${rel} must not import qwen3 modules`);
+        assert.ok(!usesQwen3Symbol, `production file ${rel} must not use Qwen3 symbols`);
       }
     }
   }
@@ -989,11 +920,11 @@ test("Qwen3 benchmark: type declarations are scoped to the benchmark directory",
     "src",
     "benchmark",
     "types",
-    "huggingface-transformers.d.ts",
+    "huggingface-transformers.d.ts"
   );
   assert.ok(
     fs.existsSync(typesFile),
-    "ambient type declaration file must exist at src/benchmark/types/huggingface-transformers.d.ts",
+    "ambient type declaration file must exist at src/benchmark/types/huggingface-transformers.d.ts"
   );
   // No type declaration lives in
   // `src/types/`, `src/controller/`, or any
@@ -1010,7 +941,7 @@ test("Qwen3 benchmark: type declarations are scoped to the benchmark directory",
     for (const e of entries) {
       assert.ok(
         !e.endsWith("huggingface-transformers.d.ts"),
-        `production directory ${prodDir} must not contain a huggingface-transformers.d.ts file (found ${e})`,
+        `production directory ${prodDir} must not contain a huggingface-transformers.d.ts file (found ${e})`
       );
     }
   }
@@ -1040,13 +971,11 @@ test("runDenseRetrievalBenchmark: variant=vector-dense with embedder=qwen3 produ
   // surface stays clean in the dev env.
   if (!(await isQwen3LibraryMissing())) {
     t.skip(
-      "@huggingface/transformers is installed; the runDenseRetrievalBenchmark end-to-end path is exercised in CI where the package is absent (the live integration test in tests/_helpers/retrieval-dense-qwen3-live.test.ts covers the real-model path)",
+      "@huggingface/transformers is installed; the runDenseRetrievalBenchmark end-to-end path is exercised in CI where the package is absent (the live integration test in tests/_helpers/retrieval-dense-qwen3-live.test.ts covers the real-model path)"
     );
     return;
   }
-  const { runDenseRetrievalBenchmark } = await import(
-    "../src/benchmark/retrieval-runner.ts"
-  );
+  const { runDenseRetrievalBenchmark } = await import("../src/benchmark/retrieval-runner.ts");
   const report = await runDenseRetrievalBenchmark({
     variant: "vector-dense",
     denseEmbedderSpec: "qwen3",
@@ -1057,10 +986,7 @@ test("runDenseRetrievalBenchmark: variant=vector-dense with embedder=qwen3 produ
   };
   assert.equal(r.variant, "vector-dense-benchmark");
   assert.equal(r.config.embeddingBackend.backend, "qwen3");
-  assert.equal(
-    r.config.embeddingBackend.modelId,
-    "onnx-community/Qwen3-Embedding-0.6B-ONNX",
-  );
+  assert.equal(r.config.embeddingBackend.modelId, "onnx-community/Qwen3-Embedding-0.6B-ONNX");
   // The status is "error" (init failed because
   // the library is not installed). The
   // benchmark still produced a report.

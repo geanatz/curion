@@ -45,55 +45,48 @@
  * is stored or echoed. No production code is changed.
  */
 
-import { test, before } from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
+import { before, test } from "node:test";
 
-import { runRecallController } from "../src/controller/recall-controller.ts";
 import {
-  initStorage,
+  resetListRegisteredProjectsStub,
+  setListRegisteredProjectsStub,
+} from "../src/config/registry.ts";
+import { runRecallController } from "../src/controller/recall-controller.ts";
+import { type AmbiguitySignal, formatAmbiguityNote } from "../src/retrieval/ambiguity.ts";
+import {
+  type MemoryRecord,
+  type StorageHandle,
   insertMemoryRecord,
   updateMemoryMetadata,
-  type StorageHandle,
-  type MemoryRecord,
 } from "../src/storage/storage.ts";
 import {
-  formatAmbiguityNote,
-  type AmbiguitySignal,
-} from "../src/retrieval/ambiguity.ts";
-import {
-  handleRecall,
   NO_RELEVANT_MEMORY,
-  setStorageProvider as setRecallStorageProvider,
-  resetStorageProvider as resetRecallStorageProvider,
   type RecallResult,
+  handleRecall,
+  resetStorageProvider as resetRecallStorageProvider,
+  setStorageProvider as setRecallStorageProvider,
 } from "../src/tools/recall.ts";
-import {
-  setListRegisteredProjectsStub,
-  resetListRegisteredProjectsStub,
-} from "../src/config/registry.ts";
 
 import {
-  SCENARIOS,
-  resolveIdList,
-  newReportRows,
-  buildReport,
-  formatReport,
-  type Scenario,
-  type ScenarioReportRow,
   type ExpectedStatus,
   type IdList,
+  SCENARIOS,
+  type Scenario,
+  type ScenarioReportRow,
+  buildReport,
+  formatReport,
+  newReportRows,
+  resolveIdList,
 } from "./_helpers/ambiguity-behavior-scenarios.ts";
 import { mkStorage, rmStorage } from "./_helpers/test-storage.ts";
 import {
-  TEST_PRIMARY_KEY,
-  TEST_FALLBACK_KEY,
-  TEST_PRIMARY_BASE_URL,
-  TEST_PRIMARY_MODEL,
   TEST_FALLBACK_BASE_URL,
+  TEST_FALLBACK_KEY,
   TEST_FALLBACK_MODEL,
+  TEST_PRIMARY_BASE_URL,
+  TEST_PRIMARY_KEY,
+  TEST_PRIMARY_MODEL,
 } from "./shared-test-provider.ts";
 
 // ---------------------------------------------------------------------------
@@ -132,7 +125,7 @@ function okChatResponse(content: string): Response {
       model: "m",
       choices: [{ message: { role: "assistant", content } }],
     }),
-    { status: 200, headers: { "content-type": "application/json" } },
+    { status: 200, headers: { "content-type": "application/json" } }
   );
 }
 
@@ -147,10 +140,7 @@ function okChatResponse(content: string): Response {
  * the inserted records in declaration order so the runner can
  * use the ids in further assertions if needed.
  */
-function seedScenarioRows(
-  handle: StorageHandle,
-  scenario: Scenario,
-): MemoryRecord[] {
+function seedScenarioRows(handle: StorageHandle, scenario: Scenario): MemoryRecord[] {
   const inserted: MemoryRecord[] = [];
   for (const row of scenario.rows) {
     const rec = insertMemoryRecord(handle, {
@@ -188,11 +178,11 @@ function seedScenarioRows(
     // can be extended; Phase E is intentionally simple.
     const conflictsWith: number[] = resolveIdList(
       row.relationship.conflictsWith as IdList | undefined,
-      otherId,
+      otherId
     );
     const olderVariantsOf: number[] = resolveIdList(
       row.relationship.olderVariantsOf as IdList | undefined,
-      otherId,
+      otherId
     );
     const block = {
       derivedSchemaVersion: row.relationship.derivedSchemaVersion ?? "ccm-draft-1",
@@ -237,7 +227,7 @@ function seedScenarioRows(
  */
 async function runProjected(
   handle: StorageHandle,
-  scenario: Scenario,
+  scenario: Scenario
 ): Promise<{
   status: ExpectedStatus;
   message: string;
@@ -250,9 +240,7 @@ async function runProjected(
   providerCalls: number;
   apiKeys: string[];
 }> {
-  const { fetchImpl, calls } = scriptFetch(() =>
-    okChatResponse(scenario.answer),
-  );
+  const { fetchImpl, calls } = scriptFetch(() => okChatResponse(scenario.answer));
   const out = await runRecallController(handle, scenario.query, {
     providerFetchImpl: fetchImpl,
     providerPrimaryApiKey: TEST_PRIMARY_KEY,
@@ -308,8 +296,7 @@ async function runProjected(
     answer: out.answer,
     sourceIds: [...out.sourceIds],
     warning: note.length > 0,
-    reasonActual:
-      internal.kind === "ambiguous" ? internal.reason : "none",
+    reasonActual: internal.kind === "ambiguous" ? internal.reason : "none",
     providerCalls: calls.length,
     apiKeys: [],
   };
@@ -340,14 +327,17 @@ const ALLOWED_PUBLIC_KEYS = new Set([
 /** Build the public `RecallResult` exactly the way the tool
  *  layer does, so the API drift check operates on the same
  *  shape the public surface would. */
-function buildPublicResult(scenario: Scenario, projected: {
-  status: ExpectedStatus;
-  message: string;
-  answer?: string;
-  sourceIds: number[];
-  reason?: string;
-  safetyClass?: string;
-}): RecallResult {
+function buildPublicResult(
+  scenario: Scenario,
+  projected: {
+    status: ExpectedStatus;
+    message: string;
+    answer?: string;
+    sourceIds: number[];
+    reason?: string;
+    safetyClass?: string;
+  }
+): RecallResult {
   switch (projected.status) {
     case "answered":
       return {
@@ -407,10 +397,7 @@ function expectedProviderCallsFor(status: ExpectedStatus): number {
  *  scenario, not only the ones that passed. The assertion
  *  failure is re-thrown so the test framework still
  *  reports the per-scenario test as failed. */
-async function runScenarioAsync(
-  scenario: Scenario,
-  sink: ScenarioReportRow[],
-): Promise<void> {
+async function runScenarioAsync(scenario: Scenario, sink: ScenarioReportRow[]): Promise<void> {
   const expectedStatus: ExpectedStatus = scenario.expected.status ?? "answered";
   const expectedWarning = scenario.expected.warning;
   const expectedReason: string = scenario.expected.reason ?? "none";
@@ -437,7 +424,8 @@ async function runScenarioAsync(
   // the failure path. The error is re-thrown at the end of
   // the function so the test framework still records the
   // per-scenario test as failed.
-  let captured: { kind: "status" | "warning" | "api" | "calls" | "fatal"; message: string } | null = null;
+  let captured: { kind: "status" | "warning" | "api" | "calls" | "fatal"; message: string } | null =
+    null;
 
   try {
     if (expectedStatus === "no_memory") {
@@ -509,9 +497,7 @@ async function runScenarioAsync(
       // fallback call is attempted and the adapter returns
       // `all-providers-failed` after both slots fail.
       seedScenarioRows(storage.handle, scenario);
-      const { fetchImpl, calls } = scriptFetch(
-        () => new Response("boom", { status: 500 }),
-      );
+      const { fetchImpl, calls } = scriptFetch(() => new Response("boom", { status: 500 }));
       const out = await runRecallController(storage.handle, scenario.query, {
         providerFetchImpl: fetchImpl,
         providerPrimaryApiKey: TEST_PRIMARY_KEY,
@@ -611,10 +597,7 @@ async function runScenarioAsync(
         kind: "warning",
         message: `scenario ${scenario.id} expected a warning but none fired (reason=${actualReason})`,
       };
-    } else if (
-      publicResult !== null &&
-      !publicResult.message.startsWith("Note: ")
-    ) {
+    } else if (publicResult !== null && !publicResult.message.startsWith("Note: ")) {
       captured = {
         kind: "warning",
         message: `scenario ${scenario.id} public message must start with 'Note: '`,
@@ -636,10 +619,7 @@ async function runScenarioAsync(
         kind: "warning",
         message: `scenario ${scenario.id} detector must be silent when no warning is expected (got reason=${actualReason})`,
       };
-    } else if (
-      publicResult !== null &&
-      publicResult.message.startsWith("Note: ")
-    ) {
+    } else if (publicResult !== null && publicResult.message.startsWith("Note: ")) {
       captured = {
         kind: "warning",
         message: `scenario ${scenario.id} public message must not start with 'Note: '`,
@@ -754,42 +734,41 @@ test("Phase E summary: compact validation report", () => {
   // The summary block is printed once, in a single
   // multi-line `console.log` so test runners surface it
   // intact. We use a sentinel prefix to make it greppable.
-  // eslint-disable-next-line no-console
   console.log("\n" + formatReport(report));
   // Hard assertions: no false positives, no false negatives.
   assert.equal(
     report.falsePositives,
     0,
-    `Phase E: ${report.falsePositives} false positive(s) detected`,
+    `Phase E: ${report.falsePositives} false positive(s) detected`
   );
   assert.equal(
     report.falseNegatives,
     0,
-    `Phase E: ${report.falseNegatives} false negative(s) detected`,
+    `Phase E: ${report.falseNegatives} false negative(s) detected`
   );
   // All API drift pins must pass (no new public field).
   assert.equal(
     report.apiDriftChecks.failed,
     0,
-    `Phase E: ${report.apiDriftChecks.failed} API drift failure(s)`,
+    `Phase E: ${report.apiDriftChecks.failed} API drift failure(s)`
   );
   // All provider-call pins must pass.
   assert.equal(
     report.providerCallChecks.failed,
     0,
-    `Phase E: ${report.providerCallChecks.failed} provider-call failure(s)`,
+    `Phase E: ${report.providerCallChecks.failed} provider-call failure(s)`
   );
   // Sanity: total scenarios match the curated list.
   assert.equal(
     report.totalScenarios,
     SCENARIOS.length,
-    "Phase E report row count must match the curated scenario list",
+    "Phase E report row count must match the curated scenario list"
   );
   // Sanity: the gap scenario is recorded as a gap, not a fail.
   const gapRows = report.rows.filter((r) => r.verdict === "gap");
   assert.ok(
     gapRows.length >= 1,
-    "Phase E: at least one scenario (S6) should be recorded as a capability gap",
+    "Phase E: at least one scenario (S6) should be recorded as a capability gap"
   );
   // Sanity: the S6 capability gap note is preserved.
   const s6 = report.rows.find((r) => r.id === "S6");

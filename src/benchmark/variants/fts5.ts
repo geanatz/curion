@@ -53,8 +53,8 @@ import Database from "better-sqlite3";
 import { tokenize } from "../../retrieval/lexical.js";
 import type {
   LexicalCandidate,
-  LexicalScoredCandidate,
   LexicalRankingOptions,
+  LexicalScoredCandidate,
 } from "../../retrieval/lexical.js";
 
 // ---------------------------------------------------------------------------
@@ -92,9 +92,7 @@ export interface Fts5RankingOptions extends LexicalRankingOptions {
  * literal word "OR" or "AND" (common in technical questions) is
  * not treated as a boolean operator.
  */
-const FTS5_RESERVED_WORDS: ReadonlySet<string> = new Set([
-  "AND", "OR", "NOT", "NEAR",
-]);
+const FTS5_RESERVED_WORDS: ReadonlySet<string> = new Set(["AND", "OR", "NOT", "NEAR"]);
 
 /**
  * Build a safe FTS5 MATCH expression from a free-form user query.
@@ -182,9 +180,7 @@ export interface Fts5Index {
   close(): void;
 }
 
-export function buildFts5Index(
-  candidates: ReadonlyArray<LexicalCandidate>,
-): Fts5Index {
+export function buildFts5Index(candidates: ReadonlyArray<LexicalCandidate>): Fts5Index {
   const db = new Database(":memory:");
   db.exec(`
     CREATE TABLE memories (
@@ -199,11 +195,9 @@ export function buildFts5Index(
       tokenize = 'unicode61'
     );
   `);
-  const insert = db.prepare(
-    "INSERT INTO memories (id, summary, tags) VALUES (?, ?, ?)",
-  );
+  const insert = db.prepare("INSERT INTO memories (id, summary, tags) VALUES (?, ?, ?)");
   const insertFts = db.prepare(
-    "INSERT INTO memories_fts (memory_id, summary, tags) VALUES (?, ?, ?)",
+    "INSERT INTO memories_fts (memory_id, summary, tags) VALUES (?, ?, ?)"
   );
   // Wrap inserts in a transaction so the index is built atomically.
   // A partial index would be a real bug for the benchmark; the
@@ -300,7 +294,7 @@ export const DEFAULT_FTS5_THRESHOLD = 0;
 export function rankFts5(
   query: string,
   candidates: ReadonlyArray<LexicalCandidate>,
-  options: Fts5RankingOptions = {},
+  options: Fts5RankingOptions = {}
 ): LexicalScoredCandidate[] {
   const threshold = options.threshold ?? DEFAULT_FTS5_THRESHOLD;
   const topK = options.topK ?? 5;
@@ -321,7 +315,7 @@ export function rankFts5(
            FROM memories_fts
            WHERE memories_fts MATCH ?
            ORDER BY bm25(memories_fts) ASC
-           LIMIT ?`,
+           LIMIT ?`
       )
       .all(safeQuery, overshoot) as Array<{ id: number; bm: number }>;
 

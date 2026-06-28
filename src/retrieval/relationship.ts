@@ -84,7 +84,7 @@ export const CONFLICT_CONFIDENCE_THRESHOLD = 0.85;
  * "older variant" claim needs near-paraphrase evidence, not just
  * topic similarity.
  */
-export const OLDER_VARIANT_CONFIDENCE_THRESHOLD = 0.90;
+export const OLDER_VARIANT_CONFIDENCE_THRESHOLD = 0.9;
 
 /**
  * Maximum number of ids emitted in either `conflictsWith` or
@@ -236,12 +236,11 @@ export interface RelationshipMetadataFields {
  *     derive them.
  */
 export function deriveRelationshipMetadata(
-  input: RelationshipDerivationInput,
+  input: RelationshipDerivationInput
 ): RelationshipMetadataFields {
   const { candidate, others } = input;
-  const asOf = typeof input.asOf === "number" && Number.isFinite(input.asOf)
-    ? Math.trunc(input.asOf)
-    : 0;
+  const asOf =
+    typeof input.asOf === "number" && Number.isFinite(input.asOf) ? Math.trunc(input.asOf) : 0;
 
   // Defensive: a non-array `others` becomes an empty list. This
   // keeps the function total even if a future caller miswires
@@ -264,16 +263,8 @@ export function deriveRelationshipMetadata(
     if (other.state !== "active") continue;
 
     // ---- conflictsWith: high-overlap AND opposing-claim signature ----
-    const conflictSignal = scoreConflictSignal(
-      candidate,
-      candidateTokens,
-      candidateTags,
-      other,
-    );
-    if (
-      conflictSignal !== null &&
-      conflictSignal.confidence >= CONFLICT_CONFIDENCE_THRESHOLD
-    ) {
+    const conflictSignal = scoreConflictSignal(candidate, candidateTokens, candidateTags, other);
+    if (conflictSignal !== null && conflictSignal.confidence >= CONFLICT_CONFIDENCE_THRESHOLD) {
       conflictsWith.push(other.id);
       if (conflictSignal.confidence > maxConfidence) {
         maxConfidence = conflictSignal.confidence;
@@ -295,10 +286,7 @@ export function deriveRelationshipMetadata(
     if (other.id >= candidate.id) continue;
 
     const olderSignal = scoreOlderVariantSignal(candidate, other);
-    if (
-      olderSignal !== null &&
-      olderSignal.confidence >= OLDER_VARIANT_CONFIDENCE_THRESHOLD
-    ) {
+    if (olderSignal !== null && olderSignal.confidence >= OLDER_VARIANT_CONFIDENCE_THRESHOLD) {
       olderVariantsOf.push(other.id);
       if (olderSignal.confidence > maxConfidence) {
         maxConfidence = olderSignal.confidence;
@@ -393,9 +381,7 @@ export interface PersistedRelationshipBlock {
  * being superseded), not the new candidate row, so they do
  * not gate whether the new row's block is written.
  */
-export function hasMeaningfulRelationshipData(
-  fields: RelationshipMetadataFields,
-): boolean {
+export function hasMeaningfulRelationshipData(fields: RelationshipMetadataFields): boolean {
   return (
     fields.conflictsWith.length > 0 ||
     fields.olderVariantsOf.length > 0 ||
@@ -444,7 +430,7 @@ export function hasMeaningfulRelationshipData(
  */
 export function buildPersistedMetadata(
   existing: Readonly<Record<string, unknown>> | null | undefined,
-  derived: RelationshipMetadataFields,
+  derived: RelationshipMetadataFields
 ): Record<string, unknown> {
   // Defensive: treat any non-object existing metadata as `{}`.
   const base: Record<string, unknown> =
@@ -498,11 +484,9 @@ export function buildPersistedMetadata(
   // supplied the field.
   if (Array.isArray(derived.supersedes)) {
     const filtered = derived.supersedes
-      .filter((x): x is number =>
-        typeof x === "number" &&
-        Number.isFinite(x) &&
-        Number.isInteger(x) &&
-        x > 0,
+      .filter(
+        (x): x is number =>
+          typeof x === "number" && Number.isFinite(x) && Number.isInteger(x) && x > 0
       )
       .slice(0, 16);
     if (filtered.length > 0) {
@@ -511,11 +495,9 @@ export function buildPersistedMetadata(
   }
   if (Array.isArray(derived.supersededBy)) {
     const filtered = derived.supersededBy
-      .filter((x): x is number =>
-        typeof x === "number" &&
-        Number.isFinite(x) &&
-        Number.isInteger(x) &&
-        x > 0,
+      .filter(
+        (x): x is number =>
+          typeof x === "number" && Number.isFinite(x) && Number.isInteger(x) && x > 0
       )
       .slice(0, 16);
     if (filtered.length > 0) {
@@ -615,7 +597,7 @@ function scoreConflictSignal(
   candidate: SafeMemorySummary,
   candidateTokens: readonly string[],
   candidateTags: ReadonlySet<string>,
-  other: SafeMemorySummary,
+  other: SafeMemorySummary
 ): ConflictSignal | null {
   const otherTokens = tokenize(other.memoryContent);
   if (candidateTokens.length === 0 || otherTokens.length === 0) {
@@ -656,8 +638,7 @@ function scoreConflictSignal(
   const candHasNeg = hasNegationMarker(candidate.memoryContent);
   const otherHasNeg = hasNegationMarker(other.memoryContent);
   // Asymmetric negation: exactly one side negates.
-  const asymmetricNegation =
-    candHasNeg !== otherHasNeg && (candHasNeg || otherHasNeg);
+  const asymmetricNegation = candHasNeg !== otherHasNeg && (candHasNeg || otherHasNeg);
 
   if (!asymmetricNegation && !polarityDisagrees) return null;
 
@@ -666,7 +647,7 @@ function scoreConflictSignal(
   // intentionally small enough that bare high overlap without
   // a real opposing-claim signature stays under τ.
   const base = overlap; // in [0.6, 1.0]
-  const claimBump = asymmetricNegation ? 0.30 : 0.25;
+  const claimBump = asymmetricNegation ? 0.3 : 0.25;
   const confidence = Math.min(1, base + claimBump);
   return { confidence };
 }
@@ -713,7 +694,7 @@ function pickPolarityTag(tags: ReadonlySet<string>): "positive" | "negative" | n
  */
 function scoreOlderVariantSignal(
   candidate: SafeMemorySummary,
-  other: SafeMemorySummary,
+  other: SafeMemorySummary
 ): OlderVariantSignal | null {
   const candidateTokens = tokenize(candidate.memoryContent);
   const otherTokens = tokenize(other.memoryContent);

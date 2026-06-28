@@ -53,8 +53,8 @@
  * writing it and for patching the old row's `supersededBy` field.
  */
 
-import { tokenize } from "./lexical.js";
 import type { SafeMemorySummary } from "../storage/storage.js";
+import { tokenize } from "./lexical.js";
 
 // ---------------------------------------------------------------------------
 // Thresholds and constants (exported for tests)
@@ -195,19 +195,19 @@ const SUPERSESSION_PATTERNS: readonly PhrasePattern[] = [
   {
     regex: /\bsupersedes\b/i,
     polarity: 1,
-    boost: 0.40,
+    boost: 0.4,
   },
   {
     regex: /\bsuperseded\s+by\b/i,
     polarity: -1,
-    boost: 0.40,
+    boost: 0.4,
   },
 
   // "X is replaced by Y" / "X replaces Y"
   {
     regex: /\bis\s+replaced\s+by\b/i,
     polarity: -1,
-    boost: 0.40,
+    boost: 0.4,
   },
   {
     regex: /\breplaces?\b/i,
@@ -232,12 +232,12 @@ const SUPERSESSION_PATTERNS: readonly PhrasePattern[] = [
   {
     regex: /\bdo\s+not\s+use\b/i,
     polarity: 1,
-    boost: 0.30,
+    boost: 0.3,
   },
   {
     regex: /\bdon'?t\s+use\b/i,
     polarity: 1,
-    boost: 0.30,
+    boost: 0.3,
   },
 
   // "no longer use X" (explicit deprecation)
@@ -251,7 +251,7 @@ const SUPERSESSION_PATTERNS: readonly PhrasePattern[] = [
   {
     regex: /\bprevious\s+\w+\s+is\s+superseded\b/i,
     polarity: 1,
-    boost: 0.40,
+    boost: 0.4,
   },
 
   // "new policy overrides old policy"
@@ -272,19 +272,19 @@ const SUPERSESSION_PATTERNS: readonly PhrasePattern[] = [
   {
     regex: /\bmigrated?\s+from\s+\w+\s+to\s+\w+/i,
     polarity: 1,
-    boost: 0.30,
+    boost: 0.3,
   },
   {
     regex: /\bmove[sd]?\s+from\s+\w+\s+to\s+\w+/i,
     polarity: 1,
-    boost: 0.30,
+    boost: 0.3,
   },
 
   // "switched from X to Y"
   {
     regex: /\bswitched?\s+from\s+\w+\s+to\s+\w+/i,
     polarity: 1,
-    boost: 0.30,
+    boost: 0.3,
   },
 ];
 
@@ -311,9 +311,7 @@ const SUPERSESSION_PATTERNS: readonly PhrasePattern[] = [
  *          `supersededIds` array when at least one related memory
  *          is confidently superseded.
  */
-export function detectSupersession(
-  input: SupersessionDetectionInput,
-): SupersessionSignal | null {
+export function detectSupersession(input: SupersessionDetectionInput): SupersessionSignal | null {
   const { candidate, others, rawInputText } = input;
 
   // Fast path: if the candidate memoryContent is empty, no signal.
@@ -327,8 +325,8 @@ export function detectSupersession(
   // computation, because the user's explicit statement is a strong
   // signal that should not be blocked by moderate token divergence
   // between the provider summary and the related memory.
-  const hasExplicitSupersession = rawInputText !== undefined &&
-    hasExplicitSupersessionPhrase(rawInputText);
+  const hasExplicitSupersession =
+    rawInputText !== undefined && hasExplicitSupersessionPhrase(rawInputText);
   const effectiveOverlapThreshold = hasExplicitSupersession
     ? REDUCED_OVERLAP_THRESHOLD_FOR_EXPLICIT
     : MIN_OVERLAP_FOR_SUPERSESSION;
@@ -338,9 +336,7 @@ export function detectSupersession(
   // overlap because the provider may have rephrased the explicit
   // language (e.g. "supersedes" -> "superseding"). Otherwise use
   // candidate.memoryContent as normal.
-  const effectiveText = hasExplicitSupersession
-    ? rawInputText!
-    : candidate.memoryContent;
+  const effectiveText = hasExplicitSupersession ? rawInputText! : candidate.memoryContent;
   const candidateTokens = tokenize(effectiveText);
   if (candidateTokens.length === 0) return null;
 
@@ -365,14 +361,8 @@ export function detectSupersession(
 
     // Secondary shared-content check: when overlap is marginal,
     // require a minimum number of shared content tokens.
-    const sharedContent = intersectCount(
-      candidateContentTokens,
-      contentTokens(otherTokens),
-    );
-    if (
-      overlap < effectiveOverlapThreshold + 0.1 &&
-      sharedContent < MIN_SHARED_CONTENT_TOKENS
-    ) {
+    const sharedContent = intersectCount(candidateContentTokens, contentTokens(otherTokens));
+    if (overlap < effectiveOverlapThreshold + 0.1 && sharedContent < MIN_SHARED_CONTENT_TOKENS) {
       continue;
     }
 
@@ -386,7 +376,7 @@ export function detectSupersession(
       hasExplicitSupersession,
       rawInputText,
       candidate.memoryContent,
-      overlap,
+      overlap
     );
     if (result === null) continue;
 
@@ -427,9 +417,7 @@ export function detectSupersession(
  * threshold, because the user's explicit supersession statement
  * is a strong signal.
  */
-function hasExplicitSupersessionPhrase(
-  text: string | undefined,
-): boolean {
+function hasExplicitSupersessionPhrase(text: string | undefined): boolean {
   if (!text) return false;
   for (const pattern of SUPERSESSION_PATTERNS) {
     if (pattern.regex.test(text)) {
@@ -452,7 +440,7 @@ function scanForSupersessionPhrasing(
   hasExplicitSupersession: boolean,
   rawInputText: string | undefined,
   candidateText: string,
-  overlap: number,
+  overlap: number
 ): { polarity: 1 | -1; confidence: number } | null {
   // Only use rawInputText for phrase detection if it has explicit supersession
   const textToCheck = hasExplicitSupersession ? rawInputText! : candidateText;

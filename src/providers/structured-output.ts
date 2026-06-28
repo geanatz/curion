@@ -32,17 +32,14 @@ import { z } from "zod";
  */
 export const MemoryAnalysisSchema = z.object({
   summary: z.string().min(1, "summary must be a non-empty string"),
-  confidence: z
-    .number()
-    .min(0, "confidence must be >= 0")
-    .max(1, "confidence must be <= 1"),
+  confidence: z.number().min(0, "confidence must be >= 0").max(1, "confidence must be <= 1"),
   tags: z.array(z.string().min(1)).max(16, "at most 16 tags"),
   entities: z
     .array(
       z.object({
         name: z.string().min(1),
         kind: z.string().min(1),
-      }),
+      })
     )
     .max(32, "at most 32 entities")
     .optional()
@@ -106,9 +103,7 @@ export function parseMemoryAnalysis(text: string): ParseResult {
       return validate(repaired.value, [], true, "repaired");
     }
     const balancedErr = parsed.ok ? "unknown" : parsed.error;
-    errors.push(
-      `balanced object present but unparsable: ${balancedErr}`,
-    );
+    errors.push(`balanced object present but unparsable: ${balancedErr}`);
   } else {
     errors.push("no JSON object found in response");
   }
@@ -153,7 +148,7 @@ function validate(
   candidate: unknown,
   baseErrors: string[],
   repaired: boolean,
-  strategy: NonNullable<ParseResult["strategy"]>,
+  strategy: NonNullable<ParseResult["strategy"]>
 ): ParseResult {
   const normalized = normalizeStrictModeShape(candidate);
   const result = MemoryAnalysisSchema.safeParse(normalized);
@@ -166,9 +161,7 @@ function validate(
       strategy,
     };
   }
-  const issues = result.error.issues.map(
-    (i) => `${i.path.join(".") || "<root>"}: ${i.message}`,
-  );
+  const issues = result.error.issues.map((i) => `${i.path.join(".") || "<root>"}: ${i.message}`);
   return {
     ok: false,
     errors: [...baseErrors, ...issues],
@@ -176,9 +169,7 @@ function validate(
   };
 }
 
-function tryParseJson(
-  text: string,
-): { ok: true; value: unknown } | { ok: false; error: string } {
+function tryParseJson(text: string): { ok: true; value: unknown } | { ok: false; error: string } {
   try {
     return { ok: true, value: JSON.parse(text) };
   } catch (err) {
@@ -207,13 +198,13 @@ export function buildStructuredPrompt(userText: string): string {
   return [
     "Return EXACTLY one JSON object. No prose, no markdown, no code fences.",
     "The object MUST match this TypeScript shape:",
-    '{',
+    "{",
     '  "summary": string,        // 1-2 sentence summary of the input',
     '  "confidence": number,     // 0..1, your confidence in the summary',
     '  "tags": string[],         // up to 8 short tags',
     '  "entities"?: {name: string, kind: string}[], // optional named entities',
     '  "classification"?: string // optional short label',
-    '}',
+    "}",
     "",
     "Wrap the JSON in a ```json ... ``` block. Do not include any other text.",
     "",

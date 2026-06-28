@@ -52,46 +52,39 @@
  *     conservative detector fields remain the gate).
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
+import { test } from "node:test";
 
+import { runRecallController } from "../src/controller/recall-controller.ts";
+import { runRememberController } from "../src/controller/remember-controller.ts";
 import {
-  buildPersistedMetadata,
-  hasMeaningfulRelationshipData,
-  deriveRelationshipMetadata,
   DERIVED_SCHEMA_VERSION,
   LEGACY_DERIVED_SCHEMA_VERSION,
   type RelationshipMetadataFields,
+  buildPersistedMetadata,
+  deriveRelationshipMetadata,
+  hasMeaningfulRelationshipData,
 } from "../src/retrieval/relationship.ts";
+import { resetRelatedMemoriesImpl, setRelatedMemoriesImpl } from "../src/retrieval/seam.ts";
 import {
-  listActiveMemoryRelationshipBlocks,
   type MemoryRelationshipBlockRow,
+  listActiveMemoryRelationshipBlocks,
 } from "../src/storage/storage.ts";
-import { runRememberController } from "../src/controller/remember-controller.ts";
-import { runRecallController } from "../src/controller/recall-controller.ts";
-import {
-  setStorageProvider as setRecallStorageProvider,
-  resetStorageProvider as resetRecallStorageProvider,
-} from "../src/tools/recall.ts";
-import {
-  setRelatedMemoriesImpl,
-  resetRelatedMemoriesImpl,
-} from "../src/retrieval/seam.ts";
 import type { SafeMemorySummary } from "../src/storage/storage.ts";
 import {
-  TEST_PRIMARY_KEY,
-  TEST_FALLBACK_KEY,
-  TEST_PRIMARY_BASE_URL,
-  TEST_PRIMARY_MODEL,
-  TEST_FALLBACK_BASE_URL,
-  TEST_FALLBACK_MODEL,
-} from "./shared-test-provider.ts";
-import {
-  scriptFetch,
-  okChatResponse,
-  safeAnalysis,
-} from "./_helpers/provider-stub.ts";
+  resetStorageProvider as resetRecallStorageProvider,
+  setStorageProvider as setRecallStorageProvider,
+} from "../src/tools/recall.ts";
+import { okChatResponse, safeAnalysis, scriptFetch } from "./_helpers/provider-stub.ts";
 import { mkStorage, rmStorage } from "./_helpers/test-storage.ts";
+import {
+  TEST_FALLBACK_BASE_URL,
+  TEST_FALLBACK_KEY,
+  TEST_FALLBACK_MODEL,
+  TEST_PRIMARY_BASE_URL,
+  TEST_PRIMARY_KEY,
+  TEST_PRIMARY_MODEL,
+} from "./shared-test-provider.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -350,7 +343,7 @@ test("hasMeaningfulRelationshipData: supersedes is now considered meaningful (Ph
   assert.equal(
     hasMeaningfulRelationshipData(supersessionOnly),
     true,
-    "supersession-only block (supersedes) is now meaningful",
+    "supersession-only block (supersedes) is now meaningful"
   );
 
   // supersededBy alone does NOT make a new row meaningful
@@ -366,7 +359,7 @@ test("hasMeaningfulRelationshipData: supersedes is now considered meaningful (Ph
   assert.equal(
     hasMeaningfulRelationshipData(supersededByOnly),
     false,
-    "supersededBy alone does not make a new row meaningful",
+    "supersededBy alone does not make a new row meaningful"
   );
 
   // resolvedAt alone does NOT make a new row meaningful.
@@ -381,14 +374,11 @@ test("hasMeaningfulRelationshipData: supersedes is now considered meaningful (Ph
   assert.equal(
     hasMeaningfulRelationshipData(resolvedAtOnly),
     false,
-    "resolvedAt alone does not make a new row meaningful",
+    "resolvedAt alone does not make a new row meaningful"
   );
 
   // Sanity: a row with a conservative field is still meaningful.
-  assert.equal(
-    hasMeaningfulRelationshipData({ ...supersessionOnly, conflictsWith: [1] }),
-    true,
-  );
+  assert.equal(hasMeaningfulRelationshipData({ ...supersessionOnly, conflictsWith: [1] }), true);
 });
 
 // ---------------------------------------------------------------------------
@@ -424,8 +414,8 @@ test("controller: new writes use DERIVED_SCHEMA_VERSION (ccm-draft-2)", async ()
         safeAnalysis({
           summary: "we do not use Postgres for this service in production",
           tags: ["postgres", "storage"],
-        }),
-      ),
+        })
+      )
     );
     const outcome = await runRememberController(handle, "Some safe fact.", {
       providerFetchImpl: fetchImpl,
@@ -474,7 +464,7 @@ test("listActiveMemoryRelationshipBlocks: round-trips ccm-draft-2 rows with the 
     handle.db
       .prepare(
         `INSERT INTO memories (kind, created_at, summary, state, metadata)
-         VALUES (?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?)`
       )
       .run(
         "fact",
@@ -494,10 +484,9 @@ test("listActiveMemoryRelationshipBlocks: round-trips ccm-draft-2 rows with the 
             supersededBy: [13],
             resolvedAt: 1_700_000_000_001,
           },
-        }),
+        })
       );
-    const blocks: MemoryRelationshipBlockRow[] =
-      listActiveMemoryRelationshipBlocks(handle);
+    const blocks: MemoryRelationshipBlockRow[] = listActiveMemoryRelationshipBlocks(handle);
     assert.equal(blocks.length, 1);
     const b = blocks[0]!.block;
     assert.equal(b.derivedSchemaVersion, "ccm-draft-2");
@@ -523,7 +512,7 @@ test("listActiveMemoryRelationshipBlocks: legacy ccm-draft-1 rows project safe d
     handle.db
       .prepare(
         `INSERT INTO memories (kind, created_at, summary, state, metadata)
-         VALUES (?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?)`
       )
       .run(
         "fact",
@@ -540,10 +529,9 @@ test("listActiveMemoryRelationshipBlocks: legacy ccm-draft-1 rows project safe d
             olderVariantsOf: [],
             detectionConfidence: 0.85,
           },
-        }),
+        })
       );
-    const blocks: MemoryRelationshipBlockRow[] =
-      listActiveMemoryRelationshipBlocks(handle);
+    const blocks: MemoryRelationshipBlockRow[] = listActiveMemoryRelationshipBlocks(handle);
     assert.equal(blocks.length, 1);
     const b = blocks[0]!.block;
     // Legacy literal is preserved.
@@ -569,17 +557,16 @@ test("listActiveMemoryRelationshipBlocks: rows without a relationship key projec
     handle.db
       .prepare(
         `INSERT INTO memories (kind, created_at, summary, state, metadata)
-         VALUES (?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?)`
       )
       .run(
         "fact",
         Date.now(),
         "row with no relationship key",
         "active",
-        JSON.stringify({ tags: ["x"], classification: null }),
+        JSON.stringify({ tags: ["x"], classification: null })
       );
-    const blocks: MemoryRelationshipBlockRow[] =
-      listActiveMemoryRelationshipBlocks(handle);
+    const blocks: MemoryRelationshipBlockRow[] = listActiveMemoryRelationshipBlocks(handle);
     assert.equal(blocks.length, 1);
     const b = blocks[0]!.block;
     // The pre-Phase-B fallback schema version is the
@@ -605,40 +592,28 @@ test("listActiveMemoryRelationshipBlocks: missing / malformed metadata returns s
     handle.db
       .prepare(
         `INSERT INTO memories (kind, created_at, summary, state, metadata)
-         VALUES (?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?)`
       )
-      .run(
-        "fact",
-        Date.now(),
-        "row with malformed JSON",
-        "active",
-        "this is not json {",
-      );
+      .run("fact", Date.now(), "row with malformed JSON", "active", "this is not json {");
     // Null metadata.
     handle.db
       .prepare(
         `INSERT INTO memories (kind, created_at, summary, state, metadata)
-         VALUES (?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?)`
       )
-      .run(
-        "fact",
-        Date.now() + 1,
-        "row with null metadata",
-        "active",
-        null,
-      );
+      .run("fact", Date.now() + 1, "row with null metadata", "active", null);
     // Non-object relationship block.
     handle.db
       .prepare(
         `INSERT INTO memories (kind, created_at, summary, state, metadata)
-         VALUES (?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?)`
       )
       .run(
         "fact",
         Date.now() + 2,
         "row with non-object relationship",
         "active",
-        JSON.stringify({ relationship: "not an object" }),
+        JSON.stringify({ relationship: "not an object" })
       );
     // Relationship block where the new fields are
     // non-array / non-number, but the conservative
@@ -648,7 +623,7 @@ test("listActiveMemoryRelationshipBlocks: missing / malformed metadata returns s
     handle.db
       .prepare(
         `INSERT INTO memories (kind, created_at, summary, state, metadata)
-         VALUES (?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?)`
       )
       .run(
         "fact",
@@ -673,10 +648,9 @@ test("listActiveMemoryRelationshipBlocks: missing / malformed metadata returns s
             supersededBy: ["bad", -1, 2.5, 0, Number.NaN] as unknown,
             resolvedAt: "not a number",
           },
-        }),
+        })
       );
-    const blocks: MemoryRelationshipBlockRow[] =
-      listActiveMemoryRelationshipBlocks(handle);
+    const blocks: MemoryRelationshipBlockRow[] = listActiveMemoryRelationshipBlocks(handle);
     assert.equal(blocks.length, 4);
     // The first three rows have completely missing or
     // malformed metadata; they all project the safe
@@ -728,7 +702,7 @@ test("public recall output: does NOT expose derivedSchemaVersion, ccm-draft-1, c
     handle.db
       .prepare(
         `INSERT INTO memories (kind, created_at, summary, state, metadata, confidence)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?)`
       )
       .run(
         "fact",
@@ -748,12 +722,12 @@ test("public recall output: does NOT expose derivedSchemaVersion, ccm-draft-1, c
             resolvedAt: 1_700_000_000_001,
           },
         }),
-        0.9,
+        0.9
       );
     handle.db
       .prepare(
         `INSERT INTO memories (kind, created_at, summary, state, metadata, confidence)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?)`
       )
       .run(
         "fact",
@@ -773,12 +747,12 @@ test("public recall output: does NOT expose derivedSchemaVersion, ccm-draft-1, c
             resolvedAt: 1_700_000_000_003,
           },
         }),
-        0.9,
+        0.9
       );
     setRecallStorageProvider(() => ({ handle, ownsHandle: false }));
     try {
       const { fetchImpl } = scriptFetch(() =>
-        okChatResponse("Postgres stores project data reliably."),
+        okChatResponse("Postgres stores project data reliably.")
       );
       const out = await runRecallController(handle, "What database does the project use?", {
         providerFetchImpl: fetchImpl,
@@ -805,7 +779,7 @@ test("public recall output: does NOT expose derivedSchemaVersion, ccm-draft-1, c
       ]) {
         assert.ok(
           !out.answer.includes(tok),
-          `public answer must not include '${tok}' (Phase I invariant)`,
+          `public answer must not include '${tok}' (Phase I invariant)`
         );
       }
       // The controller did not wire the resolved-history
@@ -818,7 +792,7 @@ test("public recall output: does NOT expose derivedSchemaVersion, ccm-draft-1, c
         const k = out.internalAmbiguity.kind;
         assert.ok(
           k === "ambiguous" || k === "none",
-          `Phase I internalAmbiguity.kind must be ambiguous|none, got '${k}' (resolved-history is Phase J only)`,
+          `Phase I internalAmbiguity.kind must be ambiguous|none, got '${k}' (resolved-history is Phase J only)`
         );
       }
     } finally {
@@ -838,7 +812,7 @@ test("public recall output: no_memory / rejected / provider_error paths are unch
     handle.db
       .prepare(
         `INSERT INTO memories (kind, created_at, summary, state, metadata, confidence)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?)`
       )
       .run(
         "fact",
@@ -846,7 +820,7 @@ test("public recall output: no_memory / rejected / provider_error paths are unch
         "Postgres is the primary store.",
         "active",
         JSON.stringify({ tags: ["postgres"], classification: null }),
-        0.9,
+        0.9
       );
     setRecallStorageProvider(() => ({ handle, ownsHandle: false }));
     try {
@@ -875,10 +849,7 @@ test("public recall output: no_memory / rejected / provider_error paths are unch
           "resolvedAt",
           "internalAmbiguity",
         ]) {
-          assert.ok(
-            !r2.reason.includes(tok),
-            `rejected reason must not include '${tok}'`,
-          );
+          assert.ok(!r2.reason.includes(tok), `rejected reason must not include '${tok}'`);
         }
       }
       // provider_error — a query that DOES match the
@@ -901,10 +872,7 @@ test("public recall output: no_memory / rejected / provider_error paths are unch
           "supersededBy",
           "resolvedAt",
         ]) {
-          assert.ok(
-            !r3.reason.includes(tok),
-            `provider_error reason must not include '${tok}'`,
-          );
+          assert.ok(!r3.reason.includes(tok), `provider_error reason must not include '${tok}'`);
         }
       }
     } finally {
@@ -939,18 +907,12 @@ test("recall controller: imports + calls the resolved-history detector (Phase J 
   const pathMod = await import("node:path");
   const urlMod = await import("node:url");
   const here = pathMod.dirname(urlMod.fileURLToPath(import.meta.url));
-  const controllerPath = pathMod.resolve(
-    here,
-    "../src/controller/recall-controller.ts",
-  );
+  const controllerPath = pathMod.resolve(here, "../src/controller/recall-controller.ts");
   const text = await fsP.readFile(controllerPath, "utf8");
-  for (const required of [
-    "detectResolvedHistory",
-    "ResolvedHistorySignal",
-  ]) {
+  for (const required of ["detectResolvedHistory", "ResolvedHistorySignal"]) {
     assert.ok(
       text.includes(required),
-      `recall-controller.ts must reference "${required}" in Phase J (wiring invariant)`,
+      `recall-controller.ts must reference "${required}" in Phase J (wiring invariant)`
     );
   }
   // The controller must NOT call the public-note
@@ -961,23 +923,22 @@ test("recall controller: imports + calls the resolved-history detector (Phase J 
   // `import` statement specifically — a docstring
   // reference is allowed (and useful for the reader).
   assert.equal(
-    /import\s+\{[^}]*formatResolvedHistoryNote[^}]*\}\s+from\s+["'][^"']*resolved-history(?:\.js)?["']/.test(text),
+    /import\s+\{[^}]*formatResolvedHistoryNote[^}]*\}\s+from\s+["'][^"']*resolved-history(?:\.js)?["']/.test(
+      text
+    ),
     false,
     "recall-controller.ts must not import formatResolvedHistoryNote; " +
-      "the formatter lives in src/tools/recall.ts (tool layer)",
+      "the formatter lives in src/tools/recall.ts (tool layer)"
   );
   // Tool layer: the projection must call
   // `formatResolvedHistoryNote` and reference the new
   // verdict.
   const toolPath = pathMod.resolve(here, "../src/tools/recall.ts");
   const toolText = await fsP.readFile(toolPath, "utf8");
-  for (const required of [
-    "formatResolvedHistoryNote",
-    "internalResolvedHistory",
-  ]) {
+  for (const required of ["formatResolvedHistoryNote", "internalResolvedHistory"]) {
     assert.ok(
       toolText.includes(required),
-      `recall.ts must reference "${required}" in Phase J (wiring invariant)`,
+      `recall.ts must reference "${required}" in Phase J (wiring invariant)`
     );
   }
 });
@@ -996,7 +957,7 @@ test("recall controller: sourceIds and answer field shape are byte-equal pre-Pha
     handle.db
       .prepare(
         `INSERT INTO memories (kind, created_at, summary, state, metadata, confidence)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?)`
       )
       .run(
         "fact",
@@ -1004,12 +965,12 @@ test("recall controller: sourceIds and answer field shape are byte-equal pre-Pha
         "Render was the project hosting platform.",
         "active",
         JSON.stringify({ tags: [], classification: null }),
-        0.9,
+        0.9
       );
     handle.db
       .prepare(
         `INSERT INTO memories (kind, created_at, summary, state, metadata, confidence)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?)`
       )
       .run(
         "fact",
@@ -1028,12 +989,12 @@ test("recall controller: sourceIds and answer field shape are byte-equal pre-Pha
             supersedes: [1],
           },
         }),
-        0.9,
+        0.9
       );
     setRecallStorageProvider(() => ({ handle, ownsHandle: false }));
     try {
       const { fetchImpl } = scriptFetch(() =>
-        okChatResponse("Fly.io is the current hosting platform for production."),
+        okChatResponse("Fly.io is the current hosting platform for production.")
       );
       // Use a query that lexically matches the seeded
       // summaries so the recall path is exercised end-to-
@@ -1053,24 +1014,16 @@ test("recall controller: sourceIds and answer field shape are byte-equal pre-Pha
       // Both ids are still listed — no demotion.
       assert.deepEqual(
         out.sourceIds.slice().sort((a, b) => a - b),
-        [1, 2].slice().sort((a, b) => a - b),
+        [1, 2].slice().sort((a, b) => a - b)
       );
       // The public answer is the synthesized answer
       // verbatim. No resolved-history prefix.
       assert.ok(
         out.answer.startsWith("Fly.io"),
-        `public answer must not have a resolved-history prefix, got: ${out.answer.slice(0, 80)}`,
+        `public answer must not have a resolved-history prefix, got: ${out.answer.slice(0, 80)}`
       );
-      for (const tok of [
-        "resolved-history",
-        "Note:",
-        "supersedes",
-        "ccm-draft-2",
-      ]) {
-        assert.ok(
-          !out.answer.includes(tok),
-          `public answer must not include '${tok}'`,
-        );
+      for (const tok of ["resolved-history", "Note:", "supersedes", "ccm-draft-2"]) {
+        assert.ok(!out.answer.includes(tok), `public answer must not include '${tok}'`);
       }
     } finally {
       resetRecallStorageProvider();
@@ -1089,10 +1042,7 @@ test("resolved-history detector: remains pure and unwired (does not import the c
   const pathMod = await import("node:path");
   const urlMod = await import("node:url");
   const here = pathMod.dirname(urlMod.fileURLToPath(import.meta.url));
-  const srcPath = pathMod.resolve(
-    here,
-    "../src/retrieval/resolved-history.ts",
-  );
+  const srcPath = pathMod.resolve(here, "../src/retrieval/resolved-history.ts");
   const text = await fsP.readFile(srcPath, "utf8");
   // The detector is a pure module. It must not import
   // the controller, the tool layer, the provider layer,
@@ -1101,17 +1051,11 @@ test("resolved-history detector: remains pure and unwired (does not import the c
   // `../storage/storage.js` (the type is a pure data
   // shape, not a runtime dependency on storage), but it
   // must not invoke any storage I/O.
-  for (const forbidden of [
-    "controller/",
-    "tools/",
-    "providers/",
-    "benchmark/",
-  ]) {
+  for (const forbidden of ["controller/", "tools/", "providers/", "benchmark/"]) {
     assert.equal(
-      text.includes(`from "../${forbidden}`) ||
-        text.includes(`from "./${forbidden}`),
+      text.includes(`from "../${forbidden}`) || text.includes(`from "./${forbidden}`),
       false,
-      `resolved-history.ts must not import from ../${forbidden}`,
+      `resolved-history.ts must not import from ../${forbidden}`
     );
   }
   // The detector exposes the pure `detectResolvedHistory`
@@ -1129,7 +1073,7 @@ test("resolved-history detector: remains pure and unwired (does not import the c
   assert.equal(
     text.includes("formatResolvedHistoryNote"),
     true,
-    "formatResolvedHistoryNote is defined in Phase J",
+    "formatResolvedHistoryNote is defined in Phase J"
   );
   // Defensive: no storage I/O calls in the detector.
   // (The detector must not invoke `initStorage`,
@@ -1147,7 +1091,7 @@ test("resolved-history detector: remains pure and unwired (does not import the c
     assert.equal(
       text.includes(runtimeCall),
       false,
-      `resolved-history.ts must not invoke storage runtime "${runtimeCall}"`,
+      `resolved-history.ts must not invoke storage runtime "${runtimeCall}"`
     );
   }
 });
@@ -1165,10 +1109,7 @@ test("Phase I: the legacy literal ccm-draft-1 is preserved for the read-side fal
   // same literal as `LEGACY_DERIVED_SCHEMA_VERSION`.
   // They are byte-equal, ensuring a single source of
   // truth across the writer/reader.
-  assert.equal(
-    LEGACY_DERIVED_SCHEMA_VERSION,
-    "ccm-draft-1",
-  );
+  assert.equal(LEGACY_DERIVED_SCHEMA_VERSION, "ccm-draft-1");
 });
 
 // ---------------------------------------------------------------------------
@@ -1186,10 +1127,7 @@ test("Phase I: AmbiguitySignal discriminator set is unchanged (no resolved-histo
   const pathMod = await import("node:path");
   const urlMod = await import("node:url");
   const here = pathMod.dirname(urlMod.fileURLToPath(import.meta.url));
-  const ambPath = pathMod.resolve(
-    here,
-    "../src/retrieval/ambiguity.ts",
-  );
+  const ambPath = pathMod.resolve(here, "../src/retrieval/ambiguity.ts");
   const text = await fsP.readFile(ambPath, "utf8");
   // The Phase D discriminator set is the only one
   // currently in `AmbiguitySignal`. Phase I does not
@@ -1199,7 +1137,7 @@ test("Phase I: AmbiguitySignal discriminator set is unchanged (no resolved-histo
   assert.equal(
     text.includes("resolved-history"),
     false,
-    "Phase I: ambiguity.ts must not reference the resolved-history verdict (Phase J only)",
+    "Phase I: ambiguity.ts must not reference the resolved-history verdict (Phase J only)"
   );
 });
 
@@ -1236,13 +1174,13 @@ test("Phase I: edited files do not import benchmark experiment modules", async (
       assert.equal(
         text.includes(tok),
         false,
-        `${rel} must not reference benchmark experiment module "${tok}"`,
+        `${rel} must not reference benchmark experiment module "${tok}"`
       );
     }
     assert.equal(
       /from\s+["'][^"']*benchmark\//.test(text),
       false,
-      `${rel} must not import from src/benchmark/`,
+      `${rel} must not import from src/benchmark/`
     );
   }
 });

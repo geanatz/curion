@@ -30,7 +30,7 @@ export function cosineSimilarity(a: ReadonlyArray<number>, b: ReadonlyArray<numb
  */
 export function scoreSemanticCandidates(
   queryVec: ReadonlyArray<number>,
-  candidates: ReadonlyArray<{ id: number; vec: ReadonlyArray<number> }>,
+  candidates: ReadonlyArray<{ id: number; vec: ReadonlyArray<number> }>
 ): Array<{ id: number; score: number }> {
   const scored: Array<{ id: number; score: number }> = [];
   for (const c of candidates) {
@@ -54,11 +54,7 @@ const DEFAULT_RRF_K = 60;
 /**
  * RRF contribution. Returns 0 if rank is null.
  */
-export function rrfContribution(
-  rank: number | null,
-  weight: number,
-  k: number,
-): number {
+export function rrfContribution(rank: number | null, weight: number, k: number): number {
   if (rank === null) return 0;
   if (!Number.isFinite(rank) || rank < 1) return 0;
   if (!Number.isFinite(weight) || weight < 0) return 0;
@@ -81,7 +77,7 @@ export function fuseLexicalAndSemantic(
   semanticRanked: ReadonlyArray<{ id: number; score: number }>,
   weights: { lexical?: number; semantic?: number } = {},
   k: number = DEFAULT_RRF_K,
-  topK: number = 5,
+  topK = 5
 ): Array<{ id: number; score: number }> {
   const wLex = weights.lexical ?? 1;
   const wSem = weights.semantic ?? 1;

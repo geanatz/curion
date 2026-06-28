@@ -36,47 +36,45 @@
  * (real corpus + query set + ranker).
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { test } from "node:test";
 
 import {
+  DIVERGENT_TEMPORAL_IDS,
+  buildAbstentionSignals,
+  buildSlices,
+  formatAbstentionAuditReport,
+  writeAbstentionAuditReport,
+} from "../src/benchmark/abstention-audit-runner.ts";
+import {
+  AUDIT_SIGNAL_NAMES,
+  AUDIT_SIGNAL_NOTES,
+  auditSignal,
+  auditSlice,
   computeAuRoc,
   computeRiskCoverageCurve,
   coverageAtFixedRisk,
   riskAtFixedCoverage,
-  auditSignal,
-  auditSlice,
-  AUDIT_SIGNAL_NAMES,
-  AUDIT_SIGNAL_NOTES,
 } from "../src/benchmark/abstention-audit.ts";
+import { BENCHMARK_RECORDS } from "../src/benchmark/corpus.ts";
+import type { AbstentionSignals } from "../src/benchmark/metrics.ts";
+import { BENCHMARK_QUERIES } from "../src/benchmark/queries.ts";
 import {
-  detectQueryShape,
-  buildCorpusTokenSets,
   LEGACY_DISTRACTOR_IDS,
+  buildCorpusTokenSets,
+  detectQueryShape,
 } from "../src/benchmark/query-shapes.ts";
-import {
-  buildAbstentionSignals,
-  buildSlices,
-  buildPerQueryExamples,
-  runAbstentionAudit,
-  writeAbstentionAuditReport,
-  formatAbstentionAuditReport,
-  DIVERGENT_TEMPORAL_IDS,
-} from "../src/benchmark/abstention-audit-runner.ts";
 import {
   runAbstentionAuditFromBenchmarkReport,
   runAbstentionAuditFromDenseReport,
 } from "../src/benchmark/retrieval-runner.ts";
-import type { AbstentionSignals } from "../src/benchmark/metrics.ts";
-import { BENCHMARK_RECORDS } from "../src/benchmark/corpus.ts";
-import { BENCHMARK_QUERIES } from "../src/benchmark/queries.ts";
 import {
-  runRetrievalBenchmark,
   parseRetrievalCli,
   runDenseRetrievalBenchmark,
+  runRetrievalBenchmark,
 } from "../src/benchmark/retrieval-runner.ts";
 import { PUBLIC_TOOL_NAMES } from "../src/server.ts";
 
@@ -103,16 +101,15 @@ test("abstention audit: AUDIT_SIGNAL_NAMES is stable and covers the brief", () =
       "minContributorScore",
       "maxContributorScore",
       "meanContributorScore",
-    ],
+    ]
   );
 });
 
 test("abstention audit: AUDIT_SIGNAL_NOTES has a non-empty note for every signal", () => {
   for (const s of AUDIT_SIGNAL_NAMES) {
     assert.ok(
-      typeof AUDIT_SIGNAL_NOTES[s] === "string" &&
-        AUDIT_SIGNAL_NOTES[s].length > 0,
-      `signal ${s} must have a non-empty note`,
+      typeof AUDIT_SIGNAL_NOTES[s] === "string" && AUDIT_SIGNAL_NOTES[s].length > 0,
+      `signal ${s} must have a non-empty note`
     );
   }
 });
@@ -141,7 +138,7 @@ test("AUROC: perfect separation in the inverted direction = 1.0 (reported as inv
   const aurocNatural = computeAuRoc(labels, scores);
   const aurocInverted = computeAuRoc(
     labels,
-    scores.map((s) => -s),
+    scores.map((s) => -s)
   );
   assert.equal(aurocNatural, 0);
   assert.equal(aurocInverted, 1);
@@ -153,14 +150,10 @@ test("AUROC: random ordering = 0.5 (within tolerance)", () => {
   // random sample is noisy.
   const labels: Array<0 | 1> = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
   const scores = [
-    0.12, 0.87, 0.34, 0.55, 0.91, 0.05, 0.78, 0.43,
-    0.61, 0.29, 0.83, 0.16, 0.94, 0.07, 0.51, 0.68,
+    0.12, 0.87, 0.34, 0.55, 0.91, 0.05, 0.78, 0.43, 0.61, 0.29, 0.83, 0.16, 0.94, 0.07, 0.51, 0.68,
   ];
   const auroc = computeAuRoc(labels, scores);
-  assert.ok(
-    auroc >= 0.35 && auroc <= 0.65,
-    `random AUROC should be ~0.5, got ${auroc}`,
-  );
+  assert.ok(auroc >= 0.35 && auroc <= 0.65, `random AUROC should be ~0.5, got ${auroc}`);
 });
 
 test("AUROC: known small example (Mann-Whitney-U equivalence)", () => {
@@ -187,7 +180,7 @@ test("AUROC: known small example (Mann-Whitney-U equivalence)", () => {
   // = 0.4.
   assert.ok(
     Math.abs(auroc - 0.4) < 1e-9,
-    `AUROC should be exactly 0.4 for the (3,4,5,6,7) vs (1,2,8,9,10) example, got ${auroc}`,
+    `AUROC should be exactly 0.4 for the (3,4,5,6,7) vs (1,2,8,9,10) example, got ${auroc}`
   );
 });
 
@@ -216,10 +209,7 @@ test("AUROC: single-class input returns 0.5 (no separation possible)", () => {
 });
 
 test("AUROC: throws on length mismatch", () => {
-  assert.throws(
-    () => computeAuRoc([1, 0], [0.5]),
-    /same length/,
-  );
+  assert.throws(() => computeAuRoc([1, 0], [0.5]), /same length/);
 });
 
 // ---------------------------------------------------------------------------
@@ -263,14 +253,13 @@ test("risk-coverage: every point is monotone non-increasing in coverage", () => 
   // most-abstain point.)
   const labels: Array<0 | 1> = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
   const scores = [
-    0.12, 0.87, 0.34, 0.55, 0.91, 0.05, 0.78, 0.43,
-    0.61, 0.29, 0.83, 0.16, 0.94, 0.07, 0.51, 0.68,
+    0.12, 0.87, 0.34, 0.55, 0.91, 0.05, 0.78, 0.43, 0.61, 0.29, 0.83, 0.16, 0.94, 0.07, 0.51, 0.68,
   ];
   const curve = computeRiskCoverageCurve(labels, scores);
   for (let i = 1; i < curve.length; i++) {
     assert.ok(
       curve[i]!.coverage <= curve[i - 1]!.coverage,
-      `coverage must be non-increasing: ${curve[i - 1]!.coverage} -> ${curve[i]!.coverage}`,
+      `coverage must be non-increasing: ${curve[i - 1]!.coverage} -> ${curve[i]!.coverage}`
     );
   }
   // The first point is coverage = 1.
@@ -295,7 +284,7 @@ test("coverage-at-fixed-risk: known example", () => {
   // coverage=0.6, risk=0.0
   // coverage=0.4, risk=0.0
   const curve = [
-    { coverage: 1, risk: 0.4, threshold: -Infinity, abstainedCount: 0 },
+    { coverage: 1, risk: 0.4, threshold: Number.NEGATIVE_INFINITY, abstainedCount: 0 },
     { coverage: 0.8, risk: 0.4, threshold: 0.3, abstainedCount: 2 },
     { coverage: 0.6, risk: 0.0, threshold: 0.5, abstainedCount: 4 },
     { coverage: 0.4, risk: 0.0, threshold: 0.7, abstainedCount: 6 },
@@ -316,7 +305,7 @@ test("coverage-at-fixed-risk: known example", () => {
 
 test("risk-at-fixed-coverage: known example", () => {
   const curve = [
-    { coverage: 1, risk: 0.4, threshold: -Infinity, abstainedCount: 0 },
+    { coverage: 1, risk: 0.4, threshold: Number.NEGATIVE_INFINITY, abstainedCount: 0 },
     { coverage: 0.8, risk: 0.4, threshold: 0.3, abstainedCount: 2 },
     { coverage: 0.6, risk: 0.0, threshold: 0.5, abstainedCount: 4 },
     { coverage: 0.4, risk: 0.0, threshold: 0.7, abstainedCount: 6 },
@@ -348,46 +337,52 @@ test("auditSignal: topScore on a perfect signal has AUROC 1.0 in the inverted di
   // natural direction is below 0.5, the inverted
   // direction is 1.0.
   const signals: AbstentionSignals[] = [
-    ...Array.from({ length: 4 }, (): AbstentionSignals => ({
-      topScore: 0.1,
-      top1Top2Gap: 0.1,
-      top1Top2Ratio: 1,
-      returnedCount: 1,
-      agreementCount: 0,
-      minContributorRank: null,
-      maxContributorRank: null,
-      meanContributorRank: null,
-      minContributorScore: null,
-      maxContributorScore: null,
-      meanContributorScore: null,
-      sourcePresence: "___",
-      isNoAnswerHardNegative: false,
-      isTemporalCurrent: false,
-      isNegationLike: false,
-      isOodEntityLike: false,
-      isParaphraseTrap: false,
-      isFalsePremiseLike: false,
-    })),
-    ...Array.from({ length: 4 }, (): AbstentionSignals => ({
-      topScore: 0.9,
-      top1Top2Gap: 0.5,
-      top1Top2Ratio: 2,
-      returnedCount: 1,
-      agreementCount: 1,
-      minContributorRank: 1,
-      maxContributorRank: 1,
-      meanContributorRank: 1,
-      minContributorScore: 0.9,
-      maxContributorScore: 0.9,
-      meanContributorScore: 0.9,
-      sourcePresence: "L__",
-      isNoAnswerHardNegative: false,
-      isTemporalCurrent: false,
-      isNegationLike: false,
-      isOodEntityLike: false,
-      isParaphraseTrap: false,
-      isFalsePremiseLike: false,
-    })),
+    ...Array.from(
+      { length: 4 },
+      (): AbstentionSignals => ({
+        topScore: 0.1,
+        top1Top2Gap: 0.1,
+        top1Top2Ratio: 1,
+        returnedCount: 1,
+        agreementCount: 0,
+        minContributorRank: null,
+        maxContributorRank: null,
+        meanContributorRank: null,
+        minContributorScore: null,
+        maxContributorScore: null,
+        meanContributorScore: null,
+        sourcePresence: "___",
+        isNoAnswerHardNegative: false,
+        isTemporalCurrent: false,
+        isNegationLike: false,
+        isOodEntityLike: false,
+        isParaphraseTrap: false,
+        isFalsePremiseLike: false,
+      })
+    ),
+    ...Array.from(
+      { length: 4 },
+      (): AbstentionSignals => ({
+        topScore: 0.9,
+        top1Top2Gap: 0.5,
+        top1Top2Ratio: 2,
+        returnedCount: 1,
+        agreementCount: 1,
+        minContributorRank: 1,
+        maxContributorRank: 1,
+        meanContributorRank: 1,
+        minContributorScore: 0.9,
+        maxContributorScore: 0.9,
+        meanContributorScore: 0.9,
+        sourcePresence: "L__",
+        isNoAnswerHardNegative: false,
+        isTemporalCurrent: false,
+        isNegationLike: false,
+        isOodEntityLike: false,
+        isParaphraseTrap: false,
+        isFalsePremiseLike: false,
+      })
+    ),
   ];
   const labels: Array<0 | 1> = [1, 1, 1, 1, 0, 0, 0, 0];
   const result = auditSignal("topScore", signals, labels);
@@ -425,9 +420,9 @@ test("auditSignal: throws on length mismatch", () => {
             isFalsePremiseLike: false,
           },
         ],
-        [1, 0],
+        [1, 0]
       ),
-    /same length/,
+    /same length/
   );
 });
 
@@ -439,9 +434,7 @@ test("query-shape detector: labeled hard-negative `nonexistent-load-balancer` is
   // The labeled hard-negative shares `MCP` / `server` /
   // `port` tokens with the agent runtime cluster. The
   // detector should flag it.
-  const q = BENCHMARK_QUERIES.find(
-    (q) => q.id === "nonexistent-load-balancer",
-  );
+  const q = BENCHMARK_QUERIES.find((q) => q.id === "nonexistent-load-balancer");
   assert.ok(q, "fixture query `nonexistent-load-balancer` must exist");
   const corpusTokenSets = buildCorpusTokenSets(BENCHMARK_RECORDS);
   const flags = detectQueryShape(q, corpusTokenSets);
@@ -482,7 +475,7 @@ test("query-shape detector: easy no-answer queries are NOT hard-negatives", () =
     assert.equal(
       flags.isNoAnswerHardNegative,
       false,
-      `expected ${id} to NOT be a hard-negative, got true`,
+      `expected ${id} to NOT be a hard-negative, got true`
     );
   }
 });
@@ -500,19 +493,12 @@ test("query-shape detector: temporal-current queries are detected", () => {
     assert.ok(q);
     const corpusTokenSets = buildCorpusTokenSets(BENCHMARK_RECORDS);
     const flags = detectQueryShape(q, corpusTokenSets);
-    assert.equal(
-      flags.isTemporalCurrent,
-      true,
-      `expected ${id} to be temporal-current, got false`,
-    );
+    assert.equal(flags.isTemporalCurrent, true, `expected ${id} to be temporal-current, got false`);
   }
   // A non-temporal query should not be flagged.
   const exactQ = BENCHMARK_QUERIES.find((q) => q.id === "exact-postgres-storage");
   assert.ok(exactQ);
-  const flags = detectQueryShape(
-    exactQ,
-    buildCorpusTokenSets(BENCHMARK_RECORDS),
-  );
+  const flags = detectQueryShape(exactQ, buildCorpusTokenSets(BENCHMARK_RECORDS));
   assert.equal(flags.isTemporalCurrent, false);
 });
 
@@ -570,10 +556,7 @@ test("query-shape detector: DIVERGENT_TEMPORAL_IDS is the same set the existing 
     "temp-superseded-stale-fact-trap-postgres",
     "temp-superseded-retrieval-design-current",
   ]) {
-    assert.ok(
-      DIVERGENT_TEMPORAL_IDS.has(id),
-      `expected DIVERGENT_TEMPORAL_IDS to contain ${id}`,
-    );
+    assert.ok(DIVERGENT_TEMPORAL_IDS.has(id), `expected DIVERGENT_TEMPORAL_IDS to contain ${id}`);
   }
 });
 
@@ -609,7 +592,7 @@ test("query-shape detector: isDivergentTemporal surfaces labeled divergent queri
     assert.equal(
       flags.isDivergentTemporal,
       true,
-      `expected isDivergentTemporal=true for labeled divergent query ${id}`,
+      `expected isDivergentTemporal=true for labeled divergent query ${id}`
     );
   }
 });
@@ -635,7 +618,7 @@ test("query-shape detector: isAdversarialParaphrase surfaces labeled paraphrases
     assert.equal(
       flags.isAdversarialParaphrase,
       true,
-      `expected isAdversarialParaphrase=true for labeled paraphrase ${id}`,
+      `expected isAdversarialParaphrase=true for labeled paraphrase ${id}`
     );
   }
 });
@@ -647,12 +630,12 @@ test("query-shape detector: isNearMissCurrentCluster surfaces labeled near-misse
   // target one of the near-miss cluster records
   // (109..112). The adversarial expansion has 7
   // labeled near-miss cases.
-  const labeledNearMiss = BENCHMARK_QUERIES.filter(
-    (q) => (q.labels ?? []).includes("nearMissCurrentCluster"),
+  const labeledNearMiss = BENCHMARK_QUERIES.filter((q) =>
+    (q.labels ?? []).includes("nearMissCurrentCluster")
   );
   assert.ok(
     labeledNearMiss.length >= 1,
-    `expected at least 1 labeled 'nearMissCurrentCluster' query, got ${labeledNearMiss.length}`,
+    `expected at least 1 labeled 'nearMissCurrentCluster' query, got ${labeledNearMiss.length}`
   );
   for (const q of labeledNearMiss) {
     const corpusTokenSets = buildCorpusTokenSets(BENCHMARK_RECORDS);
@@ -660,7 +643,7 @@ test("query-shape detector: isNearMissCurrentCluster surfaces labeled near-misse
     assert.equal(
       flags.isNearMissCurrentCluster,
       true,
-      `expected isNearMissCurrentCluster=true for labeled near-miss ${q.id}`,
+      `expected isNearMissCurrentCluster=true for labeled near-miss ${q.id}`
     );
   }
 });
@@ -760,9 +743,7 @@ test("abstention audit runner: end-to-end on the lexical hybrid (stub)", async (
   assert.equal(allSlice.total, BENCHMARK_QUERIES.length);
   // The no-answer count is the number of no-answer
   // queries in the query set.
-  const expectedNoAnswer = BENCHMARK_QUERIES.filter(
-    (q) => q.family === "no-answer",
-  ).length;
+  const expectedNoAnswer = BENCHMARK_QUERIES.filter((q) => q.family === "no-answer").length;
   assert.equal(auditReport.config.noAnswerCount, expectedNoAnswer);
   // Every AUDIT_SIGNAL_NAMES entry has a result on the
   // "all" slice.
@@ -789,17 +770,14 @@ test("abstention audit runner: per-query signals carry all required fields", asy
     assert.equal(typeof p.signals.top1Top2Gap, "number");
     assert.ok(
       Number.isFinite(p.signals.top1Top2Ratio) ||
-        p.signals.top1Top2Ratio === Number.POSITIVE_INFINITY,
+        p.signals.top1Top2Ratio === Number.POSITIVE_INFINITY
     );
     assert.equal(typeof p.signals.returnedCount, "number");
     assert.equal(typeof p.signals.agreementCount, "number");
     // The hybrid run has contributor ranks / scores
     // for every query (the runner always populates
     // them, even on empty top-K).
-    assert.ok(
-      p.signals.minContributorRank !== null ||
-        p.signals.minContributorRank === null,
-    );
+    assert.ok(p.signals.minContributorRank !== null || p.signals.minContributorRank === null);
     assert.equal(typeof p.signals.sourcePresence, "string");
     assert.equal(typeof p.signals.isNoAnswerHardNegative, "boolean");
     assert.equal(typeof p.signals.isTemporalCurrent, "boolean");
@@ -896,14 +874,12 @@ test("abstention audit runner: buildSlices emits a stable, well-formed slice set
         q.id === "nonexistent-load-balancer" ||
         q.id === "nonexistent-rollback" ||
         q.id === "nonexistent-sso",
-      isTemporalCurrent:
-        q.family === "temporal" || q.id === "exact-postgres-storage",
+      isTemporalCurrent: q.family === "temporal" || q.id === "exact-postgres-storage",
       isNegationLike: q.id === "nonexistent-customer-count",
       isOodEntityLike: q.id === "nonexistent-cdn-config",
       isParaphraseTrap: q.family === "paraphrase",
       isFalsePremiseLike:
-        q.id === "nonexistent-load-balancer" ||
-        q.id === "nonexistent-graphql-endpoint",
+        q.id === "nonexistent-load-balancer" || q.id === "nonexistent-graphql-endpoint",
     },
   }));
   const slices = buildSlices(perQuery, {});
@@ -915,7 +891,7 @@ test("abstention audit runner: buildSlices emits a stable, well-formed slice set
   for (const f of familyNames) {
     assert.ok(
       slices.find((s) => s.name === `family:${f}`),
-      `expected family:${f} slice`,
+      `expected family:${f} slice`
     );
   }
   // The per-shape slices are present.
@@ -929,7 +905,7 @@ test("abstention audit runner: buildSlices emits a stable, well-formed slice set
   ]) {
     assert.ok(
       slices.find((s) => s.name === name),
-      `expected ${name} slice`,
+      `expected ${name} slice`
     );
   }
 });
@@ -939,11 +915,7 @@ test("abstention audit runner: buildSlices emits a stable, well-formed slice set
 // ---------------------------------------------------------------------------
 
 test("abstention-audit CLI: --abstention-audit is parsed correctly", () => {
-  const opts = parseRetrievalCli([
-    "--variant",
-    "hybrid",
-    "--abstention-audit",
-  ]);
+  const opts = parseRetrievalCli(["--variant", "hybrid", "--abstention-audit"]);
   assert.equal(opts.abstentionAudit, true);
   assert.equal(opts.variant, "hybrid");
 });
@@ -969,12 +941,12 @@ test("abstention-audit artifact: writeAbstentionAuditReport writes the right pre
     assert.match(
       path.basename(file),
       /^retrieval-abstention-audit-/,
-      `audit file prefix mismatch: ${path.basename(file)}`,
+      `audit file prefix mismatch: ${path.basename(file)}`
     );
     // The file does NOT carry the existing prefixes.
     assert.doesNotMatch(
       path.basename(file),
-      /^retrieval-(baseline|fts5|vector|hybrid|compare|calibration|calibration-dense|vector-dense|hybrid-dense|compare-dense)/,
+      /^retrieval-(baseline|fts5|vector|hybrid|compare|calibration|calibration-dense|vector-dense|hybrid-dense|compare-dense)/
     );
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
@@ -996,10 +968,7 @@ test("abstention-audit human report: includes the per-signal AUROC table and the
     "per-query examples (honest)",
     "READ THIS FIRST: this is a BENCHMARK-ONLY study",
   ]) {
-    assert.ok(
-      out.includes(section),
-      `audit human report missing section: ${section}`,
-    );
+    assert.ok(out.includes(section), `audit human report missing section: ${section}`);
   }
 });
 
@@ -1025,36 +994,26 @@ test("abstention audit: production recall() controller is not modified", () => {
   // controller's source code must not import the
   // audit module.
   const recallSrc = fs.readFileSync(
-    path.join(
-      import.meta.dirname,
-      "..",
-      "src",
-      "controller",
-      "recall-controller.ts",
-    ),
-    "utf8",
+    path.join(import.meta.dirname, "..", "src", "controller", "recall-controller.ts"),
+    "utf8"
   );
   assert.match(recallSrc, /rankLexical/);
   assert.doesNotMatch(
     recallSrc,
     /abstention-audit|runAbstentionAudit|abstentionSignals|detectQueryShape/,
-    "recall controller must NOT import abstention-audit modules",
+    "recall controller must NOT import abstention-audit modules"
   );
   // The MCP server still exposes exactly two tools.
   const serverSrc = fs.readFileSync(
     path.join(import.meta.dirname, "..", "src", "server.ts"),
-    "utf8",
+    "utf8"
   );
   const toolCallCount = (serverSrc.match(/server\.registerTool\(/g) ?? []).length;
-  assert.equal(
-    toolCallCount,
-    2,
-    `server.ts must register exactly 2 tools, found ${toolCallCount}`,
-  );
+  assert.equal(toolCallCount, 2, `server.ts must register exactly 2 tools, found ${toolCallCount}`);
   assert.deepEqual(
     [...PUBLIC_TOOL_NAMES],
     ["remember", "recall"],
-    "public MCP tool surface must remain exactly remember + recall",
+    "public MCP tool surface must remain exactly remember + recall"
   );
 });
 
@@ -1089,7 +1048,7 @@ test("abstention audit: buildPerQueryExamples is deterministic", () => {
   });
   assert.deepEqual(
     r1.perQueryExamples.mostConfidentNoAnswer.map((e) => e.queryId),
-    r2.perQueryExamples.mostConfidentNoAnswer.map((e) => e.queryId),
+    r2.perQueryExamples.mostConfidentNoAnswer.map((e) => e.queryId)
   );
 });
 
@@ -1172,7 +1131,7 @@ test("abstention audit: auditSlice flags singleClass and the report renders n/a 
     "all-positive",
     "synthetic single-class slice (all answerable)",
     allPosSignals,
-    allPosLabels,
+    allPosLabels
   );
   assert.equal(allPosSlice.singleClass, true);
   // JSON still emits the documented 0.5 AUROC.
@@ -1186,7 +1145,7 @@ test("abstention audit: auditSlice flags singleClass and the report renders n/a 
     "all-no-answer",
     "synthetic single-class slice (all no-answer)",
     allNoAnsSignals,
-    allNoAnsLabels,
+    allNoAnsLabels
   );
   assert.equal(allNoAnsSlice.singleClass, true);
   for (const s of allNoAnsSlice.signalResults) {
@@ -1195,18 +1154,11 @@ test("abstention audit: auditSlice flags singleClass and the report renders n/a 
   // Mixed-class slice: not single-class.
   const mixedSignals = [0.8, 0.05, 0.7, 0.04].map(mkSignals);
   const mixedLabels: Array<0 | 1> = [0, 1, 0, 1];
-  const mixedSlice = auditSlice(
-    "mixed",
-    "synthetic mixed-class slice",
-    mixedSignals,
-    mixedLabels,
-  );
+  const mixedSlice = auditSlice("mixed", "synthetic mixed-class slice", mixedSignals, mixedLabels);
   assert.equal(mixedSlice.singleClass, false);
   // The mixed slice should NOT have AUROC = 0.5 for
   // topScore (it has a real separation).
-  const topScore = mixedSlice.signalResults.find(
-    (s) => s.signal === "topScore",
-  );
+  const topScore = mixedSlice.signalResults.find((s) => s.signal === "topScore");
   assert.ok(topScore);
   assert.notEqual(topScore!.auroc, 0.5);
   // Now build a report with a single-class per-family
@@ -1270,14 +1222,12 @@ test("abstention audit: auditSlice flags singleClass and the report renders n/a 
     .find((l) => l.includes("no-answer") && l.includes("single-class slice"));
   assert.ok(
     noAnsLine,
-    `expected a single-class slice marker line for family:no-answer, got:\n${out}`,
+    `expected a single-class slice marker line for family:no-answer, got:\n${out}`
   );
   assert.match(noAnsLine!, /\bn\/a\b/);
   // The mixed `exact` row should have a numeric AUROC
   // and should NOT carry the single-class marker.
-  const exactLine = out
-    .split("\n")
-    .find((l) => /^\s*exact\s/.test(l));
+  const exactLine = out.split("\n").find((l) => /^\s*exact\s/.test(l));
   assert.ok(exactLine, "expected a per-family row for exact");
   assert.doesNotMatch(exactLine!, /single-class slice/);
   assert.match(exactLine!, /\b\d+\.\d{3}\b/);

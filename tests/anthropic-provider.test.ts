@@ -16,8 +16,8 @@
  *   7. Request/response bodies do not include the API key.
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
+import { test } from "node:test";
 
 import { analyzeMemoryWithFallback } from "../src/providers/memory-analysis.ts";
 import { synthesizeRecallWithFallback } from "../src/providers/recall-synthesis.ts";
@@ -35,7 +35,7 @@ const ANTHROPIC_MODEL = "claude-sonnet-4-5";
  */
 function scriptedFetch(
   responses: Array<() => Response | Error>,
-  log: Array<{ url: string; body: string }>,
+  log: Array<{ url: string; body: string }>
 ): typeof fetch {
   let i = 0;
   const f: typeof fetch = async (input, init) => {
@@ -68,7 +68,7 @@ function anthropicSuccessResponse(content: string, model = ANTHROPIC_MODEL): Res
       stop_sequence: null,
       usage: { input_tokens: 10, output_tokens: 20 },
     }),
-    { status: 200, headers: { "content-type": "application/json" } },
+    { status: 200, headers: { "content-type": "application/json" } }
   );
 }
 
@@ -79,7 +79,7 @@ function anthropicErrorResponse(status: number, errorType: string, errorMessage:
       type: "error",
       error: { type: errorType, message: errorMessage },
     }),
-    { status, headers: { "content-type": "application/json" } },
+    { status, headers: { "content-type": "application/json" } }
   );
 }
 
@@ -98,22 +98,18 @@ test("anthropic: memory analysis success maps request correctly (model, max_toke
             confidence: 0.9,
             tags: ["preference", "ui"],
             classification: "preference",
-          }),
+          })
         ),
     ],
-    log,
+    log
   );
 
-  const r = await analyzeMemoryWithFallback(
-    "I like dark mode in the dashboard.",
-    undefined,
-    {
-      primaryApiKey: ANTHROPIC_KEY,
-      primaryApiFormat: "anthropic",
-      primaryModel: ANTHROPIC_MODEL,
-      fetchImpl,
-    },
-  );
+  const r = await analyzeMemoryWithFallback("I like dark mode in the dashboard.", undefined, {
+    primaryApiKey: ANTHROPIC_KEY,
+    primaryApiFormat: "anthropic",
+    primaryModel: ANTHROPIC_MODEL,
+    fetchImpl,
+  });
 
   assert.equal(r.ok, true, `expected ok=true, got: ${JSON.stringify(r)}`);
   if (!r.ok) return;
@@ -155,10 +151,10 @@ test("anthropic: memory analysis success extracts text from content block correc
             summary: "Project uses Postgres 16.",
             confidence: 0.85,
             tags: ["database", "infrastructure"],
-          }),
+          })
         ),
     ],
-    log,
+    log
   );
 
   const r = await analyzeMemoryWithFallback("We use Postgres 16.", undefined, {
@@ -179,10 +175,10 @@ test("anthropic: memory analysis success includes usage and latency fields", asy
     [
       () =>
         anthropicSuccessResponse(
-          JSON.stringify({ summary: "Test summary.", confidence: 0.5, tags: [] }),
+          JSON.stringify({ summary: "Test summary.", confidence: 0.5, tags: [] })
         ),
     ],
-    log,
+    log
   );
 
   const r = await analyzeMemoryWithFallback("test input", undefined, {
@@ -215,10 +211,10 @@ test("anthropic: memory analysis repair flow succeeds on second call", async () 
             summary: "Repaired summary after first attempt.",
             confidence: 0.75,
             tags: ["repaired"],
-          }),
+          })
         ),
     ],
-    log,
+    log
   );
 
   const r = await analyzeMemoryWithFallback("Test input for repair flow.", undefined, {
@@ -243,9 +239,13 @@ test("anthropic: memory analysis repair flow succeeds on second call", async () 
 
   // The repair request should include the previous bad response.
   const repairBody = JSON.parse(log[1]!.body);
-  assert.ok(repairBody.messages.some((m: { role: string; content: string }) =>
-    m.role === "user" && m.content.includes("This is just some prose")
-  ), "repair request should reference the previous invalid response");
+  assert.ok(
+    repairBody.messages.some(
+      (m: { role: string; content: string }) =>
+        m.role === "user" && m.content.includes("This is just some prose")
+    ),
+    "repair request should reference the previous invalid response"
+  );
 
   assert.equal(r.value.summary, "Repaired summary after first attempt.");
   assert.equal(r.value.confidence, 0.75);
@@ -278,26 +278,22 @@ test("anthropic: memory analysis repair flow falls back on second failure", asyn
               },
             ],
           }),
-          { status: 200, headers: { "content-type": "application/json" } },
+          { status: 200, headers: { "content-type": "application/json" } }
         ),
     ],
-    log,
+    log
   );
 
-  const r = await analyzeMemoryWithFallback(
-    "test repair fallback",
-    undefined,
-    {
-      primaryApiKey: ANTHROPIC_KEY,
-      primaryApiFormat: "anthropic",
-      primaryModel: ANTHROPIC_MODEL,
-      fallbackApiKey: ANTHROPIC_KEY,
-      fallbackApiFormat: "openai-compatible",
-      fallbackBaseUrl: "https://api.example.com/v1",
-      fallbackModel: "fallback-model",
-      fetchImpl,
-    },
-  );
+  const r = await analyzeMemoryWithFallback("test repair fallback", undefined, {
+    primaryApiKey: ANTHROPIC_KEY,
+    primaryApiFormat: "anthropic",
+    primaryModel: ANTHROPIC_MODEL,
+    fallbackApiKey: ANTHROPIC_KEY,
+    fallbackApiFormat: "openai-compatible",
+    fallbackBaseUrl: "https://api.example.com/v1",
+    fallbackModel: "fallback-model",
+    fetchImpl,
+  });
 
   assert.equal(r.ok, true);
   if (!r.ok) return;
@@ -316,10 +312,10 @@ test("anthropic: recall synthesis success extracts text response correctly", asy
     [
       () =>
         anthropicSuccessResponse(
-          "The project uses Postgres 16 for the primary database and stores sessions in Redis.",
+          "The project uses Postgres 16 for the primary database and stores sessions in Redis."
         ),
     ],
-    log,
+    log
   );
 
   const r = await synthesizeRecallWithFallback(
@@ -330,7 +326,7 @@ test("anthropic: recall synthesis success extracts text response correctly", asy
       primaryApiFormat: "anthropic",
       primaryModel: ANTHROPIC_MODEL,
       fetchImpl,
-    },
+    }
   );
 
   assert.equal(r.ok, true, `expected ok=true, got: ${JSON.stringify(r)}`);
@@ -346,11 +342,7 @@ test("anthropic: recall synthesis success extracts text response correctly", asy
   assert.match(log[0]!.url, /^https:\/\/api\.anthropic\.com\/v1\/messages/);
 
   // Verify text extraction.
-  assert.match(
-    r.answer,
-    /Postgres 16/,
-    `expected answer to mention Postgres 16, got: ${r.answer}`,
-  );
+  assert.match(r.answer, /Postgres 16/, `expected answer to mention Postgres 16, got: ${r.answer}`);
   assert.ok(!r.answer.includes("sk-ant-"), "answer must not include API key");
 });
 
@@ -375,10 +367,10 @@ test("anthropic: recall synthesis primary failure falls back to secondary", asyn
               },
             ],
           }),
-          { status: 200, headers: { "content-type": "application/json" } },
+          { status: 200, headers: { "content-type": "application/json" } }
         ),
     ],
-    log,
+    log
   );
 
   const r = await synthesizeRecallWithFallback(
@@ -393,7 +385,7 @@ test("anthropic: recall synthesis primary failure falls back to secondary", asyn
       fallbackBaseUrl: "https://api.example.com/v1",
       fallbackModel: "fallback-model",
       fetchImpl,
-    },
+    }
   );
 
   assert.equal(r.ok, true);
@@ -409,23 +401,17 @@ test("anthropic: recall synthesis primary failure falls back to secondary", asyn
 test("anthropic: 401 auth error sets kind=auth and reachedServer=true", async () => {
   const log: Array<{ url: string; body: string }> = [];
   const fetchImpl = scriptedFetch(
-    [
-      () => anthropicErrorResponse(401, "authentication_error", "Invalid API key"),
-    ],
-    log,
+    [() => anthropicErrorResponse(401, "authentication_error", "Invalid API key")],
+    log
   );
 
-  const r = await synthesizeRecallWithFallback(
-    "query",
-    [{ id: 1, memoryContent: "memory" }],
-    {
-      primaryApiKey: ANTHROPIC_KEY,
-      primaryApiFormat: "anthropic",
-      primaryModel: ANTHROPIC_MODEL,
-      disableFallback: true,
-      fetchImpl,
-    },
-  );
+  const r = await synthesizeRecallWithFallback("query", [{ id: 1, memoryContent: "memory" }], {
+    primaryApiKey: ANTHROPIC_KEY,
+    primaryApiFormat: "anthropic",
+    primaryModel: ANTHROPIC_MODEL,
+    disableFallback: true,
+    fetchImpl,
+  });
 
   assert.equal(r.ok, false, `expected failure, got: ${JSON.stringify(r)}`);
   if (r.ok) return;
@@ -450,23 +436,19 @@ test("anthropic: auth error message does not include API key", async () => {
               message: `invalid api key: ${ANTHROPIC_KEY}`,
             },
           }),
-          { status: 401, headers: { "content-type": "application/json" } },
+          { status: 401, headers: { "content-type": "application/json" } }
         ),
     ],
-    log,
+    log
   );
 
-  const r = await synthesizeRecallWithFallback(
-    "query",
-    [{ id: 1, memoryContent: "memory" }],
-    {
-      primaryApiKey: ANTHROPIC_KEY,
-      primaryApiFormat: "anthropic",
-      primaryModel: ANTHROPIC_MODEL,
-      disableFallback: true,
-      fetchImpl,
-    },
-  );
+  const r = await synthesizeRecallWithFallback("query", [{ id: 1, memoryContent: "memory" }], {
+    primaryApiKey: ANTHROPIC_KEY,
+    primaryApiFormat: "anthropic",
+    primaryModel: ANTHROPIC_MODEL,
+    disableFallback: true,
+    fetchImpl,
+  });
 
   assert.equal(r.ok, false);
   if (r.ok) return;
@@ -474,11 +456,11 @@ test("anthropic: auth error message does not include API key", async () => {
   // The error message must not contain the raw API key.
   assert.ok(
     !r.lastError?.message.includes(ANTHROPIC_KEY),
-    `API key leaked into error message: ${r.lastError?.message}`,
+    `API key leaked into error message: ${r.lastError?.message}`
   );
   assert.ok(
     r.lastError?.message.includes("<redacted>"),
-    `error message should contain <redacted>: ${r.lastError?.message}`,
+    `error message should contain <redacted>: ${r.lastError?.message}`
   );
 });
 
@@ -491,21 +473,21 @@ test("anthropic: connection refused sets reachedServer=false", async () => {
   // Simulate a network-level error that the SDK wraps in APIConnectionError.
   const networkError = new TypeError("fetch failed: connection refused");
   const fetchImpl = scriptedFetch(
-    [() => { throw networkError; }],
-    log,
+    [
+      () => {
+        throw networkError;
+      },
+    ],
+    log
   );
 
-  const r = await synthesizeRecallWithFallback(
-    "query",
-    [{ id: 1, memoryContent: "memory" }],
-    {
-      primaryApiKey: ANTHROPIC_KEY,
-      primaryApiFormat: "anthropic",
-      primaryModel: ANTHROPIC_MODEL,
-      disableFallback: true,
-      fetchImpl,
-    },
-  );
+  const r = await synthesizeRecallWithFallback("query", [{ id: 1, memoryContent: "memory" }], {
+    primaryApiKey: ANTHROPIC_KEY,
+    primaryApiFormat: "anthropic",
+    primaryModel: ANTHROPIC_MODEL,
+    disableFallback: true,
+    fetchImpl,
+  });
 
   assert.equal(r.ok, false, `expected failure, got: ${JSON.stringify(r)}`);
   if (r.ok) return;
@@ -513,12 +495,12 @@ test("anthropic: connection refused sets reachedServer=false", async () => {
   // Connection error should be classified as network or timeout.
   assert.ok(
     r.lastError?.kind === "network" || r.lastError?.kind === "timeout",
-    `expected network or timeout, got: ${r.lastError?.kind}`,
+    `expected network or timeout, got: ${r.lastError?.kind}`
   );
   assert.equal(
     r.lastError?.reachedServer,
     false,
-    "connection error should set reachedServer=false",
+    "connection error should set reachedServer=false"
   );
 });
 
@@ -527,21 +509,21 @@ test("anthropic: timeout error sets reachedServer=false", async () => {
   // Simulate a timeout error that the SDK wraps in APIConnectionTimeoutError.
   const timeoutError = new TypeError("request timed out");
   const fetchImpl = scriptedFetch(
-    [() => { throw timeoutError; }],
-    log,
+    [
+      () => {
+        throw timeoutError;
+      },
+    ],
+    log
   );
 
-  const r = await synthesizeRecallWithFallback(
-    "query",
-    [{ id: 1, memoryContent: "memory" }],
-    {
-      primaryApiKey: ANTHROPIC_KEY,
-      primaryApiFormat: "anthropic",
-      primaryModel: ANTHROPIC_MODEL,
-      disableFallback: true,
-      fetchImpl,
-    },
-  );
+  const r = await synthesizeRecallWithFallback("query", [{ id: 1, memoryContent: "memory" }], {
+    primaryApiKey: ANTHROPIC_KEY,
+    primaryApiFormat: "anthropic",
+    primaryModel: ANTHROPIC_MODEL,
+    disableFallback: true,
+    fetchImpl,
+  });
 
   assert.equal(r.ok, false);
   if (r.ok) return;
@@ -549,36 +531,34 @@ test("anthropic: timeout error sets reachedServer=false", async () => {
   // Timeout error should be classified as timeout.
   assert.ok(
     r.lastError?.kind === "timeout" || r.lastError?.kind === "network",
-    `expected timeout or network, got: ${r.lastError?.kind}`,
+    `expected timeout or network, got: ${r.lastError?.kind}`
   );
-  assert.equal(
-    r.lastError?.reachedServer,
-    false,
-    "timeout error should set reachedServer=false",
-  );
+  assert.equal(r.lastError?.reachedServer, false, "timeout error should set reachedServer=false");
 });
 
 test("anthropic: timeout error message does not include API key", async () => {
   const log: Array<{ url: string; body: string }> = [];
   // The error message would typically include the URL; we need to ensure
   // the key is redacted from any error messages.
-  const timeoutError = new TypeError(`request timed out after 30000ms: https://api.anthropic.com/v1/messages?api_key=${ANTHROPIC_KEY}`);
+  const timeoutError = new TypeError(
+    `request timed out after 30000ms: https://api.anthropic.com/v1/messages?api_key=${ANTHROPIC_KEY}`
+  );
   const fetchImpl = scriptedFetch(
-    [() => { throw timeoutError; }],
-    log,
+    [
+      () => {
+        throw timeoutError;
+      },
+    ],
+    log
   );
 
-  const r = await synthesizeRecallWithFallback(
-    "query",
-    [{ id: 1, memoryContent: "memory" }],
-    {
-      primaryApiKey: ANTHROPIC_KEY,
-      primaryApiFormat: "anthropic",
-      primaryModel: ANTHROPIC_MODEL,
-      disableFallback: true,
-      fetchImpl,
-    },
-  );
+  const r = await synthesizeRecallWithFallback("query", [{ id: 1, memoryContent: "memory" }], {
+    primaryApiKey: ANTHROPIC_KEY,
+    primaryApiFormat: "anthropic",
+    primaryModel: ANTHROPIC_MODEL,
+    disableFallback: true,
+    fetchImpl,
+  });
 
   assert.equal(r.ok, false);
   if (r.ok) return;
@@ -586,11 +566,11 @@ test("anthropic: timeout error message does not include API key", async () => {
   // The error message must not contain the raw API key.
   assert.ok(
     !r.lastError?.message.includes(ANTHROPIC_KEY),
-    `API key leaked into timeout error: ${r.lastError?.message}`,
+    `API key leaked into timeout error: ${r.lastError?.message}`
   );
   assert.ok(
     !r.message.includes(ANTHROPIC_KEY),
-    `API key leaked into top-level message: ${r.message}`,
+    `API key leaked into top-level message: ${r.message}`
   );
 });
 
@@ -603,11 +583,9 @@ test("anthropic: request body does not include API key value", async () => {
   const fetchImpl = scriptedFetch(
     [
       () =>
-        anthropicSuccessResponse(
-          JSON.stringify({ summary: "Test.", confidence: 0.5, tags: [] }),
-        ),
+        anthropicSuccessResponse(JSON.stringify({ summary: "Test.", confidence: 0.5, tags: [] })),
     ],
-    log,
+    log
   );
 
   await analyzeMemoryWithFallback("test input", undefined, {
@@ -620,7 +598,7 @@ test("anthropic: request body does not include API key value", async () => {
   assert.equal(log.length, 1);
   assert.ok(
     !log[0]!.body.includes(ANTHROPIC_KEY),
-    `API key leaked into request body: ${log[0]!.body}`,
+    `API key leaked into request body: ${log[0]!.body}`
   );
 });
 
@@ -629,11 +607,9 @@ test("anthropic: serialized success result does not include API key", async () =
   const fetchImpl = scriptedFetch(
     [
       () =>
-        anthropicSuccessResponse(
-          JSON.stringify({ summary: "Test.", confidence: 0.5, tags: [] }),
-        ),
+        anthropicSuccessResponse(JSON.stringify({ summary: "Test.", confidence: 0.5, tags: [] })),
     ],
-    log,
+    log
   );
 
   const r = await analyzeMemoryWithFallback("test input", undefined, {
@@ -649,18 +625,13 @@ test("anthropic: serialized success result does not include API key", async () =
   const serialized = JSON.stringify(r);
   assert.ok(
     !serialized.includes(ANTHROPIC_KEY),
-    `API key leaked into serialized result: ${serialized}`,
+    `API key leaked into serialized result: ${serialized}`
   );
 });
 
 test("anthropic: serialized failure result does not include API key", async () => {
   const log: Array<{ url: string; body: string }> = [];
-  const fetchImpl = scriptedFetch(
-    [
-      () => anthropicErrorResponse(401, "auth", "Invalid key"),
-    ],
-    log,
-  );
+  const fetchImpl = scriptedFetch([() => anthropicErrorResponse(401, "auth", "Invalid key")], log);
 
   const r = await analyzeMemoryWithFallback("test input", undefined, {
     primaryApiKey: ANTHROPIC_KEY,
@@ -676,7 +647,7 @@ test("anthropic: serialized failure result does not include API key", async () =
   const serialized = JSON.stringify(r);
   assert.ok(
     !serialized.includes(ANTHROPIC_KEY),
-    `API key leaked into serialized failure: ${serialized}`,
+    `API key leaked into serialized failure: ${serialized}`
   );
 });
 
@@ -696,14 +667,16 @@ test("anthropic: response without text content block returns bad-request error",
             type: "message",
             role: "assistant",
             model: ANTHROPIC_MODEL,
-            content: [{ type: "image", source: { type: "base64", media_type: "image/jpeg", data: "..." } }],
+            content: [
+              { type: "image", source: { type: "base64", media_type: "image/jpeg", data: "..." } },
+            ],
             stop_reason: "end_turn",
             usage: { input_tokens: 5, output_tokens: 5 },
           }),
-          { status: 200, headers: { "content-type": "application/json" } },
+          { status: 200, headers: { "content-type": "application/json" } }
         ),
     ],
-    log,
+    log
   );
 
   const r = await analyzeMemoryWithFallback("test input", undefined, {
@@ -721,7 +694,7 @@ test("anthropic: response without text content block returns bad-request error",
   assert.equal(r.lastError?.reachedServer, true);
   assert.match(
     r.lastError?.message ?? "",
-    /response missing text content block|content\[0\]\.type.*text/,
+    /response missing text content block|content\[0\]\.type.*text/
   );
 });
 
@@ -750,26 +723,22 @@ test("anthropic: primary fails, fallback (openai-compatible) succeeds", async ()
               },
             ],
           }),
-          { status: 200, headers: { "content-type": "application/json" } },
+          { status: 200, headers: { "content-type": "application/json" } }
         ),
     ],
-    log,
+    log
   );
 
-  const r = await synthesizeRecallWithFallback(
-    "query",
-    [{ id: 1, memoryContent: "memory" }],
-    {
-      primaryApiKey: ANTHROPIC_KEY,
-      primaryApiFormat: "anthropic",
-      primaryModel: ANTHROPIC_MODEL,
-      fallbackApiKey: ANTHROPIC_KEY,
-      fallbackApiFormat: "openai-compatible",
-      fallbackBaseUrl: "https://api.example.com/v1",
-      fallbackModel: "fallback-model",
-      fetchImpl,
-    },
-  );
+  const r = await synthesizeRecallWithFallback("query", [{ id: 1, memoryContent: "memory" }], {
+    primaryApiKey: ANTHROPIC_KEY,
+    primaryApiFormat: "anthropic",
+    primaryModel: ANTHROPIC_MODEL,
+    fallbackApiKey: ANTHROPIC_KEY,
+    fallbackApiFormat: "openai-compatible",
+    fallbackBaseUrl: "https://api.example.com/v1",
+    fallbackModel: "fallback-model",
+    fetchImpl,
+  });
 
   assert.equal(r.ok, true);
   if (!r.ok) return;

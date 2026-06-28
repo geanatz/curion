@@ -35,34 +35,26 @@
  * + query set + dense ranker).
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { test } from "node:test";
 
 import {
   DEFAULT_CALIBRATION_SWEEP,
   DEFAULT_DENSE_CALIBRATION_SWEEP,
   DEFAULT_HYBRID_DENSE_CALIBRATION_SWEEP,
   buildQueryDiagnostic,
-  buildSweepForVariant,
   computeContributorSupport,
-  computeRegressionCounts,
   computeScoreDistribution,
   evaluateGates,
-  type CalibrationGate,
-  type CalibrationVariantResult,
 } from "../src/benchmark/calibration.ts";
-import {
-  StubDeterministicDenseEmbedder,
-} from "../src/benchmark/variants/dense-embedder.ts";
-import {
-  rankDenseVectorAsync,
-} from "../src/benchmark/variants/dense-vector.ts";
 import { BENCHMARK_RECORDS } from "../src/benchmark/corpus.ts";
+import { type QueryEval, aggregateMetrics } from "../src/benchmark/metrics.ts";
 import { BENCHMARK_QUERIES } from "../src/benchmark/queries.ts";
 import {
+  type DenseCalibrationReport,
   buildCandidates,
   formatDenseCalibrationReport,
   isComparisonReport,
@@ -72,10 +64,10 @@ import {
   runDenseRetrievalBenchmark,
   runRetrievalBenchmark,
   writeDenseCalibrationReport,
-  type DenseCalibrationReport,
 } from "../src/benchmark/retrieval-runner.ts";
+import { StubDeterministicDenseEmbedder } from "../src/benchmark/variants/dense-embedder.ts";
+import { rankDenseVectorAsync } from "../src/benchmark/variants/dense-vector.ts";
 import { PUBLIC_TOOL_NAMES } from "../src/server.ts";
-import { aggregateMetrics, type QueryEval } from "../src/benchmark/metrics.ts";
 
 // ---------------------------------------------------------------------------
 // 0. Stable defaults
@@ -87,30 +79,27 @@ test("dense calibration: default dense sweep grid is stable", () => {
   // surfaces.
   assert.deepEqual(
     [...(DEFAULT_DENSE_CALIBRATION_SWEEP.threshold ?? [])],
-    [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+    [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
   );
   assert.deepEqual(
     [...(DEFAULT_DENSE_CALIBRATION_SWEEP.margin ?? [])],
-    [0.0, 0.05, 0.1, 0.15, 0.2, 0.3],
+    [0.0, 0.05, 0.1, 0.15, 0.2, 0.3]
   );
-  assert.deepEqual(
-    [...(DEFAULT_DENSE_CALIBRATION_SWEEP.ratio ?? [])],
-    [1.0, 1.25, 1.5, 2.0, 3.0],
-  );
+  assert.deepEqual([...(DEFAULT_DENSE_CALIBRATION_SWEEP.ratio ?? [])], [1.0, 1.25, 1.5, 2.0, 3.0]);
 });
 
 test("dense calibration: default hybrid-dense sweep grid is stable", () => {
   assert.deepEqual(
     [...(DEFAULT_HYBRID_DENSE_CALIBRATION_SWEEP.threshold ?? [])],
-    [0.01, 0.02, 0.025, 0.03, 0.04],
+    [0.01, 0.02, 0.025, 0.03, 0.04]
   );
   assert.deepEqual(
     [...(DEFAULT_HYBRID_DENSE_CALIBRATION_SWEEP.margin ?? [])],
-    [0.0, 0.002, 0.005, 0.01, 0.02],
+    [0.0, 0.002, 0.005, 0.01, 0.02]
   );
   assert.deepEqual(
     [...(DEFAULT_HYBRID_DENSE_CALIBRATION_SWEEP.ratio ?? [])],
-    [1.0, 1.25, 1.5, 2.0, 3.0],
+    [1.0, 1.25, 1.5, 2.0, 3.0]
   );
 });
 
@@ -120,18 +109,9 @@ test("dense calibration: sync default sweep is unchanged (backward compat)", () 
   // identity comparison with `DEFAULT_CALIBRATION_SWEEP`,
   // so a regression here would silently change the
   // dense sweep grid too.
-  assert.deepEqual(
-    [...(DEFAULT_CALIBRATION_SWEEP.threshold ?? [])],
-    [0.1, 0.2, 0.3, 0.4, 0.5],
-  );
-  assert.deepEqual(
-    [...(DEFAULT_CALIBRATION_SWEEP.margin ?? [])],
-    [0.0, 0.05, 0.1, 0.2, 0.3],
-  );
-  assert.deepEqual(
-    [...(DEFAULT_CALIBRATION_SWEEP.ratio ?? [])],
-    [1.0, 1.25, 1.5, 2.0, 3.0],
-  );
+  assert.deepEqual([...(DEFAULT_CALIBRATION_SWEEP.threshold ?? [])], [0.1, 0.2, 0.3, 0.4, 0.5]);
+  assert.deepEqual([...(DEFAULT_CALIBRATION_SWEEP.margin ?? [])], [0.0, 0.05, 0.1, 0.2, 0.3]);
+  assert.deepEqual([...(DEFAULT_CALIBRATION_SWEEP.ratio ?? [])], [1.0, 1.25, 1.5, 2.0, 3.0]);
 });
 
 // ---------------------------------------------------------------------------
@@ -162,10 +142,7 @@ test("dense calibration: score distribution math is unchanged for the dense vari
   // assertion. (The test in
   // `retrieval-calibration.test.ts` uses the same
   // pattern.)
-  assert.ok(
-    Math.abs(d2.scoreGap - 0.3) < 1e-12,
-    `scoreGap should be ~0.3, got ${d2.scoreGap}`,
-  );
+  assert.ok(Math.abs(d2.scoreGap - 0.3) < 1e-12, `scoreGap should be ~0.3, got ${d2.scoreGap}`);
   assert.ok(Math.abs(d2.scoreRatio - 3.0) < 1e-12);
 });
 
@@ -181,46 +158,22 @@ test("dense calibration: gate evaluation with cosine-scale thresholds", () => {
     scoreRatio: 3.0,
   };
   // threshold @ 0.4: 0.45 >= 0.4 -> pass.
-  const t1 = evaluateGates(
-    dist,
-    [{ kind: "threshold", value: 0.4 }],
-    "higher-is-better",
-  );
+  const t1 = evaluateGates(dist, [{ kind: "threshold", value: 0.4 }], "higher-is-better");
   assert.equal(t1.abstained, false);
   // threshold @ 0.5: 0.45 < 0.5 -> abstain.
-  const t2 = evaluateGates(
-    dist,
-    [{ kind: "threshold", value: 0.5 }],
-    "higher-is-better",
-  );
+  const t2 = evaluateGates(dist, [{ kind: "threshold", value: 0.5 }], "higher-is-better");
   assert.equal(t2.abstained, true);
   // margin @ 0.2: 0.3 >= 0.2 -> pass.
-  const m1 = evaluateGates(
-    dist,
-    [{ kind: "margin", value: 0.2 }],
-    "higher-is-better",
-  );
+  const m1 = evaluateGates(dist, [{ kind: "margin", value: 0.2 }], "higher-is-better");
   assert.equal(m1.abstained, false);
   // margin @ 0.4: 0.3 < 0.4 -> abstain.
-  const m2 = evaluateGates(
-    dist,
-    [{ kind: "margin", value: 0.4 }],
-    "higher-is-better",
-  );
+  const m2 = evaluateGates(dist, [{ kind: "margin", value: 0.4 }], "higher-is-better");
   assert.equal(m2.abstained, true);
   // ratio @ 2: 3 >= 2 -> pass.
-  const r1 = evaluateGates(
-    dist,
-    [{ kind: "ratio", value: 2 }],
-    "higher-is-better",
-  );
+  const r1 = evaluateGates(dist, [{ kind: "ratio", value: 2 }], "higher-is-better");
   assert.equal(r1.abstained, false);
   // ratio @ 4: 3 < 4 -> abstain.
-  const r2 = evaluateGates(
-    dist,
-    [{ kind: "ratio", value: 4 }],
-    "higher-is-better",
-  );
+  const r2 = evaluateGates(dist, [{ kind: "ratio", value: 4 }], "higher-is-better");
   assert.equal(r2.abstained, true);
 });
 
@@ -270,7 +223,7 @@ test("dense calibration: buildQueryDiagnostic with hybridSupport populates the a
         { source: "vector-dense", rank: 3, score: 0.2, contribution: 1 / 63 },
       ],
       agreementCount: 3,
-    },
+    }
   );
   assert.ok(d.contributorSupport !== undefined);
   assert.equal(d.contributorSupport?.length, 3);
@@ -288,7 +241,7 @@ test("dense calibration: buildQueryDiagnostic without hybridSupport leaves the f
     true,
     [{ id: 1, score: 0.5 }],
     [],
-    "higher-is-better",
+    "higher-is-better"
   );
   assert.equal(d.contributorSupport, undefined);
   assert.equal(d.contributorAgreementCount, undefined);
@@ -315,10 +268,7 @@ test("dense calibration runner: vector-dense report is well-formed", async () =>
   assert.equal(report.bestByVariant.fts5, null);
   assert.equal(report.bestByVariant.vector, null);
   // The dense best keys are populated.
-  assert.ok(
-    report.bestByVariant.vectorDense,
-    "vectorDense best row should be populated",
-  );
+  assert.ok(report.bestByVariant.vectorDense, "vectorDense best row should be populated");
   // The hybrid-dense best key is `null` (we asked for
   // `vector-dense` only).
   assert.equal(report.bestByVariant.hybridDense, null);
@@ -335,7 +285,7 @@ test("dense calibration runner: vector-dense report is well-formed", async () =>
   assert.equal(
     report.sweep.length,
     7 + 6 + 5,
-    "sweep should have one row per (kind, value) on the dense grid",
+    "sweep should have one row per (kind, value) on the dense grid"
   );
   for (const r of report.sweep) {
     assert.equal(r.variant, "vector-dense");
@@ -353,10 +303,7 @@ test("dense calibration runner: hybrid-dense report is well-formed", async () =>
   assert.equal(report.bestByVariant.vector, null);
   // The hybrid-dense best key is populated; the
   // vector-dense best key is `null`.
-  assert.ok(
-    report.bestByVariant.hybridDense,
-    "hybridDense best row should be populated",
-  );
+  assert.ok(report.bestByVariant.hybridDense, "hybridDense best row should be populated");
   assert.equal(report.bestByVariant.vectorDense, null);
   // Baseline: exactly one row.
   assert.equal(report.baseline.length, 1);
@@ -423,26 +370,27 @@ test("dense calibration runner: baseline row matches a direct no-threshold re-ru
     eval_.rank1 = top0 !== undefined && expected.has(top0);
     const ct = new Set(eval_.currentTruthIds);
     eval_.currentTruthAt1 = top0 !== undefined && ct.has(top0);
-    eval_.passed = eval_.expectedIds.length === 0
-      ? eval_.topIds.length === 0
-      : eval_.topIds.slice(0, 5).some((id) => expected.has(id));
+    eval_.passed =
+      eval_.expectedIds.length === 0
+        ? eval_.topIds.length === 0
+        : eval_.topIds.slice(0, 5).some((id) => expected.has(id));
     evals.push(eval_);
   }
   const m = aggregateMetrics(evals);
   assert.equal(
     base.metrics.noAnswerCorrect,
     m.noAnswerCorrect,
-    "vector-dense baseline noAnswerCorrect disagrees with direct threshold=0 re-run",
+    "vector-dense baseline noAnswerCorrect disagrees with direct threshold=0 re-run"
   );
   assert.equal(
     base.metrics.hitAt5,
     m.hitAt5,
-    "vector-dense baseline hit@5 disagrees with direct threshold=0 re-run",
+    "vector-dense baseline hit@5 disagrees with direct threshold=0 re-run"
   );
   assert.equal(
     base.metrics.rank1,
     m.rank1,
-    "vector-dense baseline rank1 disagrees with direct threshold=0 re-run",
+    "vector-dense baseline rank1 disagrees with direct threshold=0 re-run"
   );
 });
 
@@ -462,9 +410,7 @@ test("dense calibration runner: per-query diagnostics have the required fields",
     assert.equal(typeof d.topScore, "number");
     assert.equal(typeof d.secondScore, "number");
     assert.equal(typeof d.scoreGap, "number");
-    assert.ok(
-      Number.isFinite(d.scoreRatio) || d.scoreRatio === Number.POSITIVE_INFINITY,
-    );
+    assert.ok(Number.isFinite(d.scoreRatio) || d.scoreRatio === Number.POSITIVE_INFINITY);
     assert.equal(typeof d.abstained, "boolean");
     assert.ok(Array.isArray(d.abstainedByGate));
     assert.equal(typeof d.abstentionWasCorrect, "boolean");
@@ -496,11 +442,11 @@ test("dense calibration runner: per-query diagnostics have the required fields",
     // diagnostic is well-formed).
     assert.ok(
       d.contributorSupport !== undefined,
-      "hybrid-dense per-query diagnostic must carry contributorSupport",
+      "hybrid-dense per-query diagnostic must carry contributorSupport"
     );
     assert.ok(
       d.contributorAgreementCount !== undefined,
-      "hybrid-dense per-query diagnostic must carry contributorAgreementCount",
+      "hybrid-dense per-query diagnostic must carry contributorAgreementCount"
     );
     // The agreement count is in [0, 3] (three contributors
     // total: lexical, fts5, vector-dense).
@@ -528,7 +474,7 @@ test("dense calibration runner: hybrid-dense contributorSupport labels are the d
     // hybrid-aware diagnostic.
     assert.ok(
       !d.contributorSupport.some((c) => c.source === "vector"),
-      "dense hybrid-aware diagnostic must not carry the 'vector' (hashed-BoW) source label",
+      "dense hybrid-aware diagnostic must not carry the 'vector' (hashed-BoW) source label"
     );
   }
 });
@@ -543,23 +489,18 @@ test("dense calibration runner: per-query positive regressions are subset of pos
       variant: v,
       denseEmbedderSpec: "stub-dense:dim=64",
     });
-    const best = v === "vector-dense"
-      ? report.bestByVariant.vectorDense
-      : report.bestByVariant.hybridDense;
+    const best =
+      v === "vector-dense" ? report.bestByVariant.vectorDense : report.bestByVariant.hybridDense;
     assert.ok(best, `expected a best row for ${v}`);
-    const positiveTotal = BENCHMARK_QUERIES.filter(
-      (q) => q.family !== "no-answer",
-    ).length;
+    const positiveTotal = BENCHMARK_QUERIES.filter((q) => q.family !== "no-answer").length;
     assert.ok(
       best.positiveRegressions <= positiveTotal,
-      `${v}: regressions (${best.positiveRegressions}) > positive total (${positiveTotal})`,
+      `${v}: regressions (${best.positiveRegressions}) > positive total (${positiveTotal})`
     );
-    const noAnswerTotal = BENCHMARK_QUERIES.filter(
-      (q) => q.family === "no-answer",
-    ).length;
+    const noAnswerTotal = BENCHMARK_QUERIES.filter((q) => q.family === "no-answer").length;
     assert.ok(
       best.noAnswerFixed <= noAnswerTotal,
-      `${v}: noAnswerFixed (${best.noAnswerFixed}) > no-answer total (${noAnswerTotal})`,
+      `${v}: noAnswerFixed (${best.noAnswerFixed}) > no-answer total (${noAnswerTotal})`
     );
   }
 });
@@ -614,16 +555,19 @@ test("dense calibration artifact: writeDenseCalibrationReport writes the right p
     assert.match(
       path.basename(file),
       /^retrieval-calibration-dense-/,
-      `dense calibration file prefix mismatch: ${path.basename(file)}`,
+      `dense calibration file prefix mismatch: ${path.basename(file)}`
     );
     // The file does NOT carry the sync prefix.
-    assert.doesNotMatch(
-      path.basename(file),
-      /^retrieval-calibration-(?!dense)/,
-    );
+    assert.doesNotMatch(path.basename(file), /^retrieval-calibration-(?!dense)/);
     const parsed = JSON.parse(fs.readFileSync(file, "utf8")) as {
       embeddingBackend: { backend: string; dim: number };
-      bestByVariant: { lexical: null; fts5: null; vector: null; vectorDense: unknown; hybridDense: null };
+      bestByVariant: {
+        lexical: null;
+        fts5: null;
+        vector: null;
+        vectorDense: unknown;
+        hybridDense: null;
+      };
     };
     assert.equal(parsed.embeddingBackend.backend, "stub-dense");
     assert.equal(parsed.embeddingBackend.dim, 64);
@@ -655,10 +599,7 @@ test("dense calibration human report: includes the embedding backend and the den
     "best per variant",
     "per-query diagnostics",
   ]) {
-    assert.ok(
-      out.includes(section),
-      `dense calibration human report missing section: ${section}`,
-    );
+    assert.ok(out.includes(section), `dense calibration human report missing section: ${section}`);
   }
 });
 
@@ -677,36 +618,32 @@ test("dense calibration human report: prints the calibration header exactly once
     denseEmbedderSpec: "stub-dense:dim=64",
   });
   const out = formatDenseCalibrationReport(report);
-  const headerCount = (
-    out.match(/^=== curion retrieval calibration.*===$/gm) ?? []
-  ).length;
+  const headerCount = (out.match(/^=== curion retrieval calibration.*===$/gm) ?? []).length;
   assert.equal(
     headerCount,
     1,
-    `dense calibration human report should print the calibration header exactly once, found ${headerCount}:\n${out}`,
+    `dense calibration human report should print the calibration header exactly once, found ${headerCount}:\n${out}`
   );
   // The dense header (with the (dense) suffix) must be
   // the one that survived — and the embedder block must
   // follow it.
   assert.ok(
-    out.startsWith(
-      "=== curion retrieval calibration (dense) ===",
-    ),
-    `dense calibration human report should start with the (dense) header, got:\n${out.slice(0, 200)}`,
+    out.startsWith("=== curion retrieval calibration (dense) ==="),
+    `dense calibration human report should start with the (dense) header, got:\n${out.slice(0, 200)}`
   );
   // The metadata block (records / queries / direction)
   // must appear exactly once.
-  const recordsCount = (out.match(/^  records:\s+\d+$/gm) ?? []).length;
+  const recordsCount = (out.match(/^ {2}records:\s+\d+$/gm) ?? []).length;
   assert.equal(
     recordsCount,
     1,
-    `dense calibration human report should list 'records' exactly once, found ${recordsCount}:\n${out}`,
+    `dense calibration human report should list 'records' exactly once, found ${recordsCount}:\n${out}`
   );
-  const queriesCount = (out.match(/^  queries:\s+\d+$/gm) ?? []).length;
+  const queriesCount = (out.match(/^ {2}queries:\s+\d+$/gm) ?? []).length;
   assert.equal(
     queriesCount,
     1,
-    `dense calibration human report should list 'queries' exactly once, found ${queriesCount}:\n${out}`,
+    `dense calibration human report should list 'queries' exactly once, found ${queriesCount}:\n${out}`
   );
   // The generated-at line should also appear exactly once
   // (the body line `generated at: <iso>` and the dense
@@ -716,7 +653,7 @@ test("dense calibration human report: prints the calibration header exactly once
   assert.equal(
     generatedAtCount,
     1,
-    `dense calibration human report should list 'generated at' exactly once, found ${generatedAtCount}:\n${out}`,
+    `dense calibration human report should list 'generated at' exactly once, found ${generatedAtCount}:\n${out}`
   );
 });
 
@@ -730,9 +667,9 @@ test("dense calibration: sync runCalibration report is byte-stable (no dense row
   // `sweep`, and `bestByVariant` shapes are unchanged.
   // The dense best keys are `undefined` (the sync
   // report does not populate them).
-  const report = await import(
-    "../src/benchmark/retrieval-runner.ts"
-  ).then((m) => m.runCalibration({ variant: "all" }));
+  const report = await import("../src/benchmark/retrieval-runner.ts").then((m) =>
+    m.runCalibration({ variant: "all" })
+  );
   assert.equal(report.baseline.length, 3, "sync baseline still has 3 rows");
   for (const b of report.baseline) {
     assert.ok(["lexical", "fts5", "vector"].includes(b.variant));
@@ -746,12 +683,12 @@ test("dense calibration: sync runCalibration report is byte-stable (no dense row
   assert.equal(
     report.bestByVariant.vectorDense,
     undefined,
-    "sync calibration report must not populate the vectorDense best key",
+    "sync calibration report must not populate the vectorDense best key"
   );
   assert.equal(
     report.bestByVariant.hybridDense,
     undefined,
-    "sync calibration report must not populate the hybridDense best key",
+    "sync calibration report must not populate the hybridDense best key"
   );
   // No dense variant rows in the sweep.
   for (const r of report.sweep) {
@@ -811,36 +748,26 @@ test("dense calibration: production recall() controller is not modified", () => 
   // recall controller's source code must not import the
   // calibration module or any dense module.
   const recallSrc = fs.readFileSync(
-    path.join(
-      import.meta.dirname,
-      "..",
-      "src",
-      "controller",
-      "recall-controller.ts",
-    ),
-    "utf8",
+    path.join(import.meta.dirname, "..", "src", "controller", "recall-controller.ts"),
+    "utf8"
   );
   assert.match(recallSrc, /rankLexical/);
   assert.doesNotMatch(
     recallSrc,
     /calibration|dense-calibration|runDenseCalibration|DenseCalibration/,
-    "recall controller must NOT import dense calibration modules",
+    "recall controller must NOT import dense calibration modules"
   );
   // The MCP server still exposes exactly two tools.
   const serverSrc = fs.readFileSync(
     path.join(import.meta.dirname, "..", "src", "server.ts"),
-    "utf8",
+    "utf8"
   );
   const toolCallCount = (serverSrc.match(/server\.registerTool\(/g) ?? []).length;
-  assert.equal(
-    toolCallCount,
-    2,
-    `server.ts must register exactly 2 tools, found ${toolCallCount}`,
-  );
+  assert.equal(toolCallCount, 2, `server.ts must register exactly 2 tools, found ${toolCallCount}`);
   assert.deepEqual(
     [...PUBLIC_TOOL_NAMES],
     ["remember", "recall"],
-    "public MCP tool surface must remain exactly remember + recall",
+    "public MCP tool surface must remain exactly remember + recall"
   );
 });
 
@@ -880,14 +807,8 @@ test("dense calibration: the dense calibration report type is a strict superset 
   // shape's projected view; this is the contract: a
   // consumer that does not know about the dense keys
   // sees a well-formed sync report.
-  assert.equal(
-    (asSync.bestByVariant as { vectorDense?: unknown }).vectorDense,
-    null,
-  );
-  assert.equal(
-    (asSync.bestByVariant as { hybridDense?: unknown }).hybridDense,
-    null,
-  );
+  assert.equal((asSync.bestByVariant as { vectorDense?: unknown }).vectorDense, null);
+  assert.equal((asSync.bestByVariant as { hybridDense?: unknown }).hybridDense, null);
 });
 
 // ---------------------------------------------------------------------------
@@ -948,14 +869,9 @@ test("dense calibration: pickBestRow on the dense sweep returns a well-formed ro
   // The best row's TNR delta over the baseline is
   // non-negative (the pick rule maximizes TNR delta).
   const base = report.baseline[0]!;
-  const baseTnr = base.metrics.noAnswerTotal > 0
-    ? base.metrics.noAnswerCorrect / base.metrics.noAnswerTotal
-    : 0;
-  const bestTnr = best.metrics.noAnswerTotal > 0
-    ? best.metrics.noAnswerCorrect / best.metrics.noAnswerTotal
-    : 0;
-  assert.ok(
-    bestTnr >= baseTnr,
-    `best row TNR (${bestTnr}) should be >= baseline TNR (${baseTnr})`,
-  );
+  const baseTnr =
+    base.metrics.noAnswerTotal > 0 ? base.metrics.noAnswerCorrect / base.metrics.noAnswerTotal : 0;
+  const bestTnr =
+    best.metrics.noAnswerTotal > 0 ? best.metrics.noAnswerCorrect / best.metrics.noAnswerTotal : 0;
+  assert.ok(bestTnr >= baseTnr, `best row TNR (${bestTnr}) should be >= baseline TNR (${baseTnr})`);
 });

@@ -49,14 +49,14 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import type { QueryEval, AbstentionSignals } from "./metrics.js";
-import type { SufficiencyLabel } from "./sufficiency-diagnostic.js";
+import type { AbstentionSignals, QueryEval } from "./metrics.js";
 import {
-  buildNoAnswerPolicyPerQuery,
-  runNoAnswerPolicyExperiment,
   type NoAnswerPolicyConfig,
   type NoAnswerPolicyReport,
+  buildNoAnswerPolicyPerQuery,
+  runNoAnswerPolicyExperiment,
 } from "./no-answer-abstention.js";
+import type { SufficiencyLabel } from "./sufficiency-diagnostic.js";
 
 // ---------------------------------------------------------------------------
 // Top-level entry point
@@ -125,10 +125,7 @@ const ARTIFACT_FILE_PREFIX = "retrieval-no-answer-abstention";
  * ISO timestamp with `:` / `.` replaced by `-` so
  * the filename is safe across shells.
  */
-export function writeNoAnswerAbstentionReport(
-  report: NoAnswerPolicyReport,
-  dir: string,
-): string {
+export function writeNoAnswerAbstentionReport(report: NoAnswerPolicyReport, dir: string): string {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   }

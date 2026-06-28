@@ -63,46 +63,41 @@
  *  18. Artifact reader + writer round-trip.
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { test } from "node:test";
 
+import { type QueryEval, evaluateQuery } from "../src/benchmark/metrics.js";
+import type { BenchmarkQuery } from "../src/benchmark/queries.js";
+import {
+  parseSupersessionRerankCliArgs,
+  runSupersessionRerankCli,
+  writeSupersessionRerankReport,
+} from "../src/benchmark/supersession-edge-simulation-runner.js";
 import {
   BUILTIN_SUPERSESSION_RERANK_VARIANTS,
   EXCLUDED_FROM_EDGE_MAP,
   SIMULATED_CURRENT_IN_GROUP_IDS,
   SIMULATED_SUPERSEDED_IDS,
   SIMULATED_SUPERSESSION_EDGES,
+  type SupersessionRerankReport,
+  type SupersessionRerankRule,
   applySupersessionRerankRule,
   buildSupersessionRerankReport,
   buildSupersessionRerankVariantRow,
   computeSupersessionRerankVerdict,
-  evaluateSupersessionRerankForQuery,
   evaluateSupersessionRerankVariant,
   formatSupersessionRerankReport,
-  aggregateSupersessionRerankPerQuery,
-  type SupersessionRerankReport,
-  type SupersessionRerankRule,
-  type SupersessionRerankVariant,
-  type SupersessionRerankVariantMetrics,
 } from "../src/benchmark/supersession-edge-simulation.js";
 import {
-  parseSupersessionRerankCliArgs,
-  runSupersessionRerankAnalysis,
-  runSupersessionRerankCli,
-  writeSupersessionRerankReport,
-} from "../src/benchmark/supersession-edge-simulation-runner.js";
-import {
+  type BenchmarkArtifact,
+  alignQueriesToEvals,
   findMostRecentArtifact,
   readBenchmarkArtifact,
-  alignQueriesToEvals,
-  type BenchmarkArtifact,
 } from "../src/benchmark/temporal-truth-diagnostic-runner.js";
 import { STALE_TEMPORAL_IDS } from "../src/benchmark/temporal-truth-diagnostic.js";
-import type { BenchmarkQuery } from "../src/benchmark/queries.js";
-import { evaluateQuery, type QueryEval } from "../src/benchmark/metrics.js";
 import { PUBLIC_TOOL_NAMES } from "../src/server.js";
 import { walkTs } from "./_helpers/fs-walk.ts";
 
@@ -125,7 +120,7 @@ function mkQueryEval(
     topIds: number[];
     topScores?: number[];
     labels?: string[];
-  }>,
+  }>
 ): { evals: QueryEval[]; queries: BenchmarkQuery[] } {
   const evals: QueryEval[] = [];
   const queries: BenchmarkQuery[] = [];
@@ -138,7 +133,7 @@ function mkQueryEval(
       s.expectedIds,
       s.currentTruthIds,
       s.topIds,
-      topScores,
+      topScores
     );
     // Re-derive rank1 / currentTruthAt1 in
     // case the synthetic topIds is empty.
@@ -193,7 +188,7 @@ test("supersession-edge-simulation: SIMULATED_SUPERSESSION_EDGES contains the do
   for (const id of [21, 22, 23, 24, 57, 58, 59, 60, 96, 105, 106, 107, 108]) {
     assert.ok(
       SIMULATED_SUPERSESSION_EDGES.has(id),
-      `SIMULATED_SUPERSESSION_EDGES must contain ${id}`,
+      `SIMULATED_SUPERSESSION_EDGES must contain ${id}`
     );
   }
   // Postgres 14 (21) is superseded by 1.
@@ -220,12 +215,9 @@ test("supersession-edge-simulation: SIMULATED_SUPERSESSION_EDGES does NOT contai
   for (const id of [117, 118, 119, 120]) {
     assert.ok(
       !SIMULATED_SUPERSESSION_EDGES.has(id),
-      `SIMULATED_SUPERSESSION_EDGES must NOT contain ${id} (current-vs-previous anchor)`,
+      `SIMULATED_SUPERSESSION_EDGES must NOT contain ${id} (current-vs-previous anchor)`
     );
-    assert.ok(
-      EXCLUDED_FROM_EDGE_MAP.has(id),
-      `EXCLUDED_FROM_EDGE_MAP must contain ${id}`,
-    );
+    assert.ok(EXCLUDED_FROM_EDGE_MAP.has(id), `EXCLUDED_FROM_EDGE_MAP must contain ${id}`);
   }
 });
 
@@ -245,11 +237,11 @@ test("supersession-edge-simulation: SIMULATED_SUPERSEDED_IDS and SIMULATED_CURRE
   }
   assert.deepEqual(
     [...SIMULATED_SUPERSEDED_IDS].sort((a, b) => a - b),
-    [...supersededFromMap].sort((a, b) => a - b),
+    [...supersededFromMap].sort((a, b) => a - b)
   );
   assert.deepEqual(
     [...SIMULATED_CURRENT_IN_GROUP_IDS].sort((a, b) => a - b),
-    [...currentInGroupFromMap].sort((a, b) => a - b),
+    [...currentInGroupFromMap].sort((a, b) => a - b)
   );
 });
 
@@ -280,7 +272,7 @@ test("supersession-edge-simulation: SIMULATED_SUPERSEDED_IDS is a subset of STAL
   for (const id of SIMULATED_SUPERSEDED_IDS) {
     assert.ok(
       STALE_TEMPORAL_IDS.has(id),
-      `SIMULATED_SUPERSEDED_IDS contains ${id} but STALE_TEMPORAL_IDS does not`,
+      `SIMULATED_SUPERSEDED_IDS contains ${id} but STALE_TEMPORAL_IDS does not`
     );
   }
 });
@@ -487,7 +479,7 @@ test("supersession-edge-simulation: applySupersessionRerankRule preserves length
 
 test("supersession-edge-simulation: built-in variant table category honesty", () => {
   const byId = new Map(
-    BUILTIN_SUPERSESSION_RERANK_VARIANTS.map((v) => [v.id, v.category] as const),
+    BUILTIN_SUPERSESSION_RERANK_VARIANTS.map((v) => [v.id, v.category] as const)
   );
   assert.equal(byId.get("baseline-no-rerank"), "production-like");
   assert.equal(byId.get("oracle-current-truth-promote-all"), "oracle");
@@ -517,7 +509,7 @@ test("supersession-edge-simulation: metadata-simulation variants reference the e
         d.includes("stale-like") ||
         d.includes("stale_id") ||
         d.includes("stalelikeids"),
-      `metadata-simulation variant ${v.id} description must name the edge map contract, got: ${v.description}`,
+      `metadata-simulation variant ${v.id} description must name the edge map contract, got: ${v.description}`
     );
     // The metadata-simulation category is
     // HONEST about NOT consulting
@@ -541,7 +533,7 @@ test("supersession-edge-simulation: metadata-simulation variants reference the e
         d.includes("stale-like") ||
         d.includes("stalelikeids") ||
         d.includes("stale-ids"),
-      `metadata-simulation variant ${v.id} description must be honest about NOT using currentTruthIds, got: ${v.description}`,
+      `metadata-simulation variant ${v.id} description must be honest about NOT using currentTruthIds, got: ${v.description}`
     );
   }
 });
@@ -556,7 +548,7 @@ test("supersession-edge-simulation: oracle variant references currentTruthIds (f
         d.includes("fixture truth") ||
         d.includes("research-only") ||
         d.includes("research"),
-      `oracle variant ${v.id} description must name fixture truth / currentTruthIds, got: ${v.description}`,
+      `oracle variant ${v.id} description must name fixture truth / currentTruthIds, got: ${v.description}`
     );
   }
 });
@@ -581,7 +573,7 @@ test("supersession-edge-simulation: production source tree does NOT import the n
       const text = fs.readFileSync(path.join(dir, f), "utf8");
       assert.ok(
         !text.includes("supersession-edge-simulation"),
-        `production source ${f} must not import the new module`,
+        `production source ${f} must not import the new module`
       );
     }
   }
@@ -687,7 +679,7 @@ test("supersession-edge-simulation: report has the documented top-level shape", 
     assert.ok(row.metrics);
     assert.ok(
       ["safe", "unsafe", "neutral"].includes(row.verdict),
-      `verdict must be safe|unsafe|neutral, got ${row.verdict}`,
+      `verdict must be safe|unsafe|neutral, got ${row.verdict}`
     );
     assert.ok(typeof row.verdictNote === "string");
   }
@@ -708,22 +700,10 @@ test("supersession-edge-simulation: per-variant metrics include the documented b
     assert.equal(m.total, 2);
     assert.equal(typeof m.baselineCurrentTruthAt1, "number");
     assert.equal(typeof m.afterCurrentTruthAt1, "number");
-    assert.equal(
-      m.afterCurrentTruthAt1 - m.baselineCurrentTruthAt1,
-      m.currentTruthAt1Delta,
-    );
-    assert.equal(
-      m.afterStaleTop1 - m.baselineStaleTop1,
-      m.staleTop1Delta,
-    );
-    assert.equal(
-      m.afterStaleOverCurrent - m.baselineStaleOverCurrent,
-      m.staleOverCurrentDelta,
-    );
-    assert.equal(
-      m.afterCurrentMissing - m.baselineCurrentMissing,
-      m.currentMissingDelta,
-    );
+    assert.equal(m.afterCurrentTruthAt1 - m.baselineCurrentTruthAt1, m.currentTruthAt1Delta);
+    assert.equal(m.afterStaleTop1 - m.baselineStaleTop1, m.staleTop1Delta);
+    assert.equal(m.afterStaleOverCurrent - m.baselineStaleOverCurrent, m.staleOverCurrentDelta);
+    assert.equal(m.afterCurrentMissing - m.baselineCurrentMissing, m.currentMissingDelta);
     assert.equal(typeof m.regressionCount, "number");
     assert.equal(typeof m.unchangedBecauseCurrentMissing, "number");
     assert.equal(typeof m.excludedCurrentAnchorCount, "number");
@@ -735,16 +715,13 @@ test("supersession-edge-simulation: per-variant metrics include the documented b
 // ---------------------------------------------------------------------------
 
 test("supersession-edge-simulation: end-to-end CLI on the real lexical baseline artifact", async () => {
-  const baselinePath = findMostRecentArtifact(
-    ".curion/benchmark",
-    "retrieval-baseline-",
-  );
+  const baselinePath = findMostRecentArtifact(".curion/benchmark", "retrieval-baseline-");
   if (!baselinePath) return; // skip if no artifact on disk
   const semanticPath = path.join(
     "src",
     "benchmark",
     "data",
-    "false-abstention-damage-semantic-evidence.json",
+    "false-abstention-damage-semantic-evidence.json"
   );
   const hasSemantic = fs.existsSync(semanticPath);
   const { report } = await runSupersessionRerankCli({
@@ -767,21 +744,18 @@ test("supersession-edge-simulation: end-to-end CLI on the real lexical baseline 
   // changed the baseline from 12 to 10.
   // The baseline variant is the
   // `baseline-no-rerank` row.
-  const baseline = report.variants.find(
-    (v) => v.variant.id === "baseline-no-rerank",
-  );
+  const baseline = report.variants.find((v) => v.variant.id === "baseline-no-rerank");
   assert.ok(baseline);
   assert.equal(baseline!.metrics.baselineCurrentTruthAt1, 10);
   // The oracle-promote-all variant should
   // produce a higher `currentTruthAt1` than
   // the baseline.
   const oraclePromote = report.variants.find(
-    (v) => v.variant.id === "oracle-current-truth-promote-all",
+    (v) => v.variant.id === "oracle-current-truth-promote-all"
   );
   assert.ok(oraclePromote);
   assert.ok(
-    oraclePromote!.metrics.afterCurrentTruthAt1 >=
-      baseline!.metrics.baselineCurrentTruthAt1,
+    oraclePromote!.metrics.afterCurrentTruthAt1 >= baseline!.metrics.baselineCurrentTruthAt1
   );
   // The metadata-simulation-combined variant
   // should produce a non-negative
@@ -789,25 +763,23 @@ test("supersession-edge-simulation: end-to-end CLI on the real lexical baseline 
   // closes the same gap the prior
   // `fixture-shaped-stale-demote-current-promote`
   // variant closed on the lexical baseline).
-  const combined = report.variants.find(
-    (v) => v.variant.id === "metadata-simulation-combined",
-  );
+  const combined = report.variants.find((v) => v.variant.id === "metadata-simulation-combined");
   assert.ok(combined);
   assert.ok(
     combined!.metrics.currentTruthAt1Delta >= 0,
-    "the combined metadata-simulation variant should not regress the baseline on currentTruthAt1",
+    "the combined metadata-simulation variant should not regress the baseline on currentTruthAt1"
   );
   // The metadata-simulation-supersededBy-demote
   // variant's `staleTop1` should be lower than
   // the baseline (the demote rule moves
   // superseded ids out of the top-1 position).
   const demote = report.variants.find(
-    (v) => v.variant.id === "metadata-simulation-supersededBy-demote",
+    (v) => v.variant.id === "metadata-simulation-supersededBy-demote"
   );
   assert.ok(demote);
   assert.ok(
     demote!.metrics.afterStaleTop1 <= demote!.metrics.baselineStaleTop1,
-    "the supersededBy-demote variant should not increase staleTop1",
+    "the supersededBy-demote variant should not increase staleTop1"
   );
   // The combined variant's `regressionCount`
   // is honest: the metadata-simulation
@@ -836,10 +808,7 @@ test("supersession-edge-simulation: end-to-end CLI on the real lexical baseline 
   // count >= 0 (it is allowed to be > 0) so
   // a future schema revision that closes
   // the regression is a deliberate edit.
-  assert.ok(
-    combined!.metrics.regressionCount >= 0,
-    "regression count is non-negative",
-  );
+  assert.ok(combined!.metrics.regressionCount >= 0, "regression count is non-negative");
   // The "gap the metadata cannot fix" block
   // is populated. The excluded current-anchor
   // queries are the `temp-current-vs-previous-*`
@@ -848,7 +817,7 @@ test("supersession-edge-simulation: end-to-end CLI on the real lexical baseline 
   // `EXCLUDED_FROM_EDGE_MAP`).
   assert.ok(
     report.gapBreakdown.total > 0,
-    "the gap breakdown should surface at least one excluded current-anchor query",
+    "the gap breakdown should surface at least one excluded current-anchor query"
   );
 });
 
@@ -860,7 +829,7 @@ test("supersession-edge-simulation: end-to-end CLI without an artifact on disk t
         noWrite: true,
         noStdout: true,
       }),
-    /no --benchmark-artifact given/,
+    /no --benchmark-artifact given/
   );
 });
 
@@ -890,11 +859,7 @@ test("supersession-edge-simulation: CLI argument parser handles the documented f
 });
 
 test("supersession-edge-simulation: CLI argument parser ignores unknown flags", () => {
-  const parsed = parseSupersessionRerankCliArgs([
-    "--unknown-flag",
-    "value",
-    "--no-write",
-  ]);
+  const parsed = parseSupersessionRerankCliArgs(["--unknown-flag", "value", "--no-write"]);
   assert.equal(parsed.noWrite, true);
 });
 
@@ -915,7 +880,7 @@ test("supersession-edge-simulation: perCategoryChange rollup is populated for at
     { queryId: "q2", expectedIds: [1], currentTruthIds: [1], topIds: [21, 1, 5, 6, 7] },
   ]);
   const oraclePromote = BUILTIN_SUPERSESSION_RERANK_VARIANTS.find(
-    (v) => v.id === "oracle-current-truth-promote-all",
+    (v) => v.id === "oracle-current-truth-promote-all"
   )!;
   const m = evaluateSupersessionRerankVariant({
     variant: oraclePromote,
@@ -926,7 +891,7 @@ test("supersession-edge-simulation: perCategoryChange rollup is populated for at
   assert.ok(change);
   assert.ok(
     change["current-truth-in-topk-stale-top1 -> current-truth-top1"] === 1,
-    "the stale-top1 -> top1 move should be reflected in the perCategoryChange block",
+    "the stale-top1 -> top1 move should be reflected in the perCategoryChange block"
   );
 });
 
@@ -939,7 +904,7 @@ test("supersession-edge-simulation: verdict is safe when at least one recovery a
     { queryId: "q1", expectedIds: [1], currentTruthIds: [1], topIds: [21, 1, 5, 6, 7] },
   ]);
   const oraclePromote = BUILTIN_SUPERSESSION_RERANK_VARIANTS.find(
-    (v) => v.id === "oracle-current-truth-promote-all",
+    (v) => v.id === "oracle-current-truth-promote-all"
   )!;
   const m = evaluateSupersessionRerankVariant({
     variant: oraclePromote,
@@ -964,9 +929,7 @@ test("supersession-edge-simulation: verdict is neutral when no recovery and zero
   const { evals, queries } = mkQueryEval([
     { queryId: "q1", expectedIds: [1], currentTruthIds: [1], topIds: [1, 21, 5, 6, 7] },
   ]);
-  const baseline = BUILTIN_SUPERSESSION_RERANK_VARIANTS.find(
-    (v) => v.id === "baseline-no-rerank",
-  )!;
+  const baseline = BUILTIN_SUPERSESSION_RERANK_VARIANTS.find((v) => v.id === "baseline-no-rerank")!;
   const m = evaluateSupersessionRerankVariant({
     variant: baseline,
     evals,
@@ -999,9 +962,7 @@ test("supersession-edge-simulation: clean / fixture-ambiguous split is on the di
       labels: ["divergentTemporal"],
     },
   ]);
-  const baseline = BUILTIN_SUPERSESSION_RERANK_VARIANTS.find(
-    (v) => v.id === "baseline-no-rerank",
-  )!;
+  const baseline = BUILTIN_SUPERSESSION_RERANK_VARIANTS.find((v) => v.id === "baseline-no-rerank")!;
   const m = evaluateSupersessionRerankVariant({
     variant: baseline,
     evals,
@@ -1025,9 +986,7 @@ test("supersession-edge-simulation: regressionCount is 0 on a no-rerank baseline
   const { evals, queries } = mkQueryEval([
     { queryId: "q1", expectedIds: [1], currentTruthIds: [1], topIds: [1, 21, 5, 6, 7] },
   ]);
-  const baseline = BUILTIN_SUPERSESSION_RERANK_VARIANTS.find(
-    (v) => v.id === "baseline-no-rerank",
-  )!;
+  const baseline = BUILTIN_SUPERSESSION_RERANK_VARIANTS.find((v) => v.id === "baseline-no-rerank")!;
   const m = evaluateSupersessionRerankVariant({
     variant: baseline,
     evals,
@@ -1048,7 +1007,7 @@ test("supersession-edge-simulation: unchangedBecauseCurrentMissing is the re-ran
     { queryId: "q1", expectedIds: [1], currentTruthIds: [1], topIds: [2, 3, 4, 5, 6] },
   ]);
   const oraclePromote = BUILTIN_SUPERSESSION_RERANK_VARIANTS.find(
-    (v) => v.id === "oracle-current-truth-promote-all",
+    (v) => v.id === "oracle-current-truth-promote-all"
   )!;
   const m = evaluateSupersessionRerankVariant({
     variant: oraclePromote,
@@ -1080,9 +1039,7 @@ test("supersession-edge-simulation: excluded current-anchor flag is set when cur
       topIds: [117, 21, 5, 6, 7],
     },
   ]);
-  const baseline = BUILTIN_SUPERSESSION_RERANK_VARIANTS.find(
-    (v) => v.id === "baseline-no-rerank",
-  )!;
+  const baseline = BUILTIN_SUPERSESSION_RERANK_VARIANTS.find((v) => v.id === "baseline-no-rerank")!;
   const m = evaluateSupersessionRerankVariant({
     variant: baseline,
     evals,
@@ -1101,9 +1058,7 @@ test("supersession-edge-simulation: excluded current-anchor flag is unset for no
   const { evals, queries } = mkQueryEval([
     { queryId: "q1", expectedIds: [1], currentTruthIds: [1], topIds: [1, 21, 5, 6, 7] },
   ]);
-  const baseline = BUILTIN_SUPERSESSION_RERANK_VARIANTS.find(
-    (v) => v.id === "baseline-no-rerank",
-  )!;
+  const baseline = BUILTIN_SUPERSESSION_RERANK_VARIANTS.find((v) => v.id === "baseline-no-rerank")!;
   const m = evaluateSupersessionRerankVariant({
     variant: baseline,
     evals,
@@ -1154,7 +1109,7 @@ test("supersession-edge-simulation: metadata-simulation re-rank rules do NOT con
     assert.deepEqual(
       out1.topIds,
       out2.topIds,
-      `metadata-simulation rule ${rule.kind} must produce the same output regardless of currentTruthIds`,
+      `metadata-simulation rule ${rule.kind} must produce the same output regardless of currentTruthIds`
     );
   }
 });
@@ -1216,10 +1171,7 @@ test("supersession-edge-simulation: artifact reader + writer round-trip is byte-
     const parsed = JSON.parse(text1) as SupersessionRerankReport;
     assert.equal(parsed.sourceVariant, "synthetic");
     assert.equal(parsed.temporalQueryCount, 1);
-    assert.equal(
-      parsed.variants.length,
-      BUILTIN_SUPERSESSION_RERANK_VARIANTS.length,
-    );
+    assert.equal(parsed.variants.length, BUILTIN_SUPERSESSION_RERANK_VARIANTS.length);
     // The `metadata-simulation-stale-id-derived`
     // variant's `staleLikeIds` is the JSON
     // serialization of the `Set` (an empty
@@ -1228,12 +1180,10 @@ test("supersession-edge-simulation: artifact reader + writer round-trip is byte-
     // design; the in-memory runner builds the
     // set from the built-in table.
     const staleIdRow = parsed.variants.find(
-      (r) => r.variant.id === "metadata-simulation-stale-id-derived",
+      (r) => r.variant.id === "metadata-simulation-stale-id-derived"
     );
     assert.ok(staleIdRow);
-    if (
-      staleIdRow!.variant.rule.kind === "metadata-simulation-stale-id-derived"
-    ) {
+    if (staleIdRow!.variant.rule.kind === "metadata-simulation-stale-id-derived") {
       assert.deepEqual(staleIdRow!.variant.rule.staleLikeIds, {});
     }
   } finally {
@@ -1250,7 +1200,7 @@ test("supersession-edge-simulation: buildSupersessionRerankVariantRow is consist
     { queryId: "q1", expectedIds: [1], currentTruthIds: [1], topIds: [21, 1, 5, 6, 7] },
   ]);
   const oraclePromote = BUILTIN_SUPERSESSION_RERANK_VARIANTS.find(
-    (v) => v.id === "oracle-current-truth-promote-all",
+    (v) => v.id === "oracle-current-truth-promote-all"
   )!;
   const row = buildSupersessionRerankVariantRow({
     variant: oraclePromote,
@@ -1278,9 +1228,7 @@ test("supersession-edge-simulation: aggregateSupersessionRerankPerQuery is consi
       labels: ["divergentTemporal"],
     },
   ]);
-  const baseline = BUILTIN_SUPERSESSION_RERANK_VARIANTS.find(
-    (v) => v.id === "baseline-no-rerank",
-  )!;
+  const baseline = BUILTIN_SUPERSESSION_RERANK_VARIANTS.find((v) => v.id === "baseline-no-rerank")!;
   const m = evaluateSupersessionRerankVariant({
     variant: baseline,
     evals,
@@ -1297,9 +1245,7 @@ test("supersession-edge-simulation: evals/queries length mismatch throws", () =>
   const { evals, queries } = mkQueryEval([
     { queryId: "q1", expectedIds: [1], currentTruthIds: [1], topIds: [1] },
   ]);
-  const baseline = BUILTIN_SUPERSESSION_RERANK_VARIANTS.find(
-    (v) => v.id === "baseline-no-rerank",
-  )!;
+  const baseline = BUILTIN_SUPERSESSION_RERANK_VARIANTS.find((v) => v.id === "baseline-no-rerank")!;
   assert.throws(
     () =>
       evaluateSupersessionRerankVariant({
@@ -1307,7 +1253,7 @@ test("supersession-edge-simulation: evals/queries length mismatch throws", () =>
         evals,
         queries: [...queries, ...queries],
       }),
-    /evals\.length/,
+    /evals\.length/
   );
 });
 
@@ -1315,9 +1261,7 @@ test("supersession-edge-simulation: evals/queries id mismatch throws", () => {
   const { evals, queries } = mkQueryEval([
     { queryId: "q1", expectedIds: [1], currentTruthIds: [1], topIds: [1] },
   ]);
-  const baseline = BUILTIN_SUPERSESSION_RERANK_VARIANTS.find(
-    (v) => v.id === "baseline-no-rerank",
-  )!;
+  const baseline = BUILTIN_SUPERSESSION_RERANK_VARIANTS.find((v) => v.id === "baseline-no-rerank")!;
   const corrupted = [{ ...queries[0]!, id: "different" }];
   assert.throws(
     () =>
@@ -1326,7 +1270,7 @@ test("supersession-edge-simulation: evals/queries id mismatch throws", () => {
         evals,
         queries: corrupted,
       }),
-    /does not match/,
+    /does not match/
   );
 });
 
@@ -1335,16 +1279,11 @@ test("supersession-edge-simulation: evals/queries id mismatch throws", () => {
 // ---------------------------------------------------------------------------
 
 test("supersession-edge-simulation: per-query alignment with prior diagnostic on the real artifact", () => {
-  const baselinePath = findMostRecentArtifact(
-    ".curion/benchmark",
-    "retrieval-baseline-",
-  );
+  const baselinePath = findMostRecentArtifact(".curion/benchmark", "retrieval-baseline-");
   if (!baselinePath) return;
   const artifact = readBenchmarkArtifact(baselinePath);
   const queries = alignQueriesToEvals(artifact.evals);
-  const baseline = BUILTIN_SUPERSESSION_RERANK_VARIANTS.find(
-    (v) => v.id === "baseline-no-rerank",
-  )!;
+  const baseline = BUILTIN_SUPERSESSION_RERANK_VARIANTS.find((v) => v.id === "baseline-no-rerank")!;
   const m = evaluateSupersessionRerankVariant({
     variant: baseline,
     evals: artifact.evals,
@@ -1372,18 +1311,15 @@ test("supersession-edge-simulation: combined metadata-simulation variant closes 
   // variant's `currentTruthAt1Delta` (the
   // combined variant subsumes the demote
   // rule).
-  const baselinePath = findMostRecentArtifact(
-    ".curion/benchmark",
-    "retrieval-baseline-",
-  );
+  const baselinePath = findMostRecentArtifact(".curion/benchmark", "retrieval-baseline-");
   if (!baselinePath) return;
   const artifact = readBenchmarkArtifact(baselinePath);
   const queries = alignQueriesToEvals(artifact.evals);
   const demote = BUILTIN_SUPERSESSION_RERANK_VARIANTS.find(
-    (v) => v.id === "metadata-simulation-supersededBy-demote",
+    (v) => v.id === "metadata-simulation-supersededBy-demote"
   )!;
   const combined = BUILTIN_SUPERSESSION_RERANK_VARIANTS.find(
-    (v) => v.id === "metadata-simulation-combined",
+    (v) => v.id === "metadata-simulation-combined"
   )!;
   const demoteM = evaluateSupersessionRerankVariant({
     variant: demote,
@@ -1397,7 +1333,7 @@ test("supersession-edge-simulation: combined metadata-simulation variant closes 
   });
   assert.ok(
     combinedM.currentTruthAt1Delta >= demoteM.currentTruthAt1Delta,
-    "the combined metadata-simulation variant should recover at least as many queries as the demote-only variant",
+    "the combined metadata-simulation variant should recover at least as many queries as the demote-only variant"
   );
 });
 
@@ -1427,16 +1363,8 @@ test("supersession-edge-simulation: semantic overlay cross-reference is well-for
   assert.equal(report.semanticOverlay!.covered, 2);
   assert.equal(report.semanticOverlay!.hit, 1);
   assert.equal(report.semanticOverlay!.miss, 1);
-  assert.equal(
-    report.semanticOverlay!.recoveredByVariant[
-      "oracle-current-truth-promote-all"
-    ],
-    1,
-  );
-  assert.equal(
-    report.semanticOverlay!.recoveredByVariant["baseline-no-rerank"],
-    0,
-  );
+  assert.equal(report.semanticOverlay!.recoveredByVariant["oracle-current-truth-promote-all"], 1);
+  assert.equal(report.semanticOverlay!.recoveredByVariant["baseline-no-rerank"], 0);
 });
 
 test("supersession-edge-simulation: buildSupersessionRerankReport with no semantic overlay omits the field", () => {

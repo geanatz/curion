@@ -54,60 +54,40 @@
  * `.curion/benchmark/`).
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { test } from "node:test";
 
+import { classifyFalseAbstention } from "../src/benchmark/false-abstention-damage.js";
+import type { AbstentionSignals } from "../src/benchmark/metrics.js";
 import {
   BUILTIN_NO_ANSWER_POLICIES,
-  buildNoAnswerPolicyPerQuery,
-  evaluateNoAnswerPolicy,
-  type NoAnswerPolicy,
   type NoAnswerPolicyPerQuery,
+  evaluateNoAnswerPolicy,
 } from "../src/benchmark/no-answer-abstention.js";
-import {
-  BUILTIN_PARAPHRASE_RECOVERY_VARIANTS,
-  BASELINE_POLICY_ID,
-  computeParaphraseRecoveryVariantMetrics,
-  computeSafetyVerdict,
-  evaluateParaphraseRecoveryVariant,
-  formatParaphraseRecoveryReport,
-  runParaphraseRecoveryExperiment,
-  type ParaphraseRecoveryDecision,
-  type ParaphraseRecoveryEscape,
-  type ParaphraseRecoveryReport,
-  type ParaphraseRecoveryVariant,
-} from "../src/benchmark/paraphrase-recovery.js";
-import { classifyFalseAbstention } from "../src/benchmark/false-abstention-damage.js";
-import {
-  evaluateQuery,
-  type AbstentionSignals,
-  type QueryEval,
-} from "../src/benchmark/metrics.js";
-import {
-  BENCHMARK_QUERIES,
-  type BenchmarkQuery,
-} from "../src/benchmark/queries.js";
-import { rankLexical } from "../src/retrieval/lexical.js";
-import {
-  buildCandidates,
-  runRetrievalBenchmark,
-} from "../src/benchmark/retrieval-runner.js";
-import { BENCHMARK_RECORDS } from "../src/benchmark/corpus.js";
-import { buildCorpusTokenSets } from "../src/benchmark/query-shapes.js";
-import { PUBLIC_TOOL_NAMES } from "../src/server.js";
 import {
   findParaphraseRecoveryMostRecentArtifact,
   parseParaphraseRecoveryCliArgs,
   readParaphraseRecoveryNoAnswerArtifact,
   readParaphraseRecoverySemanticEvidenceFile,
-  reconstructPerQuery,
   runParaphraseRecoveryAnalysis,
   runParaphraseRecoveryCli,
   writeParaphraseRecoveryReport,
 } from "../src/benchmark/paraphrase-recovery-runner.js";
+import {
+  BASELINE_POLICY_ID,
+  BUILTIN_PARAPHRASE_RECOVERY_VARIANTS,
+  type ParaphraseRecoveryReport,
+  type ParaphraseRecoveryVariant,
+  computeParaphraseRecoveryVariantMetrics,
+  computeSafetyVerdict,
+  evaluateParaphraseRecoveryVariant,
+  formatParaphraseRecoveryReport,
+  runParaphraseRecoveryExperiment,
+} from "../src/benchmark/paraphrase-recovery.js";
+import { PUBLIC_TOOL_NAMES } from "../src/server.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -149,7 +129,7 @@ function mkPerQuery(
     rank1?: boolean;
     currentTruthAt1?: boolean;
     hitAt5?: boolean;
-  }>,
+  }>
 ): NoAnswerPolicyPerQuery[] {
   return specs.map((s) => {
     const signals: AbstentionSignals = {
@@ -197,9 +177,7 @@ function mkPerQuery(
  * synthetic end-to-end tests so the runner
  * has a real in-memory artifact to consume.
  */
-function mkArtifact(
-  perQuery: ReadonlyArray<NoAnswerPolicyPerQuery>,
-): {
+function mkArtifact(perQuery: ReadonlyArray<NoAnswerPolicyPerQuery>): {
   generatedAt: string;
   config: {
     recordCount: number;
@@ -248,7 +226,7 @@ function mkArtifact(
 test("paraphrase-recovery: built-in variant table is well-formed and has a baseline", () => {
   assert.ok(
     BUILTIN_PARAPHRASE_RECOVERY_VARIANTS.length >= 3,
-    `at least baseline + production-like + fixture-shaped variants must be present, got ${BUILTIN_PARAPHRASE_RECOVERY_VARIANTS.length}`,
+    `at least baseline + production-like + fixture-shaped variants must be present, got ${BUILTIN_PARAPHRASE_RECOVERY_VARIANTS.length}`
   );
   // The first variant is the baseline.
   const first = BUILTIN_PARAPHRASE_RECOVERY_VARIANTS[0]!;
@@ -258,22 +236,15 @@ test("paraphrase-recovery: built-in variant table is well-formed and has a basel
   // Every variant has a non-empty id + description.
   for (const v of BUILTIN_PARAPHRASE_RECOVERY_VARIANTS) {
     assert.ok(v.id.length > 0, `variant id must be non-empty`);
-    assert.ok(
-      v.description.length > 0,
-      `variant description must be non-empty for ${v.id}`,
-    );
+    assert.ok(v.description.length > 0, `variant description must be non-empty for ${v.id}`);
     assert.ok(
       ["production-like", "fixture-shaped", "oracle"].includes(v.category),
-      `variant category must be one of the three documented categories for ${v.id}`,
+      `variant category must be one of the three documented categories for ${v.id}`
     );
   }
   // Ids are unique.
   const ids = new Set(BUILTIN_PARAPHRASE_RECOVERY_VARIANTS.map((v) => v.id));
-  assert.equal(
-    ids.size,
-    BUILTIN_PARAPHRASE_RECOVERY_VARIANTS.length,
-    "variant ids must be unique",
-  );
+  assert.equal(ids.size, BUILTIN_PARAPHRASE_RECOVERY_VARIANTS.length, "variant ids must be unique");
 });
 
 test("paraphrase-recovery: built-in variant categories are honest about deployability", () => {
@@ -285,44 +256,35 @@ test("paraphrase-recovery: built-in variant categories are honest about deployab
       assert.notEqual(
         v.escape.kind,
         "paraphrase-family-rank1-or-hit5",
-        `production-like variant ${v.id} must NOT use the fixture-shaped family gate`,
+        `production-like variant ${v.id} must NOT use the fixture-shaped family gate`
       );
       assert.notEqual(
         v.escape.kind,
         "paraphrase-fixture-label-rank1-or-hit5",
-        `production-like variant ${v.id} must NOT use the fixture-truth label gate`,
+        `production-like variant ${v.id} must NOT use the fixture-truth label gate`
       );
     }
     if (v.escape.kind === "paraphrase-family-rank1-or-hit5") {
       assert.equal(
         v.category,
         "fixture-shaped",
-        `family-gated variant ${v.id} must be marked fixture-shaped, not production-like`,
+        `family-gated variant ${v.id} must be marked fixture-shaped, not production-like`
       );
     }
     if (v.escape.kind === "paraphrase-fixture-label-rank1-or-hit5") {
       assert.equal(
         v.category,
         "oracle",
-        `fixture-label-gated variant ${v.id} must be marked oracle, not production-like`,
+        `fixture-label-gated variant ${v.id} must be marked oracle, not production-like`
       );
     }
   }
 });
 
 test("paraphrase-recovery: baseline policy id resolves to a built-in no-answer policy", () => {
-  const policy = BUILTIN_NO_ANSWER_POLICIES.find(
-    (p) => p.id === BASELINE_POLICY_ID,
-  );
-  assert.ok(
-    policy,
-    `baseline policy id ${BASELINE_POLICY_ID} must be a real built-in policy`,
-  );
-  assert.equal(
-    policy.category,
-    "production-like",
-    "baseline must be a production-like policy",
-  );
+  const policy = BUILTIN_NO_ANSWER_POLICIES.find((p) => p.id === BASELINE_POLICY_ID);
+  assert.ok(policy, `baseline policy id ${BASELINE_POLICY_ID} must be a real built-in policy`);
+  assert.equal(policy.category, "production-like", "baseline must be a production-like policy");
 });
 
 // ---------------------------------------------------------------------------
@@ -330,9 +292,7 @@ test("paraphrase-recovery: baseline policy id resolves to a built-in no-answer p
 // ---------------------------------------------------------------------------
 
 test("paraphrase-recovery: detector-rank1-or-hit5 escape requires BOTH the detector flag and a hit", () => {
-  const baseline = BUILTIN_NO_ANSWER_POLICIES.find(
-    (p) => p.id === BASELINE_POLICY_ID,
-  )!;
+  const baseline = BUILTIN_NO_ANSWER_POLICIES.find((p) => p.id === BASELINE_POLICY_ID)!;
   // Paraphrase flagged AND rank1 -> escape fires.
   let perQuery = mkPerQuery([
     {
@@ -347,16 +307,14 @@ test("paraphrase-recovery: detector-rank1-or-hit5 escape requires BOTH the detec
     },
   ]);
   let decisions = evaluateParaphraseRecoveryVariant(
-    BUILTIN_PARAPHRASE_RECOVERY_VARIANTS.find(
-      (v) => v.id === "paraphrase-detector-rank1-or-hit5",
-    )!,
+    BUILTIN_PARAPHRASE_RECOVERY_VARIANTS.find((v) => v.id === "paraphrase-detector-rank1-or-hit5")!,
     baseline,
-    perQuery,
+    perQuery
   );
   assert.equal(
     decisions[0]!.abstain,
     false,
-    "escape must fire: paraphrase flagged + rank1 === true",
+    "escape must fire: paraphrase flagged + rank1 === true"
   );
   // Paraphrase flagged BUT rank1=false, hit@5=false -> escape does not fire.
   perQuery = mkPerQuery([
@@ -372,16 +330,14 @@ test("paraphrase-recovery: detector-rank1-or-hit5 escape requires BOTH the detec
     },
   ]);
   decisions = evaluateParaphraseRecoveryVariant(
-    BUILTIN_PARAPHRASE_RECOVERY_VARIANTS.find(
-      (v) => v.id === "paraphrase-detector-rank1-or-hit5",
-    )!,
+    BUILTIN_PARAPHRASE_RECOVERY_VARIANTS.find((v) => v.id === "paraphrase-detector-rank1-or-hit5")!,
     baseline,
-    perQuery,
+    perQuery
   );
   assert.equal(
     decisions[0]!.abstain,
     true,
-    "escape must NOT fire: paraphrase flagged but rank1=false, hit@5=false",
+    "escape must NOT fire: paraphrase flagged but rank1=false, hit@5=false"
   );
   // Not paraphrase-flagged but rank1=true -> escape does not fire.
   perQuery = mkPerQuery([
@@ -398,25 +354,21 @@ test("paraphrase-recovery: detector-rank1-or-hit5 escape requires BOTH the detec
     },
   ]);
   decisions = evaluateParaphraseRecoveryVariant(
-    BUILTIN_PARAPHRASE_RECOVERY_VARIANTS.find(
-      (v) => v.id === "paraphrase-detector-rank1-or-hit5",
-    )!,
+    BUILTIN_PARAPHRASE_RECOVERY_VARIANTS.find((v) => v.id === "paraphrase-detector-rank1-or-hit5")!,
     baseline,
-    perQuery,
+    perQuery
   );
   assert.equal(
     decisions[0]!.abstain,
     true,
-    "escape must NOT fire: not paraphrase flagged, even though rank1 === true",
+    "escape must NOT fire: not paraphrase flagged, even though rank1 === true"
   );
 });
 
 test("paraphrase-recovery: detector-rank1-only escape requires BOTH the detector flag and rank1", () => {
-  const baseline = BUILTIN_NO_ANSWER_POLICIES.find(
-    (p) => p.id === BASELINE_POLICY_ID,
-  )!;
+  const baseline = BUILTIN_NO_ANSWER_POLICIES.find((p) => p.id === BASELINE_POLICY_ID)!;
   const variant = BUILTIN_PARAPHRASE_RECOVERY_VARIANTS.find(
-    (v) => v.id === "paraphrase-detector-rank1-only",
+    (v) => v.id === "paraphrase-detector-rank1-only"
   )!;
   // hit@5 but not rank1: escape does NOT fire (rank1-only is stricter).
   const perQuery = mkPerQuery([
@@ -431,24 +383,14 @@ test("paraphrase-recovery: detector-rank1-only escape requires BOTH the detector
       sufficiencyLabel: "insufficient",
     },
   ]);
-  const decisions = evaluateParaphraseRecoveryVariant(
-    variant,
-    baseline,
-    perQuery,
-  );
-  assert.equal(
-    decisions[0]!.abstain,
-    true,
-    "rank1-only escape must NOT fire on hit@5-only",
-  );
+  const decisions = evaluateParaphraseRecoveryVariant(variant, baseline, perQuery);
+  assert.equal(decisions[0]!.abstain, true, "rank1-only escape must NOT fire on hit@5-only");
 });
 
 test("paraphrase-recovery: loose-threshold escape requires BOTH the detector flag and a score in band", () => {
-  const baseline = BUILTIN_NO_ANSWER_POLICIES.find(
-    (p) => p.id === BASELINE_POLICY_ID,
-  )!;
+  const baseline = BUILTIN_NO_ANSWER_POLICIES.find((p) => p.id === BASELINE_POLICY_ID)!;
   const variant = BUILTIN_PARAPHRASE_RECOVERY_VARIANTS.find(
-    (v) => v.id === "paraphrase-detector-loose-threshold-0.20",
+    (v) => v.id === "paraphrase-detector-loose-threshold-0.20"
   )!;
   // Score in band (0.25) AND paraphrase flagged -> escape fires.
   let perQuery = mkPerQuery([
@@ -467,7 +409,7 @@ test("paraphrase-recovery: loose-threshold escape requires BOTH the detector fla
   assert.equal(
     decisions[0]!.abstain,
     false,
-    "loose-threshold escape must fire: paraphrase + 0.25 (in 0.20-0.30 band)",
+    "loose-threshold escape must fire: paraphrase + 0.25 (in 0.20-0.30 band)"
   );
   // Score below band (0.15) AND paraphrase flagged -> escape does NOT fire.
   perQuery = mkPerQuery([
@@ -486,7 +428,7 @@ test("paraphrase-recovery: loose-threshold escape requires BOTH the detector fla
   assert.equal(
     decisions[0]!.abstain,
     true,
-    "loose-threshold escape must NOT fire: paraphrase + 0.15 (below lowerBound 0.20)",
+    "loose-threshold escape must NOT fire: paraphrase + 0.15 (below lowerBound 0.20)"
   );
   // Score at threshold 0.30 (in the band 0.20-0.30, the escape is a "suppress if band" condition) -> escape DOES fire (suppresses the baseline's abstention).
   perQuery = mkPerQuery([
@@ -505,7 +447,7 @@ test("paraphrase-recovery: loose-threshold escape requires BOTH the detector fla
   assert.equal(
     decisions[0]!.abstain,
     false,
-    "loose-threshold escape must fire: topScore 0.30 (in 0.20-0.30 band) suppresses the baseline's score-or-sufficiency abstention",
+    "loose-threshold escape must fire: topScore 0.30 (in 0.20-0.30 band) suppresses the baseline's score-or-sufficiency abstention"
   );
   // Score very high (0.5) -> baseline doesn't abstain; variant also retains (escape is a no-op).
   perQuery = mkPerQuery([
@@ -524,16 +466,14 @@ test("paraphrase-recovery: loose-threshold escape requires BOTH the detector fla
   assert.equal(
     decisions[0]!.abstain,
     false,
-    "loose-threshold escape: baseline doesn't abstain on topScore=0.5 + sufficient; variant also retains",
+    "loose-threshold escape: baseline doesn't abstain on topScore=0.5 + sufficient; variant also retains"
   );
 });
 
 test("paraphrase-recovery: family-gated escape requires family==='paraphrase' (fixture-shaped)", () => {
-  const baseline = BUILTIN_NO_ANSWER_POLICIES.find(
-    (p) => p.id === BASELINE_POLICY_ID,
-  )!;
+  const baseline = BUILTIN_NO_ANSWER_POLICIES.find((p) => p.id === BASELINE_POLICY_ID)!;
   const variant = BUILTIN_PARAPHRASE_RECOVERY_VARIANTS.find(
-    (v) => v.id === "paraphrase-family-rank1-or-hit5",
+    (v) => v.id === "paraphrase-family-rank1-or-hit5"
   )!;
   // family='paraphrase' + rank1 -> fires.
   let perQuery = mkPerQuery([
@@ -552,7 +492,7 @@ test("paraphrase-recovery: family-gated escape requires family==='paraphrase' (f
   assert.equal(
     decisions[0]!.abstain,
     false,
-    "family-gated escape must fire: family='paraphrase' + rank1",
+    "family-gated escape must fire: family='paraphrase' + rank1"
   );
   // family='orientation' + rank1 -> does NOT fire (no family match).
   perQuery = mkPerQuery([
@@ -572,16 +512,14 @@ test("paraphrase-recovery: family-gated escape requires family==='paraphrase' (f
   assert.equal(
     decisions[0]!.abstain,
     true,
-    "family-gated escape must NOT fire: family='orientation' (even with detector flags)",
+    "family-gated escape must NOT fire: family='orientation' (even with detector flags)"
   );
 });
 
 test("paraphrase-recovery: fixture-label-gated escape requires the explicit label (oracle)", () => {
-  const baseline = BUILTIN_NO_ANSWER_POLICIES.find(
-    (p) => p.id === BASELINE_POLICY_ID,
-  )!;
+  const baseline = BUILTIN_NO_ANSWER_POLICIES.find((p) => p.id === BASELINE_POLICY_ID)!;
   const variant = BUILTIN_PARAPHRASE_RECOVERY_VARIANTS.find(
-    (v) => v.id === "paraphrase-fixture-label-rank1-or-hit5",
+    (v) => v.id === "paraphrase-fixture-label-rank1-or-hit5"
   )!;
   // Labeled + rank1 -> fires.
   let perQuery = mkPerQuery([
@@ -600,7 +538,7 @@ test("paraphrase-recovery: fixture-label-gated escape requires the explicit labe
   assert.equal(
     decisions[0]!.abstain,
     false,
-    "fixture-label escape must fire: adversarialParaphrase + rank1",
+    "fixture-label escape must fire: adversarialParaphrase + rank1"
   );
   // nearMissCurrentCluster label + rank1 -> fires.
   perQuery = mkPerQuery([
@@ -619,7 +557,7 @@ test("paraphrase-recovery: fixture-label-gated escape requires the explicit labe
   assert.equal(
     decisions[0]!.abstain,
     false,
-    "fixture-label escape must fire: nearMissCurrentCluster + rank1",
+    "fixture-label escape must fire: nearMissCurrentCluster + rank1"
   );
   // Unlabeled + rank1 -> does NOT fire.
   perQuery = mkPerQuery([
@@ -639,7 +577,7 @@ test("paraphrase-recovery: fixture-label-gated escape requires the explicit labe
   assert.equal(
     decisions[0]!.abstain,
     true,
-    "fixture-label escape must NOT fire: detector flagged but no explicit label",
+    "fixture-label escape must NOT fire: detector flagged but no explicit label"
   );
 });
 
@@ -648,9 +586,7 @@ test("paraphrase-recovery: fixture-label-gated escape requires the explicit labe
 // ---------------------------------------------------------------------------
 
 test("paraphrase-recovery: variant is one-way suppression (cannot introduce new abstention)", () => {
-  const baseline = BUILTIN_NO_ANSWER_POLICIES.find(
-    (p) => p.id === BASELINE_POLICY_ID,
-  )!;
+  const baseline = BUILTIN_NO_ANSWER_POLICIES.find((p) => p.id === BASELINE_POLICY_ID)!;
   // A query that the baseline would retain
   // (high score, no insufficiency) is also
   // retained by the variant, regardless of
@@ -685,7 +621,7 @@ test("paraphrase-recovery: variant is one-way suppression (cannot introduce new 
       assert.equal(
         d.abstain,
         false,
-        `variant ${v.id} must NOT introduce a new abstention on a query the baseline would retain (queryId=${d.queryId})`,
+        `variant ${v.id} must NOT introduce a new abstention on a query the baseline would retain (queryId=${d.queryId})`
       );
     }
   }
@@ -773,9 +709,7 @@ test("paraphrase-recovery: safety verdict explanation mentions the reason", () =
 // ---------------------------------------------------------------------------
 
 test("paraphrase-recovery: per-variant metrics math (positive abstention rate, recoveredFps)", () => {
-  const baseline = BUILTIN_NO_ANSWER_POLICIES.find(
-    (p) => p.id === BASELINE_POLICY_ID,
-  )!;
+  const baseline = BUILTIN_NO_ANSWER_POLICIES.find((p) => p.id === BASELINE_POLICY_ID)!;
   // Synthetic: 1 baseline-FP (paraphrase, flagged,
   // rank1) + 1 baseline-TN (no FP, no abstention)
   // + 1 no-answer query that is correctly
@@ -809,13 +743,9 @@ test("paraphrase-recovery: per-variant metrics math (positive abstention rate, r
     },
   ]);
   const variant = BUILTIN_PARAPHRASE_RECOVERY_VARIANTS.find(
-    (v) => v.id === "paraphrase-detector-rank1-or-hit5",
+    (v) => v.id === "paraphrase-detector-rank1-or-hit5"
   )!;
-  const decisions = evaluateParaphraseRecoveryVariant(
-    variant,
-    baseline,
-    perQuery,
-  );
+  const decisions = evaluateParaphraseRecoveryVariant(variant, baseline, perQuery);
   // The baseline decision is needed by the
   // metric computer; we re-evaluate here for
   // determinism. The function does it
@@ -824,13 +754,9 @@ test("paraphrase-recovery: per-variant metrics math (positive abstention rate, r
   // artifact, so we compute it ourselves.
   const baselineDecisions = evaluateNoAnswerPolicy(baseline, perQuery);
   const baselineMetrics = {
-    noAnswerAbstained: baselineDecisions.filter(
-      (d) => !d.isPositive && d.abstain,
-    ).length,
+    noAnswerAbstained: baselineDecisions.filter((d) => !d.isPositive && d.abstain).length,
     noAnswerAbstainedRate: 1.0,
-    positiveAbstained: baselineDecisions.filter(
-      (d) => d.isPositive && d.abstain,
-    ).length,
+    positiveAbstained: baselineDecisions.filter((d) => d.isPositive && d.abstain).length,
     positiveAbstainedRate: 1 / 2,
     hitAt5Retained: 1,
     rank1Retained: 1,
@@ -851,23 +777,17 @@ test("paraphrase-recovery: per-variant metrics math (positive abstention rate, r
   // query), kept the no-answer query abstained,
   // and the TN remained retained.
   assert.equal(metrics.recoveredFps, 1, "should recover the 1 paraphrase FP");
-  assert.equal(
-    metrics.noAnswerAbstainedRate,
-    1.0,
-    "no-answer TNR must be preserved",
-  );
+  assert.equal(metrics.noAnswerAbstainedRate, 1.0, "no-answer TNR must be preserved");
   assert.equal(metrics.positiveAbstainedRate, 0, "no FPs remain");
   assert.equal(metrics.verdict, "safe");
   // Family rollup
   assert.ok(
     metrics.recoveredByFamily["paraphrase"] === 1,
-    "paraphrase family recovered count must be 1",
+    "paraphrase family recovered count must be 1"
   );
   // Recovered FP details include the
   // query id.
-  const recoveredDecisions = decisions.filter(
-    (d) => d.recoveredFp === true,
-  );
+  const recoveredDecisions = decisions.filter((d) => d.recoveredFp === true);
   assert.equal(recoveredDecisions.length, 1);
   assert.equal(recoveredDecisions[0]!.queryId, "fp-1");
 });
@@ -877,9 +797,7 @@ test("paraphrase-recovery: per-variant metrics math (positive abstention rate, r
 // ---------------------------------------------------------------------------
 
 test("paraphrase-recovery: end-to-end on synthetic artifact (paraphrase FP + honest abstention + TN)", () => {
-  const baseline = BUILTIN_NO_ANSWER_POLICIES.find(
-    (p) => p.id === BASELINE_POLICY_ID,
-  )!;
+  const baseline = BUILTIN_NO_ANSWER_POLICIES.find((p) => p.id === BASELINE_POLICY_ID)!;
   // Two FPs the baseline would make: one
   // paraphrase-detector (recoverable by
   // production-like escape) and one
@@ -948,33 +866,25 @@ test("paraphrase-recovery: end-to-end on synthetic artifact (paraphrase FP + hon
   // The baseline false-abstained total is
   // 3 (the 2 paraphrase FPs + the 1
   // orientation FP).
-  assert.equal(
-    report.baselineMetrics.falseAbstainedTotal,
-    3,
-    "baseline should have 3 FPs",
-  );
+  assert.equal(report.baselineMetrics.falseAbstainedTotal, 3, "baseline should have 3 FPs");
   // The detector-rank1-or-hit5 variant
   // recovers 2 FPs (the 2 paraphrase FPs).
   // The orientation FP is NOT recovered
   // (the detector is family-agnostic and the
   // orientation query is not paraphrase-flagged).
   const detectorVariant = report.variants.find(
-    (v) => v.variantId === "paraphrase-detector-rank1-or-hit5",
+    (v) => v.variantId === "paraphrase-detector-rank1-or-hit5"
   )!;
   assert.equal(detectorVariant.recoveredFps, 2);
   assert.equal(detectorVariant.verdict, "safe");
-  assert.equal(
-    detectorVariant.noAnswerAbstainedRate,
-    1.0,
-    "no-answer TNR must be preserved",
-  );
+  assert.equal(detectorVariant.noAnswerAbstainedRate, 1.0, "no-answer TNR must be preserved");
   // The family-rollup for the detector variant
   // is concentrated on the paraphrase family.
   assert.equal(detectorVariant.recoveredByFamily["paraphrase"], 2);
   assert.equal(
     detectorVariant.recoveredByFamily["orientation"],
     undefined,
-    "orientation family should have 0 recovered FPs (not in the family rollup)",
+    "orientation family should have 0 recovered FPs (not in the family rollup)"
   );
   // The family-gated escape recovers 3 FPs
   // (all of them — paraphrase + orientation
@@ -991,14 +901,14 @@ test("paraphrase-recovery: end-to-end on synthetic artifact (paraphrase FP + hon
   // on paraphrase-flagged queries, and only
   // the 2 paraphrase queries are flagged).
   const familyVariant = report.variants.find(
-    (v) => v.variantId === "paraphrase-family-rank1-or-hit5",
+    (v) => v.variantId === "paraphrase-family-rank1-or-hit5"
   )!;
   assert.equal(familyVariant.recoveredFps, 2);
   assert.equal(familyVariant.category, "fixture-shaped");
   // The oracle-label escape recovers 0 FPs
   // (no query carries the explicit label).
   const oracleVariant = report.variants.find(
-    (v) => v.variantId === "paraphrase-fixture-label-rank1-or-hit5",
+    (v) => v.variantId === "paraphrase-fixture-label-rank1-or-hit5"
   )!;
   assert.equal(oracleVariant.recoveredFps, 0);
   assert.equal(oracleVariant.verdict, "neutral");
@@ -1171,7 +1081,7 @@ test("paraphrase-recovery: production source tree must NOT import the recovery m
     assert.doesNotMatch(
       src,
       /paraphrase-recovery/,
-      `${rel} must NOT import the paraphrase-recovery module`,
+      `${rel} must NOT import the paraphrase-recovery module`
     );
   }
 });
@@ -1180,7 +1090,7 @@ test("paraphrase-recovery: public MCP API is unchanged (remember + recall only)"
   assert.deepEqual(
     [...PUBLIC_TOOL_NAMES],
     ["remember", "recall"],
-    "public MCP tool surface must remain exactly remember + recall",
+    "public MCP tool surface must remain exactly remember + recall"
   );
 });
 
@@ -1195,7 +1105,7 @@ test("paraphrase-recovery: end-to-end on the real lexical-baseline no-answer art
   // expects on the production corpus.
   const noAnswerPath = findParaphraseRecoveryMostRecentArtifact(
     ".curion/benchmark",
-    "retrieval-no-answer-abstention-",
+    "retrieval-no-answer-abstention-"
   );
   if (!noAnswerPath) {
     // The artifact may not exist on a fresh
@@ -1219,7 +1129,7 @@ test("paraphrase-recovery: end-to-end on the real lexical-baseline no-answer art
   assert.equal(
     report.baselineMetrics.noAnswerAbstainedRate,
     1.0,
-    "baseline no-answer TNR must be 100% on the production corpus",
+    "baseline no-answer TNR must be 100% on the production corpus"
   );
   // The baseline's positive abstention rate
   // is 18.5% (24/130) on the production
@@ -1227,59 +1137,55 @@ test("paraphrase-recovery: end-to-end on the real lexical-baseline no-answer art
   assert.equal(
     report.baselineMetrics.positiveAbstained,
     24,
-    "baseline positive abstained must be 24 on the production corpus",
+    "baseline positive abstained must be 24 on the production corpus"
   );
   // The detector-rank1-or-hit5 variant is
   // production-like.
   const detectorVariant = report.variants.find(
-    (v) => v.variantId === "paraphrase-detector-rank1-or-hit5",
+    (v) => v.variantId === "paraphrase-detector-rank1-or-hit5"
   )!;
-  assert.ok(
-    detectorVariant,
-    "detector-rank1-or-hit5 variant must be present",
-  );
+  assert.ok(detectorVariant, "detector-rank1-or-hit5 variant must be present");
   assert.equal(
     detectorVariant.category,
     "production-like",
-    "detector variant must be production-like",
+    "detector variant must be production-like"
   );
   // The detector variant's verdict is one
   // of the three documented values.
   assert.ok(
     ["safe", "neutral", "unsafe"].includes(detectorVariant.verdict),
-    "detector variant verdict must be safe/neutral/unsafe",
+    "detector variant verdict must be safe/neutral/unsafe"
   );
   // The detector variant's no-answer TNR
   // is preserved (the escape is one-way).
   assert.equal(
     detectorVariant.noAnswerAbstainedRate,
     1.0,
-    "detector variant no-answer TNR must be preserved",
+    "detector variant no-answer TNR must be preserved"
   );
   // The detector variant's positive
   // abstention rate is at most the baseline's
   // (the escape can only reduce it).
   assert.ok(
-    detectorVariant.positiveAbstainedRate <=
-      report.baselineMetrics.positiveAbstainedRate,
-    "detector variant positive abstention rate must be <= baseline",
+    detectorVariant.positiveAbstainedRate <= report.baselineMetrics.positiveAbstainedRate,
+    "detector variant positive abstention rate must be <= baseline"
   );
   // The recovered-FPs count is at most the
   // baseline's false-abstained total.
   assert.ok(
     detectorVariant.recoveredFps <= report.baselineMetrics.falseAbstainedTotal,
-    "recoveredFps must be <= baseline false-abstained total",
+    "recoveredFps must be <= baseline false-abstained total"
   );
   // The family-gated variant is
   // fixture-shaped.
   const familyVariant = report.variants.find(
-    (v) => v.variantId === "paraphrase-family-rank1-or-hit5",
+    (v) => v.variantId === "paraphrase-family-rank1-or-hit5"
   )!;
   assert.ok(familyVariant);
   assert.equal(familyVariant.category, "fixture-shaped");
   // The oracle-label variant is oracle.
   const oracleVariant = report.variants.find(
-    (v) => v.variantId === "paraphrase-fixture-label-rank1-or-hit5",
+    (v) => v.variantId === "paraphrase-fixture-label-rank1-or-hit5"
   )!;
   assert.ok(oracleVariant);
   assert.equal(oracleVariant.category, "oracle");
@@ -1288,12 +1194,12 @@ test("paraphrase-recovery: end-to-end on the real lexical-baseline no-answer art
 test("paraphrase-recovery: end-to-end with semantic evidence on the production corpus", () => {
   const noAnswerPath = findParaphraseRecoveryMostRecentArtifact(
     ".curion/benchmark",
-    "retrieval-no-answer-abstention-",
+    "retrieval-no-answer-abstention-"
   );
   const evidencePath = path.join(
     import.meta.dirname,
     "..",
-    "src/benchmark/data/false-abstention-damage-semantic-evidence.json",
+    "src/benchmark/data/false-abstention-damage-semantic-evidence.json"
   );
   if (!noAnswerPath || !fs.existsSync(evidencePath)) {
     return;
@@ -1308,16 +1214,16 @@ test("paraphrase-recovery: end-to-end with semantic evidence on the production c
   assert.equal(
     report.config.evidenceSource,
     "embeddinggemma-hybrid-dense-176-queries-v1",
-    "evidence source must surface on the config block",
+    "evidence source must surface on the config block"
   );
   // The detector variant's recovered-FP
   // entries (when any) carry the
   // semanticAlsoMisses annotation.
   const detectorVariant = report.variants.find(
-    (v) => v.variantId === "paraphrase-detector-rank1-or-hit5",
+    (v) => v.variantId === "paraphrase-detector-rank1-or-hit5"
   )!;
   const detectorRecovered = report.recoveredByVariant.find(
-    (r) => r.variantId === "paraphrase-detector-rank1-or-hit5",
+    (r) => r.variantId === "paraphrase-detector-rank1-or-hit5"
   )!;
   for (const e of detectorRecovered.entries) {
     // The annotation is set on entries that
@@ -1330,10 +1236,7 @@ test("paraphrase-recovery: end-to-end with semantic evidence on the production c
       // dense ranker missed; a denser
       // ranker is not a silver bullet for
       // this entry.
-      assert.ok(
-        e.queryId.length > 0,
-        "also-miss entry must have a queryId",
-      );
+      assert.ok(e.queryId.length > 0, "also-miss entry must have a queryId");
     }
   }
   // The detector variant is structurally
@@ -1345,7 +1248,7 @@ test("paraphrase-recovery: end-to-end with semantic evidence on the production c
   assert.notEqual(
     detectorVariant.verdict,
     "unsafe",
-    "detector variant must NOT be unsafe (the escape is one-way; TNR is preserved by construction)",
+    "detector variant must NOT be unsafe (the escape is one-way; TNR is preserved by construction)"
   );
 });
 
@@ -1450,10 +1353,7 @@ test("paraphrase-recovery: onlyVariantIds filter restricts the report", () => {
     config: { onlyVariantIds: ["baseline-score-or-sufficiency-insufficient"] },
   });
   assert.equal(report.variants.length, 1);
-  assert.equal(
-    report.variants[0]!.variantId,
-    "baseline-score-or-sufficiency-insufficient",
-  );
+  assert.equal(report.variants[0]!.variantId, "baseline-score-or-sufficiency-insufficient");
 });
 
 // ---------------------------------------------------------------------------
@@ -1513,7 +1413,7 @@ test("paraphrase-recovery: invalid baselinePolicyId throws a loud error", () => 
         baselinePolicyId: "nonexistent-policy",
       }),
     /nonexistent-policy/,
-    "invalid baselinePolicyId must throw a loud error mentioning the bad id",
+    "invalid baselinePolicyId must throw a loud error mentioning the bad id"
   );
 });
 
@@ -1524,7 +1424,7 @@ test("paraphrase-recovery: invalid baselinePolicyId throws a loud error", () => 
 test("paraphrase-recovery: CLI runs end-to-end (no-write mode) and produces a report", async () => {
   const noAnswerPath = findParaphraseRecoveryMostRecentArtifact(
     ".curion/benchmark",
-    "retrieval-no-answer-abstention-",
+    "retrieval-no-answer-abstention-"
   );
   if (!noAnswerPath) return;
   const { report } = await runParaphraseRecoveryCli({
@@ -1548,9 +1448,7 @@ test("paraphrase-recovery: existing no-answer policy table is unchanged (smoke t
   // intact reads this smoke test.
   assert.equal(BUILTIN_NO_ANSWER_POLICIES.length >= 15, true);
   // The baseline policy is in the table.
-  const baseline = BUILTIN_NO_ANSWER_POLICIES.find(
-    (p) => p.id === BASELINE_POLICY_ID,
-  );
+  const baseline = BUILTIN_NO_ANSWER_POLICIES.find((p) => p.id === BASELINE_POLICY_ID);
   assert.ok(baseline);
   assert.equal(baseline.category, "production-like");
   // The baseline has the documented gates.
@@ -1582,9 +1480,7 @@ test("paraphrase-recovery: recovered FP's damage category matches the upstream c
       sufficiencyLabel: "insufficient",
     },
   ]);
-  const baseline = BUILTIN_NO_ANSWER_POLICIES.find(
-    (p) => p.id === BASELINE_POLICY_ID,
-  )!;
+  const baseline = BUILTIN_NO_ANSWER_POLICIES.find((p) => p.id === BASELINE_POLICY_ID)!;
   // Compute the upstream classifier
   // directly to pin the contract. The
   // baseline reason for this query is
@@ -1601,12 +1497,12 @@ test("paraphrase-recovery: recovered FP's damage category matches the upstream c
       rank1: true,
       hitAt5: true,
     },
-    perQuery[0]!,
+    perQuery[0]!
   );
   assert.equal(
     upstreamCategory,
     "multi-gate-conjunction-honest",
-    "baseline's reason includes both gates; classifier returns the multi-gate-honest category",
+    "baseline's reason includes both gates; classifier returns the multi-gate-honest category"
   );
   // The recovery decision uses the same
   // classifier. The recovery decision's
@@ -1614,18 +1510,14 @@ test("paraphrase-recovery: recovered FP's damage category matches the upstream c
   // reason string, so the wiring is
   // exact.
   const variant = BUILTIN_PARAPHRASE_RECOVERY_VARIANTS.find(
-    (v) => v.id === "paraphrase-detector-rank1-or-hit5",
+    (v) => v.id === "paraphrase-detector-rank1-or-hit5"
   )!;
-  const decisions = evaluateParaphraseRecoveryVariant(
-    variant,
-    baseline,
-    perQuery,
-  );
+  const decisions = evaluateParaphraseRecoveryVariant(variant, baseline, perQuery);
   const recovered = decisions.find((d) => d.recoveredFp === true);
   assert.ok(recovered);
   assert.equal(
     recovered.recoveredCategory,
     "multi-gate-conjunction-honest",
-    "recoveredCategory must match the upstream classifier's category for the same input + baseline reason",
+    "recoveredCategory must match the upstream classifier's category for the same input + baseline reason"
   );
 });

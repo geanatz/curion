@@ -25,37 +25,37 @@
  *      leak into production.
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { test } from "node:test";
 
 import { BENCHMARK_RECORDS } from "../src/benchmark/corpus.ts";
+import { aggregateMetrics } from "../src/benchmark/metrics.ts";
 import { BENCHMARK_QUERIES } from "../src/benchmark/queries.ts";
+import { buildCandidates } from "../src/benchmark/retrieval-runner.ts";
 import {
-  cosineSimilarity,
-  embedHashedBagOfWords,
-  HashedBagOfWordsEmbedder,
-  rankVector,
+  formatComparisonReport,
+  isComparisonReport,
+  isSingleVariantReport,
+  parseRetrievalCli,
+  resolveBenchmarkArtifactsDir,
+  runRetrievalBenchmark,
+  writeBenchmarkReport,
+  writeComparisonReport,
+} from "../src/benchmark/retrieval-runner.ts";
+import {
   DEFAULT_VECTOR_THRESHOLD,
+  HashedBagOfWordsEmbedder,
   type VectorEmbedder,
   type VectorEmbedding,
   type VectorRankingOptions,
+  cosineSimilarity,
+  embedHashedBagOfWords,
+  rankVector,
 } from "../src/benchmark/variants/vector.ts";
-import { buildCandidates } from "../src/benchmark/retrieval-runner.ts";
 import type { LexicalCandidate } from "../src/retrieval/lexical.ts";
-import {
-  runRetrievalBenchmark,
-  parseRetrievalCli,
-  isSingleVariantReport,
-  isComparisonReport,
-  resolveBenchmarkArtifactsDir,
-  writeBenchmarkReport,
-  writeComparisonReport,
-  formatComparisonReport,
-} from "../src/benchmark/retrieval-runner.ts";
-import { aggregateMetrics } from "../src/benchmark/metrics.ts";
 import { PUBLIC_TOOL_NAMES } from "../src/server.ts";
 import { walkTs } from "./_helpers/fs-walk.ts";
 
@@ -75,16 +75,13 @@ test("vector embedder: same text always produces the same vector", () => {
     assert.equal(
       a.values[i],
       b.values[i],
-      `determinism failed at bucket ${i}: ${a.values[i]} vs ${b.values[i]}`,
+      `determinism failed at bucket ${i}: ${a.values[i]} vs ${b.values[i]}`
     );
   }
 });
 
 test("vector embedder: L2-normalizes to a unit vector", () => {
-  const v = embedHashedBagOfWords(
-    "Postgres 16 primary data store, TypeScript Node 22",
-    1024,
-  );
+  const v = embedHashedBagOfWords("Postgres 16 primary data store, TypeScript Node 22", 1024);
   // Compute L2 norm.
   let norm = 0;
   for (const x of v.values) norm += x * x;
@@ -92,7 +89,7 @@ test("vector embedder: L2-normalizes to a unit vector", () => {
   // Either zero (empty text) or 1.0 (L2-normalized).
   assert.ok(
     Math.abs(norm - 1) < 1e-9 || norm === 0,
-    `expected unit vector or zero, got norm=${norm}`,
+    `expected unit vector or zero, got norm=${norm}`
   );
 });
 
@@ -231,7 +228,7 @@ test("vector ranker: returns the {id, score}[] top-K shape used by the metrics",
     } else {
       assert.ok(
         a.score > b.score,
-        `score must be descending at index ${i}: ${a.score} vs ${b.score}`,
+        `score must be descending at index ${i}: ${a.score} vs ${b.score}`
       );
     }
   }
@@ -265,10 +262,7 @@ test("vector ranker: threshold is respected (zero threshold passes everything wi
   // result respects the threshold: every returned hit has
   // score >= 0.99.
   for (const h of hits) {
-    assert.ok(
-      h.score >= 0.99,
-      `threshold 0.99 not respected: hit ${h.id} score ${h.score}`,
-    );
+    assert.ok(h.score >= 0.99, `threshold 0.99 not respected: hit ${h.id} score ${h.score}`);
   }
 });
 
@@ -318,7 +312,7 @@ test("vector ranker: accepts a custom embedder (extension-point contract)", () =
   assert.equal(
     hits[0]!.id,
     1,
-    `custom embedder not honored: top hit was ${hits[0]!.id}, expected 1`,
+    `custom embedder not honored: top hit was ${hits[0]!.id}, expected 1`
   );
 });
 
@@ -341,7 +335,7 @@ test("vector ranker: runs in memory and does not write to the project storage", 
     assert.ok(hits.length > 0);
     assert.ok(
       !fs.existsSync(path.join(tmpCwd, ".curion")),
-      "vector ranker must not create a .curion directory in cwd",
+      "vector ranker must not create a .curion directory in cwd"
     );
   } finally {
     process.chdir(prevCwd);
@@ -367,7 +361,7 @@ test("vector ranker: returns a non-empty top-K for any well-formed query (defaul
   for (const h of hits) {
     assert.ok(
       BENCHMARK_RECORDS.some((r) => r.id === h.id),
-      `vector returned non-corpus id: ${h.id}`,
+      `vector returned non-corpus id: ${h.id}`
     );
   }
 });
@@ -379,19 +373,13 @@ test("vector ranker: no-answer TNR is reachable with a positive threshold", () =
   // contract. Use a high threshold (close to 1) to filter out
   // all but the strongest matches.
   const cands = buildCandidates(BENCHMARK_RECORDS);
-  const noAnswerQueries = BENCHMARK_QUERIES.filter(
-    (q) => q.family === "no-answer",
-  );
+  const noAnswerQueries = BENCHMARK_QUERIES.filter((q) => q.family === "no-answer");
   for (const q of noAnswerQueries) {
     const hits = rankVector(q.query, cands, { topK: 5, threshold: 0.99 });
     // With a near-1 threshold, cosine similarity to a random
     // unrelated record is well below 0.99; the no-answer path
     // returns an empty top-K.
-    assert.equal(
-      hits.length,
-      0,
-      `no-answer query ${q.id} unexpectedly matched at threshold 0.99`,
-    );
+    assert.equal(hits.length, 0, `no-answer query ${q.id} unexpectedly matched at threshold 0.99`);
   }
 });
 
@@ -401,10 +389,7 @@ test("vector ranker: no-answer TNR is reachable with a positive threshold", () =
 
 test("runner: --variant vector produces a single-variant report with label `vector-benchmark`", () => {
   const report = runRetrievalBenchmark({ variant: "vector" });
-  assert.ok(
-    isSingleVariantReport(report),
-    "variant=vector must produce a single-variant report",
-  );
+  assert.ok(isSingleVariantReport(report), "variant=vector must produce a single-variant report");
   if (!isSingleVariantReport(report)) return;
   assert.equal(report.variant, "vector-benchmark");
   // Default vector threshold is 0 (no filter) for the reason
@@ -421,7 +406,7 @@ test("runner: --variant vector produces a single-variant report with label `vect
     for (const id of e.topIds) {
       assert.ok(
         BENCHMARK_RECORDS.some((r) => r.id === id),
-        `vector returned non-corpus id: ${id}`,
+        `vector returned non-corpus id: ${id}`
       );
     }
     assert.equal(e.topIds.length, e.topScores.length);
@@ -446,10 +431,7 @@ test("runner: --variant all: per-family metrics for vector match aggregateMetric
   assert.equal(fresh.noAnswerCorrect, vectorSide.metrics.noAnswerCorrect);
   assert.equal(fresh.noAnswerTotal, vectorSide.metrics.noAnswerTotal);
   for (const f of Object.keys(vectorSide.metrics.perFamily)) {
-    assert.deepEqual(
-      vectorSide.metrics.perFamily[f],
-      fresh.perFamily[f],
-    );
+    assert.deepEqual(vectorSide.metrics.perFamily[f], fresh.perFamily[f]);
   }
 });
 
@@ -466,9 +448,7 @@ test("runner: --variant vector respects --only-family and --top-k overrides", ()
   assert.equal(report.variant, "vector-benchmark");
   // The exact family count is computed from BENCHMARK_QUERIES
   // so the assertion is robust to family-set changes.
-  const expectedExactCount = BENCHMARK_QUERIES.filter(
-    (q) => q.family === "exact",
-  ).length;
+  const expectedExactCount = BENCHMARK_QUERIES.filter((q) => q.family === "exact").length;
   assert.equal(report.config.queryCount, expectedExactCount);
   assert.equal(report.config.topK, 3);
   for (const e of report.evals) {
@@ -503,43 +483,33 @@ test("vector variant is benchmark-only: production recall() controller is not mo
   // point: it makes the "benchmark-only" contract visible in
   // CI.
   const recallSrc = fs.readFileSync(
-    path.join(
-      import.meta.dirname,
-      "..",
-      "src",
-      "controller",
-      "recall-controller.ts",
-    ),
-    "utf8",
+    path.join(import.meta.dirname, "..", "src", "controller", "recall-controller.ts"),
+    "utf8"
   );
-  assert.match(
-    recallSrc,
-    /rankLexical/,
-    "recall controller must still import rankLexical",
-  );
+  assert.match(recallSrc, /rankLexical/, "recall controller must still import rankLexical");
   assert.doesNotMatch(
     recallSrc,
     /rankVector/,
-    "recall controller must NOT import rankVector — vector is benchmark-only",
+    "recall controller must NOT import rankVector — vector is benchmark-only"
   );
   const seamSrc = fs.readFileSync(
     path.join(import.meta.dirname, "..", "src", "retrieval", "seam.ts"),
-    "utf8",
+    "utf8"
   );
   assert.doesNotMatch(
     seamSrc,
     /rankVector/,
-    "retrieval/seam.ts must NOT call rankVector — it is the production seam",
+    "retrieval/seam.ts must NOT call rankVector — it is the production seam"
   );
   assert.doesNotMatch(
     seamSrc,
     /benchmark\/variants\/vector/,
-    "retrieval/seam.ts must NOT import the vector benchmark module",
+    "retrieval/seam.ts must NOT import the vector benchmark module"
   );
   // The MCP server must still expose exactly two tools.
   const serverSrc = fs.readFileSync(
     path.join(import.meta.dirname, "..", "src", "server.ts"),
-    "utf8",
+    "utf8"
   );
   assert.match(serverSrc, /"remember"/);
   assert.match(serverSrc, /"recall"/);
@@ -553,7 +523,7 @@ test("vector variant is benchmark-only: production recall() controller is not mo
   assert.deepEqual(
     serverSrc.match(/server\.registerTool\(\s*"(\w+)"/g),
     ['server.registerTool(\n    "remember"', 'server.registerTool(\n    "recall"'],
-    "public MCP tool surface must remain exactly remember + recall",
+    "public MCP tool surface must remain exactly remember + recall"
   );
 });
 
@@ -583,10 +553,10 @@ test("vector variant: only the benchmark runner imports the vector module", () =
     if (allowedImporters.has(file)) continue;
     const src = fs.readFileSync(path.join(root, file), "utf8");
     const importsVectorModule =
-      src.includes("from \"./vector\"") ||
-      src.includes("from \"./vector.js\"") ||
-      src.includes("from \"../benchmark/variants/vector") ||
-      src.includes("from \"../../benchmark/variants/vector");
+      src.includes('from "./vector"') ||
+      src.includes('from "./vector.js"') ||
+      src.includes('from "../benchmark/variants/vector') ||
+      src.includes('from "../../benchmark/variants/vector');
     // Direct symbol usage outside the module's own file is
     // also a leak.
     const usesVectorSymbol =
@@ -594,14 +564,8 @@ test("vector variant: only the benchmark runner imports the vector module", () =
       src.match(/\bsanitizeVectorInput\b/) !== null ||
       src.match(/\bHashedBagOfWordsEmbedder\b/) !== null ||
       src.match(/\bembedHashedBagOfWords\b/) !== null;
-    assert.ok(
-      !importsVectorModule,
-      `unexpected import of vector module in ${file}`,
-    );
-    assert.ok(
-      !usesVectorSymbol,
-      `unexpected vector symbol usage in ${file}`,
-    );
+    assert.ok(!importsVectorModule, `unexpected import of vector module in ${file}`);
+    assert.ok(!usesVectorSymbol, `unexpected vector symbol usage in ${file}`);
   }
 });
 
@@ -622,14 +586,10 @@ test("public MCP contract unchanged: exactly two tools, one text param each", ()
   // `outputSchema`; the public tool surface is unchanged.)
   const serverSrc = fs.readFileSync(
     path.join(import.meta.dirname, "..", "src", "server.ts"),
-    "utf8",
+    "utf8"
   );
   const toolCallCount = (serverSrc.match(/server\.registerTool\(/g) ?? []).length;
-  assert.equal(
-    toolCallCount,
-    2,
-    `server.ts must register exactly 2 tools, found ${toolCallCount}`,
-  );
+  assert.equal(toolCallCount, 2, `server.ts must register exactly 2 tools, found ${toolCallCount}`);
 });
 
 // ---------------------------------------------------------------------------
@@ -698,9 +658,9 @@ test("runner: vector report has no credential-shaped or raw-text fragments", () 
   // authorization header, no sk-/AKIA/glpat shapes.
   assert.ok(
     !/apiKey|authorization|bearer|sk-[A-Za-z0-9_\-]{20,}|AKIA[0-9A-Z]{16}|glpat-[A-Za-z0-9_\-]{20,}/i.test(
-      serialized,
+      serialized
     ),
-    "vector report must not contain credential-shaped fragments",
+    "vector report must not contain credential-shaped fragments"
   );
   // The vector report does NOT carry the corpus summaries or
   // queries; it carries the top-K ids and scores. Confirm by
@@ -709,7 +669,7 @@ test("runner: vector report has no credential-shaped or raw-text fragments", () 
   const sampleSummary = BENCHMARK_RECORDS[0]!.summary.slice(0, 30);
   assert.ok(
     !serialized.includes(sampleSummary),
-    "vector report must not contain the corpus summary text",
+    "vector report must not contain the corpus summary text"
   );
 });
 
@@ -727,7 +687,7 @@ test("runner: parseRetrievalCli accepts --variant vector and rejects unknown val
   // An actually-unknown variant is still rejected.
   assert.throws(
     () => parseRetrievalCli(["--variant", "hybrid-rrf"]),
-    /--variant must be one of lexical\|fts5\|vector\|hybrid\|all/,
+    /--variant must be one of lexical\|fts5\|vector\|hybrid\|all/
   );
 });
 
@@ -744,10 +704,7 @@ test("runner: formatComparisonReport includes the lexical vs fts5 vs vector vs h
     "### vector ###",
     "vector-benchmark",
   ]) {
-    assert.ok(
-      out.includes(section),
-      `comparison report missing section: ${section}`,
-    );
+    assert.ok(out.includes(section), `comparison report missing section: ${section}`);
   }
 });
 

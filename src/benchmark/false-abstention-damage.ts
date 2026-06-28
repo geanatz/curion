@@ -1,268 +1,11 @@
-/**
- * Benchmark-only false-abstention damage analysis.
- *
- * Why this exists:
- *   The prior no-answer abstention / calibration
- *   experiment surfaced a clean production-like
- *   policy (`score-or-sufficiency-insufficient`)
- *   that achieves TNR=100% at 18.5% positive
- *   abstention on the lexical baseline. The damage
- *   is concentrated on `paraphrase` (8/32 = 25%) and
- *   `orientation` (8/26 = 30.8%), with smaller
- *   spillover on `multi-hop` and `temporal`. A
- *   reviewer who wants to know WHY the production-
- *   like policy abstains on those 24 positives
- *   needs a finer-grained reading than the prior
- *   experiment's per-family table provides.
- *
- *   This module is the diagnostic. It consumes the
- *   per-query input the prior experiment
- *   (no-answer-abstention.ts) already builds, and
- *   classifies each false-positive (a positive
- *   query the policy wrongly abstained on) into an
- *   ACTIONABLE category. The category answers
- *   "what would have prevented this false
- *   abstention?": a different score threshold? a
- *   different sufficiency-label rule? a better
- *   ranker? a different gate entirely? a near-miss
- *   the fixture flagged as ambiguous? The
- *   diagnostic is read-only: it never re-ranks,
- *   never calls the provider, and never opens the
- *   network. It is benchmark-only and is NOT
- *   wired into the production `recall(text)`
- *   controller, the public MCP API, or the storage
- *   schema.
- *
- *   The category set is deliberately small and
- *   MUTUALLY EXCLUSIVE (with one priority order so
- *   a query that matches several categories
- *   resolves to the most specific one). The
- *   categories are derived from the per-query
- *   signal block the prior experiment already
- *   records plus the per-query `queryLabels` and
- *   the per-query `rank1` / `hit@5` outcomes. No
- *   new signal is required.
- *
- * What this module does:
- *   - Defines a stable set of damage categories
- *     (see `DamageCategory`).
- *   - Provides a pure, deterministic
- *     `classifyFalseAbstention` helper that maps a
- *     single false-positive to its category.
- *   - Provides `buildFalseAbstentionDamageReport`,
- *     a pure orchestrator that consumes the same
- *     per-query input the prior experiment
- *     consumes, evaluates the recommended
- *     production-like policy, and emits a
- *     `FalseAbstentionDamageReport` with per-
- *     category, per-family, per-reason, and per-
- *     score-band breakdowns.
- *   - Provides `formatFalseAbstentionDamageReport`,
- *     a pure human-readable string formatter. The
- *     formatter is byte-stable for a fixed input.
- *   - Optionally consumes a pre-computed set of
- *     "semantic rank-1 misses" (a queryId set
- *     derived from a separate dense benchmark run
- *     on the same fixture corpus) and adds a
- *     `semantic-evidence` annotation to each FP.
- *     This is HONESTLY marked: the semantic
- *     evidence is a passed-in map, never derived
- *     by this module, and the report surfaces the
- *     "evidence source" string so a reviewer can
- *     see where it came from.
- *
- * What this module does NOT do:
- *   - It does NOT call any provider, any ranker,
- *     or any external service. It consumes the
- *     same per-query input the prior experiment
- *     already builds.
- *   - It does NOT change the production
- *     `recall(text)` controller, the public MCP
- *     API, or the storage schema.
- *   - It does NOT run a new dense embedding
- *     benchmark. If the caller has a pre-computed
- *     semantic-miss set, it can be passed in; if
- *     not, the report is honest about the
- *     unavailability of the semantic evidence.
- *
- * Determinism:
- *   Every function in this module is pure. The
- *   category assignment is a pure function of the
- *   per-query input. The per-category / per-
- *   family / per-reason breakdowns are
- *   deterministic. The human report's column
- *   order is fixed. The on-disk artifact is
- *   byte-stable for a fixed input.
- *
- * Category set (priority order — first match
- * wins):
- *   1. `ranker-empty-recoverable` — the ranker
- *      returned ZERO candidates (topKSize===0,
- *      returnedCount===0). The policy abstained
- *      on the score gate (topScore===0 < 0.30).
- *      If a denser ranker can surface the right
- *      candidate where the lexical ranker could
- *      not, the abstention is recoverable by
- *      candidate generation. This is a sub-case of
- *      `score-threshold-on-real-failure` but is
- *      distinguished because the failure mode is
- *      "ranker returned nothing" — the lexical
- *      ranker's coverage of paraphrased queries
- *      with zero token overlap is a known weak
- *      point, and the recovery is a candidate
- *      generation change, not a policy change.
- *   2. `labeled-near-miss-or-divergent` — the
- *      query carries a `nearMissCurrentCluster`
- *      / `divergentTemporal` /
- *      `adversarialParaphrase` label. The fixture
- *      flagged the query as deliberately
- *      ambiguous; the abstention is the fixture's
- *      intended call. A reviewer who wants to
- *      "recover" these queries is recovering a
- *      fixture adversarial, not a regular query.
- *      The label takes precedence over the
- *      score/sufficiency analysis because the
- *      label is the stronger signal: it
- *      documents that the query is
- *      *designed* to be hard.
- *   3. `score-threshold-on-recoverable` — the
- *      score gate fired AND `rank1===true` (or
- *      `hit@5===true`). The ranker DID return
- *      the right answer at rank 1; the policy's
- *      score threshold is below the rank-1's
- *      score. A different threshold OR a more
- *      discriminating gate (e.g. gap / ratio
- *      conditioned on a "rank-1 looks right"
- *      check) would recover this. Action:
- *      consider raising the score threshold OR
- *      adding a rank-1-check escape.
- *   4. `score-threshold-on-real-failure` — the
- *      score gate fired AND `rank1===false` AND
- *      `hit@5===false`. The lexical ranker
- *      genuinely failed to surface the right
- *      answer; the policy correctly caught the
- *      low-confidence case. The abstention is
- *      honest. Action: a different ranker is
- *      needed, NOT a policy change.
- *   5. `sufficiency-label-honest` — the
- *      sufficiency-label gate fired (and the
- *      score gate did not). The candidate set
- *      does not contain the expected id; the
- *      ranker genuinely failed. The policy is
- *      honest. Action: a different ranker is
- *      needed, NOT a policy change.
- *   6. `multi-gate-conjunction-honest` — both
- *      gates fired (score + sufficiency). The
- *      policy is double-counting a single
- *      underlying ranker failure. The abstention
- *      is honest but the policy is conservative
- *      here; the reader can audit whether a
- *      simpler policy would still have abstained
- *      on the same query.
- *   7. `labeled-oracle-misclassification` — the
- *      query carries a `hardNegative` /
- *      `falsePremise` label. The fixture tagged
- *      the query as "no-answer-shaped", but the
- *      query's `isPositive===true` (so it is
- *      answerable). This is a fixture-design
- *      artifact, NOT a real-world false
- *      abstention: the fixture flagged a positive
- *      query as a no-answer-family query by
- *      accident. (This category is currently
- *      expected to be empty on the production
- *      corpus; the test pins the contract.)
- *
- *   If semantic evidence is supplied (a
- *   `queryId -> "miss" | "hit"` map derived from
- *   a separate dense benchmark), each FP is
- *   additionally annotated with:
- *     - `semanticRecoverable: boolean` — true
- *       iff the dense ranker did NOT rank-1-miss
- *       the query (i.e. the dense ranker would
- *       have surfaced the right answer).
- *     - `semanticAlsoMisses: boolean` — true iff
- *       the dense ranker DID rank-1-miss the
- *       query.
- *   The annotations are HONESTLY marked with an
- *   `evidenceSource` string. The report's
- *   per-category summary includes a "with
- *   semantic evidence" rollup so a reviewer can
- *   see how many FPs the dense ranker could
- *   recover.
- *
- * Trade-off definitions (deliberately explicit):
- *   - `falseAbstainedTotal` — the total count of
- *     positive queries the policy wrongly abstained
- *     on (the damage budget for the production-
- *     like policy).
- *   - `categoryCount[c]` — the number of FPs in
- *     category `c`. Categories with zero FPs are
- *     included in the report with `count: 0` so
- *     the artifact is complete.
- *   - `categoryRate[c]` — `categoryCount[c] /
- *     falseAbstainedTotal`. The "what fraction
- *     of the damage does this category account
- *     for?" reading.
- *   - `familyDamageCount[family][category]` —
- *     the cross-tabulation of FP count by family
- *     and category. Surfaced so a reviewer can
- *     see "the paraphrase damage is mostly
- *     `score-threshold-on-real-failure` while
- *     the orientation damage is mostly
- *     `sufficiency-label-honest`" without re-
- *     deriving.
- *   - `scoreBandDamage[band][category]` — the
- *     per-topScore-band per-category cross-tab.
- *     A reviewer who wants to know "if I raised
- *     the score threshold to 0.40, which FPs would
- *     I save and which would I still lose?"
- *     reads this.
- *
- * Family-aware behavior:
- *   The category assignment is family-agnostic.
- *   A `paraphrase` FP can land in any category
- *   the per-query signal supports; the same is
- *   true of `orientation`, `multi-hop`, etc. The
- *   per-family breakdown in the report is the
- *   natural way to see WHERE the damage is
- *   concentrated.
- *
- * Limitations:
- *   - The category set is hand-curated, not
- *     learned. A query that does not match any
- *     category defaults to `unclassified`, which
- *     the report surfaces as its own row so a
- *     reviewer can audit. (The current
- *     production-like policy's 24 FPs all match
- *     one of the documented categories on the
- *     lexical baseline; a future policy that
- *     surfaces an unclassified case is a
- *     deliberate signal that the category table
- *     needs an addition.)
- *   - The semantic evidence, when supplied, is
- *     a pre-computed set of `queryId ->
- *     "hit"|"miss"`. The helper does NOT
- *     re-derive the dense ranker's behavior. A
- *     reviewer who wants to audit the evidence
- *     reads the `evidenceSource` string.
- *   - The diagnostic is benchmark-only and is
- *     fixture-shaped: the category names refer
- *     to the fixture's labels and signals. A
- *     production ranker would need a
- *     corresponding production-side
- *     instrumentation to apply the same
- *     analysis.
- */
-
-import type { AbstentionSignals, QueryEval } from "./metrics.js";
-import type { SufficiencyLabel } from "./sufficiency-diagnostic.js";
 import {
   BUILTIN_NO_ANSWER_POLICIES,
-  evaluateNoAnswerPolicy,
   type NoAnswerPolicy,
-  type NoAnswerPolicyPerQuery,
   type NoAnswerPolicyDecision,
+  type NoAnswerPolicyPerQuery,
+  evaluateNoAnswerPolicy,
 } from "./no-answer-abstention.js";
+import type { SufficiencyLabel } from "./sufficiency-diagnostic.js";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -552,7 +295,7 @@ export function classifyFalseAbstention(
     hitAt5: boolean;
     queryLabels?: string[];
   },
-  pq: NoAnswerPolicyPerQuery,
+  pq: NoAnswerPolicyPerQuery
 ): DamageCategory {
   const signals = pq.signals;
   const topScore = signals.topScore;
@@ -593,11 +336,7 @@ export function classifyFalseAbstention(
   //    score. This is the most actionable
   //    policy damage: raising the threshold or
   //    adding a rank-1-check would recover it.
-  if (
-    scoreFired &&
-    !suffFired &&
-    (entry.rank1 || entry.hitAt5)
-  ) {
+  if (scoreFired && !suffFired && (entry.rank1 || entry.hitAt5)) {
     return "score-threshold-on-recoverable";
   }
   // -- Priority 4: score gate fired AND the
@@ -605,12 +344,7 @@ export function classifyFalseAbstention(
   //    being honest. The damage is real, but it
   //    is a ranker problem, not a policy
   //    problem.
-  if (
-    scoreFired &&
-    !suffFired &&
-    !entry.rank1 &&
-    !entry.hitAt5
-  ) {
+  if (scoreFired && !suffFired && !entry.rank1 && !entry.hitAt5) {
     return "score-threshold-on-real-failure";
   }
   // -- Priority 5: sufficiency-label gate fired
@@ -630,10 +364,7 @@ export function classifyFalseAbstention(
   //    fixture tagged the query as a no-answer-
   //    shape query, but the query is
   //    answerable. Fixture-design artifact.
-  if (
-    queryLabels.includes("hardNegative") ||
-    queryLabels.includes("falsePremise")
-  ) {
+  if (queryLabels.includes("hardNegative") || queryLabels.includes("falsePremise")) {
     return "labeled-oracle-misclassification";
   }
   // -- Default: not classified. The report
@@ -672,12 +403,12 @@ export const SCORE_BANDS: ReadonlyArray<{
   min: number;
   max: number;
 }> = [
-  { label: "topScore<0.10", min: -Infinity, max: 0.1 },
+  { label: "topScore<0.10", min: Number.NEGATIVE_INFINITY, max: 0.1 },
   { label: "0.10<=topScore<0.20", min: 0.1, max: 0.2 },
   { label: "0.20<=topScore<0.30", min: 0.2, max: 0.3 },
   { label: "0.30<=topScore<0.50", min: 0.3, max: 0.5 },
   { label: "0.50<=topScore<0.75", min: 0.5, max: 0.75 },
-  { label: "topScore>=0.75", min: 0.75, max: Infinity },
+  { label: "topScore>=0.75", min: 0.75, max: Number.POSITIVE_INFINITY },
 ];
 
 /**
@@ -760,7 +491,7 @@ export interface SemanticEvidenceMap {
 function buildEntry(
   decision: NoAnswerPolicyDecision,
   pq: NoAnswerPolicyPerQuery,
-  semantic: SemanticEvidenceMap | undefined,
+  semantic: SemanticEvidenceMap | undefined
 ): FalseAbstentionDamageEntry {
   const entry: FalseAbstentionDamageEntry = {
     queryId: decision.queryId,
@@ -786,11 +517,9 @@ function buildEntry(
       reason: decision.reason,
       rank1: decision.rank1,
       hitAt5: decision.hitAt5,
-      ...(decision.queryLabels !== undefined
-        ? { queryLabels: [...decision.queryLabels] }
-        : {}),
+      ...(decision.queryLabels !== undefined ? { queryLabels: [...decision.queryLabels] } : {}),
     },
-    pq,
+    pq
   );
   entry.category = category;
   entry.categoryExplanation = CATEGORY_EXPLANATION[category];
@@ -854,7 +583,7 @@ function buildEntry(
  * classifier uses).
  */
 function buildCategorySummary(
-  entries: ReadonlyArray<FalseAbstentionDamageEntry>,
+  entries: ReadonlyArray<FalseAbstentionDamageEntry>
 ): DamageCategorySummary[] {
   const counts: Record<DamageCategory, number> = {
     "ranker-empty-recoverable": 0,
@@ -868,8 +597,7 @@ function buildCategorySummary(
   };
   for (const e of entries) counts[e.category] += 1;
   const total = entries.length;
-  const order = (c: DamageCategory): number =>
-    DAMAGE_CATEGORIES.indexOf(c);
+  const order = (c: DamageCategory): number => DAMAGE_CATEGORIES.indexOf(c);
   const summaries: DamageCategorySummary[] = DAMAGE_CATEGORIES.map((c) => ({
     category: c,
     count: counts[c],
@@ -889,12 +617,9 @@ function buildCategorySummary(
  * family name ascending.
  */
 function buildFamilyBreakdown(
-  entries: ReadonlyArray<FalseAbstentionDamageEntry>,
+  entries: ReadonlyArray<FalseAbstentionDamageEntry>
 ): FamilyDamageEntry[] {
-  const byFamily = new Map<
-    string,
-    { count: number; byCategory: Record<DamageCategory, number> }
-  >();
+  const byFamily = new Map<string, { count: number; byCategory: Record<DamageCategory, number> }>();
   for (const e of entries) {
     let slot = byFamily.get(e.family);
     if (!slot) {
@@ -932,7 +657,7 @@ function buildFamilyBreakdown(
  * complete.
  */
 function buildScoreBandBreakdown(
-  entries: ReadonlyArray<FalseAbstentionDamageEntry>,
+  entries: ReadonlyArray<FalseAbstentionDamageEntry>
 ): ScoreBandDamageEntry[] {
   const byBand = new Map<
     string,
@@ -975,7 +700,7 @@ function buildScoreBandBreakdown(
  */
 function buildSemanticRollup(
   entries: ReadonlyArray<FalseAbstentionDamageEntry>,
-  semantic: SemanticEvidenceMap | undefined,
+  semantic: SemanticEvidenceMap | undefined
 ): SemanticEvidenceRollup | undefined {
   if (!semantic) return undefined;
   let annotated = 0;
@@ -1040,14 +765,12 @@ export function buildFalseAbstentionDamageReport(args: {
   const { recordCount, perQuery, semantic } = args;
   const policy =
     args.policy ??
-    BUILTIN_NO_ANSWER_POLICIES.find(
-      (p) => p.id === "score-or-sufficiency-insufficient",
-    );
+    BUILTIN_NO_ANSWER_POLICIES.find((p) => p.id === "score-or-sufficiency-insufficient");
   if (!policy) {
     throw new Error(
       "buildFalseAbstentionDamageReport: default policy " +
         "'score-or-sufficiency-insufficient' is not in BUILTIN_NO_ANSWER_POLICIES; " +
-        "this is a build-time invariant violation",
+        "this is a build-time invariant violation"
     );
   }
   const decisions = evaluateNoAnswerPolicy(policy, perQuery);
@@ -1067,7 +790,7 @@ export function buildFalseAbstentionDamageReport(args: {
       // input. If it does, surface the bug
       // rather than silently dropping the FP.
       throw new Error(
-        `buildFalseAbstentionDamageReport: decision for ${d.queryId} has no matching per-query input`,
+        `buildFalseAbstentionDamageReport: decision for ${d.queryId} has no matching per-query input`
       );
     }
     entries.push(buildEntry(d, pq, semantic));
@@ -1081,8 +804,7 @@ export function buildFalseAbstentionDamageReport(args: {
     if (p.isPositive) positiveCount += 1;
     else noAnswerCount += 1;
   }
-  const positiveAbstainedRate =
-    positiveCount > 0 ? entries.length / positiveCount : 0;
+  const positiveAbstainedRate = positiveCount > 0 ? entries.length / positiveCount : 0;
   // Build the rollups.
   const categorySummary = buildCategorySummary(entries);
   const familyBreakdown = buildFamilyBreakdown(entries);
@@ -1134,13 +856,9 @@ export function buildFalseAbstentionDamageReport(args: {
  *   7. The per-FP damage list.
  *   8. The honest reading block.
  */
-export function formatFalseAbstentionDamageReport(
-  report: FalseAbstentionDamageReport,
-): string {
+export function formatFalseAbstentionDamageReport(report: FalseAbstentionDamageReport): string {
   const lines: string[] = [];
-  lines.push(
-    "=== curion false-abstention damage analysis (benchmark-only) ===",
-  );
+  lines.push("=== curion false-abstention damage analysis (benchmark-only) ===");
   lines.push(`generated at: ${report.generatedAt}`);
   lines.push("");
   lines.push("--- config ---");
@@ -1153,46 +871,26 @@ export function formatFalseAbstentionDamageReport(
   lines.push(`  positive:               ${report.config.positiveCount}`);
   lines.push(`  false abstained:        ${report.config.falseAbstainedTotal}`);
   lines.push(
-    `  positive abstention:    ${(report.config.positiveAbstainedRate * 100).toFixed(1)}%`,
+    `  positive abstention:    ${(report.config.positiveAbstainedRate * 100).toFixed(1)}%`
   );
   if (report.config.evidenceSource) {
     lines.push(`  semantic evidence:      ${report.config.evidenceSource}`);
   }
   lines.push("");
   lines.push("READ THIS FIRST: this is a BENCHMARK-ONLY study.");
-  lines.push(
-    "  The diagnostic consumes the same per-query input",
-  );
-  lines.push(
-    "  the prior no-answer abstention experiment builds,",
-  );
-  lines.push(
-    "  evaluates the recommended production-like policy",
-  );
-  lines.push(
-    `  ('${report.config.policyId}'), filters to the false`,
-  );
-  lines.push(
-    "  positives (the damage budget), and classifies each",
-  );
-  lines.push(
-    "  FP into an actionable category. The categories are",
-  );
-  lines.push(
-    "  documented on the CATEGORY_EXPLANATION table inside",
-  );
-  lines.push(
-    "  the module; a reviewer who wants to decide what to",
-  );
-  lines.push(
-    "  do reads the per-category summary first.",
-  );
+  lines.push("  The diagnostic consumes the same per-query input");
+  lines.push("  the prior no-answer abstention experiment builds,");
+  lines.push("  evaluates the recommended production-like policy");
+  lines.push(`  ('${report.config.policyId}'), filters to the false`);
+  lines.push("  positives (the damage budget), and classifies each");
+  lines.push("  FP into an actionable category. The categories are");
+  lines.push("  documented on the CATEGORY_EXPLANATION table inside");
+  lines.push("  the module; a reviewer who wants to decide what to");
+  lines.push("  do reads the per-category summary first.");
   lines.push("");
   // ---- Per-category summary ----
   lines.push("--- per-category summary ---");
-  lines.push(
-    "  category                          count  rate   explanation",
-  );
+  lines.push("  category                          count  rate   explanation");
   for (const row of report.categorySummary) {
     const cat = row.category.padEnd(34);
     const count = String(row.count).padStart(3);
@@ -1204,13 +902,12 @@ export function formatFalseAbstentionDamageReport(
   lines.push("--- per-family per-category cross-tab ---");
   lines.push(
     "  family          total  " +
-      "rec-emp  sc-recover  sc-fail  suff-hon  multi-gate  labeled-nm  labeled-mc  unclass",
+      "rec-emp  sc-recover  sc-fail  suff-hon  multi-gate  labeled-nm  labeled-mc  unclass"
   );
   for (const row of report.familyBreakdown) {
     const fam = row.family.padEnd(16);
     const total = String(row.count).padStart(3);
-    const r = (k: DamageCategory): string =>
-      String(row.byCategory[k]).padStart(3);
+    const r = (k: DamageCategory): string => String(row.byCategory[k]).padStart(3);
     lines.push(
       `  ${fam} ${total}    ` +
         `${r("ranker-empty-recoverable")}      ` +
@@ -1220,7 +917,7 @@ export function formatFalseAbstentionDamageReport(
         `${r("multi-gate-conjunction-honest")}        ` +
         `${r("labeled-near-miss-or-divergent")}       ` +
         `${r("labeled-oracle-misclassification")}     ` +
-        `${r("unclassified")}`,
+        `${r("unclassified")}`
     );
   }
   lines.push("");
@@ -1237,13 +934,12 @@ export function formatFalseAbstentionDamageReport(
   lines.push("--- per-score-band per-category cross-tab ---");
   lines.push(
     "  band                  total  " +
-      "rec-emp  sc-recover  sc-fail  suff-hon  multi-gate  labeled-nm  labeled-mc  unclass",
+      "rec-emp  sc-recover  sc-fail  suff-hon  multi-gate  labeled-nm  labeled-mc  unclass"
   );
   for (const row of report.scoreBandBreakdown) {
     const band = row.band.padEnd(20);
     const total = String(row.count).padStart(3);
-    const r = (k: DamageCategory): string =>
-      String(row.byCategory[k]).padStart(3);
+    const r = (k: DamageCategory): string => String(row.byCategory[k]).padStart(3);
     lines.push(
       `  ${band} ${total}    ` +
         `${r("ranker-empty-recoverable")}      ` +
@@ -1253,7 +949,7 @@ export function formatFalseAbstentionDamageReport(
         `${r("multi-gate-conjunction-honest")}        ` +
         `${r("labeled-near-miss-or-divergent")}       ` +
         `${r("labeled-oracle-misclassification")}     ` +
-        `${r("unclassified")}`,
+        `${r("unclassified")}`
     );
   }
   lines.push("");
@@ -1271,12 +967,10 @@ export function formatFalseAbstentionDamageReport(
       const recPct = (r.recoverable / annotated) * 100;
       const missPct = (r.alsoMisses / annotated) * 100;
       lines.push(
-        `  recoverable rate:   ${recPct.toFixed(1)}% ` +
-          `(${r.recoverable} / ${annotated})`,
+        `  recoverable rate:   ${recPct.toFixed(1)}% ` + `(${r.recoverable} / ${annotated})`
       );
       lines.push(
-        `  also-miss rate:     ${missPct.toFixed(1)}% ` +
-          `(${r.alsoMisses} / ${annotated})`,
+        `  also-miss rate:     ${missPct.toFixed(1)}% ` + `(${r.alsoMisses} / ${annotated})`
       );
     }
     lines.push("");
@@ -1290,9 +984,7 @@ export function formatFalseAbstentionDamageReport(
         ? "  semantic=also-miss"
         : "";
     const labels =
-      e.queryLabels && e.queryLabels.length > 0
-        ? `  labels=${e.queryLabels.join("|")}`
-        : "";
+      e.queryLabels && e.queryLabels.length > 0 ? `  labels=${e.queryLabels.join("|")}` : "";
     lines.push(
       `  [${e.family.padEnd(11)}] ${e.queryId.padEnd(42)}  ` +
         `topScore=${e.topScore.toFixed(3)}  ` +
@@ -1300,7 +992,7 @@ export function formatFalseAbstentionDamageReport(
         `rank1=${e.rank1 ? "T" : "F"}  ` +
         `hit5=${e.hitAt5 ? "T" : "F"}  ` +
         `cat=${e.category}` +
-        `${sem}${labels}`,
+        `${sem}${labels}`
     );
   }
   lines.push("");
@@ -1308,128 +1000,50 @@ export function formatFalseAbstentionDamageReport(
   lines.push("--- honest reading ---");
   lines.push(
     `  The diagnostic was run on policy ` +
-      `'${report.config.policyId}' (${report.config.policyCategory}).`,
+      `'${report.config.policyId}' (${report.config.policyCategory}).`
   );
   lines.push(
     `  Total FPs: ${report.config.falseAbstainedTotal} ` +
-      `(${report.config.positiveAbstainedRate === 0 ? "0.0" : (report.config.positiveAbstainedRate * 100).toFixed(1)}% of positives).`,
+      `(${report.config.positiveAbstainedRate === 0 ? "0.0" : (report.config.positiveAbstainedRate * 100).toFixed(1)}% of positives).`
   );
-  lines.push(
-    "  The category table is the action surface:",
-  );
-  lines.push(
-    "    - `score-threshold-on-recoverable` is the",
-  );
-  lines.push(
-    "      actionable policy damage. The ranker DID",
-  );
-  lines.push(
-    "      return the right answer; the score gate",
-  );
-  lines.push(
-    "      is too tight. A different threshold OR a",
-  );
-  lines.push(
-    "      rank-1-check escape would recover these.",
-  );
-  lines.push(
-    "    - `score-threshold-on-real-failure` and",
-  );
-  lines.push(
-    "      `sufficiency-label-honest` are HONEST",
-  );
-  lines.push(
-    "      abstentions. The ranker genuinely failed;",
-  );
-  lines.push(
-    "      the policy is correctly catching the",
-  );
-  lines.push(
-    "      low-confidence case. A different ranker",
-  );
-  lines.push(
-    "      is needed, NOT a policy change.",
-  );
-  lines.push(
-    "    - `multi-gate-conjunction-honest` is a",
-  );
-  lines.push(
-    "      double-count: the policy is conservative",
-  );
-  lines.push(
-    "      on a single underlying failure. A simpler",
-  );
-  lines.push(
-    "      policy (score-only OR sufficiency-only)",
-  );
-  lines.push(
-    "      would still have abstained on the same",
-  );
-  lines.push(
-    "      query.",
-  );
-  lines.push(
-    "    - `ranker-empty-recoverable` is a",
-  );
-  lines.push(
-    "      candidate-generation problem: the ranker",
-  );
-  lines.push(
-    "      returned ZERO candidates. A denser ranker",
-  );
-  lines.push(
-    "      (semantic) can surface a candidate where",
-  );
-  lines.push(
-    "      lexical cannot. The semantic-evidence",
-  );
-  lines.push(
-    "      rollup (when supplied) is the natural way",
-  );
-  lines.push(
-    "      to see how many of these a dense reranker",
-  );
-  lines.push(
-    "      would recover.",
-  );
-  lines.push(
-    "    - `labeled-near-miss-or-divergent` is a",
-  );
-  lines.push(
-    "      fixture adversarial: the query is",
-  );
-  lines.push(
-    "      deliberately calibrated to be ambiguous.",
-  );
-  lines.push(
-    "      Abstention may be the correct call.",
-  );
-  lines.push(
-    "  The semantic-evidence rollup is the only",
-  );
-  lines.push(
-    "  way to see \"can a dense reranker recover",
-  );
-  lines.push(
-    "  this?\". When supplied, the rollup says so",
-  );
-  lines.push(
-    "  honestly: `recoverable` = the dense ranker",
-  );
-  lines.push(
-    "  got rank-1 right; `also-miss` = the dense",
-  );
-  lines.push(
-    "  ranker also rank-1-missed. A reviewer who",
-  );
-  lines.push(
-    "  wants to decide whether to wire a dense",
-  );
-  lines.push(
-    "  reranker reads the rollup's `recoverable`",
-  );
-  lines.push(
-    "  count.",
-  );
+  lines.push("  The category table is the action surface:");
+  lines.push("    - `score-threshold-on-recoverable` is the");
+  lines.push("      actionable policy damage. The ranker DID");
+  lines.push("      return the right answer; the score gate");
+  lines.push("      is too tight. A different threshold OR a");
+  lines.push("      rank-1-check escape would recover these.");
+  lines.push("    - `score-threshold-on-real-failure` and");
+  lines.push("      `sufficiency-label-honest` are HONEST");
+  lines.push("      abstentions. The ranker genuinely failed;");
+  lines.push("      the policy is correctly catching the");
+  lines.push("      low-confidence case. A different ranker");
+  lines.push("      is needed, NOT a policy change.");
+  lines.push("    - `multi-gate-conjunction-honest` is a");
+  lines.push("      double-count: the policy is conservative");
+  lines.push("      on a single underlying failure. A simpler");
+  lines.push("      policy (score-only OR sufficiency-only)");
+  lines.push("      would still have abstained on the same");
+  lines.push("      query.");
+  lines.push("    - `ranker-empty-recoverable` is a");
+  lines.push("      candidate-generation problem: the ranker");
+  lines.push("      returned ZERO candidates. A denser ranker");
+  lines.push("      (semantic) can surface a candidate where");
+  lines.push("      lexical cannot. The semantic-evidence");
+  lines.push("      rollup (when supplied) is the natural way");
+  lines.push("      to see how many of these a dense reranker");
+  lines.push("      would recover.");
+  lines.push("    - `labeled-near-miss-or-divergent` is a");
+  lines.push("      fixture adversarial: the query is");
+  lines.push("      deliberately calibrated to be ambiguous.");
+  lines.push("      Abstention may be the correct call.");
+  lines.push("  The semantic-evidence rollup is the only");
+  lines.push('  way to see "can a dense reranker recover');
+  lines.push('  this?". When supplied, the rollup says so');
+  lines.push("  honestly: `recoverable` = the dense ranker");
+  lines.push("  got rank-1 right; `also-miss` = the dense");
+  lines.push("  ranker also rank-1-missed. A reviewer who");
+  lines.push("  wants to decide whether to wire a dense");
+  lines.push("  reranker reads the rollup's `recoverable`");
+  lines.push("  count.");
   return lines.join("\n");
 }

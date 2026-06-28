@@ -34,50 +34,46 @@
  * migration; no state transition; no provider-prompt change.
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
+import { test } from "node:test";
 
-import { runRememberController } from "../src/controller/remember-controller.ts";
+import {
+  resetListRegisteredProjectsStub,
+  setListRegisteredProjectsStub,
+} from "../src/config/registry.ts";
 import { runRecallController } from "../src/controller/recall-controller.ts";
+import { runRememberController } from "../src/controller/remember-controller.ts";
 import { formatAmbiguityNote } from "../src/retrieval/ambiguity.ts";
 import {
-  formatResolvedHistoryNote,
   RESOLVED_HISTORY_NOTE_TEXT,
   type ResolvedHistorySignal,
+  formatResolvedHistoryNote,
 } from "../src/retrieval/resolved-history.ts";
 import {
-  insertMemoryRecord,
-  type StorageHandle,
   type MemoryRecord,
+  type StorageHandle,
+  insertMemoryRecord,
 } from "../src/storage/storage.ts";
 import {
-  handleRemember,
-  setStorageProvider as setRememberStorageProvider,
-  resetStorageProvider as resetRememberStorageProvider,
-} from "../src/tools/remember.ts";
-import {
   handleRecall,
-  setStorageProvider as setRecallStorageProvider,
   resetStorageProvider as resetRecallStorageProvider,
+  setStorageProvider as setRecallStorageProvider,
 } from "../src/tools/recall.ts";
 import {
-  setListRegisteredProjectsStub,
-  resetListRegisteredProjectsStub,
-} from "../src/config/registry.ts";
-import {
-  TEST_PRIMARY_KEY,
-  TEST_FALLBACK_KEY,
-  TEST_PRIMARY_BASE_URL,
-  TEST_PRIMARY_MODEL,
-  TEST_FALLBACK_BASE_URL,
-  TEST_FALLBACK_MODEL,
-} from "./shared-test-provider.ts";
-import {
-  scriptFetch,
-  okChatResponse,
-  safeAnalysis,
-} from "./_helpers/provider-stub.ts";
+  handleRemember,
+  resetStorageProvider as resetRememberStorageProvider,
+  setStorageProvider as setRememberStorageProvider,
+} from "../src/tools/remember.ts";
+import { okChatResponse, safeAnalysis, scriptFetch } from "./_helpers/provider-stub.ts";
 import { mkStorage, rmStorage } from "./_helpers/test-storage.ts";
+import {
+  TEST_FALLBACK_BASE_URL,
+  TEST_FALLBACK_KEY,
+  TEST_FALLBACK_MODEL,
+  TEST_PRIMARY_BASE_URL,
+  TEST_PRIMARY_KEY,
+  TEST_PRIMARY_MODEL,
+} from "./shared-test-provider.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -91,7 +87,7 @@ import { mkStorage, rmStorage } from "./_helpers/test-storage.ts";
 function assertNoMemoryIdRef(message: string, label: string): void {
   assert.ok(
     !/#\d+/.test(message),
-    `${label} must not include any #N memory-id reference; got ${JSON.stringify(message)}`,
+    `${label} must not include any #N memory-id reference; got ${JSON.stringify(message)}`
   );
 }
 
@@ -107,7 +103,7 @@ function insertWithRelationship(
       olderVariantsOf?: number[];
       detectionConfidence?: number;
     };
-  },
+  }
 ): MemoryRecord {
   const rel = opts.relationship;
   const metadata: Record<string, unknown> = {
@@ -167,7 +163,7 @@ test("regression: remember tool saved message has no #N id reference; memoryId f
           providerFallbackApiKey: TEST_FALLBACK_KEY,
           providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
           providerFallbackModel: TEST_FALLBACK_MODEL,
-        },
+        }
       );
       assert.equal(controllerOutcome.status, "saved");
       if (controllerOutcome.status !== "saved") throw new Error("unreachable");
@@ -181,21 +177,16 @@ test("regression: remember tool saved message has no #N id reference; memoryId f
       // `summary` string the message carries is the same
       // value (the tool-layer boundary maps
       // record.memoryContent -> public summary).
-      const publicMessage =
-        `Saved memory (${rec.kind}, confidence ${(rec.confidence ?? 0).toFixed(2)}): ${rec.memoryContent}`;
+      const publicMessage = `Saved memory (${rec.kind}, confidence ${(rec.confidence ?? 0).toFixed(2)}): ${rec.memoryContent}`;
       assertNoMemoryIdRef(publicMessage, "remember tool saved message");
       // The structured `memoryId` field on the tool-layer
       // result is preserved (internal id, available to
       // tests / future structured transport).
-      assert.equal(
-        controllerOutcome.record.id > 0,
-        true,
-        "internal record.id must be preserved",
-      );
+      assert.equal(controllerOutcome.record.id > 0, true, "internal record.id must be preserved");
       // The legacy `Saved memory #N (...)` form is gone.
       assert.ok(
         !/^Saved memory #\d+/.test(publicMessage),
-        `legacy Saved memory #N form must be retired; got ${JSON.stringify(publicMessage)}`,
+        `legacy Saved memory #N form must be retired; got ${JSON.stringify(publicMessage)}`
       );
       // The new no-id form starts with `Saved memory (kind, ...)`.
       assert.match(publicMessage, /^Saved memory \([a-z]+, confidence \d+\.\d{2}\):/);
@@ -255,7 +246,7 @@ test("regression: remember controller saved message has no #N id reference", asy
         providerFallbackApiKey: TEST_FALLBACK_KEY,
         providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
         providerFallbackModel: TEST_FALLBACK_MODEL,
-      },
+      }
     );
     assert.equal(r.status, "saved");
     if (r.status !== "saved") throw new Error("unreachable");
@@ -266,7 +257,7 @@ test("regression: remember controller saved message has no #N id reference", asy
     // The legacy `saved as #N (...)` form is gone.
     assert.ok(
       !/^saved as #\d+/.test(r.message),
-      `legacy 'saved as #N' form must be retired; got ${JSON.stringify(r.message)}`,
+      `legacy 'saved as #N' form must be retired; got ${JSON.stringify(r.message)}`
     );
     // The new no-id form starts with `saved (kind, ...)`.
     assert.match(r.message, /^saved \([a-z]+, confidence \d+\.\d{2}\)$/);
@@ -304,7 +295,7 @@ test("regression: remember controller saved message has no #N id reference on po
         providerFallbackApiKey: TEST_FALLBACK_KEY,
         providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
         providerFallbackModel: TEST_FALLBACK_MODEL,
-      },
+      }
     );
     assert.equal(r.status, "saved");
     if (r.status !== "saved") throw new Error("unreachable");
@@ -313,7 +304,7 @@ test("regression: remember controller saved message has no #N id reference on po
     assertNoMemoryIdRef(r.message, "remember controller saved message (post-update path)");
     assert.ok(
       !/^saved as #\d+/.test(r.message),
-      `legacy 'saved as #N' form must be retired; got ${JSON.stringify(r.message)}`,
+      `legacy 'saved as #N' form must be retired; got ${JSON.stringify(r.message)}`
     );
   } finally {
     rmStorage(tmp, handle);
@@ -355,33 +346,23 @@ test("regression: recall answered-ambiguous public message has no #N id referenc
     };
     handle.db
       .prepare("UPDATE memories SET metadata = ? WHERE id = ?")
-      .run(
-        JSON.stringify({ tags: [], classification: null, relationship: blockA }),
-        r1.id,
-      );
+      .run(JSON.stringify({ tags: [], classification: null, relationship: blockA }), r1.id);
     handle.db
       .prepare("UPDATE memories SET metadata = ? WHERE id = ?")
-      .run(
-        JSON.stringify({ tags: [], classification: null, relationship: blockB }),
-        r2.id,
-      );
+      .run(JSON.stringify({ tags: [], classification: null, relationship: blockB }), r2.id);
 
     const { fetchImpl } = scriptFetch(() =>
-      okChatResponse("Postgres stores project data reliably."),
+      okChatResponse("Postgres stores project data reliably.")
     );
-    const out = await runRecallController(
-      handle,
-      "What database does the project use?",
-      {
-        providerFetchImpl: fetchImpl,
-        providerPrimaryApiKey: TEST_PRIMARY_KEY,
-        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
-        providerPrimaryModel: TEST_PRIMARY_MODEL,
-        providerFallbackApiKey: TEST_FALLBACK_KEY,
-        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
-        providerFallbackModel: TEST_FALLBACK_MODEL,
-      },
-    );
+    const out = await runRecallController(handle, "What database does the project use?", {
+      providerFetchImpl: fetchImpl,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
+    });
     assert.equal(out.status, "answered");
     if (out.status !== "answered") throw new Error("unreachable");
     // The detector fired.
@@ -389,8 +370,7 @@ test("regression: recall answered-ambiguous public message has no #N id referenc
     // Project the public `message` exactly the way the tool
     // layer does (note prefix on the answered case).
     const note = formatAmbiguityNote(out.internalAmbiguity);
-    const projectedMessage =
-      note.length === 0 ? out.answer : `${note}\n\n${out.answer}`;
+    const projectedMessage = note.length === 0 ? out.answer : `${note}\n\n${out.answer}`;
     // The public `message` is the prose-only no-id form.
     assertNoMemoryIdRef(projectedMessage, "recall answered-ambiguous public message");
     // The note part specifically must carry no id.
@@ -399,26 +379,26 @@ test("regression: recall answered-ambiguous public message has no #N id referenc
     // No `Sources: ` substring.
     assert.ok(
       !projectedMessage.includes("Sources:"),
-      `public message must not include the legacy 'Sources:' segment; got ${JSON.stringify(projectedMessage)}`,
+      `public message must not include the legacy 'Sources:' segment; got ${JSON.stringify(projectedMessage)}`
     );
     // No `and N more` substring (legacy truncation token).
     assert.ok(
       !/and \d+ more/.test(projectedMessage),
-      `public message must not include the legacy 'and N more' token; got ${JSON.stringify(projectedMessage)}`,
+      `public message must not include the legacy 'and N more' token; got ${JSON.stringify(projectedMessage)}`
     );
     // The internal `sourceIds` field is preserved (still a
     // structured field on the controller outcome, available
     // to tests / future structured transport).
     assert.deepEqual(
       out.sourceIds.slice().sort((a, b) => a - b),
-      [r1.id, r2.id].slice().sort((a, b) => a - b),
+      [r1.id, r2.id].slice().sort((a, b) => a - b)
     );
     // The internal `internalAmbiguity.memoryIds` array is
     // also preserved on the structured signal.
     if (out.internalAmbiguity.kind === "ambiguous") {
       assert.deepEqual(
         out.internalAmbiguity.memoryIds.slice().sort((a, b) => a - b),
-        [r1.id, r2.id].slice().sort((a, b) => a - b),
+        [r1.id, r2.id].slice().sort((a, b) => a - b)
       );
     }
   } finally {
@@ -458,33 +438,21 @@ test("regression: recall answered-ambiguous public message has no #N id referenc
     };
     handle.db
       .prepare("UPDATE memories SET metadata = ? WHERE id = ?")
-      .run(
-        JSON.stringify({ tags: [], classification: null, relationship: blockA }),
-        r1.id,
-      );
+      .run(JSON.stringify({ tags: [], classification: null, relationship: blockA }), r1.id);
     handle.db
       .prepare("UPDATE memories SET metadata = ? WHERE id = ?")
-      .run(
-        JSON.stringify({ tags: [], classification: null, relationship: blockB }),
-        r2.id,
-      );
+      .run(JSON.stringify({ tags: [], classification: null, relationship: blockB }), r2.id);
 
-    const { fetchImpl } = scriptFetch(() =>
-      okChatResponse("Postgres stores project data."),
-    );
-    const out = await runRecallController(
-      handle,
-      "What database does the project use?",
-      {
-        providerFetchImpl: fetchImpl,
-        providerPrimaryApiKey: TEST_PRIMARY_KEY,
-        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
-        providerPrimaryModel: TEST_PRIMARY_MODEL,
-        providerFallbackApiKey: TEST_FALLBACK_KEY,
-        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
-        providerFallbackModel: TEST_FALLBACK_MODEL,
-      },
-    );
+    const { fetchImpl } = scriptFetch(() => okChatResponse("Postgres stores project data."));
+    const out = await runRecallController(handle, "What database does the project use?", {
+      providerFetchImpl: fetchImpl,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
+    });
     assert.equal(out.status, "answered");
     if (out.status !== "answered") throw new Error("unreachable");
     assert.equal(out.internalAmbiguity.kind, "ambiguous");
@@ -493,19 +461,15 @@ test("regression: recall answered-ambiguous public message has no #N id referenc
     }
     assert.equal(out.internalAmbiguity.reason, "older-variant-suspected");
     const note = formatAmbiguityNote(out.internalAmbiguity);
-    const projectedMessage =
-      note.length === 0 ? out.answer : `${note}\n\n${out.answer}`;
+    const projectedMessage = note.length === 0 ? out.answer : `${note}\n\n${out.answer}`;
     assertNoMemoryIdRef(projectedMessage, "recall answered-older-variant public message");
     assertNoMemoryIdRef(note, "recall answered-older-variant note");
     // The note uses the softer "may include" wording.
-    assert.match(
-      note,
-      /Note: stored memories on this topic may include older variants\./,
-    );
+    assert.match(note, /Note: stored memories on this topic may include older variants\./);
     // The internal `memoryIds` field is preserved.
     assert.deepEqual(
       out.internalAmbiguity.memoryIds.slice().sort((a, b) => a - b),
-      [r1.id, r2.id].slice().sort((a, b) => a - b),
+      [r1.id, r2.id].slice().sort((a, b) => a - b)
     );
   } finally {
     rmStorage(tmp, handle);
@@ -556,21 +520,17 @@ test("regression: recall answered-resolved-history public message has no #N id r
     });
 
     const { fetchImpl } = scriptFetch(() =>
-      okChatResponse("Fly.io is the current hosting platform."),
+      okChatResponse("Fly.io is the current hosting platform.")
     );
-    const out = await runRecallController(
-      handle,
-      "What hosting platform does the project use?",
-      {
-        providerFetchImpl: fetchImpl,
-        providerPrimaryApiKey: TEST_PRIMARY_KEY,
-        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
-        providerPrimaryModel: TEST_PRIMARY_MODEL,
-        providerFallbackApiKey: TEST_FALLBACK_KEY,
-        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
-        providerFallbackModel: TEST_FALLBACK_MODEL,
-      },
-    );
+    const out = await runRecallController(handle, "What hosting platform does the project use?", {
+      providerFetchImpl: fetchImpl,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
+    });
     assert.equal(out.status, "answered");
     if (out.status !== "answered") throw new Error("unreachable");
     // The Phase H resolved-history detector fired.
@@ -592,16 +552,13 @@ test("regression: recall answered-resolved-history public message has no #N id r
     // it is the same one the tool layer uses, so the
     // projection is byte-equal to the on-the-wire public
     // text.
-    const note = formatResolvedHistoryNote(
-      out.internalResolvedHistory as ResolvedHistorySignal,
-    );
-    const projectedMessage =
-      note.length === 0 ? out.answer : `${note}\n\n${out.answer}`;
+    const note = formatResolvedHistoryNote(out.internalResolvedHistory as ResolvedHistorySignal);
+    const projectedMessage = note.length === 0 ? out.answer : `${note}\n\n${out.answer}`;
 
     // The public `message` starts with the note.
     assert.ok(
       projectedMessage.startsWith(`${note}\n\n`),
-      `public message must start with the resolved-history note followed by a blank line; got ${JSON.stringify(projectedMessage)}`,
+      `public message must start with the resolved-history note followed by a blank line; got ${JSON.stringify(projectedMessage)}`
     );
     // The exact approved Phase J note wording is present
     // byte-for-byte. We pin by `===` to the exported
@@ -614,7 +571,7 @@ test("regression: recall answered-resolved-history public message has no #N id r
     assert.equal(note, RESOLVED_HISTORY_NOTE_TEXT);
     assert.equal(
       note,
-      "Note: I found earlier related information, but newer entries appear to supersede it.",
+      "Note: I found earlier related information, but newer entries appear to supersede it."
     );
 
     // The central Phase J invariant: the public `message`
@@ -631,12 +588,12 @@ test("regression: recall answered-resolved-history public message has no #N id r
     // No `Sources: ` substring (legacy id-list form).
     assert.ok(
       !projectedMessage.includes("Sources:"),
-      `public message must not include the legacy 'Sources:' segment; got ${JSON.stringify(projectedMessage)}`,
+      `public message must not include the legacy 'Sources:' segment; got ${JSON.stringify(projectedMessage)}`
     );
     // No `and N more` substring (legacy truncation token).
     assert.ok(
       !/and \d+ more/.test(projectedMessage),
-      `public message must not include the legacy 'and N more' token; got ${JSON.stringify(projectedMessage)}`,
+      `public message must not include the legacy 'and N more' token; got ${JSON.stringify(projectedMessage)}`
     );
 
     // The synthesized answer is preserved verbatim and
@@ -644,7 +601,7 @@ test("regression: recall answered-resolved-history public message has no #N id r
     // the tool layer would render.
     assert.ok(
       projectedMessage.endsWith(out.answer),
-      `public message must end with the synthesized answer; got ${JSON.stringify(projectedMessage)}`,
+      `public message must end with the synthesized answer; got ${JSON.stringify(projectedMessage)}`
     );
     // The note text itself does not include any
     // diagnostic-leakage token the Phase D note check
@@ -669,7 +626,7 @@ test("regression: recall answered-resolved-history public message has no #N id r
     ]) {
       assert.ok(
         !projectedMessage.includes(tok),
-        `public message must not include the diagnostic/internal token '${tok}'; got ${JSON.stringify(projectedMessage)}`,
+        `public message must not include the diagnostic/internal token '${tok}'; got ${JSON.stringify(projectedMessage)}`
       );
     }
 
@@ -677,19 +634,16 @@ test("regression: recall answered-resolved-history public message has no #N id r
     //   1. The controller's `sourceIds` array is
     //      preserved (structured list of memory ids the
     //      answer was synthesized from).
-    assert.ok(
-      Array.isArray(out.sourceIds),
-      "sourceIds must remain an array on the recall outcome",
-    );
+    assert.ok(Array.isArray(out.sourceIds), "sourceIds must remain an array on the recall outcome");
     for (const id of out.sourceIds) {
       assert.ok(
         Number.isInteger(id) && id > 0,
-        `sourceIds entries must be positive integers; got ${id}`,
+        `sourceIds entries must be positive integers; got ${id}`
       );
     }
     assert.ok(
       out.sourceIds.includes(r1.id) && out.sourceIds.includes(r2.id),
-      `sourceIds must include both seeded row ids; got ${JSON.stringify(out.sourceIds)}`,
+      `sourceIds must include both seeded row ids; got ${JSON.stringify(out.sourceIds)}`
     );
     //   2. The internal resolved-history signal's
     //      `memoryIds` array is preserved on the typed
@@ -701,18 +655,16 @@ test("regression: recall answered-resolved-history public message has no #N id r
     //      invariant adds: the public `message` must not
     //      reintroduce `#N` memory-id references into
     //      the public text.
-    const resolvedMemoryIds = out.internalResolvedHistory.memoryIds
-      .slice()
-      .sort((a, b) => a - b);
+    const resolvedMemoryIds = out.internalResolvedHistory.memoryIds.slice().sort((a, b) => a - b);
     assert.ok(resolvedMemoryIds.length >= 2);
     assert.ok(
       resolvedMemoryIds.includes(r1.id) && resolvedMemoryIds.includes(r2.id),
-      `internalResolvedHistory.memoryIds must include both seeded row ids; got ${JSON.stringify(resolvedMemoryIds)}`,
+      `internalResolvedHistory.memoryIds must include both seeded row ids; got ${JSON.stringify(resolvedMemoryIds)}`
     );
     for (const id of resolvedMemoryIds) {
       assert.ok(
         Number.isInteger(id) && id > 0,
-        `internalResolvedHistory.memoryIds entries must be positive integers; got ${id}`,
+        `internalResolvedHistory.memoryIds entries must be positive integers; got ${id}`
       );
     }
     // Bounded: the bounded id-list cap is the same
@@ -721,7 +673,7 @@ test("regression: recall answered-resolved-history public message has no #N id r
     // signal-side contract.
     assert.ok(
       resolvedMemoryIds.length <= 16,
-      `internalResolvedHistory.memoryIds length must be bounded; got ${resolvedMemoryIds.length}`,
+      `internalResolvedHistory.memoryIds length must be bounded; got ${resolvedMemoryIds.length}`
     );
   } finally {
     rmStorage(tmp, handle);
@@ -751,21 +703,17 @@ test("regression: recall answered-resolved-history prefers resolved-history note
     });
 
     const { fetchImpl } = scriptFetch(() =>
-      okChatResponse("Fly.io is the current hosting platform."),
+      okChatResponse("Fly.io is the current hosting platform.")
     );
-    const out = await runRecallController(
-      handle,
-      "What hosting platform does the project use?",
-      {
-        providerFetchImpl: fetchImpl,
-        providerPrimaryApiKey: TEST_PRIMARY_KEY,
-        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
-        providerPrimaryModel: TEST_PRIMARY_MODEL,
-        providerFallbackApiKey: TEST_FALLBACK_KEY,
-        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
-        providerFallbackModel: TEST_FALLBACK_MODEL,
-      },
-    );
+    const out = await runRecallController(handle, "What hosting platform does the project use?", {
+      providerFetchImpl: fetchImpl,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
+    });
     assert.equal(out.status, "answered");
     if (out.status !== "answered") throw new Error("unreachable");
     // The composition rule's first arm is silent (no
@@ -782,13 +730,9 @@ test("regression: recall answered-resolved-history prefers resolved-history note
     // / SG7 / SG8 rows of the validation suite use, but
     // assembled directly from the public helpers).
     const ambiguityNote = formatAmbiguityNote(out.internalAmbiguity);
-    const resolvedHistoryNote = formatResolvedHistoryNote(
-      out.internalResolvedHistory,
-    );
-    const note =
-      ambiguityNote.length > 0 ? ambiguityNote : resolvedHistoryNote;
-    const projectedMessage =
-      note.length === 0 ? out.answer : `${note}\n\n${out.answer}`;
+    const resolvedHistoryNote = formatResolvedHistoryNote(out.internalResolvedHistory);
+    const note = ambiguityNote.length > 0 ? ambiguityNote : resolvedHistoryNote;
+    const projectedMessage = note.length === 0 ? out.answer : `${note}\n\n${out.answer}`;
 
     // The ambiguity note is the empty string on this
     // path; the resolved-history note is the one
@@ -867,19 +811,15 @@ test("regression: recall provider_error public message has no #N id reference", 
       summary: "The project uses Postgres 16 for the primary store.",
     });
     const errFetch = scriptFetch(() => new Response("boom", { status: 500 }));
-    const out = await runRecallController(
-      handle,
-      "What database does the project use?",
-      {
-        providerFetchImpl: errFetch.fetchImpl,
-        providerPrimaryApiKey: TEST_PRIMARY_KEY,
-        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
-        providerPrimaryModel: TEST_PRIMARY_MODEL,
-        providerFallbackApiKey: TEST_FALLBACK_KEY,
-        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
-        providerFallbackModel: TEST_FALLBACK_MODEL,
-      },
-    );
+    const out = await runRecallController(handle, "What database does the project use?", {
+      providerFetchImpl: errFetch.fetchImpl,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
+    });
     assert.equal(out.status, "provider_error");
     if (out.status !== "provider_error") throw new Error("unreachable");
     // The tool-layer projection is `Provider error: ${reason}`.
@@ -912,13 +852,13 @@ test("regression: internal id fields remain intact (memoryId, sourceIds, memoryI
         providerFallbackApiKey: TEST_FALLBACK_KEY,
         providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
         providerFallbackModel: TEST_FALLBACK_MODEL,
-      },
+      }
     );
     assert.equal(r.status, "saved");
     if (r.status !== "saved") throw new Error("unreachable");
     assert.ok(
       Number.isInteger(r.record.id) && r.record.id > 0,
-      `internal record.id must remain a positive integer; got ${r.record.id}`,
+      `internal record.id must remain a positive integer; got ${r.record.id}`
     );
 
     // 2. The `relationship` block on the persisted row
@@ -941,21 +881,17 @@ test("regression: internal id fields remain intact (memoryId, sourceIds, memoryI
     // 3. The internal `sourceIds` field on a recall outcome
     //    is preserved.
     const { fetchImpl: recallFetch } = scriptFetch(() =>
-      okChatResponse("Postgres stores project data reliably."),
+      okChatResponse("Postgres stores project data reliably.")
     );
-    const recallOut = await runRecallController(
-      handle,
-      "What database does the project use?",
-      {
-        providerFetchImpl: recallFetch,
-        providerPrimaryApiKey: TEST_PRIMARY_KEY,
-        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
-        providerPrimaryModel: TEST_PRIMARY_MODEL,
-        providerFallbackApiKey: TEST_FALLBACK_KEY,
-        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
-        providerFallbackModel: TEST_FALLBACK_MODEL,
-      },
-    );
+    const recallOut = await runRecallController(handle, "What database does the project use?", {
+      providerFetchImpl: recallFetch,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
+    });
     assert.equal(recallOut.status, "answered");
     if (recallOut.status !== "answered") throw new Error("unreachable");
     // `sourceIds` is the structured list of memory ids the
@@ -964,12 +900,12 @@ test("regression: internal id fields remain intact (memoryId, sourceIds, memoryI
     // message; the public surface only emits prose.
     assert.ok(
       Array.isArray(recallOut.sourceIds),
-      "sourceIds must remain an array on the recall outcome",
+      "sourceIds must remain an array on the recall outcome"
     );
     for (const id of recallOut.sourceIds) {
       assert.ok(
         Number.isInteger(id) && id > 0,
-        `sourceIds entries must be positive integers; got ${id}`,
+        `sourceIds entries must be positive integers; got ${id}`
       );
     }
     // The internal detector's `memoryIds` array is also

@@ -16,11 +16,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { initStorage, type StorageHandle } from "../../src/storage/storage.ts";
+import { type StorageHandle, initStorage } from "../../src/storage/storage.ts";
 
-export function mkStorage(
-  prefix: string = "curion-test-",
-): { tmp: string; handle: StorageHandle } {
+export function mkStorage(prefix = "curion-test-"): { tmp: string; handle: StorageHandle } {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   const handle = initStorage({ projectRoot: tmp });
   return { tmp, handle };

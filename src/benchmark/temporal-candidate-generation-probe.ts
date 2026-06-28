@@ -245,25 +245,23 @@
  *     read the contract.
  */
 
-import type { BenchmarkQuery } from "./queries.js";
 import type { QueryEval } from "./metrics.js";
-import { STALE_TEMPORAL_IDS } from "./temporal-truth-diagnostic.js";
 import {
-  classifyTemporalTruthFailure,
-  type TemporalTruthCategory,
-  TEMPORAL_TRUTH_CATEGORIES,
-} from "./temporal-truth-diagnostic.js";
-import { SIMULATED_SUPERSESSION_EDGES } from "./supersession-edge-simulation.js";
-import {
-  SIMULATED_MULTI_ANCHOR_TREATMENT,
-  SIMULATED_MULTI_ANCHOR_IDS,
-  applyMultiAnchorRerankRule,
   type MultiAnchorRerankRule,
   type MultiAnchorRerankVariant,
+  SIMULATED_MULTI_ANCHOR_IDS,
+  SIMULATED_MULTI_ANCHOR_TREATMENT,
+  applyMultiAnchorRerankRule,
 } from "./multi-anchor-current-previous.js";
+import { BUILTIN_MULTI_ANCHOR_RERANK_VARIANTS } from "./multi-anchor-current-previous.js";
+import type { BenchmarkQuery } from "./queries.js";
+import { SIMULATED_SUPERSESSION_EDGES } from "./supersession-edge-simulation.js";
+import { STALE_TEMPORAL_IDS } from "./temporal-truth-diagnostic.js";
 import {
-  BUILTIN_MULTI_ANCHOR_RERANK_VARIANTS,
-} from "./multi-anchor-current-previous.js";
+  TEMPORAL_TRUTH_CATEGORIES,
+  type TemporalTruthCategory,
+  classifyTemporalTruthFailure,
+} from "./temporal-truth-diagnostic.js";
 
 // ---------------------------------------------------------------------------
 // Linked-expansion type and map
@@ -399,10 +397,7 @@ export interface CandidateGenerationVariant {
  *       119 -> [69] (safety current)
  *       120 -> [11] (oncall current)
  */
-export const SIMULATED_LINKED_EXPANSION: ReadonlyMap<
-  number,
-  ReadonlyArray<number>
-> = (() => {
+export const SIMULATED_LINKED_EXPANSION: ReadonlyMap<number, ReadonlyArray<number>> = (() => {
   const out = new Map<number, number[]>();
   for (const [recordId, edge] of SIMULATED_SUPERSESSION_EDGES.entries()) {
     if (edge.supersededBy !== null) {
@@ -429,14 +424,13 @@ export const SIMULATED_LINKED_EXPANSION: ReadonlyMap<
  * The set of "current" ids the linked-expansion
  * map would inject.
  */
-export const SIMULATED_LINKED_EXPANSION_INJECTED_IDS: ReadonlySet<number> =
-  (() => {
-    const out = new Set<number>();
-    for (const ids of SIMULATED_LINKED_EXPANSION.values()) {
-      for (const id of ids) out.add(id);
-    }
-    return out;
-  })();
+export const SIMULATED_LINKED_EXPANSION_INJECTED_IDS: ReadonlySet<number> = (() => {
+  const out = new Set<number>();
+  for (const ids of SIMULATED_LINKED_EXPANSION.values()) {
+    for (const id of ids) out.add(id);
+  }
+  return out;
+})();
 
 /**
  * The fixed downstream reranker the
@@ -450,7 +444,7 @@ export const DOWNSTREAM_RERANKER_VARIANT: MultiAnchorRerankVariant = (() => {
   }
   throw new Error(
     "temporal-candidate-generation-probe: BUILTIN_MULTI_ANCHOR_RERANK_VARIANTS " +
-      "must contain a 'multi-anchor-aware-combined' variant (Experiment 8 contract)",
+      "must contain a 'multi-anchor-aware-combined' variant (Experiment 8 contract)"
   );
 })();
 
@@ -460,51 +454,50 @@ export const DOWNSTREAM_RERANKER_VARIANT: MultiAnchorRerankVariant = (() => {
  * is declaration order; the report iterates in
  * this order.
  */
-export const BUILTIN_CANDIDATE_GENERATION_VARIANTS: ReadonlyArray<CandidateGenerationVariant> =
-  [
-    {
-      id: "baseline-no-rerank",
-      description:
-        "Baseline: no candidate expansion, no reranker. The lexical baseline's existing top-K order is used as-is. The reference row; production-like.",
-      category: "production-like",
-      rule: { kind: "none" },
-    },
-    {
-      id: "reranker-control-multi-anchor-aware-combined",
-      description:
-        "Reranker-control: no candidate expansion; the downstream reranker is Experiment 8's multi-anchor-aware-combined (the multi-anchor-aware combined rule, which protects the rank-1 anchor from being displaced by a promotion). This is the EXPERIMENT 9 fixed downstream control; every candidate-expansion variant below composes with this reranker.",
-      category: "reranker-control",
-      rule: { kind: "none" },
-    },
-    {
-      id: "candidate-expansion-topk10-no-expansion",
-      description:
-        "Metadata-simulation: synthetic top-K derived from the baseline top-K by appending the canonical supersededBy-projection ids of records in the top-K that are NOT already in the top-K. The downstream reranker is Experiment 8's multi-anchor-aware-combined. Honest framing: this is metadata-simulation, NOT production-like.",
-      category: "metadata-simulation",
-      rule: { kind: "metadata-simulation-larger-topk-no-expansion" },
-    },
-    {
-      id: "metadata-simulation-linked-candidate-expansion",
-      description:
-        "Metadata-simulation: for every record in the top-K that is a stale / superseded candidate (per the simulated supersededBy map), inject the supersededBy id if it is NOT already in the top-K. The injected id is appended to the top-K; the downstream reranker (multi-anchor-aware-combined) can promote it. The rule does NOT consult currentTruthIds; the injection is driven by the simulated edge map.",
-      category: "metadata-simulation",
-      rule: { kind: "metadata-simulation-linked-candidate-expansion" },
-    },
-    {
-      id: "metadata-simulation-multi-anchor-linked-expansion",
-      description:
-        "Multi-anchor-simulation (PRIMARY DELIVERABLE): the linked-candidate-expansion rule PLUS the multi-anchor treatment's currentTruthId projection. If a multi-anchor record is in the top-K AND the multi-anchor treatment explicitly maps the record to a currentTruthId, AND that id is NOT already in the top-K, inject the currentTruthId. The rule does NOT consult currentTruthIds for the linked-expansion decision. The downstream reranker is the multi-anchor-aware-combined. This is the closest a non-oracle candidate-generation rule can come to the oracle candidate-injection ceiling.",
-      category: "multi-anchor-simulation",
-      rule: { kind: "metadata-simulation-multi-anchor-linked-expansion" },
-    },
-    {
-      id: "oracle-candidate-injection-ceiling",
-      description:
-        "Oracle: for every query, inject every id in currentTruthIds that is NOT in the baseline top-K into the candidate set, then apply the multi-anchor-aware-combined downstream reranker. The honest candidate-generation ceiling the Architect asked for.",
-      category: "oracle",
-      rule: { kind: "oracle-candidate-injection-ceiling" },
-    },
-  ];
+export const BUILTIN_CANDIDATE_GENERATION_VARIANTS: ReadonlyArray<CandidateGenerationVariant> = [
+  {
+    id: "baseline-no-rerank",
+    description:
+      "Baseline: no candidate expansion, no reranker. The lexical baseline's existing top-K order is used as-is. The reference row; production-like.",
+    category: "production-like",
+    rule: { kind: "none" },
+  },
+  {
+    id: "reranker-control-multi-anchor-aware-combined",
+    description:
+      "Reranker-control: no candidate expansion; the downstream reranker is Experiment 8's multi-anchor-aware-combined (the multi-anchor-aware combined rule, which protects the rank-1 anchor from being displaced by a promotion). This is the EXPERIMENT 9 fixed downstream control; every candidate-expansion variant below composes with this reranker.",
+    category: "reranker-control",
+    rule: { kind: "none" },
+  },
+  {
+    id: "candidate-expansion-topk10-no-expansion",
+    description:
+      "Metadata-simulation: synthetic top-K derived from the baseline top-K by appending the canonical supersededBy-projection ids of records in the top-K that are NOT already in the top-K. The downstream reranker is Experiment 8's multi-anchor-aware-combined. Honest framing: this is metadata-simulation, NOT production-like.",
+    category: "metadata-simulation",
+    rule: { kind: "metadata-simulation-larger-topk-no-expansion" },
+  },
+  {
+    id: "metadata-simulation-linked-candidate-expansion",
+    description:
+      "Metadata-simulation: for every record in the top-K that is a stale / superseded candidate (per the simulated supersededBy map), inject the supersededBy id if it is NOT already in the top-K. The injected id is appended to the top-K; the downstream reranker (multi-anchor-aware-combined) can promote it. The rule does NOT consult currentTruthIds; the injection is driven by the simulated edge map.",
+    category: "metadata-simulation",
+    rule: { kind: "metadata-simulation-linked-candidate-expansion" },
+  },
+  {
+    id: "metadata-simulation-multi-anchor-linked-expansion",
+    description:
+      "Multi-anchor-simulation (PRIMARY DELIVERABLE): the linked-candidate-expansion rule PLUS the multi-anchor treatment's currentTruthId projection. If a multi-anchor record is in the top-K AND the multi-anchor treatment explicitly maps the record to a currentTruthId, AND that id is NOT already in the top-K, inject the currentTruthId. The rule does NOT consult currentTruthIds for the linked-expansion decision. The downstream reranker is the multi-anchor-aware-combined. This is the closest a non-oracle candidate-generation rule can come to the oracle candidate-injection ceiling.",
+    category: "multi-anchor-simulation",
+    rule: { kind: "metadata-simulation-multi-anchor-linked-expansion" },
+  },
+  {
+    id: "oracle-candidate-injection-ceiling",
+    description:
+      "Oracle: for every query, inject every id in currentTruthIds that is NOT in the baseline top-K into the candidate set, then apply the multi-anchor-aware-combined downstream reranker. The honest candidate-generation ceiling the Architect asked for.",
+    category: "oracle",
+    rule: { kind: "oracle-candidate-injection-ceiling" },
+  },
+];
 
 // ---------------------------------------------------------------------------
 // Candidate-expansion rule application
@@ -683,7 +676,7 @@ export function applyCandidateExpansionRule(args: {
   throw new Error(
     `applyCandidateExpansionRule: unknown rule kind "${
       (rule as { kind: string }).kind
-    }" for query "${e.queryId}"`,
+    }" for query "${e.queryId}"`
   );
 }
 
@@ -700,20 +693,13 @@ export function applyCandidateExpansionRule(args: {
  * the rule kind labels are the
  * `category`-honest distinction.
  */
-function appendSupersededByFromTopK(
-  ids: number[],
-  scores: number[],
-): CandidateExpansionResult {
+function appendSupersededByFromTopK(ids: number[], scores: number[]): CandidateExpansionResult {
   const topKSet = new Set(ids);
   const appendedIds: number[] = [];
   const appendedScores: number[] = [];
   for (const id of ids) {
     const edge = SIMULATED_SUPERSESSION_EDGES.get(id);
-    if (
-      edge !== undefined &&
-      edge.supersededBy !== null &&
-      !topKSet.has(edge.supersededBy)
-    ) {
+    if (edge !== undefined && edge.supersededBy !== null && !topKSet.has(edge.supersededBy)) {
       topKSet.add(edge.supersededBy);
       appendedIds.push(edge.supersededBy);
       appendedScores.push(0.0);
@@ -868,23 +854,18 @@ export function evaluateCandidateGenerationVariant(args: {
   queries: ReadonlyArray<BenchmarkQuery>;
   downstreamVariant?: MultiAnchorRerankVariant;
 }): CandidateGenerationVariantMetrics {
-  const {
-    variant,
-    evals,
-    queries,
-    downstreamVariant = DOWNSTREAM_RERANKER_VARIANT,
-  } = args;
+  const { variant, evals, queries, downstreamVariant = DOWNSTREAM_RERANKER_VARIANT } = args;
   if (evals.length !== queries.length) {
     throw new Error(
       `evaluateCandidateGenerationVariant: evals.length (${evals.length}) must match ` +
-        `queries.length (${queries.length}) for variant "${variant.id}"`,
+        `queries.length (${queries.length}) for variant "${variant.id}"`
     );
   }
   if (downstreamVariant.id !== "multi-anchor-aware-combined") {
     throw new Error(
       `evaluateCandidateGenerationVariant: downstreamVariant must be ` +
         `'multi-anchor-aware-combined' for variant "${variant.id}", ` +
-        `got "${downstreamVariant.id}"`,
+        `got "${downstreamVariant.id}"`
     );
   }
 
@@ -895,7 +876,7 @@ export function evaluateCandidateGenerationVariant(args: {
     if (e.queryId !== q.id) {
       throw new Error(
         `evaluateCandidateGenerationVariant: evals[${i}].queryId="${e.queryId}" does ` +
-          `not match queries[${i}].id="${q.id}" for variant "${variant.id}"`,
+          `not match queries[${i}].id="${q.id}" for variant "${variant.id}"`
       );
     }
     if (q.family !== "temporal") continue;
@@ -905,7 +886,7 @@ export function evaluateCandidateGenerationVariant(args: {
         eval: e,
         query: q,
         downstreamVariant,
-      }),
+      })
     );
   }
   return aggregateCandidateGenerationPerQuery(perQuery);
@@ -959,10 +940,7 @@ export function evaluateCandidateGenerationForQuery(args: {
     topIds: expansion.topIds,
     topScores: expansion.topScores,
   };
-  const afterExpansionDiag = classifyTemporalTruthFailure(
-    afterExpansionEval,
-    q,
-  );
+  const afterExpansionDiag = classifyTemporalTruthFailure(afterExpansionEval, q);
   // Step 4: apply the downstream reranker
   // (Experiment 8's
   // `multi-anchor-aware-combined`). The
@@ -992,15 +970,13 @@ export function evaluateCandidateGenerationForQuery(args: {
   const categoryChange = `${baselineDiag.category} -> ${afterDiag.category}`;
 
   const regression =
-    baselineDiag.top1IsCurrentTruth === true &&
-    afterDiag.top1IsCurrentTruth === false;
+    baselineDiag.top1IsCurrentTruth === true && afterDiag.top1IsCurrentTruth === false;
 
   const baselineCurrentInTopK = baselineDiag.topKHasCurrentTruth;
   const afterExpansionCurrentInTopK = afterExpansionDiag.topKHasCurrentTruth;
 
   const recoveredByExpansion =
-    baselineCurrentInTopK === false &&
-    afterExpansionCurrentInTopK === true;
+    baselineCurrentInTopK === false && afterExpansionCurrentInTopK === true;
 
   // `expansionInjectedCurrent`: `true` iff
   // the candidate-expansion rule injected
@@ -1031,8 +1007,7 @@ export function evaluateCandidateGenerationForQuery(args: {
     baselineTop1Id: baselineDiag.top1Id,
     baselineCurrentTruthAt1: baselineDiag.top1IsCurrentTruth,
     baselineStaleTop1: baselineDiag.top1IsStale,
-    baselineStaleOverCurrent:
-      baselineDiag.top1IsStale && baselineDiag.topKHasCurrentTruth,
+    baselineStaleOverCurrent: baselineDiag.top1IsStale && baselineDiag.topKHasCurrentTruth,
     baselineCategory: baselineDiag.category,
     baselineIsDivergentLabeled: baselineDiag.isDivergentLabeled,
     baselineCurrentInTopK,
@@ -1040,8 +1015,7 @@ export function evaluateCandidateGenerationForQuery(args: {
     afterTop1Id: afterDiag.top1Id,
     afterCurrentTruthAt1: afterDiag.top1IsCurrentTruth,
     afterStaleTop1: afterDiag.top1IsStale,
-    afterStaleOverCurrent:
-      afterDiag.top1IsStale && afterDiag.topKHasCurrentTruth,
+    afterStaleOverCurrent: afterDiag.top1IsStale && afterDiag.topKHasCurrentTruth,
     afterCategory: afterDiag.category,
     categoryChange,
     regression,
@@ -1064,7 +1038,7 @@ export function evaluateCandidateGenerationForQuery(args: {
  * The function is pure.
  */
 export function aggregateCandidateGenerationPerQuery(
-  perQuery: ReadonlyArray<CandidateGenerationPerQuery>,
+  perQuery: ReadonlyArray<CandidateGenerationPerQuery>
 ): CandidateGenerationVariantMetrics {
   const total = perQuery.length;
   let cleanTotal = 0;
@@ -1159,13 +1133,11 @@ export function aggregateCandidateGenerationPerQuery(
 
     if (p.hasExcludedCurrentAnchor) {
       multiAnchorQueryCount += 1;
-      if (p.baselineCurrentTruthAt1)
-        multiAnchorBaselineCurrentTruthAt1 += 1;
+      if (p.baselineCurrentTruthAt1) multiAnchorBaselineCurrentTruthAt1 += 1;
       if (p.afterCurrentTruthAt1) multiAnchorAfterCurrentTruthAt1 += 1;
       if (p.regression) multiAnchorRegressionCount += 1;
       if (p.recoveredByExpansion) multiAnchorRecoveredByExpansion += 1;
-      if (p.expansionInjectedCurrent)
-        multiAnchorExpansionInjectedCurrentCount += 1;
+      if (p.expansionInjectedCurrent) multiAnchorExpansionInjectedCurrentCount += 1;
     }
 
     if (p.isClean) {
@@ -1173,34 +1145,26 @@ export function aggregateCandidateGenerationPerQuery(
       if (p.afterCurrentTruthAt1) cleanAfterCurrentTruthAt1 += 1;
       if (p.regression) cleanRegressionCount += 1;
     } else {
-      if (p.baselineCurrentTruthAt1)
-        fixtureAmbiguousBaselineCurrentTruthAt1 += 1;
-      if (p.afterCurrentTruthAt1)
-        fixtureAmbiguousAfterCurrentTruthAt1 += 1;
+      if (p.baselineCurrentTruthAt1) fixtureAmbiguousBaselineCurrentTruthAt1 += 1;
+      if (p.afterCurrentTruthAt1) fixtureAmbiguousAfterCurrentTruthAt1 += 1;
       if (p.regression) fixtureAmbiguousRegressionCount += 1;
     }
 
-    perCategoryChange[p.categoryChange] =
-      (perCategoryChange[p.categoryChange] ?? 0) + 1;
+    perCategoryChange[p.categoryChange] = (perCategoryChange[p.categoryChange] ?? 0) + 1;
   }
 
   const safeDiv = (n: number, d: number): number => (d > 0 ? n / d : 0);
   const currentTruthAt1Delta = afterCurrentTruthAt1 - baselineCurrentTruthAt1;
   const currentTruthAt1RateDelta =
-    safeDiv(afterCurrentTruthAt1, total) -
-    safeDiv(baselineCurrentTruthAt1, total);
+    safeDiv(afterCurrentTruthAt1, total) - safeDiv(baselineCurrentTruthAt1, total);
   const staleTop1Delta = afterStaleTop1 - baselineStaleTop1;
-  const staleOverCurrentDelta =
-    afterStaleOverCurrent - baselineStaleOverCurrent;
+  const staleOverCurrentDelta = afterStaleOverCurrent - baselineStaleOverCurrent;
   const currentMissingDelta = afterCurrentMissing - baselineCurrentMissing;
-  const expansionCurrentMissingDelta =
-    afterExpansionCurrentMissing - baselineCurrentMissing;
+  const expansionCurrentMissingDelta = afterExpansionCurrentMissing - baselineCurrentMissing;
 
-  const cleanCurrentTruthAt1Delta =
-    cleanAfterCurrentTruthAt1 - cleanBaselineCurrentTruthAt1;
+  const cleanCurrentTruthAt1Delta = cleanAfterCurrentTruthAt1 - cleanBaselineCurrentTruthAt1;
   const fixtureAmbiguousCurrentTruthAt1Delta =
-    fixtureAmbiguousAfterCurrentTruthAt1 -
-    fixtureAmbiguousBaselineCurrentTruthAt1;
+    fixtureAmbiguousAfterCurrentTruthAt1 - fixtureAmbiguousBaselineCurrentTruthAt1;
 
   const multiAnchorCurrentTruthAt1Delta =
     multiAnchorAfterCurrentTruthAt1 - multiAnchorBaselineCurrentTruthAt1;
@@ -1260,9 +1224,10 @@ export function aggregateCandidateGenerationPerQuery(
  * Compute the per-variant verdict. The
  * verdict is a research-only reading aid.
  */
-export function computeCandidateGenerationVerdict(
-  metrics: CandidateGenerationVariantMetrics,
-): { verdict: CandidateGenerationVerdict; note: string } {
+export function computeCandidateGenerationVerdict(metrics: CandidateGenerationVariantMetrics): {
+  verdict: CandidateGenerationVerdict;
+  note: string;
+} {
   if (metrics.regressionCount > 0) {
     return {
       verdict: "unsafe",
@@ -1277,8 +1242,7 @@ export function computeCandidateGenerationVerdict(
   }
   return {
     verdict: "neutral",
-    note:
-      "no regressions, no currentTruthAt1 recovery; the candidate-generation variant preserved the baseline on this slice (research probe that did not help; verdict is neutral, not safe)",
+    note: "no regressions, no currentTruthAt1 recovery; the candidate-generation variant preserved the baseline on this slice (research probe that did not help; verdict is neutral, not safe)",
   };
 }
 
@@ -1374,14 +1338,12 @@ export function buildCandidateGenerationReport(args: {
   if (evals.length !== queries.length) {
     throw new Error(
       `buildCandidateGenerationReport: evals.length (${evals.length}) must match ` +
-        `queries.length (${queries.length})`,
+        `queries.length (${queries.length})`
     );
   }
   const rows: CandidateGenerationVariantRow[] = [];
   for (const v of variants) {
-    rows.push(
-      buildCandidateGenerationVariantRow({ variant: v, evals, queries }),
-    );
+    rows.push(buildCandidateGenerationVariantRow({ variant: v, evals, queries }));
   }
   let temporalQueryCount = 0;
   for (const q of queries) {
@@ -1431,14 +1393,10 @@ export function buildCandidateGenerationReport(args: {
   const recoveredByRerankerByVariant: Record<string, number> = {};
   const expansionInjectedCurrentByVariant: Record<string, number> = {};
   for (const row of rows) {
-    unchangedByVariant[row.variant.id] =
-      row.metrics.unchangedBecauseCurrentMissing;
-    recoveredByExpansionByVariant[row.variant.id] =
-      row.metrics.recoveredByExpansion;
-    recoveredByRerankerByVariant[row.variant.id] =
-      row.metrics.recoveredByReranker;
-    expansionInjectedCurrentByVariant[row.variant.id] =
-      row.metrics.expansionInjectedCurrentCount;
+    unchangedByVariant[row.variant.id] = row.metrics.unchangedBecauseCurrentMissing;
+    recoveredByExpansionByVariant[row.variant.id] = row.metrics.recoveredByExpansion;
+    recoveredByRerankerByVariant[row.variant.id] = row.metrics.recoveredByReranker;
+    expansionInjectedCurrentByVariant[row.variant.id] = row.metrics.expansionInjectedCurrentCount;
   }
   let semanticOverlay: CandidateGenerationReport["semanticOverlay"];
   if (semantic) {
@@ -1475,7 +1433,7 @@ export function buildCandidateGenerationReport(args: {
     if (missQueries.length !== miss) {
       throw new Error(
         `buildCandidateGenerationReport: semantic overlay miss mismatch ` +
-          `(${missQueries.length} vs ${miss})`,
+          `(${missQueries.length} vs ${miss})`
       );
     }
   }
@@ -1493,9 +1451,7 @@ export function buildCandidateGenerationReport(args: {
     supersessionEdgeMapSize: SIMULATED_SUPERSESSION_EDGES.size,
     multiAnchorTreatmentSize: SIMULATED_MULTI_ANCHOR_TREATMENT.size,
     linkedExpansionMapSize: SIMULATED_LINKED_EXPANSION.size,
-    linkedExpansionInjectedIds: [
-      ...SIMULATED_LINKED_EXPANSION_INJECTED_IDS,
-    ].sort((a, b) => a - b),
+    linkedExpansionInjectedIds: [...SIMULATED_LINKED_EXPANSION_INJECTED_IDS].sort((a, b) => a - b),
     downstreamRerankerId: DOWNSTREAM_RERANKER_VARIANT.id,
     variants: rows,
     gapBreakdown: {
@@ -1522,13 +1478,9 @@ export function buildCandidateGenerationReport(args: {
  * Render a `CandidateGenerationReport` as a
  * human-readable text block. Deterministic.
  */
-export function formatCandidateGenerationReport(
-  report: CandidateGenerationReport,
-): string {
+export function formatCandidateGenerationReport(report: CandidateGenerationReport): string {
   const out: string[] = [];
-  out.push(
-    `# Candidate-generation probe (source: ${report.sourceVariant})`,
-  );
+  out.push(`# Candidate-generation probe (source: ${report.sourceVariant})`);
   if (report.recordCount !== null) {
     out.push(`#   (records: ${report.recordCount})`);
   }
@@ -1537,17 +1489,15 @@ export function formatCandidateGenerationReport(
     `#   (simulated supersession edge map: ${report.supersessionEdgeMapSize} entries; ` +
       `multi-anchor treatment: ${report.multiAnchorTreatmentSize} entries; ` +
       `linked-expansion map: ${report.linkedExpansionMapSize} entries; ` +
-      `linked-expansion injected ids: ${report.linkedExpansionInjectedIds.length})`,
+      `linked-expansion injected ids: ${report.linkedExpansionInjectedIds.length})`
   );
-  out.push(
-    `#   (downstream reranker: ${report.downstreamRerankerId})`,
-  );
+  out.push(`#   (downstream reranker: ${report.downstreamRerankerId})`);
   out.push("");
 
   out.push("## Variant table (temporal slice)");
   out.push("");
   out.push(
-    "  category | variant | n | baseline@1 | after@1 | delta | recoveredByExpansion | currentMissing baseline->afterExpansion->afterRerank | regressions | meanExpandedK | maxExpandedK | injectedCurrent | verdict",
+    "  category | variant | n | baseline@1 | after@1 | delta | recoveredByExpansion | currentMissing baseline->afterExpansion->afterRerank | regressions | meanExpandedK | maxExpandedK | injectedCurrent | verdict"
   );
   for (const row of report.variants) {
     const m = row.metrics;
@@ -1563,7 +1513,7 @@ export function formatCandidateGenerationReport(
         `${m.meanExpandedTopKSize.toFixed(2).padStart(13)} | ` +
         `${String(m.maxExpandedTopKSize).padStart(12)} | ` +
         `${String(m.expansionInjectedCurrentCount).padStart(15)} | ` +
-        `${row.verdict}`,
+        `${row.verdict}`
     );
   }
   out.push("");
@@ -1571,7 +1521,7 @@ export function formatCandidateGenerationReport(
   out.push("## Variant table (clean / fixture-ambiguous split)");
   out.push("");
   out.push(
-    "  category | variant | cleanN | cleanBaseline@1 | cleanAfter@1 | cleanDelta | cleanRegressions | ambigN | ambigBaseline@1 | ambigAfter@1 | ambigDelta | ambigRegressions",
+    "  category | variant | cleanN | cleanBaseline@1 | cleanAfter@1 | cleanDelta | cleanRegressions | ambigN | ambigBaseline@1 | ambigAfter@1 | ambigDelta | ambigRegressions"
   );
   for (const row of report.variants) {
     const m = row.metrics;
@@ -1586,17 +1536,17 @@ export function formatCandidateGenerationReport(
         `${String(m.fixtureAmbiguousBaselineCurrentTruthAt1).padStart(15)} | ` +
         `${String(m.fixtureAmbiguousAfterCurrentTruthAt1).padStart(12)} | ` +
         `${signedInt(m.fixtureAmbiguousCurrentTruthAt1Delta).padStart(10)} | ` +
-        `${String(m.fixtureAmbiguousRegressionCount).padStart(17)}`,
+        `${String(m.fixtureAmbiguousRegressionCount).padStart(17)}`
     );
   }
   out.push("");
 
   out.push(
-    "## Multi-anchor subset (4 queries: temp-current-vs-previous-{postgres,release,safety,oncall})",
+    "## Multi-anchor subset (4 queries: temp-current-vs-previous-{postgres,release,safety,oncall})"
   );
   out.push("");
   out.push(
-    "  category | variant | baseline@1 | after@1 | delta | regressions | recoveredByExpansion | expansionInjectedCurrent",
+    "  category | variant | baseline@1 | after@1 | delta | regressions | recoveredByExpansion | expansionInjectedCurrent"
   );
   for (const row of report.variants) {
     const m = row.metrics;
@@ -1607,7 +1557,7 @@ export function formatCandidateGenerationReport(
         `${signedInt(m.multiAnchorCurrentTruthAt1Delta).padStart(5)} | ` +
         `${String(m.multiAnchorRegressionCount).padStart(11)} | ` +
         `${String(m.multiAnchorRecoveredByExpansion).padStart(20)} | ` +
-        `${String(m.multiAnchorExpansionInjectedCurrentCount).padStart(25)}`,
+        `${String(m.multiAnchorExpansionInjectedCurrentCount).padStart(25)}`
     );
   }
   out.push("");
@@ -1629,7 +1579,7 @@ export function formatCandidateGenerationReport(
     "  The table maps (baseline-category -> after-category) -> count for each variant. " +
       "The columns are the union of all observed change keys, sorted alphabetically. " +
       "The dominant 'X -> X' diagonal is the unchanged-count; the " +
-      "off-diagonal rows are the per-variant recoveries.",
+      "off-diagonal rows are the per-variant recoveries."
   );
   out.push("");
   for (const row of report.variants) {
@@ -1653,7 +1603,7 @@ export function formatCandidateGenerationReport(
   out.push("## Multi-anchor subset per-query breakdown");
   out.push("");
   out.push(
-    `  total temporal queries whose currentTruthIds intersects SIMULATED_MULTI_ANCHOR_IDS: ${report.multiAnchorSubset.total}`,
+    `  total temporal queries whose currentTruthIds intersects SIMULATED_MULTI_ANCHOR_IDS: ${report.multiAnchorSubset.total}`
   );
   out.push("");
   out.push("  per-variant (multi-anchor subset):");
@@ -1663,7 +1613,7 @@ export function formatCandidateGenerationReport(
         `after@1=${String(n.afterCurrentTruthAt1).padStart(2)}  ` +
         `delta=${signedInt(n.currentTruthAt1Delta).padStart(3)}  ` +
         `regressions=${String(n.regressionCount).padStart(2)}  ` +
-        `recoveredByExpansion=${String(n.recoveredByExpansion).padStart(2)}`,
+        `recoveredByExpansion=${String(n.recoveredByExpansion).padStart(2)}`
     );
   }
   out.push("");
@@ -1672,12 +1622,12 @@ export function formatCandidateGenerationReport(
     out.push("    (no multi-anchor queries on the temporal slice)");
   } else {
     const sorted = [...report.multiAnchorSubset.perQuery].sort((a, b) =>
-      a.queryId < b.queryId ? -1 : a.queryId > b.queryId ? 1 : 0,
+      a.queryId < b.queryId ? -1 : a.queryId > b.queryId ? 1 : 0
     );
     for (const p of sorted) {
       out.push(
         `    ${p.queryId.padEnd(48)}  family=${p.family.padEnd(10)}  ` +
-          `multi-anchor=${JSON.stringify(p.multiAnchorCurrentTruthIds)}`,
+          `multi-anchor=${JSON.stringify(p.multiAnchorCurrentTruthIds)}`
       );
     }
   }
@@ -1690,46 +1640,34 @@ export function formatCandidateGenerationReport(
       "`currentMissing` after BOTH the candidate expansion step and the " +
       "downstream reranker. A query is `unchangedBecauseCurrentMissing` iff " +
       "the baseline was missing AND the after-expansion step was missing " +
-      "AND the after-rerank step was missing.",
+      "AND the after-rerank step was missing."
   );
   out.push("");
   out.push("  per-variant (unchangedBecauseCurrentMissing):");
-  for (const [vid, n] of Object.entries(
-    report.gapBreakdown.unchangedByVariant,
-  )) {
+  for (const [vid, n] of Object.entries(report.gapBreakdown.unchangedByVariant)) {
     out.push(`    ${vid.padEnd(56)}  ${n}`);
   }
   out.push("");
   out.push("  per-variant (recoveredByExpansion):");
-  for (const [vid, n] of Object.entries(
-    report.gapBreakdown.recoveredByExpansionByVariant,
-  )) {
+  for (const [vid, n] of Object.entries(report.gapBreakdown.recoveredByExpansionByVariant)) {
     out.push(`    ${vid.padEnd(56)}  ${n}`);
   }
   out.push("");
   out.push("  per-variant (recoveredByReranker):");
-  for (const [vid, n] of Object.entries(
-    report.gapBreakdown.recoveredByRerankerByVariant,
-  )) {
+  for (const [vid, n] of Object.entries(report.gapBreakdown.recoveredByRerankerByVariant)) {
     out.push(`    ${vid.padEnd(56)}  ${n}`);
   }
   out.push("");
   out.push("  per-variant (expansionInjectedCurrentCount):");
-  for (const [vid, n] of Object.entries(
-    report.gapBreakdown.expansionInjectedCurrentByVariant,
-  )) {
+  for (const [vid, n] of Object.entries(report.gapBreakdown.expansionInjectedCurrentByVariant)) {
     out.push(`    ${vid.padEnd(56)}  ${n}`);
   }
   out.push("");
 
   out.push("## Linked-expansion map summary");
   out.push("");
-  out.push(
-    `  linked-expansion map entries:        ${report.linkedExpansionMapSize}`,
-  );
-  out.push(
-    `  linked-expansion injected ids:       ${report.linkedExpansionInjectedIds.length}`,
-  );
+  out.push(`  linked-expansion map entries:        ${report.linkedExpansionMapSize}`);
+  out.push(`  linked-expansion injected ids:       ${report.linkedExpansionInjectedIds.length}`);
   out.push("");
   out.push("  injected ids (sorted):");
   out.push(`    [${report.linkedExpansionInjectedIds.join(", ")}]`);
@@ -1746,36 +1684,32 @@ export function formatCandidateGenerationReport(
   out.push("## Cross-experiment sanity (vs STALE_TEMPORAL_IDS)");
   out.push("");
   out.push(
-    `  linkedExpansionInjectedIds ∩ STALE_TEMPORAL_IDS: ${staleOverlap.length} (overlap ids: [${staleOverlap.join(", ")}])`,
+    `  linkedExpansionInjectedIds ∩ STALE_TEMPORAL_IDS: ${staleOverlap.length} (overlap ids: [${staleOverlap.join(", ")}])`
   );
   out.push(
-    `  STALE_TEMPORAL_IDS \\ linkedExpansionInjectedIds: ${staleOnly.length} (ids: [${staleOnly.join(", ")}])`,
+    `  STALE_TEMPORAL_IDS \\ linkedExpansionInjectedIds: ${staleOnly.length} (ids: [${staleOnly.join(", ")}])`
   );
   out.push(
     "  The linked-expansion injected ids are the chain winners of the " +
       "supersession graph (e.g. 1, 2, 3, 6, 7, 11, 37, 50, 69, 90) plus the " +
       "multi-anchor anchors' current truth ids (1, 7, 11, 69). The set is " +
       "INTENTIONALLY NARROW: only ids the simulated metadata explicitly " +
-      "links to a stale record are in the map.",
+      "links to a stale record are in the map."
   );
   out.push("");
   if (report.semanticOverlay) {
     const o = report.semanticOverlay;
-    out.push(
-      "## Semantic evidence overlay (temporal slice, cross-reference only)",
-    );
+    out.push("## Semantic evidence overlay (temporal slice, cross-reference only)");
     out.push("");
     out.push(`  source:    ${o.source}`);
     out.push(`  covered:   ${o.covered}`);
     out.push(`  hit:       ${o.hit}`);
     out.push(`  miss:      ${o.miss}`);
     out.push(
-      "  The candidate-expansion rules do NOT consult the map. The map is a cross-reference.",
+      "  The candidate-expansion rules do NOT consult the map. The map is a cross-reference."
     );
     out.push("");
-    out.push(
-      "  recovered-by-variant (baseline-miss queries, after-currentTruthAt1):",
-    );
+    out.push("  recovered-by-variant (baseline-miss queries, after-currentTruthAt1):");
     for (const [vid, n] of Object.entries(o.recoveredByVariant)) {
       out.push(`    ${vid.padEnd(56)}  ${n}`);
     }
@@ -1793,7 +1727,7 @@ export function formatCandidateGenerationReport(
       "multi-anchor treatment AND the linked-expansion map at `remember` " +
       "time would let a runtime candidate generator + the downstream " +
       "multi-anchor-aware reranker reach the oracle-candidate-injection " +
-      "ceiling WITHOUT depending on the fixture truth at all'.",
+      "ceiling WITHOUT depending on the fixture truth at all'."
   );
   out.push("");
   return out.join("\n");

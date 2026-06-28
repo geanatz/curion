@@ -79,9 +79,9 @@ import path from "node:path";
 import { BENCHMARK_QUERIES } from "./queries.js";
 import type { BenchmarkQuery } from "./queries.js";
 import {
+  type TemporalTruthDiagnosticReport,
   buildTemporalTruthDiagnosticReport,
   formatTemporalTruthDiagnosticReport,
-  type TemporalTruthDiagnosticReport,
 } from "./temporal-truth-diagnostic.js";
 
 // ---------------------------------------------------------------------------
@@ -126,35 +126,29 @@ export function readBenchmarkArtifact(filePath: string): BenchmarkArtifact {
   const text = fs.readFileSync(filePath, "utf8");
   const raw = JSON.parse(text) as BenchmarkArtifact;
   if (!raw || typeof raw !== "object") {
-    throw new Error(
-      `readBenchmarkArtifact: ${filePath} must be a JSON object, got ${typeof raw}`,
-    );
+    throw new Error(`readBenchmarkArtifact: ${filePath} must be a JSON object, got ${typeof raw}`);
   }
   if (!Array.isArray(raw.evals)) {
     throw new Error(
-      `readBenchmarkArtifact: ${filePath} must have an 'evals' array, got ${typeof raw.evals}`,
+      `readBenchmarkArtifact: ${filePath} must have an 'evals' array, got ${typeof raw.evals}`
     );
   }
   for (let i = 0; i < raw.evals.length; i++) {
     const e = raw.evals[i]!;
     if (typeof e.queryId !== "string" || e.queryId.length === 0) {
       throw new Error(
-        `readBenchmarkArtifact: ${filePath} evals[${i}] must have a non-empty 'queryId'`,
+        `readBenchmarkArtifact: ${filePath} evals[${i}] must have a non-empty 'queryId'`
       );
     }
     if (typeof e.family !== "string") {
-      throw new Error(
-        `readBenchmarkArtifact: ${filePath} evals[${i}].family must be a string`,
-      );
+      throw new Error(`readBenchmarkArtifact: ${filePath} evals[${i}].family must be a string`);
     }
     if (!Array.isArray(e.topIds)) {
-      throw new Error(
-        `readBenchmarkArtifact: ${filePath} evals[${i}].topIds must be an array`,
-      );
+      throw new Error(`readBenchmarkArtifact: ${filePath} evals[${i}].topIds must be an array`);
     }
     if (!Array.isArray(e.currentTruthIds)) {
       throw new Error(
-        `readBenchmarkArtifact: ${filePath} evals[${i}].currentTruthIds must be an array`,
+        `readBenchmarkArtifact: ${filePath} evals[${i}].currentTruthIds must be an array`
       );
     }
   }
@@ -178,19 +172,17 @@ export function readSemanticEvidenceFile(filePath: string): SemanticEvidenceMap 
   const raw = JSON.parse(text);
   if (typeof raw.source !== "string" || raw.source.length === 0) {
     throw new Error(
-      `readSemanticEvidenceFile: ${filePath} must have a non-empty string 'source' field`,
+      `readSemanticEvidenceFile: ${filePath} must have a non-empty string 'source' field`
     );
   }
   if (typeof raw.byQueryId !== "object" || raw.byQueryId === null) {
-    throw new Error(
-      `readSemanticEvidenceFile: ${filePath} must have an object 'byQueryId' field`,
-    );
+    throw new Error(`readSemanticEvidenceFile: ${filePath} must have an object 'byQueryId' field`);
   }
   const map = new Map<string, "hit" | "miss">();
   for (const [k, v] of Object.entries(raw.byQueryId)) {
     if (v !== "hit" && v !== "miss") {
       throw new Error(
-        `readSemanticEvidenceFile: ${filePath} byQueryId.${k} must be "hit" or "miss", got ${JSON.stringify(v)}`,
+        `readSemanticEvidenceFile: ${filePath} byQueryId.${k} must be "hit" or "miss", got ${JSON.stringify(v)}`
       );
     }
     map.set(k, v);
@@ -208,10 +200,7 @@ export function readSemanticEvidenceFile(filePath: string): SemanticEvidenceMap 
  * matches. The function is synchronous and never mutates
  * the directory.
  */
-export function findMostRecentArtifact(
-  dir: string,
-  prefix: string,
-): string | undefined {
+export function findMostRecentArtifact(dir: string, prefix: string): string | undefined {
   if (!fs.existsSync(dir)) return undefined;
   const entries = fs
     .readdirSync(dir)
@@ -239,9 +228,7 @@ export function findMostRecentArtifact(
  * is caught at runner time rather than silently producing
  * a malformed report.
  */
-export function alignQueriesToEvals(
-  evals: ReadonlyArray<{ queryId: string }>,
-): BenchmarkQuery[] {
+export function alignQueriesToEvals(evals: ReadonlyArray<{ queryId: string }>): BenchmarkQuery[] {
   const byId = new Map(BENCHMARK_QUERIES.map((q) => [q.id, q]));
   const out: BenchmarkQuery[] = [];
   for (let i = 0; i < evals.length; i++) {
@@ -249,7 +236,7 @@ export function alignQueriesToEvals(
     const q = byId.get(e.queryId);
     if (!q) {
       throw new Error(
-        `alignQueriesToEvals: evals[${i}].queryId="${e.queryId}" not found in BENCHMARK_QUERIES`,
+        `alignQueriesToEvals: evals[${i}].queryId="${e.queryId}" not found in BENCHMARK_QUERIES`
       );
     }
     out.push(q);
@@ -309,7 +296,7 @@ const ARTIFACT_FILE_PREFIX = "retrieval-temporal-truth-diagnostic";
  */
 export function writeTemporalTruthDiagnosticReport(
   report: TemporalTruthDiagnosticReport,
-  dir: string,
+  dir: string
 ): string {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -345,20 +332,17 @@ export interface TemporalTruthDiagnosticCliArgs {
  * TypeScript surface (the function does its own
  * argument parsing).
  */
-export async function runTemporalTruthDiagnosticCli(
-  args: TemporalTruthDiagnosticCliArgs,
-): Promise<{
+export async function runTemporalTruthDiagnosticCli(args: TemporalTruthDiagnosticCliArgs): Promise<{
   report: TemporalTruthDiagnosticReport;
   written?: string;
 }> {
   const outDir = args.outDir ?? ".curion/benchmark";
   const defaultBenchmark =
-    args.benchmarkArtifact ??
-    findMostRecentArtifact(outDir, "retrieval-baseline-");
+    args.benchmarkArtifact ?? findMostRecentArtifact(outDir, "retrieval-baseline-");
   if (!defaultBenchmark) {
     throw new Error(
       `runTemporalTruthDiagnosticCli: no --benchmark-artifact given and no ` +
-        `retrieval-baseline-*.json found under ${outDir}`,
+        `retrieval-baseline-*.json found under ${outDir}`
     );
   }
   const benchmarkArtifact = readBenchmarkArtifact(defaultBenchmark);
@@ -376,22 +360,16 @@ export async function runTemporalTruthDiagnosticCli(
     written = writeTemporalTruthDiagnosticReport(report, outDir);
   }
   if (!args.noStdout) {
-    process.stderr.write(
-      `[temporal-truth-diagnostic] benchmark artifact: ${defaultBenchmark}\n`,
-    );
+    process.stderr.write(`[temporal-truth-diagnostic] benchmark artifact: ${defaultBenchmark}\n`);
     if (semantic) {
       process.stderr.write(
-        `[temporal-truth-diagnostic] semantic evidence:  ${args.semanticEvidence}\n`,
+        `[temporal-truth-diagnostic] semantic evidence:  ${args.semanticEvidence}\n`
       );
     }
     if (written) {
-      process.stderr.write(
-        `[temporal-truth-diagnostic] wrote:              ${written}\n`,
-      );
+      process.stderr.write(`[temporal-truth-diagnostic] wrote:              ${written}\n`);
     }
-    process.stdout.write(
-      formatTemporalTruthDiagnosticReport(report) + "\n",
-    );
+    process.stdout.write(formatTemporalTruthDiagnosticReport(report) + "\n");
   }
   return { report, ...(written ? { written } : {}) };
 }
@@ -409,7 +387,7 @@ export async function runTemporalTruthDiagnosticCli(
  * arguments does not matter.
  */
 export function parseTemporalTruthDiagnosticCliArgs(
-  argv: ReadonlyArray<string>,
+  argv: ReadonlyArray<string>
 ): TemporalTruthDiagnosticCliArgs {
   const out: TemporalTruthDiagnosticCliArgs = {};
   for (let i = 0; i < argv.length; i++) {
@@ -442,7 +420,7 @@ export function parseTemporalTruthDiagnosticCliArgs(
  * the process exits normally.
  */
 export async function main(
-  argv: ReadonlyArray<string> = process.argv.slice(2),
+  argv: ReadonlyArray<string> = process.argv.slice(2)
 ): Promise<TemporalTruthDiagnosticReport> {
   const args = parseTemporalTruthDiagnosticCliArgs(argv);
   const { report } = await runTemporalTruthDiagnosticCli(args);
@@ -472,7 +450,7 @@ const isMainEntry = (() => {
 if (isMainEntry) {
   main().catch((err) => {
     process.stderr.write(
-      `[temporal-truth-diagnostic] error: ${err instanceof Error ? err.message : String(err)}\n`,
+      `[temporal-truth-diagnostic] error: ${err instanceof Error ? err.message : String(err)}\n`
     );
     process.exit(1);
   });

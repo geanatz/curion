@@ -457,10 +457,7 @@ export interface NoAnswerPolicyFamilyBreakdown {
  * the family name and the value is the
  * per-family counts.
  */
-export type NoAnswerPolicyFamilyBreakdownMap = Record<
-  string,
-  NoAnswerPolicyFamilyBreakdown
->;
+export type NoAnswerPolicyFamilyBreakdownMap = Record<string, NoAnswerPolicyFamilyBreakdown>;
 
 /**
  * The per-sufficiency-label abstention
@@ -679,8 +676,7 @@ export const BUILTIN_NO_ANSWER_POLICIES: ReadonlyArray<NoAnswerPolicy> = [
   },
   {
     id: "gap-below-0.10",
-    description:
-      "Production-like: abstain iff top1Top2Gap<0.10. A more permissive gap gate.",
+    description: "Production-like: abstain iff top1Top2Gap<0.10. A more permissive gap gate.",
     category: "production-like",
     gates: [{ kind: "top1Top2GapBelow", threshold: 0.1 }],
   },
@@ -693,8 +689,7 @@ export const BUILTIN_NO_ANSWER_POLICIES: ReadonlyArray<NoAnswerPolicy> = [
   },
   {
     id: "ratio-below-2.0",
-    description:
-      "Production-like: abstain iff top1Top2Ratio<2.0. A more permissive ratio gate.",
+    description: "Production-like: abstain iff top1Top2Ratio<2.0. A more permissive ratio gate.",
     category: "production-like",
     gates: [{ kind: "top1Top2RatioBelow", threshold: 2.0 }],
   },
@@ -715,8 +710,7 @@ export const BUILTIN_NO_ANSWER_POLICIES: ReadonlyArray<NoAnswerPolicy> = [
   },
   {
     id: "topK-size-equals-1",
-    description:
-      "Production-like: abstain iff topKSize===1. The 'exactly one candidate' pin.",
+    description: "Production-like: abstain iff topKSize===1. The 'exactly one candidate' pin.",
     category: "production-like",
     gates: [{ kind: "topKSizeEquals", value: 1 }],
   },
@@ -801,18 +795,14 @@ export const BUILTIN_NO_ANSWER_POLICIES: ReadonlyArray<NoAnswerPolicy> = [
     description:
       "Oracle (NOT production-like): abstain iff isNoAnswerHardNegative. The hard-negative detector alone.",
     category: "oracle",
-    gates: [
-      { kind: "queryShapeFlag", flag: "isNoAnswerHardNegative" },
-    ],
+    gates: [{ kind: "queryShapeFlag", flag: "isNoAnswerHardNegative" }],
   },
   {
     id: "oracle-detector-falseprem-only",
     description:
       "Oracle (NOT production-like): abstain iff isFalsePremiseLike. The false-premise detector alone.",
     category: "oracle",
-    gates: [
-      { kind: "queryShapeFlag", flag: "isFalsePremiseLike" },
-    ],
+    gates: [{ kind: "queryShapeFlag", flag: "isFalsePremiseLike" }],
   },
   // ---- Oracle: fixture-truth label-based ----
   {
@@ -873,7 +863,7 @@ export const BUILTIN_NO_ANSWER_POLICIES: ReadonlyArray<NoAnswerPolicy> = [
  */
 function evaluateGate(
   gate: NoAnswerPolicyGate,
-  p: NoAnswerPolicyPerQuery,
+  p: NoAnswerPolicyPerQuery
 ): { fires: boolean; reason: string } {
   switch (gate.kind) {
     case "none":
@@ -895,9 +885,7 @@ function evaluateGate(
       // cap only matters when the cap is below
       // the threshold; in that case a +Infinity
       // ratio does NOT trip the gate.
-      const r = Number.isFinite(p.signals.top1Top2Ratio)
-        ? p.signals.top1Top2Ratio
-        : 1.0e9;
+      const r = Number.isFinite(p.signals.top1Top2Ratio) ? p.signals.top1Top2Ratio : 1.0e9;
       return {
         fires: r < gate.threshold,
         reason: `ratio-below-${gate.threshold}`,
@@ -920,9 +908,7 @@ function evaluateGate(
       };
     case "sufficiencyLabelIn":
       return {
-        fires:
-          p.sufficiencyLabel !== undefined &&
-          gate.labels.includes(p.sufficiencyLabel),
+        fires: p.sufficiencyLabel !== undefined && gate.labels.includes(p.sufficiencyLabel),
         reason: `sufficiency-in-${gate.labels.join("|")}`,
       };
     case "family":
@@ -931,9 +917,7 @@ function evaluateGate(
         reason: `family-in-${gate.families.join("|")}`,
       };
     case "queryShapeFlag": {
-      const v = (p.signals as unknown as Record<string, unknown>)[
-        gate.flag
-      ];
+      const v = (p.signals as unknown as Record<string, unknown>)[gate.flag];
       return {
         fires: v === true,
         reason: `flag-${gate.flag}`,
@@ -941,9 +925,7 @@ function evaluateGate(
     }
     case "queryLabelsIn":
       return {
-        fires:
-          p.queryLabels !== undefined &&
-          p.queryLabels.some((l) => gate.labels.includes(l)),
+        fires: p.queryLabels !== undefined && p.queryLabels.some((l) => gate.labels.includes(l)),
         reason: `labels-in-${gate.labels.join("|")}`,
       };
   }
@@ -961,7 +943,7 @@ function evaluateGate(
  */
 export function evaluateNoAnswerPolicy(
   policy: NoAnswerPolicy,
-  perQuery: ReadonlyArray<NoAnswerPolicyPerQuery>,
+  perQuery: ReadonlyArray<NoAnswerPolicyPerQuery>
 ): NoAnswerPolicyDecision[] {
   const out: NoAnswerPolicyDecision[] = new Array(perQuery.length);
   for (let i = 0; i < perQuery.length; i++) {
@@ -985,12 +967,8 @@ export function evaluateNoAnswerPolicy(
       rank1: p.rank1,
       currentTruthAt1: p.currentTruthAt1,
       hitAt5: p.hitAt5,
-      ...(p.sufficiencyLabel !== undefined
-        ? { sufficiencyLabel: p.sufficiencyLabel }
-        : {}),
-      ...(p.queryLabels !== undefined
-        ? { queryLabels: [...p.queryLabels] }
-        : {}),
+      ...(p.sufficiencyLabel !== undefined ? { sufficiencyLabel: p.sufficiencyLabel } : {}),
+      ...(p.queryLabels !== undefined ? { queryLabels: [...p.queryLabels] } : {}),
     };
   }
   return out;
@@ -1018,7 +996,7 @@ export function evaluateNoAnswerPolicy(
  */
 export function computeNoAnswerPolicyMetrics(
   policy: NoAnswerPolicy,
-  decisions: ReadonlyArray<NoAnswerPolicyDecision>,
+  decisions: ReadonlyArray<NoAnswerPolicyDecision>
 ): NoAnswerPolicyMetrics {
   let total = 0;
   let noAnswerCount = 0;
@@ -1049,10 +1027,7 @@ export function computeNoAnswerPolicyMetrics(
     queryShapeFlag: 0,
     queryLabelsIn: 0,
   };
-  const positiveByFamily: Record<
-    string,
-    { total: number; abstained: number }
-  > = {};
+  const positiveByFamily: Record<string, { total: number; abstained: number }> = {};
   const abstainedBySufficiency: Partial<
     Record<SufficiencyLabel, { total: number; abstained: number }>
   > = {};
@@ -1184,10 +1159,7 @@ export function computeNoAnswerPolicyMetrics(
   const fn = noAnswerCount - noAnswerAbstained;
   const precision = tp + fp > 0 ? tp / (tp + fp) : 0;
   const recall = tp + fn > 0 ? tp / (tp + fn) : 0;
-  const f1 =
-    precision + recall > 0
-      ? (2 * precision * recall) / (precision + recall)
-      : 0;
+  const f1 = precision + recall > 0 ? (2 * precision * recall) / (precision + recall) : 0;
   return {
     policyId: policy.id,
     category: policy.category,
@@ -1195,11 +1167,9 @@ export function computeNoAnswerPolicyMetrics(
     noAnswerCount,
     positiveCount,
     noAnswerAbstained,
-    noAnswerAbstainedRate:
-      noAnswerCount > 0 ? noAnswerAbstained / noAnswerCount : 0,
+    noAnswerAbstainedRate: noAnswerCount > 0 ? noAnswerAbstained / noAnswerCount : 0,
     positiveAbstained,
-    positiveAbstainedRate:
-      positiveCount > 0 ? positiveAbstained / positiveCount : 0,
+    positiveAbstainedRate: positiveCount > 0 ? positiveAbstained / positiveCount : 0,
     positiveAbstainedByFamily: positiveByFamilyRates,
     abstainedBySufficiencyLabel: abstainedBySufficiencyRates,
     hitAt5Retained,
@@ -1211,9 +1181,7 @@ export function computeNoAnswerPolicyMetrics(
     currentTruthAt1Retained,
     currentTruthAt1Lost,
     currentTruthAt1RetainedRate:
-      baselineCurrentTruthAt1 > 0
-        ? currentTruthAt1Retained / baselineCurrentTruthAt1
-        : 0,
+      baselineCurrentTruthAt1 > 0 ? currentTruthAt1Retained / baselineCurrentTruthAt1 : 0,
     baseline: {
       hitAt5: baselineHitAt5,
       rank1: baselineRank1,
@@ -1401,9 +1369,7 @@ export function runNoAnswerPolicyExperiment(args: {
 }): NoAnswerPolicyReport {
   const { perQuery, config = {} } = args;
   const customPolicies = config.customPolicies ?? [];
-  const filterIds = config.onlyPolicyIds
-    ? new Set(config.onlyPolicyIds)
-    : null;
+  const filterIds = config.onlyPolicyIds ? new Set(config.onlyPolicyIds) : null;
   const policies: NoAnswerPolicy[] = [];
   for (const p of customPolicies) {
     if (filterIds === null || filterIds.has(p.id)) {
@@ -1447,12 +1413,8 @@ export function runNoAnswerPolicyExperiment(args: {
       noAnswerCount,
       positiveCount,
       policyCount: policies.length,
-      productionLikeCount: policies.filter(
-        (p) => p.category === "production-like",
-      ).length,
-      fixtureShapedCount: policies.filter(
-        (p) => p.category === "fixture-shaped",
-      ).length,
+      productionLikeCount: policies.filter((p) => p.category === "production-like").length,
+      fixtureShapedCount: policies.filter((p) => p.category === "fixture-shaped").length,
       oracleCount: policies.filter((p) => p.category === "oracle").length,
     },
     policies: rows,
@@ -1530,9 +1492,7 @@ function nullSignalBlock(): AbstentionSignals {
  *   4. The honest reading block the README
  *      references.
  */
-export function formatNoAnswerPolicyReport(
-  report: NoAnswerPolicyReport,
-): string {
+export function formatNoAnswerPolicyReport(report: NoAnswerPolicyReport): string {
   const lines: string[] = [];
   lines.push("=== curion no-answer abstention / calibration experiment ===");
   lines.push(`generated at: ${report.generatedAt}`);
@@ -1547,86 +1507,40 @@ export function formatNoAnswerPolicyReport(
     `  policies evaluated:    ${String(report.config.policyCount).padStart(3)} ` +
       `(production-like=${report.config.productionLikeCount}, ` +
       `fixture-shaped=${report.config.fixtureShapedCount}, ` +
-      `oracle=${report.config.oracleCount})`,
+      `oracle=${report.config.oracleCount})`
   );
   lines.push("");
   lines.push("READ THIS FIRST: this is a BENCHMARK-ONLY study.");
-  lines.push(
-    "  The experiment tests how a set of deterministic",
-  );
-  lines.push(
-    "  abstention policies behave on the fixture corpus. The",
-  );
-  lines.push(
-    "  policies are NOT wired into the production `recall(text)`",
-  );
-  lines.push(
-    "  controller, the public MCP API, or the existing audit /",
-  );
-  lines.push(
-    "  calibration / diagnostic / policy report shapes. The",
-  );
-  lines.push(
-    "  experiment is a trade-off analysis: how much no-answer",
-  );
-  lines.push(
-    "  confabulation can a deterministic rule remove, and at",
-  );
-  lines.push(
-    "  what cost on the answerable set?",
-  );
-  lines.push(
-    "  Three policy categories are reported:",
-  );
-  lines.push(
-    "    - `production-like` — runtime-only signals (score, gap,",
-  );
-  lines.push(
-    "      ratio, returned count, top-K size, the candidate-set",
-  );
-  lines.push(
-    "      sufficiency label). A reviewer who wants to reason",
-  );
-  lines.push(
-    "      about a deployable rule reads ONLY this category.",
-  );
-  lines.push(
-    "    - `fixture-shaped` — keys on a fixture-truth signal",
-  );
-  lines.push(
-    "      (the benchmark's `family` field). A real production",
-  );
-  lines.push(
-    "      ranker has no such label on incoming queries. These",
-  );
-  lines.push(
-    "      rows are research / oracle-like ceilings and are",
-  );
-  lines.push(
-    "      clearly NOT deployable.",
-  );
-  lines.push(
-    "    - `oracle` — keys on the detector's query-shape flag",
-  );
-  lines.push(
-    "      approximations or the explicit fixture-truth labels.",
-  );
-  lines.push(
-    "      Clearly non-production. Detector-derived rows are a",
-  );
-  lines.push(
-    "      near-ceiling; fixture-truth rows are a true ceiling.",
-  );
+  lines.push("  The experiment tests how a set of deterministic");
+  lines.push("  abstention policies behave on the fixture corpus. The");
+  lines.push("  policies are NOT wired into the production `recall(text)`");
+  lines.push("  controller, the public MCP API, or the existing audit /");
+  lines.push("  calibration / diagnostic / policy report shapes. The");
+  lines.push("  experiment is a trade-off analysis: how much no-answer");
+  lines.push("  confabulation can a deterministic rule remove, and at");
+  lines.push("  what cost on the answerable set?");
+  lines.push("  Three policy categories are reported:");
+  lines.push("    - `production-like` — runtime-only signals (score, gap,");
+  lines.push("      ratio, returned count, top-K size, the candidate-set");
+  lines.push("      sufficiency label). A reviewer who wants to reason");
+  lines.push("      about a deployable rule reads ONLY this category.");
+  lines.push("    - `fixture-shaped` — keys on a fixture-truth signal");
+  lines.push("      (the benchmark's `family` field). A real production");
+  lines.push("      ranker has no such label on incoming queries. These");
+  lines.push("      rows are research / oracle-like ceilings and are");
+  lines.push("      clearly NOT deployable.");
+  lines.push("    - `oracle` — keys on the detector's query-shape flag");
+  lines.push("      approximations or the explicit fixture-truth labels.");
+  lines.push("      Clearly non-production. Detector-derived rows are a");
+  lines.push("      near-ceiling; fixture-truth rows are a true ceiling.");
   lines.push("");
   // ---- Headline policy frontier table ----
   lines.push("--- policy frontier ---");
   lines.push(
-    "  category   policy                                              TNR%   posAbst%  hit5Ret%  rank1Ret%  curT1Ret%  P     R     F1",
+    "  category   policy                                              TNR%   posAbst%  hit5Ret%  rank1Ret%  curT1Ret%  P     R     F1"
   );
   for (const row of report.policies) {
-    const policyLabel = row.policyId.length > 58
-      ? row.policyId.slice(0, 55) + "..."
-      : row.policyId;
+    const policyLabel = row.policyId.length > 58 ? row.policyId.slice(0, 55) + "..." : row.policyId;
     const cat =
       row.category === "oracle"
         ? "oracle   "
@@ -1640,43 +1554,21 @@ export function formatNoAnswerPolicyReport(
         `    ${(row.hitAt5RetainedRate * 100).toFixed(1).padStart(5)}` +
         `     ${(row.rank1RetainedRate * 100).toFixed(1).padStart(5)}` +
         `      ${(row.currentTruthAt1RetainedRate * 100).toFixed(1).padStart(5)}` +
-        `   ${row.precision.toFixed(2)}  ${row.recall.toFixed(2)}  ${row.f1.toFixed(2)}`,
+        `   ${row.precision.toFixed(2)}  ${row.recall.toFixed(2)}  ${row.f1.toFixed(2)}`
     );
   }
   lines.push("");
-  lines.push(
-    "  TNR%        = no-answer queries the policy abstained on (TNR equivalent).",
-  );
-  lines.push(
-    "  posAbst%    = positive queries the policy abstained on (a damage metric).",
-  );
-  lines.push(
-    "  hit5Ret%    = hit@5 retained on positive queries (vs un-gated baseline).",
-  );
-  lines.push(
-    "  rank1Ret%   = rank1 retained on positive queries.",
-  );
-  lines.push(
-    "  curT1Ret%   = currentTruthAt1 retained on positive queries.",
-  );
-  lines.push(
-    "  P/R/F1      = precision / recall / F1 on the 'should-abstain' binary",
-  );
-  lines.push(
-    "                task with `isNoAnswer` as the positive class.",
-  );
-  lines.push(
-    "  category    = `prod` (production-like; runtime-only signals),",
-  );
-  lines.push(
-    "                `fixture` (fixture-shaped; gates on a fixture-truth",
-  );
-  lines.push(
-    "                signal such as the benchmark's `family` field — NOT",
-  );
-  lines.push(
-    "                deployable), or `oracle` (clearly non-production).",
-  );
+  lines.push("  TNR%        = no-answer queries the policy abstained on (TNR equivalent).");
+  lines.push("  posAbst%    = positive queries the policy abstained on (a damage metric).");
+  lines.push("  hit5Ret%    = hit@5 retained on positive queries (vs un-gated baseline).");
+  lines.push("  rank1Ret%   = rank1 retained on positive queries.");
+  lines.push("  curT1Ret%   = currentTruthAt1 retained on positive queries.");
+  lines.push("  P/R/F1      = precision / recall / F1 on the 'should-abstain' binary");
+  lines.push("                task with `isNoAnswer` as the positive class.");
+  lines.push("  category    = `prod` (production-like; runtime-only signals),");
+  lines.push("                `fixture` (fixture-shaped; gates on a fixture-truth");
+  lines.push("                signal such as the benchmark's `family` field — NOT");
+  lines.push("                deployable), or `oracle` (clearly non-production).");
   lines.push("");
   // ---- Per-family positive abstention breakdown for a
   //      PRODUCTION-LIKE candidate ----
@@ -1692,22 +1584,18 @@ export function formatNoAnswerPolicyReport(
   // sufficiency-label gate is a research-only
   // read of the new diagnostic).
   const prodCandidate = report.policies.find(
-    (p) => p.policyId === "score-or-sufficiency-insufficient",
+    (p) => p.policyId === "score-or-sufficiency-insufficient"
   );
   if (prodCandidate) {
     lines.push(
-      "--- per-family positive abstention (production-like candidate: score-or-sufficiency-insufficient) ---",
+      "--- per-family positive abstention (production-like candidate: score-or-sufficiency-insufficient) ---"
     );
-    lines.push(
-      "  family           total  abstained  rate",
-    );
-    const familyOrder = Object.keys(
-      prodCandidate.positiveAbstainedByFamily,
-    ).sort();
+    lines.push("  family           total  abstained  rate");
+    const familyOrder = Object.keys(prodCandidate.positiveAbstainedByFamily).sort();
     for (const family of familyOrder) {
       const slot = prodCandidate.positiveAbstainedByFamily[family]!;
       lines.push(
-        `  ${family.padEnd(16)} ${String(slot.total).padStart(4)}    ${String(slot.abstained).padStart(4)}     ${(slot.rate * 100).toFixed(1).padStart(4)}%`,
+        `  ${family.padEnd(16)} ${String(slot.total).padStart(4)}    ${String(slot.abstained).padStart(4)}     ${(slot.rate * 100).toFixed(1).padStart(4)}%`
       );
     }
     lines.push("");
@@ -1716,167 +1604,75 @@ export function formatNoAnswerPolicyReport(
   //      PRODUCTION-LIKE candidate ----
   if (prodCandidate) {
     lines.push(
-      "--- production-like candidate: false positives (positive queries wrongly abstained) ---",
+      "--- production-like candidate: false positives (positive queries wrongly abstained) ---"
     );
     if (prodCandidate.falsePositives.length === 0) {
       lines.push("  (none)");
     } else {
       for (const fp of prodCandidate.falsePositives) {
         const labelStr =
-          fp.queryLabels && fp.queryLabels.length > 0
-            ? `  labels=${fp.queryLabels.join("|")}`
-            : "";
-        lines.push(
-          `  [${fp.family}] ${fp.queryId}  reason=${fp.reason}${labelStr}`,
-        );
+          fp.queryLabels && fp.queryLabels.length > 0 ? `  labels=${fp.queryLabels.join("|")}` : "";
+        lines.push(`  [${fp.family}] ${fp.queryId}  reason=${fp.reason}${labelStr}`);
       }
     }
     lines.push("");
     lines.push(
-      "--- production-like candidate: false negatives (no-answer queries wrongly retained) ---",
+      "--- production-like candidate: false negatives (no-answer queries wrongly retained) ---"
     );
     if (prodCandidate.falseNegatives.length === 0) {
       lines.push("  (none)");
     } else {
       for (const fn of prodCandidate.falseNegatives) {
         const labelStr =
-          fn.queryLabels && fn.queryLabels.length > 0
-            ? `  labels=${fn.queryLabels.join("|")}`
-            : "";
-        lines.push(
-          `  [${fn.family}] ${fn.queryId}  reason=${fn.reason}${labelStr}`,
-        );
+          fn.queryLabels && fn.queryLabels.length > 0 ? `  labels=${fn.queryLabels.join("|")}` : "";
+        lines.push(`  [${fn.family}] ${fn.queryId}  reason=${fn.reason}${labelStr}`);
       }
     }
     lines.push("");
   }
   // ---- Honest reading block ----
   lines.push("--- honest reading ---");
-  lines.push(
-    "  The baseline row is the ranker's natural empty-top-K",
-  );
-  lines.push(
-    "  abstention (no policy). The headline confabulation",
-  );
-  lines.push(
-    "  count is the no-answer-correct number in the audit.",
-  );
-  lines.push(
-    "  The `family=no-answer` row is the strongest",
-  );
-  lines.push(
-    "    fixture-shaped (NOT production-like) rule:",
-  );
-  lines.push(
-    "    it abstains on every query whose family is",
-  );
-  lines.push(
-    "    'no-answer' (the ranker is expected to return",
-  );
-  lines.push(
-    "    zero hits on that family), at zero positive-set",
-  );
-  lines.push(
-    "    cost. It is NOT deployable: the `family` field is",
-  );
-  lines.push(
-    "    fixture truth, and a real production ranker has no",
-  );
-  lines.push(
-    "    such label on incoming queries. The row exists to",
-  );
-  lines.push(
-    "    show the 'ceiling if a perfect no-answer family",
-  );
-  lines.push(
-    "    detector were available' reading.",
-  );
-  lines.push(
-    "  The absolute score gates (topScore<0.20/0.30/0.40)",
-  );
-  lines.push(
-    "  are the simplest production-like rules. They catch",
-  );
-  lines.push(
-    "  the low-confidence no-answer queries at some",
-  );
-  lines.push(
-    "  positive-set cost. The threshold is",
-  );
-  lines.push(
-    "  variant-specific (lexical uses a Jaccard-style",
-  );
-  lines.push(
-    "    [0, 1] scale); a vector / hybrid variant has its",
-  );
-  lines.push(
-    "    own scale and needs re-calibration.",
-  );
-  lines.push(
-    "  The `score-or-sufficiency-insufficient` row is the",
-  );
-  lines.push(
-    "    genuinely production-like candidate the experiment",
-  );
-  lines.push(
-    "    surfaces. It uses ONLY runtime signals: the",
-  );
-  lines.push(
-    "    absolute score gate AND the candidate-set",
-  );
-  lines.push(
-    "    sufficiency label (which the diagnostic derives",
-  );
-  lines.push(
-    "    from the ranker's existing output — no fixture",
-  );
-  lines.push(
-    "    truth required). A deployment would need a",
-  );
-  lines.push(
-    "    ranker-side implementation of the diagnostic; the",
-  );
-  lines.push(
-    "    experiment studies the trade-off, not the",
-  );
-  lines.push(
-    "    deployment.",
-  );
-  lines.push(
-    "  The `score-or-family-no-answer` row is fixture-shaped",
-  );
-  lines.push(
-    "    (it includes the `family` gate). Despite the",
-  );
-  lines.push(
-    "    strong TNR / F1 reading, it is NOT a deployable",
-  );
-  lines.push(
-    "    rule. Its score-only sub-rule is the `score-below-0.30`",
-  );
-  lines.push(
-    "    rule; its family sub-rule is the `family-no-answer`",
-  );
-  lines.push(
-    "    ceiling.",
-  );
-  lines.push(
-    "  The oracle policies (clearly marked) give a true",
-  );
-  lines.push(
-    "  ceiling reading: how much of the confabulation is",
-  );
-  lines.push(
-    "  even removable by label-aware rules? If the oracle",
-  );
-  lines.push(
-    "  policies also miss confabulations, the problem is",
-  );
-  lines.push(
-    "  not a missing signal — it is the corpus / the",
-  );
-  lines.push(
-    "  ranker / the confabulation pattern itself.",
-  );
+  lines.push("  The baseline row is the ranker's natural empty-top-K");
+  lines.push("  abstention (no policy). The headline confabulation");
+  lines.push("  count is the no-answer-correct number in the audit.");
+  lines.push("  The `family=no-answer` row is the strongest");
+  lines.push("    fixture-shaped (NOT production-like) rule:");
+  lines.push("    it abstains on every query whose family is");
+  lines.push("    'no-answer' (the ranker is expected to return");
+  lines.push("    zero hits on that family), at zero positive-set");
+  lines.push("    cost. It is NOT deployable: the `family` field is");
+  lines.push("    fixture truth, and a real production ranker has no");
+  lines.push("    such label on incoming queries. The row exists to");
+  lines.push("    show the 'ceiling if a perfect no-answer family");
+  lines.push("    detector were available' reading.");
+  lines.push("  The absolute score gates (topScore<0.20/0.30/0.40)");
+  lines.push("  are the simplest production-like rules. They catch");
+  lines.push("  the low-confidence no-answer queries at some");
+  lines.push("  positive-set cost. The threshold is");
+  lines.push("  variant-specific (lexical uses a Jaccard-style");
+  lines.push("    [0, 1] scale); a vector / hybrid variant has its");
+  lines.push("    own scale and needs re-calibration.");
+  lines.push("  The `score-or-sufficiency-insufficient` row is the");
+  lines.push("    genuinely production-like candidate the experiment");
+  lines.push("    surfaces. It uses ONLY runtime signals: the");
+  lines.push("    absolute score gate AND the candidate-set");
+  lines.push("    sufficiency label (which the diagnostic derives");
+  lines.push("    from the ranker's existing output — no fixture");
+  lines.push("    truth required). A deployment would need a");
+  lines.push("    ranker-side implementation of the diagnostic; the");
+  lines.push("    experiment studies the trade-off, not the");
+  lines.push("    deployment.");
+  lines.push("  The `score-or-family-no-answer` row is fixture-shaped");
+  lines.push("    (it includes the `family` gate). Despite the");
+  lines.push("    strong TNR / F1 reading, it is NOT a deployable");
+  lines.push("    rule. Its score-only sub-rule is the `score-below-0.30`");
+  lines.push("    rule; its family sub-rule is the `family-no-answer`");
+  lines.push("    ceiling.");
+  lines.push("  The oracle policies (clearly marked) give a true");
+  lines.push("  ceiling reading: how much of the confabulation is");
+  lines.push("  even removable by label-aware rules? If the oracle");
+  lines.push("  policies also miss confabulations, the problem is");
+  lines.push("  not a missing signal — it is the corpus / the");
+  lines.push("  ranker / the confabulation pattern itself.");
   return lines.join("\n");
 }

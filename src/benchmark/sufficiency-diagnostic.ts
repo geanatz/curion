@@ -193,8 +193,8 @@
  *   under `.curion/benchmark/`.
  */
 
-import type { BenchmarkQuery, BenchmarkQueryFamily } from "./queries.js";
 import type { QueryEval } from "./metrics.js";
+import type { BenchmarkQuery, BenchmarkQueryFamily } from "./queries.js";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -300,10 +300,7 @@ export interface SufficiencyDiagnosticReport {
    *  value is a per-label count for that family.
    *  A family with zero queries on a variant is
    *  omitted from the record. */
-  perFamily: Record<
-    BenchmarkQueryFamily,
-    Record<SufficiencyLabel, number>
-  >;
+  perFamily: Record<BenchmarkQueryFamily, Record<SufficiencyLabel, number>>;
 }
 
 /**
@@ -330,10 +327,7 @@ export interface SufficiencyDiagnosticComparisonReport {
    * is reported as 0. The keys are stable
    * (`SufficiencyLabel` strings).
    */
-  crossVariantPerLabel: Record<
-    SufficiencyLabel,
-    Record<string, number>
-  >;
+  crossVariantPerLabel: Record<SufficiencyLabel, Record<string, number>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -368,7 +362,7 @@ export interface SufficiencyDiagnosticComparisonReport {
  */
 export function classifyCandidateSetSufficiency(
   e: QueryEval,
-  query: BenchmarkQuery,
+  query: BenchmarkQuery
 ): SufficiencyDiagnostic {
   const family = query.family;
   const expected = query.expectedIds;
@@ -380,8 +374,7 @@ export function classifyCandidateSetSufficiency(
   const expectedInTopK = countOverlap(expected, topIds);
   const currentTruthInTopK = countOverlap(currentTruth, topIds);
   const rank1IsExpected = top0 !== undefined && expectedSet.has(top0);
-  const rank1IsCurrentTruth =
-    top0 !== undefined && currentTruthSet.has(top0);
+  const rank1IsCurrentTruth = top0 !== undefined && currentTruthSet.has(top0);
   const hasNearMissLabel = queryHasNearMissLabel(query);
 
   // Raw counts first — every branch uses them.
@@ -399,8 +392,7 @@ export function classifyCandidateSetSufficiency(
   // The no-answer family is the simplest: empty top-K
   // is correct, non-empty top-K is confabulation.
   if (family === "no-answer") {
-    const label: SufficiencyLabel =
-      topIds.length === 0 ? "no-answer-correct" : "confabulation";
+    const label: SufficiencyLabel = topIds.length === 0 ? "no-answer-correct" : "confabulation";
     return { queryId: e.queryId, family, label, rawCounts };
   }
 
@@ -516,10 +508,7 @@ export function classifyCandidateSetSufficiency(
   // place so a future orientation temporal gap
   // does not silently change the label table.
   if (family === "orientation") {
-    if (
-      rank1IsCurrentTruth &&
-      expectedInTopK === expected.length
-    ) {
+    if (rank1IsCurrentTruth && expectedInTopK === expected.length) {
       return { queryId: e.queryId, family, label: "sufficient", rawCounts };
     }
     if (expectedInTopK > 0) {
@@ -568,12 +557,12 @@ export function classifyCandidateSetSufficiency(
 export function buildSufficiencyReport(
   variant: string,
   evals: ReadonlyArray<QueryEval>,
-  queries: ReadonlyArray<BenchmarkQuery>,
+  queries: ReadonlyArray<BenchmarkQuery>
 ): SufficiencyDiagnosticReport {
   if (evals.length !== queries.length) {
     throw new Error(
       `buildSufficiencyReport: evals.length (${evals.length}) must match ` +
-        `queries.length (${queries.length}) for variant "${variant}"`,
+        `queries.length (${queries.length}) for variant "${variant}"`
     );
   }
   const diagnostics: SufficiencyDiagnostic[] = [];
@@ -583,7 +572,7 @@ export function buildSufficiencyReport(
     if (e.queryId !== q.id) {
       throw new Error(
         `buildSufficiencyReport: evals[${i}].queryId="${e.queryId}" does ` +
-          `not match queries[${i}].id="${q.id}" for variant "${variant}"`,
+          `not match queries[${i}].id="${q.id}" for variant "${variant}"`
       );
     }
     diagnostics.push(classifyCandidateSetSufficiency(e, q));
@@ -597,10 +586,7 @@ export function buildSufficiencyReport(
   // that actually appear in the input are kept;
   // an absent family is omitted from the record
   // so the report does not carry empty families.
-  const perFamily: Record<
-    BenchmarkQueryFamily,
-    Record<SufficiencyLabel, number>
-  > = {} as Record<
+  const perFamily: Record<BenchmarkQueryFamily, Record<SufficiencyLabel, number>> = {} as Record<
     BenchmarkQueryFamily,
     Record<SufficiencyLabel, number>
   >;
@@ -621,7 +607,7 @@ export function buildSufficiencyReport(
  * is pure and does not re-classify any eval.
  */
 export function buildSufficiencyComparison(
-  reports: ReadonlyArray<SufficiencyDiagnosticReport>,
+  reports: ReadonlyArray<SufficiencyDiagnosticReport>
 ): SufficiencyDiagnosticComparisonReport {
   const crossVariantPerLabel = freshCrossVariantTable();
   for (const r of reports) {
@@ -649,9 +635,7 @@ export function buildSufficiencyComparison(
  * differences will be the actual numbers. The
  * function is pure: same report -> same string.
  */
-export function formatSufficiencyReport(
-  report: SufficiencyDiagnosticReport,
-): string {
+export function formatSufficiencyReport(report: SufficiencyDiagnosticReport): string {
   const out: string[] = [];
   out.push(`# Sufficiency diagnostic (variant: ${report.variant})`);
   out.push("");
@@ -677,19 +661,13 @@ export function formatSufficiencyReport(
   const familyNames = (Object.keys(report.perFamily) as BenchmarkQueryFamily[]).sort();
   for (const family of familyNames) {
     const slot = report.perFamily[family];
-    const familyTotal = (Object.values(slot) as number[]).reduce(
-      (a, b) => a + b,
-      0,
-    );
+    const familyTotal = (Object.values(slot) as number[]).reduce((a, b) => a + b, 0);
     out.push(`  family=${family} (n=${familyTotal})`);
     for (const label of SUFFICIENCY_LABELS) {
       const n = slot[label] ?? 0;
       if (n === 0) continue; // skip zero-count rows for readability
-      const pct =
-        familyTotal > 0 ? ((n / familyTotal) * 100).toFixed(1) : "0.0";
-      out.push(
-        `    ${label.padEnd(22)} ${String(n).padStart(4)}  (${pct.padStart(5)}%)`,
-      );
+      const pct = familyTotal > 0 ? ((n / familyTotal) * 100).toFixed(1) : "0.0";
+      out.push(`    ${label.padEnd(22)} ${String(n).padStart(4)}  (${pct.padStart(5)}%)`);
     }
   }
   out.push("");
@@ -723,10 +701,7 @@ function countOverlap(a: ReadonlyArray<number>, b: ReadonlyArray<number>): numbe
  */
 function queryHasNearMissLabel(q: BenchmarkQuery): boolean {
   if (!q.labels || q.labels.length === 0) return false;
-  return (
-    q.labels.includes("nearMissCurrentCluster") ||
-    q.labels.includes("adversarialParaphrase")
-  );
+  return q.labels.includes("nearMissCurrentCluster") || q.labels.includes("adversarialParaphrase");
 }
 
 function freshPerLabelCounts(): Record<SufficiencyLabel, number> {
@@ -741,10 +716,7 @@ function freshPerLabelCounts(): Record<SufficiencyLabel, number> {
   };
 }
 
-function freshCrossVariantTable(): Record<
-  SufficiencyLabel,
-  Record<string, number>
-> {
+function freshCrossVariantTable(): Record<SufficiencyLabel, Record<string, number>> {
   return {
     sufficient: {},
     partial: {},

@@ -72,20 +72,20 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import {
+  type MultiAnchorRerankReport,
+  buildMultiAnchorRerankReport,
+  formatMultiAnchorRerankReport,
+} from "./multi-anchor-current-previous.js";
 import { BENCHMARK_QUERIES } from "./queries.js";
 import type { BenchmarkQuery } from "./queries.js";
 import {
-  buildMultiAnchorRerankReport,
-  formatMultiAnchorRerankReport,
-  type MultiAnchorRerankReport,
-} from "./multi-anchor-current-previous.js";
-import {
-  alignQueriesToEvals,
-  readBenchmarkArtifact,
-  readSemanticEvidenceFile,
-  findMostRecentArtifact,
   type BenchmarkArtifact,
   type SemanticEvidenceMap,
+  alignQueriesToEvals,
+  findMostRecentArtifact,
+  readBenchmarkArtifact,
+  readSemanticEvidenceFile,
 } from "./temporal-truth-diagnostic-runner.js";
 
 // ---------------------------------------------------------------------------
@@ -145,10 +145,7 @@ const ARTIFACT_FILE_PREFIX = "retrieval-multi-anchor-current-previous";
  * next to the regular reports without
  * confusing them.
  */
-export function writeMultiAnchorRerankReport(
-  report: MultiAnchorRerankReport,
-  dir: string,
-): string {
+export function writeMultiAnchorRerankReport(report: MultiAnchorRerankReport, dir: string): string {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   }
@@ -184,20 +181,17 @@ export interface MultiAnchorRerankCliArgs {
  * the public TypeScript surface (the function
  * does its own argument parsing).
  */
-export async function runMultiAnchorRerankCli(
-  args: MultiAnchorRerankCliArgs,
-): Promise<{
+export async function runMultiAnchorRerankCli(args: MultiAnchorRerankCliArgs): Promise<{
   report: MultiAnchorRerankReport;
   written?: string;
 }> {
   const outDir = args.outDir ?? ".curion/benchmark";
   const defaultBenchmark =
-    args.benchmarkArtifact ??
-    findMostRecentArtifact(outDir, "retrieval-baseline-");
+    args.benchmarkArtifact ?? findMostRecentArtifact(outDir, "retrieval-baseline-");
   if (!defaultBenchmark) {
     throw new Error(
       `runMultiAnchorRerankCli: no --benchmark-artifact given and no ` +
-        `retrieval-baseline-*.json found under ${outDir}`,
+        `retrieval-baseline-*.json found under ${outDir}`
     );
   }
   const benchmarkArtifact = readBenchmarkArtifact(defaultBenchmark);
@@ -216,21 +210,17 @@ export async function runMultiAnchorRerankCli(
   }
   if (!args.noStdout) {
     process.stderr.write(
-      `[multi-anchor-current-previous] benchmark artifact: ${defaultBenchmark}\n`,
+      `[multi-anchor-current-previous] benchmark artifact: ${defaultBenchmark}\n`
     );
     if (semantic) {
       process.stderr.write(
-        `[multi-anchor-current-previous] semantic evidence:  ${args.semanticEvidence}\n`,
+        `[multi-anchor-current-previous] semantic evidence:  ${args.semanticEvidence}\n`
       );
     }
     if (written) {
-      process.stderr.write(
-        `[multi-anchor-current-previous] wrote:              ${written}\n`,
-      );
+      process.stderr.write(`[multi-anchor-current-previous] wrote:              ${written}\n`);
     }
-    process.stdout.write(
-      formatMultiAnchorRerankReport(report) + "\n",
-    );
+    process.stdout.write(formatMultiAnchorRerankReport(report) + "\n");
   }
   return { report, ...(written ? { written } : {}) };
 }
@@ -248,7 +238,7 @@ export async function runMultiAnchorRerankCli(
  * them. The order of arguments does not matter.
  */
 export function parseMultiAnchorRerankCliArgs(
-  argv: ReadonlyArray<string>,
+  argv: ReadonlyArray<string>
 ): MultiAnchorRerankCliArgs {
   const out: MultiAnchorRerankCliArgs = {};
   for (let i = 0; i < argv.length; i++) {
@@ -282,7 +272,7 @@ export function parseMultiAnchorRerankCliArgs(
  * normally.
  */
 export async function main(
-  argv: ReadonlyArray<string> = process.argv.slice(2),
+  argv: ReadonlyArray<string> = process.argv.slice(2)
 ): Promise<MultiAnchorRerankReport> {
   const args = parseMultiAnchorRerankCliArgs(argv);
   const { report } = await runMultiAnchorRerankCli(args);
@@ -301,10 +291,7 @@ const isMainEntry = (() => {
   if (!Array.isArray(process.argv)) return false;
   const entry = process.argv[1];
   if (!entry) return false;
-  if (
-    !/multi-anchor-current-previous-runner\.(ts|js)$/.test(entry)
-  )
-    return false;
+  if (!/multi-anchor-current-previous-runner\.(ts|js)$/.test(entry)) return false;
   try {
     const url = new URL(import.meta.url);
     return url.pathname === entry || url.pathname.endsWith(entry);
@@ -316,7 +303,7 @@ const isMainEntry = (() => {
 if (isMainEntry) {
   main().catch((err) => {
     process.stderr.write(
-      `[multi-anchor-current-previous] error: ${err instanceof Error ? err.message : String(err)}\n`,
+      `[multi-anchor-current-previous] error: ${err instanceof Error ? err.message : String(err)}\n`
     );
     process.exit(1);
   });

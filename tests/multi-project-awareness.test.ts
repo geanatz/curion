@@ -6,22 +6,18 @@
  * challenges with the shared registry file.
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { test } from "node:test";
 
 import {
-  readProjectConfig,
-  writeProjectConfig,
   isProjectPrivate,
-  setProjectPrivate,
+  readProjectConfig,
   resolveProjectConfigPath,
+  setProjectPrivate,
+  writeProjectConfig,
 } from "../src/config/project-config.ts";
 import { insertMemoryRecord } from "../src/storage/storage.ts";
-import {
-  setStorageProvider,
-  resetStorageProvider,
-} from "../src/tools/remember.ts";
 import { mkStorage, rmStorage } from "./_helpers/test-storage.ts";
 
 // ---------------------------------------------------------------------------
@@ -34,10 +30,7 @@ import { mkStorage, rmStorage } from "./_helpers/test-storage.ts";
 
 test("project config: resolveProjectConfigPath returns correct path", () => {
   const configPath = resolveProjectConfigPath("/tmp/myproject");
-  assert.ok(
-    configPath.endsWith("/tmp/myproject/.curion/config.json"),
-    `got: ${configPath}`,
-  );
+  assert.ok(configPath.endsWith("/tmp/myproject/.curion/config.json"), `got: ${configPath}`);
 });
 
 test("project config: readProjectConfig returns non-private for missing file", () => {
@@ -91,11 +84,7 @@ test("project config: readProjectConfig returns isPrivate=true when set", () => 
   const { tmp, handle } = mkStorage("curion-multi-project-");
   try {
     const configPath = resolveProjectConfigPath(tmp);
-    fs.writeFileSync(
-      configPath,
-      JSON.stringify({ version: 1, isPrivate: true }),
-      "utf-8",
-    );
+    fs.writeFileSync(configPath, JSON.stringify({ version: 1, isPrivate: true }), "utf-8");
     const config = readProjectConfig(tmp);
     assert.equal(config.isPrivate, true);
   } finally {
@@ -165,9 +154,7 @@ test("project config: isProjectPrivate returns false after setting to false", ()
 test("storage: memories table has no raw/original text column", () => {
   const { tmp, handle } = mkStorage("curion-multi-project-");
   try {
-    const cols = handle.db
-      .prepare("PRAGMA table_info(memories)")
-      .all() as Array<{ name: string }>;
+    const cols = handle.db.prepare("PRAGMA table_info(memories)").all() as Array<{ name: string }>;
     const names = cols.map((c) => c.name);
     for (const forbidden of [
       "raw_text",
@@ -180,10 +167,7 @@ test("storage: memories table has no raw/original text column", () => {
       "body",
       "source",
     ]) {
-      assert.ok(
-        !names.includes(forbidden),
-        `memories must not have a '${forbidden}' column`,
-      );
+      assert.ok(!names.includes(forbidden), `memories must not have a '${forbidden}' column`);
     }
   } finally {
     rmStorage(tmp, handle);
@@ -239,38 +223,30 @@ test("storage: different projects have isolated SQLite files", () => {
     });
 
     // Verify counts.
-    const allInProj1 = handle1.db
-      .prepare("SELECT id FROM memories ORDER BY id")
-      .all() as Array<{ id: number }>;
-    const allInProj2 = handle2.db
-      .prepare("SELECT id FROM memories ORDER BY id")
-      .all() as Array<{ id: number }>;
+    const allInProj1 = handle1.db.prepare("SELECT id FROM memories ORDER BY id").all() as Array<{
+      id: number;
+    }>;
+    const allInProj2 = handle2.db.prepare("SELECT id FROM memories ORDER BY id").all() as Array<{
+      id: number;
+    }>;
     assert.equal(allInProj1.length, 2, "proj1 should have 2 memories");
     assert.equal(allInProj2.length, 2, "proj2 should have 2 memories");
 
     // Project 1 should NOT see project 2's memories.
     const proj1Contents = (
-      handle1.db
-        .prepare("SELECT summary FROM memories")
-        .all() as Array<{ summary: string }>
+      handle1.db.prepare("SELECT summary FROM memories").all() as Array<{ summary: string }>
     ).map((r) => r.summary);
     assert.ok(
-      proj1Contents.every(
-        (c) => !c.includes("Kubernetes") && !c.includes("Docker"),
-      ),
-      "proj1 should not contain proj2 memories",
+      proj1Contents.every((c) => !c.includes("Kubernetes") && !c.includes("Docker")),
+      "proj1 should not contain proj2 memories"
     );
     // Project 2 should NOT see project 1's memories.
     const proj2Contents = (
-      handle2.db
-        .prepare("SELECT summary FROM memories")
-        .all() as Array<{ summary: string }>
+      handle2.db.prepare("SELECT summary FROM memories").all() as Array<{ summary: string }>
     ).map((r) => r.summary);
     assert.ok(
-      proj2Contents.every(
-        (c) => !c.includes("Postgres") && !c.includes("Redis"),
-      ),
-      "proj2 should not contain proj1 memories",
+      proj2Contents.every((c) => !c.includes("Postgres") && !c.includes("Redis")),
+      "proj2 should not contain proj1 memories"
     );
   } finally {
     rmStorage(proj1, handle1);
@@ -317,12 +293,8 @@ test("privacy: private project config is not readable by other projects", () => 
     });
 
     // Both storages work independently.
-    const mem1 = handle1.db
-      .prepare("SELECT COUNT(*) as c FROM memories")
-      .get() as { c: number };
-    const mem2 = handle2.db
-      .prepare("SELECT COUNT(*) as c FROM memories")
-      .get() as { c: number };
+    const mem1 = handle1.db.prepare("SELECT COUNT(*) as c FROM memories").get() as { c: number };
+    const mem2 = handle2.db.prepare("SELECT COUNT(*) as c FROM memories").get() as { c: number };
     assert.equal(mem1.c, 1, "proj1 should have 1 memory");
     assert.equal(mem2.c, 1, "proj2 should have 1 memory");
   } finally {
@@ -380,31 +352,23 @@ test("lexical: rankLexical is deterministic and threshold-based", async () => {
     }));
 
     // Strong match query.
-    const postgresRanked = rankLexical(
-      "Postgres database storage",
-      lexicalCandidates,
-      { threshold: 0.2 },
-    );
+    const postgresRanked = rankLexical("Postgres database storage", lexicalCandidates, {
+      threshold: 0.2,
+    });
     assert.ok(
       postgresRanked.some((r) => r.id === candidates[0]!.id),
-      "Postgres memory should rank for Postgres query",
+      "Postgres memory should rank for Postgres query"
     );
     assert.ok(
       !postgresRanked.some((r) => r.id === candidates[2]!.id),
-      "Dark mode memory should NOT rank for Postgres query",
+      "Dark mode memory should NOT rank for Postgres query"
     );
 
     // Weak/no match query.
-    const kubernetesRanked = rankLexical(
-      "kubernetes deployment operator",
-      lexicalCandidates,
-      { threshold: 0.2 },
-    );
-    assert.equal(
-      kubernetesRanked.length,
-      0,
-      "no memories should match kubernetes query",
-    );
+    const kubernetesRanked = rankLexical("kubernetes deployment operator", lexicalCandidates, {
+      threshold: 0.2,
+    });
+    assert.equal(kubernetesRanked.length, 0, "no memories should match kubernetes query");
   } finally {
     rmStorage(tmp, handle);
   }
@@ -414,16 +378,13 @@ test("lexical: rankLexical is deterministic and threshold-based", async () => {
 // Helper
 // ---------------------------------------------------------------------------
 
-function scriptFetch(
-  responder: () => Response,
-): {
+function scriptFetch(responder: () => Response): {
   fetchImpl: typeof fetch;
   calls: Array<{ url: string; body: string }>;
 } {
   const calls: Array<{ url: string; body: string }> = [];
   const fetchImpl: typeof fetch = async (input, init) => {
-    const url =
-      typeof input === "string" ? input : (input as URL).toString();
+    const url = typeof input === "string" ? input : (input as URL).toString();
     let body = "";
     if (init && typeof init === "object" && "body" in init && init.body) {
       body = String(init.body);
@@ -441,6 +402,6 @@ function okChatResponse(content: string): Response {
       model: "m",
       choices: [{ message: { role: "assistant", content } }],
     }),
-    { status: 200, headers: { "content-type": "application/json" } },
+    { status: 200, headers: { "content-type": "application/json" } }
   );
 }

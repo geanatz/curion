@@ -58,9 +58,7 @@ export function redactValue(name: string, value: string): string {
  * Return a JSON-safe description of an env record with secrets
  * redacted. Useful for dry-run reports.
  */
-export function describeEnv(
-  env: Record<string, string | undefined>,
-): Record<string, string> {
+export function describeEnv(env: Record<string, string | undefined>): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(env)) {
     if (v === undefined) {
@@ -242,9 +240,7 @@ function readTrimmedString(name: string, fallback: string): string {
   return trimmed.length > 0 ? trimmed : fallback;
 }
 
-export function loadPrototypeConfig(
-  options: LoadDotEnvOptions = {},
-): PrototypeConfig {
+export function loadPrototypeConfig(options: LoadDotEnvOptions = {}): PrototypeConfig {
   const loaded = loadDotEnv(options);
   return {
     // Prototype uses role-based primary/fallback keys plus
@@ -257,26 +253,20 @@ export function loadPrototypeConfig(
       Boolean(process.env.CURION_FALLBACK_API_KEY) ||
       Boolean(process.env.CURION_PROVIDER_FALLBACK_KEY) ||
       Boolean(process.env.NVIDIA_NIM_API_KEY),
-    minimaxBaseUrl:
-      process.env.CURION_MINIMAX_BASE_URL ?? DEFAULT_MINIMAX_BASE_URL,
+    minimaxBaseUrl: process.env.CURION_MINIMAX_BASE_URL ?? DEFAULT_MINIMAX_BASE_URL,
     minimaxModel: process.env.CURION_MINIMAX_MODEL ?? DEFAULT_MINIMAX_MODEL,
     nimBaseUrl: process.env.CURION_NIM_BASE_URL ?? DEFAULT_NIM_BASE_URL,
-    nimModels:
-      process.env.CURION_NIM_MODELS
-        ?.split(",")
-        .map((m) => m.trim())
-        .filter(Boolean) ?? [...DEFAULT_NIM_MODELS],
+    nimModels: process.env.CURION_NIM_MODELS?.split(",")
+      .map((m) => m.trim())
+      .filter(Boolean) ?? [...DEFAULT_NIM_MODELS],
     timeoutMs: readNumber("CURION_PROTOTYPE_TIMEOUT_MS", DEFAULT_TIMEOUT_MS),
     maxTokens: readNumber("CURION_PROTOTYPE_MAX_TOKENS", DEFAULT_MAX_TOKENS),
     hasGroqKey: Boolean(process.env.GROQ_API_KEY),
-    groqBaseUrl: readTrimmedString(
-      "CURION_GROQ_BASE_URL",
-      DEFAULT_GROQ_BASE_URL,
-    ),
+    groqBaseUrl: readTrimmedString("CURION_GROQ_BASE_URL", DEFAULT_GROQ_BASE_URL),
     groqModel: readTrimmedString("CURION_GROQ_MODEL", DEFAULT_GROQ_MODEL),
     groqReasoningEffort: readTrimmedString(
       "CURION_GROQ_REASONING_EFFORT",
-      DEFAULT_GROQ_REASONING_EFFORT,
+      DEFAULT_GROQ_REASONING_EFFORT
     ),
     dotenvPath: loaded.path,
     dotenvLoaded: loaded.loaded,

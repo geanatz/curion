@@ -331,15 +331,13 @@ export const BENCHMARK_RECORDS: BenchmarkMemoryRecord[] = [
   {
     id: 18,
     kind: "reference",
-    summary:
-      "The on-call runbook covers incident triage, common alerts, and the escalation path.",
+    summary: "The on-call runbook covers incident triage, common alerts, and the escalation path.",
     tags: ["docs", "runbook", "oncall"],
   },
   {
     id: 19,
     kind: "fact",
-    summary:
-      "The architecture overview diagram is generated from the source tree at build time.",
+    summary: "The architecture overview diagram is generated from the source tree at build time.",
     tags: ["docs", "architecture"],
   },
   {
@@ -505,8 +503,7 @@ export const BENCHMARK_RECORDS: BenchmarkMemoryRecord[] = [
   {
     id: 40,
     kind: "reference",
-    summary:
-      "Common alert shapes and the escalation path are documented in the on-call runbook.",
+    summary: "Common alert shapes and the escalation path are documented in the on-call runbook.",
     tags: ["monitoring", "runbook", "oncall"],
   },
 

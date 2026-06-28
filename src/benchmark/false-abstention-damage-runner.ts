@@ -70,19 +70,16 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import type { AbstentionSignals } from "./metrics.js";
-import type { SufficiencyLabel } from "./sufficiency-diagnostic.js";
-import { BUILTIN_NO_ANSWER_POLICIES } from "./no-answer-abstention.js";
 import {
-  buildFalseAbstentionDamageReport,
-  formatFalseAbstentionDamageReport,
   type FalseAbstentionDamageReport,
   type SemanticEvidenceMap,
+  buildFalseAbstentionDamageReport,
+  formatFalseAbstentionDamageReport,
 } from "./false-abstention-damage.js";
-import {
-  type NoAnswerPolicy,
-  type NoAnswerPolicyPerQuery,
-} from "./no-answer-abstention.js";
+import type { AbstentionSignals } from "./metrics.js";
+import { BUILTIN_NO_ANSWER_POLICIES } from "./no-answer-abstention.js";
+import type { NoAnswerPolicy, NoAnswerPolicyPerQuery } from "./no-answer-abstention.js";
+import type { SufficiencyLabel } from "./sufficiency-diagnostic.js";
 
 // ---------------------------------------------------------------------------
 // Artifact reader
@@ -130,9 +127,7 @@ export interface NoAnswerArtifact {
  * is synchronous (small file, no streaming
  * needed) and never mutates the input.
  */
-export function readNoAnswerAbstentionArtifact(
-  filePath: string,
-): NoAnswerArtifact {
+export function readNoAnswerAbstentionArtifact(filePath: string): NoAnswerArtifact {
   const text = fs.readFileSync(filePath, "utf8");
   const raw = JSON.parse(text);
   return raw as NoAnswerArtifact;
@@ -170,9 +165,7 @@ export interface AbstentionAuditArtifact {
  * The function is synchronous and never mutates
  * the input.
  */
-export function readAbstentionAuditArtifact(
-  filePath: string,
-): AbstentionAuditArtifact {
+export function readAbstentionAuditArtifact(filePath: string): AbstentionAuditArtifact {
   const text = fs.readFileSync(filePath, "utf8");
   const raw = JSON.parse(text);
   return raw as AbstentionAuditArtifact;
@@ -187,26 +180,22 @@ export function readAbstentionAuditArtifact(
  * rather than silently producing an
  * unannotated report.
  */
-export function readSemanticEvidenceFile(
-  filePath: string,
-): SemanticEvidenceMap {
+export function readSemanticEvidenceFile(filePath: string): SemanticEvidenceMap {
   const text = fs.readFileSync(filePath, "utf8");
   const raw = JSON.parse(text);
   if (typeof raw.source !== "string" || raw.source.length === 0) {
     throw new Error(
-      `readSemanticEvidenceFile: ${filePath} must have a non-empty string 'source' field`,
+      `readSemanticEvidenceFile: ${filePath} must have a non-empty string 'source' field`
     );
   }
   if (typeof raw.byQueryId !== "object" || raw.byQueryId === null) {
-    throw new Error(
-      `readSemanticEvidenceFile: ${filePath} must have an object 'byQueryId' field`,
-    );
+    throw new Error(`readSemanticEvidenceFile: ${filePath} must have an object 'byQueryId' field`);
   }
   const map = new Map<string, "hit" | "miss">();
   for (const [k, v] of Object.entries(raw.byQueryId)) {
     if (v !== "hit" && v !== "miss") {
       throw new Error(
-        `readSemanticEvidenceFile: ${filePath} byQueryId.${k} must be "hit" or "miss", got ${JSON.stringify(v)}`,
+        `readSemanticEvidenceFile: ${filePath} byQueryId.${k} must be "hit" or "miss", got ${JSON.stringify(v)}`
       );
     }
     map.set(k, v);
@@ -235,10 +224,7 @@ export function readSemanticEvidenceFile(
  * they pass `--no-answer-artifact` /
  * `--audit-artifact` explicitly.
  */
-export function findMostRecentArtifact(
-  dir: string,
-  prefix: string,
-): string | undefined {
+export function findMostRecentArtifact(dir: string, prefix: string): string | undefined {
   if (!fs.existsSync(dir)) return undefined;
   const entries = fs
     .readdirSync(dir)
@@ -278,15 +264,13 @@ export function findMostRecentArtifact(
  */
 export function reconstructPerQuery(
   artifact: NoAnswerArtifact,
-  policyId: string,
+  policyId: string
 ): NoAnswerPolicyPerQuery[] {
-  const decisionBlock = artifact.decisions.find(
-    (b) => b.policyId === policyId,
-  );
+  const decisionBlock = artifact.decisions.find((b) => b.policyId === policyId);
   if (!decisionBlock) {
     throw new Error(
       `reconstructPerQuery: no-answer artifact has no decision block for policyId="${policyId}"; ` +
-        `available: ${artifact.decisions.map((b) => b.policyId).join(", ")}`,
+        `available: ${artifact.decisions.map((b) => b.policyId).join(", ")}`
     );
   }
   // The artifact's perQuery already has the
@@ -328,19 +312,16 @@ export function runFalseAbstentionDamageAnalysis(args: {
   semantic?: SemanticEvidenceMap;
 }): FalseAbstentionDamageReport {
   const { noAnswerArtifact, semantic } = args;
-  const policyId =
-    args.policyId ?? "score-or-sufficiency-insufficient";
+  const policyId = args.policyId ?? "score-or-sufficiency-insufficient";
   // Validate the policy id is in the built-in
   // set so a typo in a CLI flag surfaces loud
   // rather than silently producing an
   // un-analyzed report.
-  const known = BUILTIN_NO_ANSWER_POLICIES.find(
-    (p) => p.id === policyId,
-  );
+  const known = BUILTIN_NO_ANSWER_POLICIES.find((p) => p.id === policyId);
   if (!known) {
     throw new Error(
       `runFalseAbstentionDamageAnalysis: policyId="${policyId}" is not in BUILTIN_NO_ANSWER_POLICIES; ` +
-        `available: ${BUILTIN_NO_ANSWER_POLICIES.map((p) => p.id).join(", ")}`,
+        `available: ${BUILTIN_NO_ANSWER_POLICIES.map((p) => p.id).join(", ")}`
     );
   }
   const perQuery = reconstructPerQuery(noAnswerArtifact, policyId);
@@ -373,7 +354,7 @@ const ARTIFACT_FILE_PREFIX = "retrieval-false-abstention-damage";
  */
 export function writeFalseAbstentionDamageReport(
   report: FalseAbstentionDamageReport,
-  dir: string,
+  dir: string
 ): string {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -413,16 +394,15 @@ export interface FalseAbstentionDamageCliArgs {
  * parsing).
  */
 export async function runFalseAbstentionDamageCli(
-  args: FalseAbstentionDamageCliArgs,
+  args: FalseAbstentionDamageCliArgs
 ): Promise<{ report: FalseAbstentionDamageReport; written?: string }> {
   const outDir = args.outDir ?? ".curion/benchmark";
   const defaultNoAnswer =
-    args.noAnswerArtifact ??
-    findMostRecentArtifact(outDir, "retrieval-no-answer-abstention-");
+    args.noAnswerArtifact ?? findMostRecentArtifact(outDir, "retrieval-no-answer-abstention-");
   if (!defaultNoAnswer) {
     throw new Error(
       `runFalseAbstentionDamageCli: no --no-answer-artifact given and no ` +
-        `retrieval-no-answer-abstention-*.json found under ${outDir}`,
+        `retrieval-no-answer-abstention-*.json found under ${outDir}`
     );
   }
   const noAnswerArtifact = readNoAnswerAbstentionArtifact(defaultNoAnswer);
@@ -444,23 +424,17 @@ export async function runFalseAbstentionDamageCli(
     // CLI prints a small header to stderr so
     // the JSON artifact on stdout (if any)
     // stays parseable.
-    process.stderr.write(
-      `[false-abstention-damage] no-answer artifact: ${defaultNoAnswer}\n`,
-    );
+    process.stderr.write(`[false-abstention-damage] no-answer artifact: ${defaultNoAnswer}\n`);
     if (args.auditArtifact) {
-      process.stderr.write(
-        `[false-abstention-damage] audit artifact:    ${args.auditArtifact}\n`,
-      );
+      process.stderr.write(`[false-abstention-damage] audit artifact:    ${args.auditArtifact}\n`);
     }
     if (semantic) {
       process.stderr.write(
-        `[false-abstention-damage] semantic evidence:  ${args.semanticEvidence}\n`,
+        `[false-abstention-damage] semantic evidence:  ${args.semanticEvidence}\n`
       );
     }
     if (written) {
-      process.stderr.write(
-        `[false-abstention-damage] wrote:              ${written}\n`,
-      );
+      process.stderr.write(`[false-abstention-damage] wrote:              ${written}\n`);
     }
     process.stdout.write(formatFalseAbstentionDamageReport(report) + "\n");
   }
@@ -481,7 +455,7 @@ export async function runFalseAbstentionDamageCli(
  * arguments does not matter.
  */
 export function parseFalseAbstentionDamageCliArgs(
-  argv: ReadonlyArray<string>,
+  argv: ReadonlyArray<string>
 ): FalseAbstentionDamageCliArgs {
   const out: FalseAbstentionDamageCliArgs = {};
   for (let i = 0; i < argv.length; i++) {
@@ -517,7 +491,7 @@ export function parseFalseAbstentionDamageCliArgs(
  * process exits normally.
  */
 export async function main(
-  argv: ReadonlyArray<string> = process.argv.slice(2),
+  argv: ReadonlyArray<string> = process.argv.slice(2)
 ): Promise<FalseAbstentionDamageReport> {
   const args = parseFalseAbstentionDamageCliArgs(argv);
   const { report } = await runFalseAbstentionDamageCli(args);
@@ -557,7 +531,7 @@ const isMainEntry = (() => {
 if (isMainEntry) {
   main().catch((err) => {
     process.stderr.write(
-      `[false-abstention-damage] error: ${err instanceof Error ? err.message : String(err)}\n`,
+      `[false-abstention-damage] error: ${err instanceof Error ? err.message : String(err)}\n`
     );
     process.exit(1);
   });

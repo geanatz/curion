@@ -32,11 +32,7 @@
  */
 
 import { isTraceEnabled } from "./trace-enabled.js";
-import {
-  updateTraceRun,
-  writeTraceEvent,
-  writeTraceRun,
-} from "./trace-writer.js";
+import { updateTraceRun, writeTraceEvent, writeTraceRun } from "./trace-writer.js";
 
 // ---------------------------------------------------------------------------
 // Event kind tags
@@ -93,17 +89,13 @@ export const TOOL_OUTPUT_KIND = "tool.output" as const;
 // change the recall result.
 // ---------------------------------------------------------------------------
 /** Kind tag for the recall memory-read stage event. */
-export const RECALL_ACTIVE_MEMORY_READ_KIND =
-  "recall.active-memory-read" as const;
+export const RECALL_ACTIVE_MEMORY_READ_KIND = "recall.active-memory-read" as const;
 /** Kind tag for the recall lexical-ranking stage event. */
-export const RECALL_LEXICAL_RANKING_KIND =
-  "recall.lexical-ranking" as const;
+export const RECALL_LEXICAL_RANKING_KIND = "recall.lexical-ranking" as const;
 /** Kind tag for the recall selected-candidates stage event. */
-export const RECALL_SELECTED_CANDIDATES_KIND =
-  "recall.selected-candidates" as const;
+export const RECALL_SELECTED_CANDIDATES_KIND = "recall.selected-candidates" as const;
 /** Kind tag for the recall superseded-demotion stage event. */
-export const RECALL_SUPERSEDED_DEMOTION_KIND =
-  "recall.superseded-demotion" as const;
+export const RECALL_SUPERSEDED_DEMOTION_KIND = "recall.superseded-demotion" as const;
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -209,9 +201,7 @@ export interface ToolBoundaryTracer {
  * caller is responsible for calling `recordOutput` once the
  * controller returns, and `finish` once the handler is done.
  */
-export function startToolBoundaryTrace(
-  options: StartToolBoundaryTraceOptions,
-): ToolBoundaryTracer {
+export function startToolBoundaryTrace(options: StartToolBoundaryTraceOptions): ToolBoundaryTracer {
   return new ToolBoundaryTracerImpl(options);
 }
 

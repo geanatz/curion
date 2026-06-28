@@ -22,36 +22,36 @@
  *     test to keep env pollution out of the rest of the suite.
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { test } from "node:test";
 
 import Database from "better-sqlite3";
 
+import { CURION_DIRNAME, closeStorage, initStorage } from "../src/storage/storage.ts";
 import {
   CURION_TRACE_DB_FILENAME,
+  DEFAULT_TRACE_MAX_AGE_MS,
   TRACE_SCHEMA_VERSION,
-  initTraceStorage,
   closeTraceStorage,
-  resolveTraceDbPath,
+  closeTraceWriter,
+  getOrInitTraceWriter,
+  initTraceStorage,
   isTraceEnabled,
+  listTraceEventsForRun,
+  listTraceRuns,
+  purgeAllTraceRuns,
+  purgeTraceRunsOlderThan,
   redactPayload,
   redactString,
-  writeTraceRun,
-  writeTraceEvent,
-  updateTraceRun,
-  listTraceRuns,
-  listTraceEventsForRun,
-  getOrInitTraceWriter,
-  closeTraceWriter,
   resetTraceWriterForTests,
-  purgeTraceRunsOlderThan,
-  purgeAllTraceRuns,
-  DEFAULT_TRACE_MAX_AGE_MS,
+  resolveTraceDbPath,
+  updateTraceRun,
+  writeTraceEvent,
+  writeTraceRun,
 } from "../src/trace/index.ts";
-import { CURION_DIRNAME, initStorage, closeStorage } from "../src/storage/storage.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -102,10 +102,7 @@ function openTraceDbReadOnly(dbPath: string): Database.Database {
  * `projectRoot`. Always tears the writer back down on exit so
  * module-level state does not leak into the next test.
  */
-function withWriter<T>(
-  projectRoot: string,
-  fn: () => T,
-): T {
+function withWriter<T>(projectRoot: string, fn: () => T): T {
   resetTraceWriterForTests();
   try {
     const handle = getOrInitTraceWriter({ projectRoot });
@@ -145,11 +142,7 @@ test("trace-enabled: false-like values disable tracing", () => {
   for (const off of ["0", "false", "FALSE", "False", "no", "NO", "off", "OFF"]) {
     withEnvSnapshot(() => {
       process.env.CURION_TRACE_ENABLED = off;
-      assert.equal(
-        isTraceEnabled(),
-        false,
-        `expected OFF for value "${off}"`,
-      );
+      assert.equal(isTraceEnabled(), false, `expected OFF for value "${off}"`);
     });
   }
 });
@@ -158,11 +151,7 @@ test("trace-enabled: arbitrary non-empty string is ON", () => {
   for (const on of ["1", "true", "yes", "on", "enabled", "definitely", "x"]) {
     withEnvSnapshot(() => {
       process.env.CURION_TRACE_ENABLED = on;
-      assert.equal(
-        isTraceEnabled(),
-        true,
-        `expected ON for value "${on}"`,
-      );
+      assert.equal(isTraceEnabled(), true, `expected ON for value "${on}"`);
     });
   }
 });
@@ -208,7 +197,7 @@ test("trace-storage: initTraceStorage creates .curion/ + trace.sqlite (NOT curio
     assert.ok(fs.existsSync(handle.dbPath), "trace.sqlite must exist");
     assert.ok(
       !fs.existsSync(path.join(expectedDir, "curion.sqlite")),
-      "memory DB curion.sqlite must NOT be created by trace init",
+      "memory DB curion.sqlite must NOT be created by trace init"
     );
   } finally {
     if (handle) closeTraceStorage(handle);
@@ -226,7 +215,7 @@ test("trace-storage: schema is _meta + trace_runs + trace_events with cascade", 
         `SELECT name FROM sqlite_master
           WHERE type IN ('table', 'index')
             AND name NOT LIKE 'sqlite_%'
-          ORDER BY name ASC`,
+          ORDER BY name ASC`
       )
       .all() as Array<{ name: string }>;
     const names = new Set(tables.map((r) => r.name));
@@ -235,13 +224,13 @@ test("trace-storage: schema is _meta + trace_runs + trace_events with cascade", 
     assert.ok(names.has("trace_events"), "trace_events table must exist");
     assert.ok(
       names.has("trace_events_run_id_idx"),
-      "trace_events(run_id, sequence) index must exist",
+      "trace_events(run_id, sequence) index must exist"
     );
 
     // _meta must carry the documented schema version stamp.
-    const meta = handle.db
-      .prepare(`SELECT value FROM _meta WHERE key = 'schema_version'`)
-      .get() as { value: string } | undefined;
+    const meta = handle.db.prepare(`SELECT value FROM _meta WHERE key = 'schema_version'`).get() as
+      | { value: string }
+      | undefined;
     assert.ok(meta, "_meta.schema_version must be set");
     assert.equal(meta.value, TRACE_SCHEMA_VERSION);
     assert.equal(TRACE_SCHEMA_VERSION, "v1-trace-1");
@@ -249,14 +238,14 @@ test("trace-storage: schema is _meta + trace_runs + trace_events with cascade", 
     // FK action: deleting a trace_runs row must cascade to its events.
     const insertRun = handle.db.prepare(
       `INSERT INTO trace_runs (name, started_at, ended_at, status, metadata)
-       VALUES (?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?)`
     );
     const insertEvent = handle.db.prepare(
       `INSERT INTO trace_events (run_id, ts, kind, payload_json, redacted_keys, sequence)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?)`
     );
     const runId = Number(
-      insertRun.run("cascade-test", 1_000, null, "in_progress", null).lastInsertRowid,
+      insertRun.run("cascade-test", 1_000, null, "in_progress", null).lastInsertRowid
     );
     insertEvent.run(runId, 1_000, "k", "{}", "[]", 1);
     insertEvent.run(runId, 1_001, "k", "{}", "[]", 2);
@@ -284,16 +273,16 @@ test("trace-storage: initTraceStorage is idempotent (re-running keeps the same s
     h1.db
       .prepare(
         `INSERT INTO _meta (key, value) VALUES ('custom', 'first')
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value`
       )
       .run();
     closeTraceStorage(h1);
     h1 = null;
 
     h2 = initTraceStorage({ projectRoot: tmp });
-    const meta = h2.db
-      .prepare(`SELECT value FROM _meta WHERE key = 'custom'`)
-      .get() as { value: string } | undefined;
+    const meta = h2.db.prepare(`SELECT value FROM _meta WHERE key = 'custom'`).get() as
+      | { value: string }
+      | undefined;
     assert.equal(meta?.value, "first", "user _meta rows must survive a re-init");
   } finally {
     if (h1) closeTraceStorage(h1);
@@ -329,10 +318,7 @@ test("trace-storage: initTraceStorage sets owner-only (0o600) on the main DB fil
     const m = modeStr(dbPath);
     // chmod is best-effort; we assert only when the call succeeded.
     if (m !== null) {
-      assert.ok(
-        m === "600" || m === "400",
-        `expected owner-only mode, got 0o${m}`,
-      );
+      assert.ok(m === "600" || m === "400", `expected owner-only mode, got 0o${m}`);
     }
   } finally {
     if (handle) closeTraceStorage(handle);
@@ -353,10 +339,7 @@ test("trace-storage: WAL sidecar (-wal) gets owner-only mode after first write",
     const walPath = path.join(tmp, CURION_DIRNAME, `${CURION_TRACE_DB_FILENAME}-wal`);
     const m = modeStr(walPath);
     if (m !== null) {
-      assert.ok(
-        m === "600" || m === "400",
-        `expected owner-only mode on WAL, got 0o${m}`,
-      );
+      assert.ok(m === "600" || m === "400", `expected owner-only mode on WAL, got 0o${m}`);
     }
   } finally {
     if (handle) closeTraceStorage(handle);
@@ -376,10 +359,7 @@ test("trace-storage: SHM sidecar (-shm) gets owner-only mode when it exists", ()
     const shmPath = path.join(tmp, CURION_DIRNAME, `${CURION_TRACE_DB_FILENAME}-shm`);
     const m = modeStr(shmPath);
     if (m !== null) {
-      assert.ok(
-        m === "600" || m === "400",
-        `expected owner-only mode on SHM, got 0o${m}`,
-      );
+      assert.ok(m === "600" || m === "400", `expected owner-only mode on SHM, got 0o${m}`);
     }
   } finally {
     if (handle) closeTraceStorage(handle);
@@ -408,11 +388,7 @@ test("redactPayload: recursive credential / secret key scrubbing", () => {
       private_key: "-----BEGIN PRIVATE KEY-----",
       bearer: "abc123",
     },
-    list: [
-      { apiKey: "first" },
-      { password: "second" },
-      "harmless string",
-    ],
+    list: [{ apiKey: "first" }, { password: "second" }, "harmless string"],
     keep: "visible",
   }) as Record<string, unknown>;
 
@@ -446,29 +422,17 @@ test("redactPayload: recursive credential / secret key scrubbing", () => {
 });
 
 test("redactPayload: Authorization / API-key HEADER-style values in strings are scrubbed", () => {
-  const out = redactString(
-    "Authorization: Bearer sk-abcdefghijklmnopqrstuv",
-  );
+  const out = redactString("Authorization: Bearer sk-abcdefghijklmnopqrstuv");
   assert.ok(!out.includes("sk-abcdefghijklmnopqrstuv"), `sk- leaked: ${out}`);
   assert.match(out, /<redacted>/);
 
-  const out2 = redactString(
-    `x-api-key: "nvapi-aaaaaaaaaaaaaaabbbbbbbb"`,
-  );
-  assert.ok(
-    !out2.includes("nvapi-aaaaaaaaaaaaaaabbbbbbbb"),
-    `nvapi- leaked: ${out2}`,
-  );
+  const out2 = redactString(`x-api-key: "nvapi-aaaaaaaaaaaaaaabbbbbbbb"`);
+  assert.ok(!out2.includes("nvapi-aaaaaaaaaaaaaaabbbbbbbb"), `nvapi- leaked: ${out2}`);
 });
 
 test("redactPayload: URL basic-auth credentials are stripped", () => {
-  const out = redactString(
-    "fetching https://user:supersecret123@api.example.com/v1/chat",
-  );
-  assert.ok(
-    !out.includes("supersecret123"),
-    `basic-auth password leaked: ${out}`,
-  );
+  const out = redactString("fetching https://user:supersecret123@api.example.com/v1/chat");
+  assert.ok(!out.includes("supersecret123"), `basic-auth password leaked: ${out}`);
   // The user and host must still be visible.
   assert.match(out, /user:<redacted>@api\.example\.com/);
 });
@@ -478,9 +442,7 @@ test("redactPayload: secret-shaped query parameters in free-form strings are scr
   // Phase 1 spec did not add a dedicated URL query-param scrubber;
   // we verify the string-level pass picks the value up so a URL
   // copied into a log line does not leak the secret).
-  const out = redactString(
-    "GET /v1/proxy?token=abc123def456ghi789&x=1",
-  );
+  const out = redactString("GET /v1/proxy?token=abc123def456ghi789&x=1");
   assert.ok(!out.includes("abc123def456ghi789"), `token leaked: ${out}`);
   assert.match(out, /<redacted>/);
 });
@@ -526,10 +488,7 @@ test("redactPayload: reasoning / CoT fields are dropped (key is removed entirely
     "analysis",
     "plan",
   ]) {
-    assert.ok(
-      !(k in out),
-      `reasoning key "${k}" must be dropped, got ${JSON.stringify(out[k])}`,
-    );
+    assert.ok(!(k in out), `reasoning key "${k}" must be dropped, got ${JSON.stringify(out[k])}`);
   }
   // Innocuous fields survive.
   assert.equal(out.prompt, "what is the capital of france");
@@ -542,18 +501,9 @@ test("redactPayload: <think>...</think> blocks in strings are stripped", () => {
       "hello <think>internal chain-of-thought</think> world",
       "hello <redacted:thinking-block> world",
     ],
-    [
-      "<think>step 1\nstep 2\nstep 3</think> answer: 42",
-      "<redacted:thinking-block> answer: 42",
-    ],
-    [
-      "<think>\there is some leading whitespace</think> ok",
-      "<redacted:thinking-block> ok",
-    ],
-    [
-      "no think block here, just normal text",
-      "no think block here, just normal text",
-    ],
+    ["<think>step 1\nstep 2\nstep 3</think> answer: 42", "<redacted:thinking-block> answer: 42"],
+    ["<think>\there is some leading whitespace</think> ok", "<redacted:thinking-block> ok"],
+    ["no think block here, just normal text", "no think block here, just normal text"],
   ];
   for (const [input, expected] of cases) {
     const out = redactString(input);
@@ -565,10 +515,7 @@ test("redactPayload: nested arrays and objects are walked", () => {
   const out = redactPayload({
     a: {
       b: {
-        c: [
-          { apiKey: "leaf-1" },
-          { keep: [{ password: "leaf-2" }] },
-        ],
+        c: [{ apiKey: "leaf-1" }, { keep: [{ password: "leaf-2" }] }],
       },
     },
   }) as { a: { b: { c: Array<Record<string, unknown>> } } };
@@ -635,24 +582,20 @@ test("redactPayload: does not throw on deeply nested input (depth cap returns <r
 });
 
 test("redactPayload: redactUrlCredentials=false leaves basic-auth intact", () => {
-  const out = redactString(
-    "https://user:supersecret@example.com/",
-    { redactUrlCredentials: false },
-  );
+  const out = redactString("https://user:supersecret@example.com/", {
+    redactUrlCredentials: false,
+  });
   assert.ok(
     out.includes("supersecret"),
-    `URL should be untouched when redactUrlCredentials=false, got: ${out}`,
+    `URL should be untouched when redactUrlCredentials=false, got: ${out}`
   );
 });
 
 test("redactPayload: stripThinkingBlocks=false leaves <think> blocks intact", () => {
-  const out = redactString(
-    "hello <think>internal</think> world",
-    { stripThinkingBlocks: false },
-  );
+  const out = redactString("hello <think>internal</think> world", { stripThinkingBlocks: false });
   assert.ok(
     out.includes("<think>internal</think>"),
-    `think block should be untouched when stripThinkingBlocks=false, got: ${out}`,
+    `think block should be untouched when stripThinkingBlocks=false, got: ${out}`
   );
 });
 
@@ -711,42 +654,42 @@ test("writer: writeTraceRun / writeTraceEvent / updateTraceRun persist redacted 
         const runs = db
           .prepare(
             `SELECT id, name, started_at, ended_at, status, metadata
-               FROM trace_runs WHERE id = ?`,
+               FROM trace_runs WHERE id = ?`
           )
           .all(id) as Array<{
-            id: number;
-            name: string;
-            started_at: number;
-            ended_at: number | null;
-            status: string;
-            metadata: string | null;
-          }>;
+          id: number;
+          name: string;
+          started_at: number;
+          ended_at: number | null;
+          status: string;
+          metadata: string | null;
+        }>;
         assert.equal(runs.length, 1);
         assert.equal(runs[0]?.name, "remember");
         assert.equal(runs[0]?.started_at, 1_000_000);
         assert.equal(runs[0]?.ended_at, 1_000_030);
         assert.equal(runs[0]?.status, "ok");
-        assert.deepEqual(
-          JSON.parse(runs[0]?.metadata ?? "null"),
-          { kind: "fact", confidence: 0.95 },
-        );
+        assert.deepEqual(JSON.parse(runs[0]?.metadata ?? "null"), {
+          kind: "fact",
+          confidence: 0.95,
+        });
 
         const events = db
           .prepare(
             `SELECT id, run_id, ts, kind, payload_json, redacted_keys, sequence
                FROM trace_events
               WHERE run_id = ?
-              ORDER BY sequence ASC`,
+              ORDER BY sequence ASC`
           )
           .all(id) as Array<{
-            id: number;
-            run_id: number;
-            ts: number;
-            kind: string;
-            payload_json: string | null;
-            redacted_keys: string | null;
-            sequence: number;
-          }>;
+          id: number;
+          run_id: number;
+          ts: number;
+          kind: string;
+          payload_json: string | null;
+          redacted_keys: string | null;
+          sequence: number;
+        }>;
         assert.equal(events.length, 2);
 
         const e1 = events[0];
@@ -758,18 +701,15 @@ test("writer: writeTraceRun / writeTraceEvent / updateTraceRun persist redacted 
         assert.equal(p1.apiKey, "<redacted>");
         assert.equal(p1.password, "<redacted>");
         // Nested keys are also redacted in the persisted payload.
-        assert.equal(
-          (p1.nested as Record<string, unknown>).apiKey,
-          "<redacted>",
-        );
+        assert.equal((p1.nested as Record<string, unknown>).apiKey, "<redacted>");
         // The raw API key must not survive anywhere in the persisted blob.
         assert.ok(
           !(e1?.payload_json ?? "").includes("sk-aaaaaaaaaaaaaaaaaaaaaaaa"),
-          "raw api key must not survive in the persisted payload",
+          "raw api key must not survive in the persisted payload"
         );
         assert.ok(
           !(e1?.payload_json ?? "").includes("sk-nested-key-value"),
-          "raw nested api key must not survive in the persisted payload",
+          "raw nested api key must not survive in the persisted payload"
         );
         const rk1 = JSON.parse(e1?.redacted_keys ?? "[]") as string[];
         // The redacted_keys list reports TOP-LEVEL keys whose value
@@ -786,10 +726,7 @@ test("writer: writeTraceRun / writeTraceEvent / updateTraceRun persist redacted 
         assert.equal(p2.summary, "ok");
         // Reasoning key is dropped, so it must not appear in the payload
         // object at all.
-        assert.ok(
-          !("reasoning" in p2),
-          "reasoning key must be dropped from the persisted payload",
-        );
+        assert.ok(!("reasoning" in p2), "reasoning key must be dropped from the persisted payload");
         const rk2 = JSON.parse(e2?.redacted_keys ?? "[]") as string[];
         assert.ok(rk2.includes("reasoning"), "reasoning must be reported as redacted");
       } finally {
@@ -813,13 +750,11 @@ test("writer: per-run sequence increments monotonically across inserts", () => {
       const db = openTraceDbReadOnly(path.join(tmp, ".curion", "trace.sqlite"));
       try {
         const rows = db
-          .prepare(
-            `SELECT sequence FROM trace_events WHERE run_id = ? ORDER BY sequence ASC`,
-          )
+          .prepare(`SELECT sequence FROM trace_events WHERE run_id = ? ORDER BY sequence ASC`)
           .all(runId) as Array<{ sequence: number }>;
         assert.deepEqual(
           rows.map((r) => r.sequence),
-          [1, 2, 3, 4, 5],
+          [1, 2, 3, 4, 5]
         );
       } finally {
         db.close();
@@ -882,25 +817,14 @@ test("writer: writeTraceEvent validates runId and kind (does not throw, returns 
     withWriter(tmp, () => {
       const id = writeTraceRun({ name: "r", startedAt: 1 }) as number;
       // Invalid runId.
-      assert.equal(
-        writeTraceEvent({ runId: 0, kind: "k", payload: {} }),
-        false,
-      );
-      assert.equal(
-        writeTraceEvent({ runId: -1, kind: "k", payload: {} }),
-        false,
-      );
+      assert.equal(writeTraceEvent({ runId: 0, kind: "k", payload: {} }), false);
+      assert.equal(writeTraceEvent({ runId: -1, kind: "k", payload: {} }), false);
       // Invalid kind.
-      assert.equal(
-        writeTraceEvent({ runId: id, kind: "", payload: {} }),
-        false,
-      );
+      assert.equal(writeTraceEvent({ runId: id, kind: "", payload: {} }), false);
       // DB must contain zero events after the three invalid calls.
       const db = openTraceDbReadOnly(path.join(tmp, ".curion", "trace.sqlite"));
       try {
-        const rows = db
-          .prepare(`SELECT COUNT(*) AS c FROM trace_events`)
-          .get() as { c: number };
+        const rows = db.prepare(`SELECT COUNT(*) AS c FROM trace_events`).get() as { c: number };
         assert.equal(rows.c, 0);
       } finally {
         db.close();
@@ -920,19 +844,13 @@ test("writer: when trace is disabled, every API call is a safe no-op (no DB crea
       // Even with projectRoot = tmp, no .curion/ must be created.
       assert.equal(getOrInitTraceWriter({ projectRoot: tmp }), null);
       assert.equal(writeTraceRun({ name: "x", startedAt: 1 }), null);
-      assert.equal(
-        writeTraceEvent({ runId: 1, kind: "k", payload: {} }),
-        false,
-      );
+      assert.equal(writeTraceEvent({ runId: 1, kind: "k", payload: {} }), false);
       assert.equal(updateTraceRun(1, { status: "ok" }), false);
       assert.deepEqual(listTraceRuns(), []);
       assert.deepEqual(listTraceEventsForRun(1), []);
 
       const curionDir = path.join(tmp, ".curion");
-      assert.ok(
-        !fs.existsSync(curionDir),
-        "no .curion/ must be created when tracing is disabled",
-      );
+      assert.ok(!fs.existsSync(curionDir), "no .curion/ must be created when tracing is disabled");
     } finally {
       resetTraceWriterForTests();
       rmTraceDir(tmp);
@@ -950,7 +868,7 @@ test("writer: writer API never throws on unserializable payloads (safe fallback 
       // call must return a boolean, not throw.
       const big = 1_000_000_000_000_000_000_000n;
       let threw = false;
-      let ok: boolean = false;
+      let ok = false;
       try {
         ok = writeTraceEvent({ runId: id, kind: "k", payload: { big } });
       } catch {
@@ -963,9 +881,7 @@ test("writer: writer API never throws on unserializable payloads (safe fallback 
       const db = openTraceDbReadOnly(path.join(tmp, ".curion", "trace.sqlite"));
       try {
         const row = db
-          .prepare(
-            `SELECT payload_json FROM trace_events WHERE run_id = ? ORDER BY id ASC LIMIT 1`,
-          )
+          .prepare(`SELECT payload_json FROM trace_events WHERE run_id = ? ORDER BY id ASC LIMIT 1`)
           .get(id) as { payload_json: string | null };
         const parsed = JSON.parse(row.payload_json ?? "null") as {
           big: string;
@@ -1022,7 +938,7 @@ test("retention: purgeTraceRunsOlderThan removes only runs older than the cutoff
       // Purge with a 30-day window. Only the 60-day-old run must go.
       const res = purgeTraceRunsOlderThan(
         { now: () => now, maxAgeMs: 30 * day },
-        { projectRoot: tmp },
+        { projectRoot: tmp }
       );
       assert.equal(res.runsDeleted, 1);
       assert.equal(res.eventsDeleted, 2, "the 2 old-run events must be cascaded");
@@ -1030,12 +946,13 @@ test("retention: purgeTraceRunsOlderThan removes only runs older than the cutoff
       // The mid + new runs (and their events) must still be there.
       const db = openTraceDbReadOnly(path.join(tmp, ".curion", "trace.sqlite"));
       try {
-        const runs = db
-          .prepare(`SELECT id, name FROM trace_runs ORDER BY id ASC`)
-          .all() as Array<{ id: number; name: string }>;
+        const runs = db.prepare(`SELECT id, name FROM trace_runs ORDER BY id ASC`).all() as Array<{
+          id: number;
+          name: string;
+        }>;
         assert.deepEqual(
           runs.map((r) => r.name),
-          ["mid", "new"],
+          ["mid", "new"]
         );
         const evMid = db
           .prepare(`SELECT COUNT(*) AS c FROM trace_events WHERE run_id = ?`)
@@ -1078,10 +995,7 @@ test("retention: purgeTraceRunsOlderThan with a default window is a 30-day cutof
       writeTraceEvent({ runId: drop, kind: "e", payload: {} });
       writeTraceEvent({ runId: drop, kind: "e", payload: {} });
 
-      const res = purgeTraceRunsOlderThan(
-        { now: () => now },
-        { projectRoot: tmp },
-      );
+      const res = purgeTraceRunsOlderThan({ now: () => now }, { projectRoot: tmp });
       assert.equal(res.runsDeleted, 1);
       assert.equal(res.eventsDeleted, 2);
     });
@@ -1106,12 +1020,8 @@ test("retention: purgeAllTraceRuns removes every run and cascades every event", 
 
       const db = openTraceDbReadOnly(path.join(tmp, ".curion", "trace.sqlite"));
       try {
-        const r = db
-          .prepare(`SELECT COUNT(*) AS c FROM trace_runs`)
-          .get() as { c: number };
-        const e = db
-          .prepare(`SELECT COUNT(*) AS c FROM trace_events`)
-          .get() as { c: number };
+        const r = db.prepare(`SELECT COUNT(*) AS c FROM trace_runs`).get() as { c: number };
+        const e = db.prepare(`SELECT COUNT(*) AS c FROM trace_events`).get() as { c: number };
         assert.equal(r.c, 0);
         assert.equal(e.c, 0);
       } finally {
@@ -1131,10 +1041,7 @@ test("retention: purge helpers are no-ops when trace is disabled", () => {
     try {
       const r1 = purgeAllTraceRuns({}, { projectRoot: tmp });
       assert.deepEqual(r1, { runsDeleted: 0, eventsDeleted: 0 });
-      const r2 = purgeTraceRunsOlderThan(
-        { now: () => 0, maxAgeMs: 0 },
-        { projectRoot: tmp },
-      );
+      const r2 = purgeTraceRunsOlderThan({ now: () => 0, maxAgeMs: 0 }, { projectRoot: tmp });
       assert.deepEqual(r2, { runsDeleted: 0, eventsDeleted: 0 });
       // No .curion/ must have been created.
       assert.ok(!fs.existsSync(path.join(tmp, ".curion")));
@@ -1149,15 +1056,9 @@ test("retention: purgeTraceRunsOlderThan with invalid maxAgeMs returns the empty
   const tmp = mkTraceDir();
   try {
     withWriter(tmp, () => {
-      const r = purgeTraceRunsOlderThan(
-        { maxAgeMs: -1 },
-        { projectRoot: tmp },
-      );
+      const r = purgeTraceRunsOlderThan({ maxAgeMs: -1 }, { projectRoot: tmp });
       assert.deepEqual(r, { runsDeleted: 0, eventsDeleted: 0 });
-      const r2 = purgeTraceRunsOlderThan(
-        { maxAgeMs: Number.NaN },
-        { projectRoot: tmp },
-      );
+      const r2 = purgeTraceRunsOlderThan({ maxAgeMs: Number.NaN }, { projectRoot: tmp });
       assert.deepEqual(r2, { runsDeleted: 0, eventsDeleted: 0 });
     });
   } finally {
@@ -1180,7 +1081,7 @@ test("trace ops never touch the memory DB (.curion/curion.sqlite) under the same
     memHandle.db
       .prepare(
         `INSERT INTO memories (kind, created_at, updated_at, summary, state)
-         VALUES (?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?)`
       )
       .run("fact", 1_000, 1_000, "pre-existing memory row", "active");
     const memDbPath = memHandle.dbPath;
@@ -1219,12 +1120,12 @@ test("trace ops never touch the memory DB (.curion/curion.sqlite) under the same
     const memAfter = fs.readFileSync(memDbPath);
     assert.ok(
       memBefore.equals(memAfter),
-      "memory DB must be byte-identical after trace operations",
+      "memory DB must be byte-identical after trace operations"
     );
     assert.equal(
       fs.statSync(memDbPath).size,
       memSizeBefore,
-      "memory DB size must not change after trace operations",
+      "memory DB size must not change after trace operations"
     );
     // mtime is allowed to drift on some filesystems (e.g. relatime),
     // but in our test temp dir it must also be stable: trace ops
@@ -1232,7 +1133,7 @@ test("trace ops never touch the memory DB (.curion/curion.sqlite) under the same
     assert.equal(
       fs.statSync(memDbPath).mtimeMs,
       memMtimeBefore,
-      "memory DB mtime must not change after trace operations",
+      "memory DB mtime must not change after trace operations"
     );
 
     // The two DBs live next to each other in the same .curion/ dir

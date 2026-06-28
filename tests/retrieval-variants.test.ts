@@ -5,14 +5,14 @@
  * placeholder runs cleanly against a real (empty) storage handle.
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { test } from "node:test";
 
 import { allVariants, runAllVariants } from "../src/retrieval/variants.ts";
-import { initStorage, type StorageHandle } from "../src/storage/storage.ts";
+import { type StorageHandle, initStorage } from "../src/storage/storage.ts";
 
 test("variant registry: five placeholders, stable order", () => {
   const ids = allVariants().map((v) => v.id);

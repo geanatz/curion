@@ -51,16 +51,16 @@
  * nothing more.
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { test } from "node:test";
 import url from "node:url";
 
 import {
-  formatAmbiguityNote,
   AMBIGUITY_NOTE_MAX_LENGTH,
   type AmbiguitySignal,
+  formatAmbiguityNote,
 } from "../src/retrieval/ambiguity.ts";
 
 // ---------------------------------------------------------------------------
@@ -78,18 +78,9 @@ test("formatAmbiguityNote: null / undefined / non-object -> empty string", () =>
   // Non-object inputs collapse to the empty string
   // (defensive: the function must never throw on
   // `unknown`-typed boundaries).
-  assert.equal(
-    formatAmbiguityNote("ambiguous" as unknown as AmbiguitySignal),
-    "",
-  );
-  assert.equal(
-    formatAmbiguityNote(42 as unknown as AmbiguitySignal),
-    "",
-  );
-  assert.equal(
-    formatAmbiguityNote(true as unknown as AmbiguitySignal),
-    "",
-  );
+  assert.equal(formatAmbiguityNote("ambiguous" as unknown as AmbiguitySignal), "");
+  assert.equal(formatAmbiguityNote(42 as unknown as AmbiguitySignal), "");
+  assert.equal(formatAmbiguityNote(true as unknown as AmbiguitySignal), "");
 });
 
 // ---------------------------------------------------------------------------
@@ -113,7 +104,7 @@ test("formatAmbiguityNote: conflicting-candidates -> short note, no ids in publi
   // is dropped by this formatter.
   assert.ok(
     !/#\d+/.test(out),
-    `public note must not include any #N id reference; got ${JSON.stringify(out)}`,
+    `public note must not include any #N id reference; got ${JSON.stringify(out)}`
   );
   // Bounded.
   assert.ok(out.length <= AMBIGUITY_NOTE_MAX_LENGTH);
@@ -137,17 +128,14 @@ test("formatAmbiguityNote: conflicting-candidates -> short note, no ids in publi
     "input",
     "query",
   ]) {
-    assert.ok(
-      !out.includes(tok),
-      `note must not include '${tok}'`,
-    );
+    assert.ok(!out.includes(tok), `note must not include '${tok}'`);
   }
   // Note does not claim to have picked a winner. It flags
   // the disagreement and nothing else; it does not say
   // "returning the most recent" or "I picked" etc.
   assert.ok(
     !/most recent|chose|picked|winner/i.test(out),
-    "note must not claim a current-truth selection",
+    "note must not claim a current-truth selection"
   );
 });
 
@@ -170,7 +158,7 @@ test("formatAmbiguityNote: older-variant-suspected -> softer note, no ids in pub
   // No `#N` id references — the public note is prose only.
   assert.ok(
     !/#\d+/.test(out),
-    `public note must not include any #N id reference; got ${JSON.stringify(out)}`,
+    `public note must not include any #N id reference; got ${JSON.stringify(out)}`
   );
   assert.ok(out.length <= AMBIGUITY_NOTE_MAX_LENGTH);
 });
@@ -197,12 +185,12 @@ test("formatAmbiguityNote: long id list does not render any ids and does not men
   // No ids at all in the output.
   assert.ok(
     !/#\d+/.test(out),
-    `public note must not include any #N id reference; got ${JSON.stringify(out)}`,
+    `public note must not include any #N id reference; got ${JSON.stringify(out)}`
   );
   // No truncation token (the previous form had "and 8 more").
   assert.ok(
     !/and \d+ more/.test(out),
-    `public note must not include the legacy 'and N more' token; got ${JSON.stringify(out)}`,
+    `public note must not include the legacy 'and N more' token; got ${JSON.stringify(out)}`
   );
   // The prose is exactly the same regardless of how many
   // ids the signal carries.
@@ -210,12 +198,7 @@ test("formatAmbiguityNote: long id list does not render any ids and does not men
   // Bounded total length.
   assert.ok(out.length <= AMBIGUITY_NOTE_MAX_LENGTH);
   // No raw-text leakage.
-  for (const tok of [
-    "detectionConfidence",
-    "derivedAt",
-    "derivedSchemaVersion",
-    "ccm-draft-1",
-  ]) {
+  for (const tok of ["detectionConfidence", "derivedAt", "derivedSchemaVersion", "ccm-draft-1"]) {
     assert.ok(!out.includes(tok), `note must not include '${tok}'`);
   }
 });
@@ -308,9 +291,7 @@ test("formatAmbiguityNote: non-array memoryIds -> empty note (defensive)", () =>
 test("formatAmbiguityNote: unknown reason -> empty string (defensive)", () => {
   const out = formatAmbiguityNote({
     kind: "ambiguous",
-    reason: "not-a-real-reason" as unknown as
-      | "conflicting-candidates"
-      | "older-variant-suspected",
+    reason: "not-a-real-reason" as unknown as "conflicting-candidates" | "older-variant-suspected",
     memoryIds: [1, 2],
     confidence: 0.9,
     asOf: 1,
@@ -340,7 +321,7 @@ test("formatAmbiguityNote: source does not import benchmark experiment modules",
     assert.equal(
       text.includes(tok),
       false,
-      `ambiguity.ts must not reference benchmark experiment module "${tok}"`,
+      `ambiguity.ts must not reference benchmark experiment module "${tok}"`
     );
   }
   // The module should not have grown a benchmark import
@@ -348,7 +329,7 @@ test("formatAmbiguityNote: source does not import benchmark experiment modules",
   assert.equal(
     /from\s+["'][^"']*benchmark\//.test(text),
     false,
-    "ambiguity.ts must not import from src/benchmark/",
+    "ambiguity.ts must not import from src/benchmark/"
   );
 });
 
@@ -381,7 +362,7 @@ test("formatAmbiguityNote: never throws on any input", () => {
       assert.fail(
         `formatAmbiguityNote must not throw; threw on ${JSON.stringify(inp)}: ${
           err instanceof Error ? err.message : String(err)
-        }`,
+        }`
       );
       return;
     }

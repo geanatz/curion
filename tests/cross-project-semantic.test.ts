@@ -13,42 +13,35 @@
  * the passing tests below.
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { test } from "node:test";
 
 // ---------------------------------------------------------------------------
 // Imports from production modules (NOT benchmark)
 // ---------------------------------------------------------------------------
 
+import { setProjectPrivate } from "../src/config/project-config.ts";
 import {
-  StubSemanticEmbedder,
-} from "../src/retrieval/semantic/embedder.ts";
-import {
-  insertMemoryRecord,
-  type StorageHandle,
-} from "../src/storage/storage.ts";
-import { handleRecall } from "../src/tools/recall.ts";
-import { runRecallController } from "../src/controller/recall-controller.ts";
-import { setStorageProvider, resetStorageProvider } from "../src/tools/recall.ts";
-import {
-  setProjectPrivate,
-} from "../src/config/project-config.ts";
-import {
-  setListRegisteredProjectsStub,
   resetListRegisteredProjectsStub,
+  setListRegisteredProjectsStub,
 } from "../src/config/registry.ts";
-import {
-  TEST_PRIMARY_KEY,
-  TEST_FALLBACK_KEY,
-  TEST_PRIMARY_BASE_URL,
-  TEST_PRIMARY_MODEL,
-  TEST_FALLBACK_BASE_URL,
-  TEST_FALLBACK_MODEL,
-} from "./shared-test-provider.ts";
+import { runRecallController } from "../src/controller/recall-controller.ts";
+import { StubSemanticEmbedder } from "../src/retrieval/semantic/embedder.ts";
+import { type StorageHandle, insertMemoryRecord } from "../src/storage/storage.ts";
+import { handleRecall } from "../src/tools/recall.ts";
+import { resetStorageProvider, setStorageProvider } from "../src/tools/recall.ts";
 import { mkStorage, rmStorage } from "./_helpers/test-storage.ts";
+import {
+  TEST_FALLBACK_BASE_URL,
+  TEST_FALLBACK_KEY,
+  TEST_FALLBACK_MODEL,
+  TEST_PRIMARY_BASE_URL,
+  TEST_PRIMARY_KEY,
+  TEST_PRIMARY_MODEL,
+} from "./shared-test-provider.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -71,12 +64,10 @@ function withTempHome<T>(fn: () => T): T {
   const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "curion-cross-project-semantic-home-"));
   const originalHomedir = os.homedir;
   // Override os.homedir for the duration of `fn`.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (os as any).homedir = () => tmpHome;
   try {
     return fn();
   } finally {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (os as any).homedir = originalHomedir;
     // Clean up the temp HOME dir.
     fs.rmSync(tmpHome, { recursive: true, force: true });
@@ -91,14 +82,14 @@ function scriptFetch(content: string): typeof fetch {
         model: "m",
         choices: [{ message: { role: "assistant", content } }],
       }),
-      { status: 200, headers: { "content-type": "application/json" } },
+      { status: 200, headers: { "content-type": "application/json" } }
     );
 }
 
 function insertTestMemory(
   handle: StorageHandle,
   summary: string,
-  kind: "fact" | "decision" = "fact",
+  kind: "fact" | "decision" = "fact"
 ): number {
   const record = insertMemoryRecord(handle, {
     kind,
@@ -136,7 +127,12 @@ test("cross-project semantic: private project not surfaced even with semantic en
     // Insert memory with embedding in private external project
     const externalMemId = insertTestMemory(externalHandle, "The primary provider is NVIDIA NIM");
     const embedder = new StubSemanticEmbedder({ stubDim: 64 });
-    await embedOnRemember(externalHandle, embedder, externalMemId, "The primary provider is NVIDIA NIM");
+    await embedOnRemember(
+      externalHandle,
+      embedder,
+      externalMemId,
+      "The primary provider is NVIDIA NIM"
+    );
 
     // Set external project as private
     setProjectPrivate(externalTmp, true);
@@ -164,7 +160,7 @@ test("cross-project semantic: private project not surfaced even with semantic en
     // (either as "NVIDIA" or in "From other projects" section)
     assert.ok(
       !result.message.includes("NVIDIA") || result.message === "No relevant memory found.",
-      `Should not surface private project, got: ${result.message}`,
+      `Should not surface private project, got: ${result.message}`
     );
   } finally {
     process.env.CURION_SEMANTIC_ENABLED = origEnabled ?? "";
@@ -217,8 +213,9 @@ test("cross-project semantic: no cross-project section when no semantic match ex
 
     // Verify: cross-project section should not appear for unrelated memory
     assert.ok(
-      !result.message.includes("From other projects") || result.message === "No relevant memory found.",
-      `Should not have cross-project section, got: ${result.message}`,
+      !result.message.includes("From other projects") ||
+        result.message === "No relevant memory found.",
+      `Should not have cross-project section, got: ${result.message}`
     );
   } finally {
     process.env.CURION_SEMANTIC_ENABLED = origEnabled ?? "";
@@ -270,7 +267,7 @@ test("cross-project semantic: disabled preserves lexical-only cross-project beha
     // Verify: lexical cross-project should find the external memory
     assert.ok(
       result.message.includes("NVIDIA") || result.message.includes("other projects"),
-      `Expected lexical cross-project result, got: ${result.message}`,
+      `Expected lexical cross-project result, got: ${result.message}`
     );
   } finally {
     process.env.CURION_SEMANTIC_ENABLED = origEnabled ?? "";
@@ -289,7 +286,7 @@ async function embedOnRemember(
   handle: StorageHandle,
   embedder: StubSemanticEmbedder,
   memoryId: number,
-  summary: string,
+  summary: string
 ): Promise<void> {
   const { embedOnRemember: eor } = await import("../src/retrieval/semantic/embed-on-remember.ts");
   const result = await eor(handle, embedder, memoryId, summary);
@@ -317,19 +314,27 @@ test("source: local answer path sets source to 'local'", async () => {
     // Use runRecallController directly with a scripted fetch to verify
     // that local answered status works and source would be "local".
     // We test at the controller level to avoid needing a real provider API key.
-    const controllerResult = await runRecallController(currentHandle, "What is the primary provider?", {
-      semanticEnabled: false,
-      providerFetchImpl: scriptFetch("The primary provider is NVIDIA NIM."),
-      providerPrimaryApiKey: TEST_PRIMARY_KEY,
-      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
-      providerPrimaryModel: TEST_PRIMARY_MODEL,
-      providerFallbackApiKey: TEST_FALLBACK_KEY,
-      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
-      providerFallbackModel: TEST_FALLBACK_MODEL,
-    });
+    const controllerResult = await runRecallController(
+      currentHandle,
+      "What is the primary provider?",
+      {
+        semanticEnabled: false,
+        providerFetchImpl: scriptFetch("The primary provider is NVIDIA NIM."),
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+        providerPrimaryModel: TEST_PRIMARY_MODEL,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
+        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+        providerFallbackModel: TEST_FALLBACK_MODEL,
+      }
+    );
 
     // Verify: local answer found with source=local
-    assert.equal(controllerResult.status, "answered", `expected answered, got ${controllerResult.status}`);
+    assert.equal(
+      controllerResult.status,
+      "answered",
+      `expected answered, got ${controllerResult.status}`
+    );
     // The handleRecall code path sets source: "local" when outcome.status === "answered"
     // (verified via integration; here we verify the answered path works at controller level)
   } finally {
@@ -373,24 +378,28 @@ test("source: no local memory but strong cross-project promotes to answered with
 
     // Verify: status promoted to answered, source is cross_project
     assert.equal(result.status, "answered", `expected answered, got ${result.status}`);
-    assert.equal(result.source, "cross_project", `expected source=cross_project, got ${result.source}`);
+    assert.equal(
+      result.source,
+      "cross_project",
+      `expected source=cross_project, got ${result.source}`
+    );
     // Message should contain cross-project section
     assert.ok(
       result.message.includes("From other projects"),
-      `expected cross-project section in message, got: ${result.message}`,
+      `expected cross-project section in message, got: ${result.message}`
     );
     assert.ok(
       result.message.includes("NVIDIA"),
-      `expected NVIDIA in cross-project section, got: ${result.message}`,
+      `expected NVIDIA in cross-project section, got: ${result.message}`
     );
     // Message should use cross-project prefix, NOT "No relevant memory found."
     assert.ok(
       !result.message.includes("No relevant memory found."),
-      `message should not contain 'No relevant memory found.' when promoted, got: ${result.message}`,
+      `message should not contain 'No relevant memory found.' when promoted, got: ${result.message}`
     );
     assert.ok(
       result.message.includes("Based on cross-project memory:"),
-      `message should start with cross-project prefix, got: ${result.message}`,
+      `message should start with cross-project prefix, got: ${result.message}`
     );
   } finally {
     process.env.CURION_SEMANTIC_ENABLED = origEnabled ?? "";
@@ -444,18 +453,18 @@ test("source: no local memory and weak/empty cross-project keeps no_memory with 
     assert.equal(result.status, "no_memory", `expected no_memory, got ${result.status}`);
     assert.ok(
       result.source === undefined || result.source === "local",
-      `expected source unset or 'local', got ${result.source}`,
+      `expected source unset or 'local', got ${result.source}`
     );
     // Message should NOT contain cross-project section
     assert.ok(
       !result.message.includes("From other projects"),
-      `should not have cross-project section, got: ${result.message}`,
+      `should not have cross-project section, got: ${result.message}`
     );
     // Message should be exactly "No relevant memory found." when no meaningful cross-project
     assert.equal(
       result.message,
       "No relevant memory found.",
-      `expected exact no_memory message, got: ${result.message}`,
+      `expected exact no_memory message, got: ${result.message}`
     );
   } finally {
     process.env.CURION_SEMANTIC_ENABLED = origEnabled ?? "";
@@ -511,11 +520,11 @@ test("source: privacy preserved - private project memories not surfaced even aft
     // Verify: private project memory should NOT appear even with promotion
     assert.ok(
       !result.message.includes("secret-12345"),
-      `private memory should not appear, got: ${result.message}`,
+      `private memory should not appear, got: ${result.message}`
     );
     assert.ok(
       !result.message.includes("Private"),
-      `private project reference should not appear, got: ${result.message}`,
+      `private project reference should not appear, got: ${result.message}`
     );
     // Public project memory should appear if promotion happens
     // (It might not if the public project also has no memories matching)
@@ -569,19 +578,23 @@ test("source: FTS5-based cross-project with seeded projects promotes to answered
 
     // Verify: status promoted to answered, source is cross_project
     assert.equal(result.status, "answered", `expected answered, got ${result.status}`);
-    assert.equal(result.source, "cross_project", `expected source=cross_project, got ${result.source}`);
+    assert.equal(
+      result.source,
+      "cross_project",
+      `expected source=cross_project, got ${result.source}`
+    );
     // Message should contain cross-project section with Curion content
     assert.ok(
       result.message.includes("From other projects"),
-      `expected cross-project section, got: ${result.message}`,
+      `expected cross-project section, got: ${result.message}`
     );
     assert.ok(
       result.message.includes("NVIDIA"),
-      `expected NVIDIA in cross-project section, got: ${result.message}`,
+      `expected NVIDIA in cross-project section, got: ${result.message}`
     );
     assert.ok(
       result.message.includes("Curion") || result.message.includes("other projects"),
-      `expected project reference in cross-project section, got: ${result.message}`,
+      `expected project reference in cross-project section, got: ${result.message}`
     );
   } finally {
     process.env.CURION_SEMANTIC_ENABLED = origEnabled ?? "";

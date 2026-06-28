@@ -31,34 +31,33 @@
  *      still match the `aggregateMetrics` output.
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { test } from "node:test";
 
 import { BENCHMARK_RECORDS } from "../src/benchmark/corpus.ts";
+import { aggregateMetrics } from "../src/benchmark/metrics.ts";
 import { BENCHMARK_QUERIES } from "../src/benchmark/queries.ts";
+import { buildCandidates } from "../src/benchmark/retrieval-runner.ts";
 import {
+  formatComparisonReport,
+  isComparisonReport,
+  isSingleVariantReport,
+  parseRetrievalCli,
+  resolveBenchmarkArtifactsDir,
+  runRetrievalBenchmark,
+  writeBenchmarkReport,
+  writeComparisonReport,
+} from "../src/benchmark/retrieval-runner.ts";
+import {
+  DEFAULT_FTS5_THRESHOLD,
   buildFts5Index,
   normalizeFts5Score,
   rankFts5,
   sanitizeFts5Query,
-  DEFAULT_FTS5_THRESHOLD,
 } from "../src/benchmark/variants/fts5.ts";
-import { buildCandidates } from "../src/benchmark/retrieval-runner.ts";
-import type { LexicalCandidate } from "../src/retrieval/lexical.ts";
-import {
-  runRetrievalBenchmark,
-  parseRetrievalCli,
-  isSingleVariantReport,
-  isComparisonReport,
-  resolveBenchmarkArtifactsDir,
-  writeBenchmarkReport,
-  writeComparisonReport,
-  formatComparisonReport,
-} from "../src/benchmark/retrieval-runner.ts";
-import { aggregateMetrics } from "../src/benchmark/metrics.ts";
 import { walkTs } from "./_helpers/fs-walk.ts";
 
 // ---------------------------------------------------------------------------
@@ -86,14 +85,12 @@ test("FTS5 index: uses an in-memory database and does not write to the project s
       // "the `.curion/` directory was NOT created".
       assert.ok(
         !fs.existsSync(path.join(tmpCwd, ".curion")),
-        "FTS5 index must not create a .curion directory in cwd",
+        "FTS5 index must not create a .curion directory in cwd"
       );
       // A query against the in-memory index returns rows
       // for a known record.
       const row = idx.db
-        .prepare(
-          "SELECT memory_id FROM memories_fts WHERE memories_fts MATCH ? LIMIT 1",
-        )
+        .prepare("SELECT memory_id FROM memories_fts WHERE memories_fts MATCH ? LIMIT 1")
         .get(`"postgres"`);
       assert.ok(row !== undefined, "expected at least one FTS5 hit for 'postgres'");
     } finally {
@@ -109,9 +106,7 @@ test("FTS5 index: loading 0 candidates still produces a queryable empty index", 
   const idx = buildFts5Index([]);
   try {
     assert.equal(idx.size, 0);
-    const row = idx.db
-      .prepare("SELECT COUNT(*) AS c FROM memories_fts")
-      .get() as { c: number };
+    const row = idx.db.prepare("SELECT COUNT(*) AS c FROM memories_fts").get() as { c: number };
     assert.equal(row.c, 0);
   } finally {
     idx.close();
@@ -152,7 +147,7 @@ test("FTS5 ranker: returns the {id, score}[] top-K shape used by the metrics", (
     } else {
       assert.ok(
         a.score > b.score,
-        `score must be descending at index ${i}: ${a.score} vs ${b.score}`,
+        `score must be descending at index ${i}: ${a.score} vs ${b.score}`
       );
     }
   }
@@ -194,18 +189,9 @@ test("FTS5 sanitizer: drops FTS5 reserved words (AND, OR, NOT, NEAR)", () => {
   const out = sanitizeFts5Query("Postgres OR MySQL");
   assert.equal(out, '"postgres" OR "mysql"');
   // The other reserved words behave the same way.
-  assert.equal(
-    sanitizeFts5Query("Postgres AND MySQL"),
-    '"postgres" OR "mysql"',
-  );
-  assert.equal(
-    sanitizeFts5Query("Postgres NOT MySQL"),
-    '"postgres" OR "mysql"',
-  );
-  assert.equal(
-    sanitizeFts5Query("Postgres NEAR MySQL"),
-    '"postgres" OR "mysql"',
-  );
+  assert.equal(sanitizeFts5Query("Postgres AND MySQL"), '"postgres" OR "mysql"');
+  assert.equal(sanitizeFts5Query("Postgres NOT MySQL"), '"postgres" OR "mysql"');
+  assert.equal(sanitizeFts5Query("Postgres NEAR MySQL"), '"postgres" OR "mysql"');
 });
 
 test("FTS5 sanitizer: query with operator characters does not throw and produces a safe match expression", () => {
@@ -244,7 +230,7 @@ test("FTS5 sanitizer: empty / whitespace / stopword-only inputs return an empty 
     assert.equal(
       sanitizeFts5Query(q),
       "",
-      `expected empty match expression for: ${JSON.stringify(q)}`,
+      `expected empty match expression for: ${JSON.stringify(q)}`
     );
   }
 });
@@ -300,10 +286,7 @@ test("runner: default variant is lexical and the report variant label is `lexica
   // Backward-compat: callers that don't pass `variant` get
   // the existing lexical report shape unchanged.
   const report = runRetrievalBenchmark();
-  assert.ok(
-    isSingleVariantReport(report),
-    "default run must produce a single-variant report",
-  );
+  assert.ok(isSingleVariantReport(report), "default run must produce a single-variant report");
   if (!isSingleVariantReport(report)) return;
   assert.equal(report.variant, "lexical-baseline");
   assert.equal(report.config.threshold, 0.2);
@@ -312,10 +295,7 @@ test("runner: default variant is lexical and the report variant label is `lexica
 
 test("runner: --variant fts5 produces a single-variant report with label `fts5-benchmark`", () => {
   const report = runRetrievalBenchmark({ variant: "fts5" });
-  assert.ok(
-    isSingleVariantReport(report),
-    "variant=fts5 must produce a single-variant report",
-  );
+  assert.ok(isSingleVariantReport(report), "variant=fts5 must produce a single-variant report");
   if (!isSingleVariantReport(report)) return;
   assert.equal(report.variant, "fts5-benchmark");
   // The default FTS5 threshold is 0 (no filter) for the
@@ -332,7 +312,7 @@ test("runner: --variant fts5 produces a single-variant report with label `fts5-b
     for (const id of e.topIds) {
       assert.ok(
         BENCHMARK_RECORDS.some((r) => r.id === id),
-        `FTS5 returned non-corpus id: ${id}`,
+        `FTS5 returned non-corpus id: ${id}`
       );
     }
     assert.equal(e.topIds.length, e.topScores.length);
@@ -341,10 +321,7 @@ test("runner: --variant fts5 produces a single-variant report with label `fts5-b
 
 test("runner: --variant all produces a comparison report with all three per-variant reports", () => {
   const report = runRetrievalBenchmark({ variant: "all" });
-  assert.ok(
-    isComparisonReport(report),
-    "variant=all must produce a comparison report",
-  );
+  assert.ok(isComparisonReport(report), "variant=all must produce a comparison report");
   if (!isComparisonReport(report)) return;
   assert.equal(report.variant, "all");
   assert.equal(report.lexical.variant, "lexical-baseline");
@@ -353,10 +330,7 @@ test("runner: --variant all produces a comparison report with all three per-vari
   // All per-variant reports must cover the same queries.
   assert.equal(report.lexical.evals.length, report.fts5.evals.length);
   assert.equal(report.lexical.evals.length, report.vector.evals.length);
-  assert.equal(
-    report.lexical.evals.length,
-    BENCHMARK_QUERIES.length,
-  );
+  assert.equal(report.lexical.evals.length, BENCHMARK_QUERIES.length);
   // The comparison table is a non-empty array of metric
   // rows; every row is a labeled integer.
   assert.ok(Array.isArray(report.comparison));
@@ -405,7 +379,7 @@ test("runner: parseRetrievalCli accepts --variant lexical|fts5|vector|hybrid|all
   // Unknown variants are rejected.
   assert.throws(
     () => parseRetrievalCli(["--variant", "hybrid-rrf"]),
-    /--variant must be one of lexical\|fts5\|vector\|hybrid\|all/,
+    /--variant must be one of lexical\|fts5\|vector\|hybrid\|all/
   );
   // Missing argument.
   assert.throws(() => parseRetrievalCli(["--variant"]), /--variant/);
@@ -424,9 +398,7 @@ test("runner: --variant fts5 respects --only-family and --top-k overrides", () =
   assert.equal(report.variant, "fts5-benchmark");
   // The exact family count is computed from BENCHMARK_QUERIES
   // so the assertion is robust to family-set changes.
-  const expectedExactCount = BENCHMARK_QUERIES.filter(
-    (q) => q.family === "exact",
-  ).length;
+  const expectedExactCount = BENCHMARK_QUERIES.filter((q) => q.family === "exact").length;
   assert.equal(report.config.queryCount, expectedExactCount);
   assert.equal(report.config.topK, 3);
   for (const e of report.evals) {
@@ -452,24 +424,14 @@ test("FTS5 variant is benchmark-only: production recall() controller is not modi
   // point: it makes the "benchmark-only" contract visible
   // in CI.
   const recallSrc = fs.readFileSync(
-    path.join(
-      import.meta.dirname,
-      "..",
-      "src",
-      "controller",
-      "recall-controller.ts",
-    ),
-    "utf8",
+    path.join(import.meta.dirname, "..", "src", "controller", "recall-controller.ts"),
+    "utf8"
   );
-  assert.match(
-    recallSrc,
-    /rankLexical/,
-    "recall controller must still import rankLexical",
-  );
+  assert.match(recallSrc, /rankLexical/, "recall controller must still import rankLexical");
   assert.doesNotMatch(
     recallSrc,
     /rankFts5/,
-    "recall controller must NOT import rankFts5 — FTS5 is benchmark-only",
+    "recall controller must NOT import rankFts5 — FTS5 is benchmark-only"
   );
   // The production seam (`retrieval/seam.ts`) is independent
   // of the FTS5 module. The seam's docstring may mention
@@ -481,17 +443,17 @@ test("FTS5 variant is benchmark-only: production recall() controller is not modi
   // intended upgrade signal.
   const seamSrc = fs.readFileSync(
     path.join(import.meta.dirname, "..", "src", "retrieval", "seam.ts"),
-    "utf8",
+    "utf8"
   );
   assert.doesNotMatch(
     seamSrc,
     /rankFts5/,
-    "retrieval/seam.ts must NOT call rankFts5 — it is the production seam",
+    "retrieval/seam.ts must NOT call rankFts5 — it is the production seam"
   );
   assert.doesNotMatch(
     seamSrc,
     /benchmark\/variants\/fts5/,
-    "retrieval/seam.ts must NOT import the FTS5 benchmark module",
+    "retrieval/seam.ts must NOT import the FTS5 benchmark module"
   );
 });
 
@@ -514,24 +476,18 @@ test("FTS5 variant: only the benchmark runner imports the FTS5 module", () => {
     // The relative import path is the canonical form
     // (`./fts5.js` is what TypeScript emits for ESM).
     const importsFts5Module =
-      src.includes("from \"./fts5\"") ||
-      src.includes("from \"./fts5.js\"") ||
-      src.includes("from \"../benchmark/variants/fts5") ||
-      src.includes("from \"../../benchmark/variants/fts5");
+      src.includes('from "./fts5"') ||
+      src.includes('from "./fts5.js"') ||
+      src.includes('from "../benchmark/variants/fts5') ||
+      src.includes('from "../../benchmark/variants/fts5');
     // Direct symbol usage outside the module's own file is
     // also a leak.
     const usesFts5Symbol =
       src.match(/\brankFts5\b/) !== null ||
       src.match(/\bsanitizeFts5Query\b/) !== null ||
       src.match(/\bbuildFts5Index\b/) !== null;
-    assert.ok(
-      !importsFts5Module,
-      `unexpected import of FTS5 module in ${file}`,
-    );
-    assert.ok(
-      !usesFts5Symbol,
-      `unexpected FTS5 symbol usage in ${file}`,
-    );
+    assert.ok(!importsFts5Module, `unexpected import of FTS5 module in ${file}`);
+    assert.ok(!usesFts5Symbol, `unexpected FTS5 symbol usage in ${file}`);
   }
 });
 
@@ -603,10 +559,7 @@ test("runner: formatComparisonReport includes the lexical vs fts5 vs vector vs h
     "vector-benchmark",
     "hybrid-benchmark",
   ]) {
-    assert.ok(
-      out.includes(section),
-      `comparison report missing section: ${section}`,
-    );
+    assert.ok(out.includes(section), `comparison report missing section: ${section}`);
   }
 });
 
@@ -625,10 +578,7 @@ test("FTS5 report: per-family metrics cover the corpus families and add up to to
   }
   assert.equal(total, report.metrics.totalQueries);
   for (const f of ["exact", "paraphrase", "temporal", "multi-hop", "no-answer", "orientation"]) {
-    assert.ok(
-      seen.has(f),
-      `FTS5 report missing family: ${f}`,
-    );
+    assert.ok(seen.has(f), `FTS5 report missing family: ${f}`);
   }
 });
 
@@ -658,10 +608,10 @@ test("runner: default lexical report still has variant=lexical-baseline (no prod
   const failureIds = new Set(report.failures.map((f) => f.queryId));
   assert.ok(
     failureIds.has("para-storage-detail"),
-    "expected para-storage-detail to be a lexical failure",
+    "expected para-storage-detail to be a lexical failure"
   );
   assert.ok(
     failureIds.has("para-architecture-decisions"),
-    "expected para-architecture-decisions to be a lexical failure",
+    "expected para-architecture-decisions to be a lexical failure"
   );
 });

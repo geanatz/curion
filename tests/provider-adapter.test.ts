@@ -19,19 +19,19 @@
  *   - defaults match the documented model names and base URLs
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
+import { test } from "node:test";
 
 import {
+  type MemoryAnalysisResult,
   analyzeMemoryWithFallback,
   loadAdapterConfig,
   resolveAdapterProviderId,
-  type MemoryAnalysisResult,
 } from "../src/providers/memory-analysis.ts";
 import { PUBLIC_TOOL_NAMES, buildServer } from "../src/server.ts";
 import { withCleanEnv } from "./_helpers/env.ts";
-import { TEST_ENV_KEYS, TEST_PRIMARY_KEY, TEST_FALLBACK_KEY } from "./shared-test-provider.ts";
 import { okChatResponse } from "./_helpers/provider-stub.ts";
+import { TEST_ENV_KEYS, TEST_FALLBACK_KEY, TEST_PRIMARY_KEY } from "./shared-test-provider.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -44,7 +44,7 @@ import { okChatResponse } from "./_helpers/provider-stub.ts";
  */
 function scriptedFetch(
   responses: Array<() => Response>,
-  log: Array<{ url: string; body: string }>,
+  log: Array<{ url: string; body: string }>
 ): typeof fetch {
   let i = 0;
   const f: typeof fetch = async (input, init) => {
@@ -293,10 +293,7 @@ test("adapter: whitespace-only primary key in env -> typed missing-config (no ht
     process.env.CURION_PRIMARY_API_KEY = "   ";
     process.env.CURION_FALLBACK_API_KEY = "  \t  ";
     const log: Array<{ url: string; body: string }> = [];
-    const fetchImpl = scriptedFetch(
-      [() => okChatResponse(VALID_JSON)],
-      log,
-    );
+    const fetchImpl = scriptedFetch([() => okChatResponse(VALID_JSON)], log);
     const r = await analyzeMemoryWithFallback("hello world", undefined, {
       fetchImpl,
     });
@@ -356,11 +353,8 @@ test("adapter: primary success returns adapter result with no fallback", async (
 test("adapter: primary hard failure (500) falls back to secondary provider", async () => {
   const log: Array<{ url: string; body: string }> = [];
   const fetchImpl = scriptedFetch(
-    [
-      () => httpErrorResponse(500, "internal error"),
-      () => okChatResponse(VALID_JSON),
-    ],
-    log,
+    [() => httpErrorResponse(500, "internal error"), () => okChatResponse(VALID_JSON)],
+    log
   );
   const r = await analyzeMemoryWithFallback("hello world", undefined, {
     primaryApiKey: TEST_PRIMARY_KEY,
@@ -400,7 +394,7 @@ test("adapter: primary invalid JSON triggers one repair on the same provider, no
       // Same-provider repair call: returns valid JSON.
       () => okChatResponse("```json\n" + VALID_JSON + "\n```"),
     ],
-    log,
+    log
   );
   const r = await analyzeMemoryWithFallback("hello world", undefined, {
     primaryApiKey: TEST_PRIMARY_KEY,
@@ -438,7 +432,7 @@ test("adapter: primary invalid JSON + failed repair falls back to secondary prov
       () => okChatResponse("repair also bad response"),
       () => okChatResponse(VALID_JSON),
     ],
-    log,
+    log
   );
   const r = await analyzeMemoryWithFallback("hello world", undefined, {
     primaryApiKey: TEST_PRIMARY_KEY,
@@ -477,7 +471,7 @@ test("adapter: both providers failing returns a typed all-providers-failed resul
       // Fallback also returns a hard 500. The adapter gives up.
       () => httpErrorResponse(502, "fallback down"),
     ],
-    log,
+    log
   );
   const r = await analyzeMemoryWithFallback("hello world", undefined, {
     primaryApiKey: TEST_PRIMARY_KEY,
@@ -520,7 +514,7 @@ test("adapter: both providers with invalid structured output (4 calls) returns t
       // Fallback repair also returns invalid JSON.
       () => okChatResponse("fallback repair also not-json"),
     ],
-    log,
+    log
   );
   const r = await analyzeMemoryWithFallback("hello world", undefined, {
     primaryApiKey: TEST_PRIMARY_KEY,
@@ -553,10 +547,7 @@ test("adapter: both providers with invalid structured output (4 calls) returns t
 test("adapter: no API key configured returns typed missing-config (no http calls)", async () => {
   return withCleanEnv(ENV_KEYS, async () => {
     const log: Array<{ url: string; body: string }> = [];
-    const fetchImpl = scriptedFetch(
-      [() => okChatResponse(VALID_JSON)],
-      log,
-    );
+    const fetchImpl = scriptedFetch([() => okChatResponse(VALID_JSON)], log);
     const r = await analyzeMemoryWithFallback("hello world", undefined, {
       fetchImpl,
     });
@@ -572,10 +563,7 @@ test("adapter: no API key configured returns typed missing-config (no http calls
 
 test("adapter: only primary key configured, primary hard-fails -> all-providers-failed (no fallback available)", async () => {
   const log: Array<{ url: string; body: string }> = [];
-  const fetchImpl = scriptedFetch(
-    [() => httpErrorResponse(500, "down")],
-    log,
-  );
+  const fetchImpl = scriptedFetch([() => httpErrorResponse(500, "down")], log);
   const r = await analyzeMemoryWithFallback("hello world", undefined, {
     primaryApiKey: TEST_PRIMARY_KEY,
     primaryBaseUrl: "https://primary.nvidia.test/v1",
@@ -601,11 +589,8 @@ test("adapter: NVIDIA-only default (no fallback configured) on primary hard-fail
   return withCleanEnv(ENV_KEYS, async () => {
     const log: Array<{ url: string; body: string }> = [];
     const fetchImpl = scriptedFetch(
-      [
-        () => httpErrorResponse(500, "down"),
-        () => okChatResponse(VALID_JSON),
-      ],
-      log,
+      [() => httpErrorResponse(500, "down"), () => okChatResponse(VALID_JSON)],
+      log
     );
     const r = await analyzeMemoryWithFallback("hello world", undefined, {
       primaryApiKey: TEST_PRIMARY_KEY,
@@ -623,10 +608,7 @@ test("adapter: NVIDIA-only default (no fallback configured) on primary hard-fail
       assert.equal(r.httpCalls, 1, "no fallback call when fallback slot is empty");
       // The top-level message follows the operator-visible shape:
       //   `primary failed and no fallback configured: <lastError.message>`
-      assert.match(
-        r.message,
-        /^primary failed and no fallback configured: /,
-      );
+      assert.match(r.message, /^primary failed and no fallback configured: /);
     }
     // The second scripted response was never used.
     assert.equal(log.length, 1);
@@ -640,25 +622,18 @@ test("adapter: NVIDIA-only default (no fallback configured) on primary hard-fail
 test("adapter: success result exposes providerUsed / modelUsed / fallbackUsed and is sanitized", async () => {
   const log: Array<{ url: string; body: string }> = [];
   const fetchImpl = scriptedFetch(
-    [
-      () => httpErrorResponse(500, "primary down"),
-      () => okChatResponse(VALID_JSON),
-    ],
-    log,
+    [() => httpErrorResponse(500, "primary down"), () => okChatResponse(VALID_JSON)],
+    log
   );
-  const r: MemoryAnalysisResult = await analyzeMemoryWithFallback(
-    "hello world",
-    undefined,
-    {
-      primaryApiKey: TEST_PRIMARY_KEY,
-      fallbackApiKey: TEST_FALLBACK_KEY,
-      primaryBaseUrl: "https://primary.nvidia.test/v1",
-      primaryModel: "primary-model",
-      fallbackBaseUrl: "https://fallback.minimax.test/v1",
-      fallbackModel: "fallback-model",
-      fetchImpl,
-    },
-  );
+  const r: MemoryAnalysisResult = await analyzeMemoryWithFallback("hello world", undefined, {
+    primaryApiKey: TEST_PRIMARY_KEY,
+    fallbackApiKey: TEST_FALLBACK_KEY,
+    primaryBaseUrl: "https://primary.nvidia.test/v1",
+    primaryModel: "primary-model",
+    fallbackBaseUrl: "https://fallback.minimax.test/v1",
+    fallbackModel: "fallback-model",
+    fetchImpl,
+  });
   assert.equal(r.ok, true);
   if (r.ok) {
     // Fallback URL contains "minimax" so the URL-derived id is
@@ -703,9 +678,11 @@ test("adapter: result never echoes the input text", async () => {
 test("adapter: public MCP tool surface is still exactly remember + recall", () => {
   assert.deepEqual([...PUBLIC_TOOL_NAMES], ["remember", "recall"]);
   const server = buildServer();
-  const registered = (server as unknown as {
-    _registeredTools: Record<string, unknown>;
-  })._registeredTools;
+  const registered = (
+    server as unknown as {
+      _registeredTools: Record<string, unknown>;
+    }
+  )._registeredTools;
   const keys = Object.keys(registered);
   assert.equal(keys.length, 2);
   assert.ok("remember" in registered);
@@ -744,7 +721,7 @@ test("adapter: disableRepair forces fallback on parse failure (no repair attempt
       () => okChatResponse("not-json"),
       () => okChatResponse(VALID_JSON),
     ],
-    log,
+    log
   );
   const r = await analyzeMemoryWithFallback("hello", undefined, {
     primaryApiKey: TEST_PRIMARY_KEY,
@@ -770,11 +747,8 @@ test("adapter: disableRepair forces fallback on parse failure (no repair attempt
 test("adapter: repair prompt does not echo the original input text", async () => {
   const log: Array<{ url: string; body: string }> = [];
   const fetchImpl = scriptedFetch(
-    [
-      () => okChatResponse("not-json"),
-      () => okChatResponse("```json\n" + VALID_JSON + "\n```"),
-    ],
-    log,
+    [() => okChatResponse("not-json"), () => okChatResponse("```json\n" + VALID_JSON + "\n```")],
+    log
   );
   const secretInput = "TOP-SECRET-INPUT-DO-NOT-LEAK";
   await analyzeMemoryWithFallback(secretInput, undefined, {
@@ -787,18 +761,15 @@ test("adapter: repair prompt does not echo the original input text", async () =>
   // The repair request body must not include the original input.
   assert.ok(
     !log[1]!.body.includes(secretInput),
-    "repair prompt must not contain the original input text",
+    "repair prompt must not contain the original input text"
   );
 });
 
 test("adapter: relatedMemories are included in the initial prompt only (not the repair prompt)", async () => {
   const log: Array<{ url: string; body: string }> = [];
   const fetchImpl = scriptedFetch(
-    [
-      () => okChatResponse("not-json"),
-      () => okChatResponse("```json\n" + VALID_JSON + "\n```"),
-    ],
-    log,
+    [() => okChatResponse("not-json"), () => okChatResponse("```json\n" + VALID_JSON + "\n```")],
+    log
   );
   const related = [
     // Phase 1 internal naming cleanup: this fixture is
@@ -821,7 +792,7 @@ test("adapter: relatedMemories are included in the initial prompt only (not the 
   // Repair request does NOT include the related memory text.
   assert.ok(
     !log[1]!.body.includes("prior context summary"),
-    "repair prompt must not echo related memory summaries",
+    "repair prompt must not echo related memory summaries"
   );
 });
 
@@ -849,31 +820,23 @@ test("adapter: related-memory prompt rendering is prose-only (no #id, includes m
   // into the provider prompt. The id is preserved on the seam
   // object for controller-side relationship derivation, but the
   // prompt rendering intentionally strips it.
-  assert.ok(
-    !/#\d+/.test(body),
-    `provider prompt must not include any #N id token; got: ${body}`,
-  );
+  assert.ok(!/#\d+/.test(body), `provider prompt must not include any #N id token; got: ${body}`);
   // No `id` value as a JSON key in the user-role content either
   // (defense-in-depth: the related-memory block is a single
   // user-role text payload, so this is the only surface to check).
   assert.ok(
     !/"id"\s*:/.test(body),
-    `related-memory block must not include an "id" JSON key in the prompt; got: ${body}`,
+    `related-memory block must not include an "id" JSON key in the prompt; got: ${body}`
   );
 });
 
 test("adapter: related-memory prompt includes memoryContent when related is non-empty; repair prompt excludes it", async () => {
   const log: Array<{ url: string; body: string }> = [];
   const fetchImpl = scriptedFetch(
-    [
-      () => okChatResponse("not-json"),
-      () => okChatResponse("```json\n" + VALID_JSON + "\n```"),
-    ],
-    log,
+    [() => okChatResponse("not-json"), () => okChatResponse("```json\n" + VALID_JSON + "\n```")],
+    log
   );
-  const related = [
-    { id: 99, memoryContent: "Render was the previous hosting platform" },
-  ];
+  const related = [{ id: 99, memoryContent: "Render was the previous hosting platform" }];
   await analyzeMemoryWithFallback("hello", related, {
     primaryApiKey: TEST_PRIMARY_KEY,
     primaryBaseUrl: "https://primary.nvidia.test/v1",
@@ -885,18 +848,18 @@ test("adapter: related-memory prompt includes memoryContent when related is non-
   assert.match(log[0]!.body, /Render was the previous hosting platform/);
   assert.ok(
     !/#\d+/.test(log[0]!.body),
-    `initial prompt must not include any #N id token; got: ${log[0]!.body}`,
+    `initial prompt must not include any #N id token; got: ${log[0]!.body}`
   );
   // Repair prompt: no related-memory text at all (not even the
   // kind tag / memoryContent). The repair branch never reads the
   // related-memories argument.
   assert.ok(
     !log[1]!.body.includes("Render was the previous hosting platform"),
-    "repair prompt must not echo the related memory text",
+    "repair prompt must not echo the related memory text"
   );
   assert.ok(
     !log[1]!.body.includes("Related memories"),
-    "repair prompt must not include the 'Related memories' block",
+    "repair prompt must not include the 'Related memories' block"
   );
 });
 
@@ -909,7 +872,7 @@ test("adapter: no key values appear in serialized failure results", async () => 
       () => httpErrorResponse(502, "fallback down"),
       () => httpErrorResponse(502, "fallback down on repair"),
     ],
-    log,
+    log
   );
   const r = await analyzeMemoryWithFallback("hello world", undefined, {
     primaryApiKey: TEST_PRIMARY_KEY,
@@ -951,10 +914,7 @@ test("adapter: env override CURION_PRIMARY_MODEL switches primary model id", asy
     process.env.CURION_PRIMARY_MODEL = "custom-model";
     process.env.CURION_PRIMARY_BASE_URL = "https://api.example.com/v1";
     const log: Array<{ url: string; body: string }> = [];
-    const fetchImpl = scriptedFetch(
-      [() => okChatResponse(VALID_JSON)],
-      log,
-    );
+    const fetchImpl = scriptedFetch([() => okChatResponse(VALID_JSON)], log);
     const r = await analyzeMemoryWithFallback("hello", undefined, {
       primaryApiKey: TEST_PRIMARY_KEY,
       fetchImpl,
@@ -976,11 +936,8 @@ test("adapter: env override CURION_FALLBACK_BASE_URL and CURION_FALLBACK_MODEL f
     process.env.CURION_FALLBACK_MODEL = "fallback-model";
     const log: Array<{ url: string; body: string }> = [];
     const fetchImpl = scriptedFetch(
-      [
-        () => httpErrorResponse(500, "primary down"),
-        () => okChatResponse(VALID_JSON),
-      ],
-      log,
+      [() => httpErrorResponse(500, "primary down"), () => okChatResponse(VALID_JSON)],
+      log
     );
     const r = await analyzeMemoryWithFallback("hello", undefined, {
       primaryApiKey: TEST_PRIMARY_KEY,
@@ -996,10 +953,7 @@ test("adapter: env override CURION_FALLBACK_BASE_URL and CURION_FALLBACK_MODEL f
     }
     const body = JSON.parse(log[1]!.body);
     assert.equal(body.model, "fallback-model");
-    assert.match(
-      log[1]!.url,
-      /^https:\/\/api\.example\.com\/v1\/chat\/completions/,
-    );
+    assert.match(log[1]!.url, /^https:\/\/api\.example\.com\/v1\/chat\/completions/);
   });
 });
 
@@ -1016,11 +970,8 @@ test("adapter: missing CURION_FALLBACK_BASE_URL / CURION_FALLBACK_MODEL / CURION
 
     const log: Array<{ url: string; body: string }> = [];
     const fetchImpl = scriptedFetch(
-      [
-        () => httpErrorResponse(500, "primary down"),
-        () => okChatResponse(VALID_JSON),
-      ],
-      log,
+      [() => httpErrorResponse(500, "primary down"), () => okChatResponse(VALID_JSON)],
+      log
     );
     const r = await analyzeMemoryWithFallback("hello", undefined, {
       primaryApiKey: TEST_PRIMARY_KEY,

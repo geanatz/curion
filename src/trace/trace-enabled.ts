@@ -21,12 +21,7 @@
  */
 
 /** Names of environment variables whose value disables tracing. */
-const OFF_VALUES: ReadonlySet<string> = new Set([
-  "0",
-  "false",
-  "no",
-  "off",
-]);
+const OFF_VALUES: ReadonlySet<string> = new Set(["0", "false", "no", "off"]);
 
 /**
  * True if the trace writer should be active. Reads

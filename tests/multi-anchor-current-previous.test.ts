@@ -88,14 +88,22 @@
  *  17. Artifact reader + writer round-trip.
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { test } from "node:test";
 
+import { type QueryEval, evaluateQuery } from "../src/benchmark/metrics.js";
+import {
+  parseMultiAnchorRerankCliArgs,
+  runMultiAnchorRerankCli,
+  writeMultiAnchorRerankReport,
+} from "../src/benchmark/multi-anchor-current-previous-runner.js";
 import {
   BUILTIN_MULTI_ANCHOR_RERANK_VARIANTS,
+  type MultiAnchorRerankReport,
+  type MultiAnchorRerankRule,
   SIMULATED_MULTI_ANCHOR_IDS,
   SIMULATED_MULTI_ANCHOR_TREATMENT,
   SIMULATED_PROTECTED_ANCHOR_IDS,
@@ -103,32 +111,19 @@ import {
   buildMultiAnchorRerankReport,
   buildMultiAnchorRerankVariantRow,
   computeMultiAnchorRerankVerdict,
-  evaluateMultiAnchorRerankForQuery,
   evaluateMultiAnchorRerankVariant,
   formatMultiAnchorRerankReport,
-  aggregateMultiAnchorRerankPerQuery,
-  type MultiAnchorRerankReport,
-  type MultiAnchorRerankRule,
-  type MultiAnchorRerankVariant,
-  type MultiAnchorRerankVariantMetrics,
 } from "../src/benchmark/multi-anchor-current-previous.js";
+import type { BenchmarkQuery } from "../src/benchmark/queries.js";
+import { EXCLUDED_FROM_EDGE_MAP } from "../src/benchmark/supersession-edge-simulation.js";
 import {
-  parseMultiAnchorRerankCliArgs,
-  runMultiAnchorRerankAnalysis,
-  runMultiAnchorRerankCli,
-  writeMultiAnchorRerankReport,
-} from "../src/benchmark/multi-anchor-current-previous-runner.js";
-import {
+  type BenchmarkArtifact,
+  alignQueriesToEvals,
   findMostRecentArtifact,
   readBenchmarkArtifact,
-  alignQueriesToEvals,
-  type BenchmarkArtifact,
 } from "../src/benchmark/temporal-truth-diagnostic-runner.js";
-import type { BenchmarkQuery } from "../src/benchmark/queries.js";
-import { evaluateQuery, type QueryEval } from "../src/benchmark/metrics.js";
 import { PUBLIC_TOOL_NAMES } from "../src/server.js";
 import { walkTs } from "./_helpers/fs-walk.ts";
-import { EXCLUDED_FROM_EDGE_MAP } from "../src/benchmark/supersession-edge-simulation.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -149,7 +144,7 @@ function mkQueryEval(
     topIds: number[];
     topScores?: number[];
     labels?: string[];
-  }>,
+  }>
 ): { evals: QueryEval[]; queries: BenchmarkQuery[] } {
   const evals: QueryEval[] = [];
   const queries: BenchmarkQuery[] = [];
@@ -162,7 +157,7 @@ function mkQueryEval(
       s.expectedIds,
       s.currentTruthIds,
       s.topIds,
-      topScores,
+      topScores
     );
     // Re-derive rank1 / currentTruthAt1 in
     // case the synthetic topIds is empty.
@@ -217,7 +212,7 @@ test("multi-anchor-current-previous: SIMULATED_MULTI_ANCHOR_TREATMENT contains t
   for (const id of [117, 118, 119, 120]) {
     assert.ok(
       SIMULATED_MULTI_ANCHOR_TREATMENT.has(id),
-      `SIMULATED_MULTI_ANCHOR_TREATMENT must contain ${id}`,
+      `SIMULATED_MULTI_ANCHOR_TREATMENT must contain ${id}`
     );
     const t = SIMULATED_MULTI_ANCHOR_TREATMENT.get(id)!;
     assert.equal(t.recordId, id);
@@ -236,7 +231,7 @@ test("multi-anchor-current-previous: SIMULATED_MULTI_ANCHOR_TREATMENT does NOT c
   for (const id of [1, 7, 21, 22, 23, 24, 69, 105, 106, 107, 108]) {
     assert.ok(
       !SIMULATED_MULTI_ANCHOR_TREATMENT.has(id),
-      `SIMULATED_MULTI_ANCHOR_TREATMENT must NOT contain ${id}`,
+      `SIMULATED_MULTI_ANCHOR_TREATMENT must NOT contain ${id}`
     );
   }
 });
@@ -260,11 +255,11 @@ test("multi-anchor-current-previous: SIMULATED_MULTI_ANCHOR_IDS and SIMULATED_PR
   }
   assert.deepEqual(
     [...SIMULATED_MULTI_ANCHOR_IDS].sort((a, b) => a - b),
-    [...multiAnchorFromMap].sort((a, b) => a - b),
+    [...multiAnchorFromMap].sort((a, b) => a - b)
   );
   assert.deepEqual(
     [...SIMULATED_PROTECTED_ANCHOR_IDS].sort((a, b) => a - b),
-    [...protectedFromMap].sort((a, b) => a - b),
+    [...protectedFromMap].sort((a, b) => a - b)
   );
 });
 
@@ -282,7 +277,7 @@ test("multi-anchor-current-previous: SIMULATED_MULTI_ANCHOR_IDS and EXCLUDED_FRO
   assert.deepEqual(
     [...SIMULATED_MULTI_ANCHOR_IDS].sort((a, b) => a - b),
     [...EXCLUDED_FROM_EDGE_MAP].sort((a, b) => a - b),
-    "SIMULATED_MULTI_ANCHOR_IDS and EXCLUDED_FROM_EDGE_MAP must be the same set on the fixture corpus",
+    "SIMULATED_MULTI_ANCHOR_IDS and EXCLUDED_FROM_EDGE_MAP must be the same set on the fixture corpus"
   );
 });
 
@@ -543,7 +538,7 @@ test("multi-anchor-current-previous: multi-anchor-aware-combined prevents the te
   // Run the unsafe rule.
   const unsafeMetrics = evaluateMultiAnchorRerankVariant({
     variant: BUILTIN_MULTI_ANCHOR_RERANK_VARIANTS.find(
-      (v) => v.id === "metadata-simulation-combined-unsafe",
+      (v) => v.id === "metadata-simulation-combined-unsafe"
     )!,
     evals,
     queries,
@@ -551,7 +546,7 @@ test("multi-anchor-current-previous: multi-anchor-aware-combined prevents the te
   // Run the multi-anchor-aware rule.
   const awareMetrics = evaluateMultiAnchorRerankVariant({
     variant: BUILTIN_MULTI_ANCHOR_RERANK_VARIANTS.find(
-      (v) => v.id === "multi-anchor-aware-combined",
+      (v) => v.id === "multi-anchor-aware-combined"
     )!,
     evals,
     queries,
@@ -579,9 +574,7 @@ test("multi-anchor-current-previous: multi-anchor-aware-combined prevents the te
 
 test("multi-anchor-current-previous: built-in variant table category honesty", () => {
   const byId = new Map(
-    BUILTIN_MULTI_ANCHOR_RERANK_VARIANTS.map(
-      (v) => [v.id, v.category] as const,
-    ),
+    BUILTIN_MULTI_ANCHOR_RERANK_VARIANTS.map((v) => [v.id, v.category] as const)
   );
   assert.equal(byId.get("baseline-no-rerank"), "production-like");
   assert.equal(byId.get("metadata-simulation-supersededBy-demote"), "metadata-simulation");
@@ -607,7 +600,7 @@ test("multi-anchor-current-previous: multi-anchor-simulation variants are honest
         d.includes("not key on currenttruthid") ||
         d.includes("not keying on currenttruthid") ||
         d.includes("not keyed on currenttruthid"),
-      `multi-anchor-simulation variant ${v.id} description must be honest about NOT using currentTruthIds, got: ${v.description}`,
+      `multi-anchor-simulation variant ${v.id} description must be honest about NOT using currentTruthIds, got: ${v.description}`
     );
     // The multi-anchor-simulation category
     // describes the multi-anchor treatment.
@@ -616,7 +609,7 @@ test("multi-anchor-current-previous: multi-anchor-simulation variants are honest
         d.includes("anchor") ||
         d.includes("currentvspreviousanchor") ||
         d.includes("preferanchorwhenqueryneedscomparison"),
-      `multi-anchor-simulation variant ${v.id} description must name the multi-anchor treatment, got: ${v.description}`,
+      `multi-anchor-simulation variant ${v.id} description must name the multi-anchor treatment, got: ${v.description}`
     );
   }
 });
@@ -631,7 +624,7 @@ test("multi-anchor-current-previous: oracle variant references currentTruthIds (
         d.includes("fixture truth") ||
         d.includes("research-only") ||
         d.includes("research"),
-      `oracle variant ${v.id} description must name fixture truth / currentTruthIds, got: ${v.description}`,
+      `oracle variant ${v.id} description must name fixture truth / currentTruthIds, got: ${v.description}`
     );
   }
 });
@@ -655,7 +648,7 @@ test("multi-anchor-current-previous: metadata-simulation variants do NOT consult
         d.includes("doesn’t consult") ||
         d.includes("not key on") ||
         d.includes("not keyed on"),
-      `metadata-simulation variant ${v.id} description must be honest about NOT using the multi-anchor treatment, got: ${v.description}`,
+      `metadata-simulation variant ${v.id} description must be honest about NOT using the multi-anchor treatment, got: ${v.description}`
     );
   }
 });
@@ -680,7 +673,7 @@ test("multi-anchor-current-previous: production source tree does NOT import the 
       const text = fs.readFileSync(path.join(dir, f), "utf8");
       assert.ok(
         !text.includes("multi-anchor-current-previous"),
-        `production source ${f} must not import the new module`,
+        `production source ${f} must not import the new module`
       );
     }
   }
@@ -772,10 +765,7 @@ test("multi-anchor-current-previous: report has the documented top-level shape",
   assert.equal(report.sourceVariant, "synthetic");
   assert.equal(report.temporalQueryCount, 1);
   assert.ok(Array.isArray(report.variants));
-  assert.equal(
-    report.variants.length,
-    BUILTIN_MULTI_ANCHOR_RERANK_VARIANTS.length,
-  );
+  assert.equal(report.variants.length, BUILTIN_MULTI_ANCHOR_RERANK_VARIANTS.length);
   // The treatment summary block is present.
   assert.equal(typeof report.supersessionEdgeMapSize, "number");
   assert.equal(typeof report.multiAnchorTreatmentSize, "number");
@@ -791,7 +781,7 @@ test("multi-anchor-current-previous: report has the documented top-level shape",
     assert.ok(row.metrics);
     assert.ok(
       ["safe", "unsafe", "neutral"].includes(row.verdict),
-      `verdict must be safe|unsafe|neutral, got ${row.verdict}`,
+      `verdict must be safe|unsafe|neutral, got ${row.verdict}`
     );
     assert.ok(typeof row.verdictNote === "string");
   }
@@ -812,22 +802,10 @@ test("multi-anchor-current-previous: per-variant metrics include the documented 
     assert.equal(m.total, 2);
     assert.equal(typeof m.baselineCurrentTruthAt1, "number");
     assert.equal(typeof m.afterCurrentTruthAt1, "number");
-    assert.equal(
-      m.afterCurrentTruthAt1 - m.baselineCurrentTruthAt1,
-      m.currentTruthAt1Delta,
-    );
-    assert.equal(
-      m.afterStaleTop1 - m.baselineStaleTop1,
-      m.staleTop1Delta,
-    );
-    assert.equal(
-      m.afterStaleOverCurrent - m.baselineStaleOverCurrent,
-      m.staleOverCurrentDelta,
-    );
-    assert.equal(
-      m.afterCurrentMissing - m.baselineCurrentMissing,
-      m.currentMissingDelta,
-    );
+    assert.equal(m.afterCurrentTruthAt1 - m.baselineCurrentTruthAt1, m.currentTruthAt1Delta);
+    assert.equal(m.afterStaleTop1 - m.baselineStaleTop1, m.staleTop1Delta);
+    assert.equal(m.afterStaleOverCurrent - m.baselineStaleOverCurrent, m.staleOverCurrentDelta);
+    assert.equal(m.afterCurrentMissing - m.baselineCurrentMissing, m.currentMissingDelta);
     assert.equal(typeof m.regressionCount, "number");
     assert.equal(typeof m.unchangedBecauseCurrentMissing, "number");
     assert.equal(typeof m.multiAnchorQueryCount, "number");
@@ -841,16 +819,13 @@ test("multi-anchor-current-previous: per-variant metrics include the documented 
 // ---------------------------------------------------------------------------
 
 test("multi-anchor-current-previous: end-to-end CLI on the real lexical baseline artifact", async () => {
-  const baselinePath = findMostRecentArtifact(
-    ".curion/benchmark",
-    "retrieval-baseline-",
-  );
+  const baselinePath = findMostRecentArtifact(".curion/benchmark", "retrieval-baseline-");
   if (!baselinePath) return; // skip if no artifact on disk
   const semanticPath = path.join(
     "src",
     "benchmark",
     "data",
-    "false-abstention-damage-semantic-evidence.json",
+    "false-abstention-damage-semantic-evidence.json"
   );
   const hasSemantic = fs.existsSync(semanticPath);
   const { report } = await runMultiAnchorRerankCli({
@@ -872,9 +847,7 @@ test("multi-anchor-current-previous: end-to-end CLI on the real lexical baseline
   // matches the prior diagnostic's finding
   // (10/26). The newer-wins tie-breaker
   // changed the baseline from 12 to 10.
-  const baseline = report.variants.find(
-    (v) => v.variant.id === "baseline-no-rerank",
-  );
+  const baseline = report.variants.find((v) => v.variant.id === "baseline-no-rerank");
   assert.ok(baseline);
   assert.equal(baseline!.metrics.baselineCurrentTruthAt1, 10);
   // The multi-anchor-aware combined variant
@@ -882,9 +855,7 @@ test("multi-anchor-current-previous: end-to-end CLI on the real lexical baseline
   // (newer-wins tie-breaker changed the
   // baseline from 12 to 10, so the delta
   // is now +5 instead of +6).
-  const aware = report.variants.find(
-    (v) => v.variant.id === "multi-anchor-aware-combined",
-  );
+  const aware = report.variants.find((v) => v.variant.id === "multi-anchor-aware-combined");
   assert.ok(aware);
   assert.equal(aware!.metrics.afterCurrentTruthAt1, 15);
   assert.equal(aware!.metrics.regressionCount, 0);
@@ -898,7 +869,7 @@ test("multi-anchor-current-previous: end-to-end CLI on the real lexical baseline
   // so the expected regression no longer
   // occurs).
   const unsafe = report.variants.find(
-    (v) => v.variant.id === "metadata-simulation-combined-unsafe",
+    (v) => v.variant.id === "metadata-simulation-combined-unsafe"
   );
   assert.ok(unsafe);
   assert.equal(unsafe!.metrics.regressionCount, 0);
@@ -907,16 +878,14 @@ test("multi-anchor-current-previous: end-to-end CLI on the real lexical baseline
   // with 0 regressions (newer-wins
   // changed the baseline from 12 to 10).
   const demote = report.variants.find(
-    (v) => v.variant.id === "metadata-simulation-supersededBy-demote",
+    (v) => v.variant.id === "metadata-simulation-supersededBy-demote"
   );
   assert.ok(demote);
   assert.equal(demote!.metrics.afterCurrentTruthAt1, 12);
   assert.equal(demote!.metrics.regressionCount, 0);
   // The oracle ceiling is 20 (newer-wins
   // changed from 22 to 20).
-  const oracle = report.variants.find(
-    (v) => v.variant.id === "oracle-current-truth-promote-all",
-  );
+  const oracle = report.variants.find((v) => v.variant.id === "oracle-current-truth-promote-all");
   assert.ok(oracle);
   assert.equal(oracle!.metrics.afterCurrentTruthAt1, 20);
   assert.equal(oracle!.metrics.regressionCount, 0);
@@ -929,7 +898,7 @@ test("multi-anchor-current-previous: end-to-end CLI on the real lexical baseline
   const oracleGain = oracle!.metrics.currentTruthAt1Delta;
   assert.ok(
     gapClosed > 0 && gapClosed < oracleGain,
-    `multi-anchor-aware variant closes ${gapClosed} of ${oracleGain} oracle gain; honest partial recovery`,
+    `multi-anchor-aware variant closes ${gapClosed} of ${oracleGain} oracle gain; honest partial recovery`
   );
 });
 
@@ -941,7 +910,7 @@ test("multi-anchor-current-previous: end-to-end CLI without an artifact on disk 
         noWrite: true,
         noStdout: true,
       }),
-    /no --benchmark-artifact given/,
+    /no --benchmark-artifact given/
   );
 });
 
@@ -971,11 +940,7 @@ test("multi-anchor-current-previous: CLI argument parser handles the documented 
 });
 
 test("multi-anchor-current-previous: CLI argument parser ignores unknown flags", () => {
-  const parsed = parseMultiAnchorRerankCliArgs([
-    "--unknown-flag",
-    "value",
-    "--no-write",
-  ]);
+  const parsed = parseMultiAnchorRerankCliArgs(["--unknown-flag", "value", "--no-write"]);
   assert.equal(parsed.noWrite, true);
 });
 
@@ -994,7 +959,7 @@ test("multi-anchor-current-previous: perCategoryChange rollup is populated for a
     { queryId: "q2", expectedIds: [1], currentTruthIds: [1], topIds: [21, 1, 5, 6, 7] },
   ]);
   const oraclePromote = BUILTIN_MULTI_ANCHOR_RERANK_VARIANTS.find(
-    (v) => v.id === "oracle-current-truth-promote-all",
+    (v) => v.id === "oracle-current-truth-promote-all"
   )!;
   const m = evaluateMultiAnchorRerankVariant({
     variant: oraclePromote,
@@ -1005,7 +970,7 @@ test("multi-anchor-current-previous: perCategoryChange rollup is populated for a
   assert.ok(change);
   assert.ok(
     change["current-truth-in-topk-stale-top1 -> current-truth-top1"] === 1,
-    "the stale-top1 -> top1 move should be reflected in the perCategoryChange block",
+    "the stale-top1 -> top1 move should be reflected in the perCategoryChange block"
   );
 });
 
@@ -1018,7 +983,7 @@ test("multi-anchor-current-previous: verdict is safe when at least one recovery 
     { queryId: "q1", expectedIds: [1], currentTruthIds: [1], topIds: [21, 1, 5, 6, 7] },
   ]);
   const oraclePromote = BUILTIN_MULTI_ANCHOR_RERANK_VARIANTS.find(
-    (v) => v.id === "oracle-current-truth-promote-all",
+    (v) => v.id === "oracle-current-truth-promote-all"
   )!;
   const m = evaluateMultiAnchorRerankVariant({
     variant: oraclePromote,
@@ -1035,9 +1000,7 @@ test("multi-anchor-current-previous: verdict is neutral when no recovery and zer
   const { evals, queries } = mkQueryEval([
     { queryId: "q1", expectedIds: [1], currentTruthIds: [1], topIds: [1, 21, 5, 6, 7] },
   ]);
-  const baseline = BUILTIN_MULTI_ANCHOR_RERANK_VARIANTS.find(
-    (v) => v.id === "baseline-no-rerank",
-  )!;
+  const baseline = BUILTIN_MULTI_ANCHOR_RERANK_VARIANTS.find((v) => v.id === "baseline-no-rerank")!;
   const m = evaluateMultiAnchorRerankVariant({
     variant: baseline,
     evals,
@@ -1063,7 +1026,7 @@ test("multi-anchor-current-previous: verdict is unsafe when at least one regress
     },
   ]);
   const unsafe = BUILTIN_MULTI_ANCHOR_RERANK_VARIANTS.find(
-    (v) => v.id === "metadata-simulation-combined-unsafe",
+    (v) => v.id === "metadata-simulation-combined-unsafe"
   )!;
   const m = evaluateMultiAnchorRerankVariant({
     variant: unsafe,
@@ -1091,9 +1054,7 @@ test("multi-anchor-current-previous: clean / fixture-ambiguous split is on the d
       labels: ["divergentTemporal"],
     },
   ]);
-  const baseline = BUILTIN_MULTI_ANCHOR_RERANK_VARIANTS.find(
-    (v) => v.id === "baseline-no-rerank",
-  )!;
+  const baseline = BUILTIN_MULTI_ANCHOR_RERANK_VARIANTS.find((v) => v.id === "baseline-no-rerank")!;
   const m = evaluateMultiAnchorRerankVariant({
     variant: baseline,
     evals,
@@ -1129,7 +1090,7 @@ test("multi-anchor-current-previous: multi-anchor subset metrics are populated a
     },
   ]);
   const aware = BUILTIN_MULTI_ANCHOR_RERANK_VARIANTS.find(
-    (v) => v.id === "multi-anchor-aware-combined",
+    (v) => v.id === "multi-anchor-aware-combined"
   )!;
   const m = evaluateMultiAnchorRerankVariant({
     variant: aware,
@@ -1166,9 +1127,7 @@ test("multi-anchor-current-previous: isMultiAnchorSubset is true for queries who
       topIds: [1, 21, 5, 6, 7],
     },
   ]);
-  const baseline = BUILTIN_MULTI_ANCHOR_RERANK_VARIANTS.find(
-    (v) => v.id === "baseline-no-rerank",
-  )!;
+  const baseline = BUILTIN_MULTI_ANCHOR_RERANK_VARIANTS.find((v) => v.id === "baseline-no-rerank")!;
   const m = evaluateMultiAnchorRerankVariant({
     variant: baseline,
     evals,
@@ -1201,9 +1160,7 @@ test("multi-anchor-current-previous: anchorProtected is true only for protection
     "multi-anchor-aware-combined",
     "oracle-current-truth-promote-all",
   ]) {
-    const variant = BUILTIN_MULTI_ANCHOR_RERANK_VARIANTS.find(
-      (v) => v.id === variantId,
-    )!;
+    const variant = BUILTIN_MULTI_ANCHOR_RERANK_VARIANTS.find((v) => v.id === variantId)!;
     const m = evaluateMultiAnchorRerankVariant({
       variant,
       evals,
@@ -1216,7 +1173,7 @@ test("multi-anchor-current-previous: anchorProtected is true only for protection
     assert.equal(
       q.anchorProtected,
       isProtectionRule,
-      `anchorProtected for ${variantId} should be ${isProtectionRule}, got ${q.anchorProtected}`,
+      `anchorProtected for ${variantId} should be ${isProtectionRule}, got ${q.anchorProtected}`
     );
   }
 });
@@ -1261,7 +1218,7 @@ test("multi-anchor-current-previous: multi-anchor-simulation re-rank rules do NO
     assert.deepEqual(
       out1.topIds,
       out2.topIds,
-      `multi-anchor / metadata-simulation rule ${rule.kind} must produce the same output regardless of currentTruthIds`,
+      `multi-anchor / metadata-simulation rule ${rule.kind} must produce the same output regardless of currentTruthIds`
     );
   }
 });
@@ -1315,10 +1272,7 @@ test("multi-anchor-current-previous: artifact reader + writer round-trip is byte
     const parsed = JSON.parse(text1) as MultiAnchorRerankReport;
     assert.equal(parsed.sourceVariant, "synthetic");
     assert.equal(parsed.temporalQueryCount, 1);
-    assert.equal(
-      parsed.variants.length,
-      BUILTIN_MULTI_ANCHOR_RERANK_VARIANTS.length,
-    );
+    assert.equal(parsed.variants.length, BUILTIN_MULTI_ANCHOR_RERANK_VARIANTS.length);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -1333,7 +1287,7 @@ test("multi-anchor-current-previous: buildMultiAnchorRerankVariantRow is consist
     { queryId: "q1", expectedIds: [1], currentTruthIds: [1], topIds: [21, 1, 5, 6, 7] },
   ]);
   const oraclePromote = BUILTIN_MULTI_ANCHOR_RERANK_VARIANTS.find(
-    (v) => v.id === "oracle-current-truth-promote-all",
+    (v) => v.id === "oracle-current-truth-promote-all"
   )!;
   const row = buildMultiAnchorRerankVariantRow({
     variant: oraclePromote,
@@ -1361,9 +1315,7 @@ test("multi-anchor-current-previous: aggregateMultiAnchorRerankPerQuery is consi
       labels: ["divergentTemporal"],
     },
   ]);
-  const baseline = BUILTIN_MULTI_ANCHOR_RERANK_VARIANTS.find(
-    (v) => v.id === "baseline-no-rerank",
-  )!;
+  const baseline = BUILTIN_MULTI_ANCHOR_RERANK_VARIANTS.find((v) => v.id === "baseline-no-rerank")!;
   const m = evaluateMultiAnchorRerankVariant({
     variant: baseline,
     evals,
@@ -1380,9 +1332,7 @@ test("multi-anchor-current-previous: evals/queries length mismatch throws", () =
   const { evals, queries } = mkQueryEval([
     { queryId: "q1", expectedIds: [1], currentTruthIds: [1], topIds: [1] },
   ]);
-  const baseline = BUILTIN_MULTI_ANCHOR_RERANK_VARIANTS.find(
-    (v) => v.id === "baseline-no-rerank",
-  )!;
+  const baseline = BUILTIN_MULTI_ANCHOR_RERANK_VARIANTS.find((v) => v.id === "baseline-no-rerank")!;
   assert.throws(
     () =>
       evaluateMultiAnchorRerankVariant({
@@ -1390,7 +1340,7 @@ test("multi-anchor-current-previous: evals/queries length mismatch throws", () =
         evals,
         queries: [...queries, ...queries],
       }),
-    /evals\.length/,
+    /evals\.length/
   );
 });
 
@@ -1398,9 +1348,7 @@ test("multi-anchor-current-previous: evals/queries id mismatch throws", () => {
   const { evals, queries } = mkQueryEval([
     { queryId: "q1", expectedIds: [1], currentTruthIds: [1], topIds: [1] },
   ]);
-  const baseline = BUILTIN_MULTI_ANCHOR_RERANK_VARIANTS.find(
-    (v) => v.id === "baseline-no-rerank",
-  )!;
+  const baseline = BUILTIN_MULTI_ANCHOR_RERANK_VARIANTS.find((v) => v.id === "baseline-no-rerank")!;
   const corrupted = [{ ...queries[0]!, id: "different" }];
   assert.throws(
     () =>
@@ -1409,7 +1357,7 @@ test("multi-anchor-current-previous: evals/queries id mismatch throws", () => {
         evals,
         queries: corrupted,
       }),
-    /does not match/,
+    /does not match/
   );
 });
 
@@ -1418,10 +1366,7 @@ test("multi-anchor-current-previous: evals/queries id mismatch throws", () => {
 // ---------------------------------------------------------------------------
 
 test("multi-anchor-current-previous: per-query alignment with prior diagnostic on the real artifact", () => {
-  const baselinePath = findMostRecentArtifact(
-    ".curion/benchmark",
-    "retrieval-baseline-",
-  );
+  const baselinePath = findMostRecentArtifact(".curion/benchmark", "retrieval-baseline-");
   if (!baselinePath) return;
   const artifact = readBenchmarkArtifact(baselinePath);
   const queries = alignQueriesToEvals(artifact.evals);

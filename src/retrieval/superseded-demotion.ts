@@ -66,7 +66,7 @@ export interface ScoredCandidateWithRelationship {
  *          array is not modified.
  */
 export function demoteSupersededMemories(
-  scored: ReadonlyArray<ScoredCandidateWithRelationship>,
+  scored: ReadonlyArray<ScoredCandidateWithRelationship>
 ): LexicalScoredCandidate[] {
   if (scored.length <= 1) {
     // No pair possible; return a defensive copy.

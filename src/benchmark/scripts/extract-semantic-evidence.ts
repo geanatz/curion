@@ -97,9 +97,7 @@ interface ExtractedMiss {
  * and a no-answer query's rank-1 hit is
  * confabulation, not a positive miss).
  */
-export function extractRank1MissesFromLog(
-  logText: string,
-): ExtractedMiss[] {
+export function extractRank1MissesFromLog(logText: string): ExtractedMiss[] {
   const out: ExtractedMiss[] = [];
   const seen = new Set<string>();
   // Match lines that look like:
@@ -130,8 +128,7 @@ export function main(argv: ReadonlyArray<string>): {
   const byQueryId: Record<string, "miss"> = {};
   for (const m of misses) byQueryId[m.queryId] = "miss";
   const json: Record<string, unknown> = {
-    _doc:
-      "Semantic evidence for the false-abstention damage analysis. The 'byQueryId' map records the rank-1 outcome of an EmbeddingGemma hybrid-dense benchmark on the same 132-record / 176-query corpus the lexical baseline uses. A 'miss' entry means the dense ranker rank-1-missed the query. The 'source' field is the canonical citation the runner surfaces in the report's rollup block.",
+    _doc: "Semantic evidence for the false-abstention damage analysis. The 'byQueryId' map records the rank-1 outcome of an EmbeddingGemma hybrid-dense benchmark on the same 132-record / 176-query corpus the lexical baseline uses. A 'miss' entry means the dense ranker rank-1-missed the query. The 'source' field is the canonical citation the runner surfaces in the report's rollup block.",
     source: args.source,
     model: args.model,
     corpus: args.corpus,
@@ -157,6 +154,6 @@ if (
 ) {
   const result = main(process.argv.slice(2));
   process.stdout.write(
-    `[extract-semantic-evidence] wrote ${result.count} misses to ${result.outPath}\n`,
+    `[extract-semantic-evidence] wrote ${result.count} misses to ${result.outPath}\n`
   );
 }

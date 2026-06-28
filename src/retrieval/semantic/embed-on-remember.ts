@@ -12,10 +12,7 @@
  *   // result.embedding stores the record; result.error is set on failure
  */
 
-import {
-  storeEmbedding,
-  type StorageHandle,
-} from "../../storage/storage.js";
+import { type StorageHandle, storeEmbedding } from "../../storage/storage.js";
 import type { SemanticEmbedder } from "./embedder.js";
 
 export interface EmbedOnRememberResult {
@@ -45,7 +42,7 @@ export async function embedOnRemember(
   embedder: SemanticEmbedder,
   memoryId: number,
   summary: string,
-  modelId?: string,
+  modelId?: string
 ): Promise<EmbedOnRememberResult> {
   try {
     const vec = await embedder.embed(summary, "document");
@@ -89,7 +86,7 @@ export async function backfillMissingEmbeddings(
   options: {
     batchSize?: number;
     progress?: (batchCount: number, totalSoFar: number) => void;
-  } = {},
+  } = {}
 ): Promise<number> {
   const batchSize = options.batchSize ?? 20;
 
@@ -103,7 +100,7 @@ export async function backfillMissingEmbeddings(
           AND m.summary IS NOT NULL AND m.summary != ''
           AND NOT EXISTS (SELECT 1 FROM embeddings e WHERE e.memory_id = m.id)
         ORDER BY m.id ASC
-        LIMIT ?`,
+        LIMIT ?`
     )
     .all(batchSize) as Array<{ id: number; summary: string }>;
 

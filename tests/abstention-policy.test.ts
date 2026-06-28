@@ -27,34 +27,33 @@
  * (real corpus + query set + benchmark runner).
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { test } from "node:test";
 
 import {
+  type AbstentionPolicyReport,
+  formatAbstentionPolicyReport,
+  writeAbstentionPolicyReport,
+} from "../src/benchmark/abstention-policy-runner.ts";
+import {
+  type AbstentionPolicy,
   BUILTIN_POLICIES,
   buildPolicyPerQuery,
   computePolicyMetrics,
   emptyAbstentionSignals,
   evaluatePolicy,
-  type AbstentionPolicy,
 } from "../src/benchmark/abstention-policy.ts";
-import {
-  runAbstentionPolicy,
-  writeAbstentionPolicyReport,
-  formatAbstentionPolicyReport,
-  type AbstentionPolicyReport,
-} from "../src/benchmark/abstention-policy-runner.ts";
-import {
-  runAbstentionPolicyFromBenchmarkReport,
-  runRetrievalBenchmark,
-  runDenseRetrievalBenchmark,
-  parseRetrievalCli,
-} from "../src/benchmark/retrieval-runner.ts";
-import type { AbstentionSignals } from "../src/benchmark/metrics.ts";
 import { BENCHMARK_RECORDS } from "../src/benchmark/corpus.ts";
+import type { AbstentionSignals } from "../src/benchmark/metrics.ts";
+import {
+  parseRetrievalCli,
+  runAbstentionPolicyFromBenchmarkReport,
+  runDenseRetrievalBenchmark,
+  runRetrievalBenchmark,
+} from "../src/benchmark/retrieval-runner.ts";
 import { PUBLIC_TOOL_NAMES } from "../src/server.ts";
 
 // ---------------------------------------------------------------------------
@@ -80,7 +79,7 @@ function mkPerQuery(
     rank1?: boolean;
     currentTruthAt1?: boolean;
     hitAt5?: boolean;
-  }>,
+  }>
 ): Array<{
   queryId: string;
   family: string;
@@ -221,9 +220,7 @@ test("policy: low-damage score-0.30 abstains on score<0.30 OR flags", () => {
     },
   ]);
   const decisions = evaluatePolicy(policy, perQuery);
-  const abstainedIds = new Set(
-    decisions.filter((d) => d.abstain).map((d) => d.queryId),
-  );
+  const abstainedIds = new Set(decisions.filter((d) => d.abstain).map((d) => d.queryId));
   assert.ok(abstainedIds.has("na-lowscore"));
   assert.ok(abstainedIds.has("na-flagged"));
   assert.ok(abstainedIds.has("pos-lowscore"));
@@ -260,9 +257,7 @@ test("policy: moderate score-0.40 abstains on score<0.40 OR flags", () => {
     },
   ]);
   const decisions = evaluatePolicy(policy, perQuery);
-  const abstainedIds = new Set(
-    decisions.filter((d) => d.abstain).map((d) => d.queryId),
-  );
+  const abstainedIds = new Set(decisions.filter((d) => d.abstain).map((d) => d.queryId));
   assert.ok(abstainedIds.has("na-lowscore"));
   assert.ok(!abstainedIds.has("na-highscore"));
   assert.ok(abstainedIds.has("pos-lowscore"));
@@ -307,9 +302,7 @@ test("policy: aggressive score-0.50 drops falsePrem flag, keeps hardNeg", () => 
     },
   ]);
   const decisions = evaluatePolicy(policy, perQuery);
-  const abstainedIds = new Set(
-    decisions.filter((d) => d.abstain).map((d) => d.queryId),
-  );
+  const abstainedIds = new Set(decisions.filter((d) => d.abstain).map((d) => d.queryId));
   assert.ok(abstainedIds.has("na-lowscore"));
   assert.ok(abstainedIds.has("na-hardneg"));
   assert.ok(!abstainedIds.has("na-fp-only"));
@@ -351,9 +344,7 @@ test("policy: score-only ablation grid (0.30..0.50) abstains on score only", () 
     assert.equal(policy.useFalsePremiseFlag, false);
     assert.equal(policy.scoreThreshold, t);
     const decisions = evaluatePolicy(policy, perQuery);
-    const abstainedIds = new Set(
-      decisions.filter((d) => d.abstain).map((d) => d.queryId),
-    );
+    const abstainedIds = new Set(decisions.filter((d) => d.abstain).map((d) => d.queryId));
     // The 0.10 no-answer abstains under all thresholds.
     assert.ok(abstainedIds.has("na-010"));
     // The 0.35 positive abstains only when t > 0.35.
@@ -381,9 +372,7 @@ test("policy: hardNeg-only ablation abstains only on the hardNeg flag", () => {
     { queryId: "d", family: "exact", isPositive: true, meanContributorScore: 0.1 },
   ]);
   const decisions = evaluatePolicy(policy, perQuery);
-  const abstainedIds = new Set(
-    decisions.filter((d) => d.abstain).map((d) => d.queryId),
-  );
+  const abstainedIds = new Set(decisions.filter((d) => d.abstain).map((d) => d.queryId));
   assert.deepEqual([...abstainedIds].sort(), ["a"]);
 });
 
@@ -398,9 +387,7 @@ test("policy: false-premise-only ablation abstains only on the falsePrem flag", 
     { queryId: "c", family: "no-answer", isPositive: false, meanContributorScore: 0.1 },
   ]);
   const decisions = evaluatePolicy(policy, perQuery);
-  const abstainedIds = new Set(
-    decisions.filter((d) => d.abstain).map((d) => d.queryId),
-  );
+  const abstainedIds = new Set(decisions.filter((d) => d.abstain).map((d) => d.queryId));
   assert.deepEqual([...abstainedIds].sort(), ["b"]);
 });
 
@@ -410,18 +397,40 @@ test("policy: agreement<=1 OR score<0.40 fires on agreement gate AND score gate"
   assert.equal(policy.scoreThreshold, 0.4);
   const perQuery = mkPerQuery([
     // Agreement 0, score high: abstains (agreement).
-    { queryId: "a", family: "no-answer", isPositive: false, agreementCount: 0, meanContributorScore: 0.9 },
+    {
+      queryId: "a",
+      family: "no-answer",
+      isPositive: false,
+      agreementCount: 0,
+      meanContributorScore: 0.9,
+    },
     // Agreement 2, score low: abstains (score).
-    { queryId: "b", family: "no-answer", isPositive: false, agreementCount: 2, meanContributorScore: 0.2 },
+    {
+      queryId: "b",
+      family: "no-answer",
+      isPositive: false,
+      agreementCount: 2,
+      meanContributorScore: 0.2,
+    },
     // Agreement 2, score high: does NOT abstain.
-    { queryId: "c", family: "no-answer", isPositive: false, agreementCount: 2, meanContributorScore: 0.9 },
+    {
+      queryId: "c",
+      family: "no-answer",
+      isPositive: false,
+      agreementCount: 2,
+      meanContributorScore: 0.9,
+    },
     // Agreement 0, score high: abstains (agreement).
-    { queryId: "d", family: "exact", isPositive: true, agreementCount: 0, meanContributorScore: 0.9 },
+    {
+      queryId: "d",
+      family: "exact",
+      isPositive: true,
+      agreementCount: 0,
+      meanContributorScore: 0.9,
+    },
   ]);
   const decisions = evaluatePolicy(policy, perQuery);
-  const abstainedIds = new Set(
-    decisions.filter((d) => d.abstain).map((d) => d.queryId),
-  );
+  const abstainedIds = new Set(decisions.filter((d) => d.abstain).map((d) => d.queryId));
   assert.ok(abstainedIds.has("a"));
   assert.ok(abstainedIds.has("b"));
   assert.ok(!abstainedIds.has("c"));
@@ -441,16 +450,32 @@ test("policy: agreement<=2 AND score<0.40 is a strict AND-gate (both must hold)"
   // score gate fires.
   const perQuery = mkPerQuery([
     // Agreement 0, score 0.5: abstains (agreement).
-    { queryId: "a", family: "no-answer", isPositive: false, agreementCount: 0, meanContributorScore: 0.5 },
+    {
+      queryId: "a",
+      family: "no-answer",
+      isPositive: false,
+      agreementCount: 0,
+      meanContributorScore: 0.5,
+    },
     // Agreement 3, score 0.2: abstains (score).
-    { queryId: "b", family: "no-answer", isPositive: false, agreementCount: 3, meanContributorScore: 0.2 },
+    {
+      queryId: "b",
+      family: "no-answer",
+      isPositive: false,
+      agreementCount: 3,
+      meanContributorScore: 0.2,
+    },
     // Agreement 3, score 0.5: does NOT abstain.
-    { queryId: "c", family: "no-answer", isPositive: false, agreementCount: 3, meanContributorScore: 0.5 },
+    {
+      queryId: "c",
+      family: "no-answer",
+      isPositive: false,
+      agreementCount: 3,
+      meanContributorScore: 0.5,
+    },
   ]);
   const decisions = evaluatePolicy(policy, perQuery);
-  const abstainedIds = new Set(
-    decisions.filter((d) => d.abstain).map((d) => d.queryId),
-  );
+  const abstainedIds = new Set(decisions.filter((d) => d.abstain).map((d) => d.queryId));
   assert.ok(abstainedIds.has("a"));
   assert.ok(abstainedIds.has("b"));
   assert.ok(!abstainedIds.has("c"));
@@ -464,15 +489,80 @@ test("metrics: TNR, positive abstention, hit@5 / rank1 / currentTruthAt1 retenti
   const policy = findPolicy("moderate-score-0.40");
   const perQuery = mkPerQuery([
     // No-answer queries: 4 total.
-    { queryId: "na-1", family: "no-answer", isPositive: false, meanContributorScore: 0.2, hitAt5: false, rank1: false, currentTruthAt1: false },
-    { queryId: "na-2", family: "no-answer", isPositive: false, meanContributorScore: 0.5, hitAt5: false, rank1: false, currentTruthAt1: false },
-    { queryId: "na-3", family: "no-answer", isPositive: false, meanContributorScore: 0.2, hitAt5: false, rank1: false, currentTruthAt1: false },
-    { queryId: "na-4", family: "no-answer", isPositive: false, meanContributorScore: 0.5, isNoAnswerHardNegative: true, hitAt5: false, rank1: false, currentTruthAt1: false },
+    {
+      queryId: "na-1",
+      family: "no-answer",
+      isPositive: false,
+      meanContributorScore: 0.2,
+      hitAt5: false,
+      rank1: false,
+      currentTruthAt1: false,
+    },
+    {
+      queryId: "na-2",
+      family: "no-answer",
+      isPositive: false,
+      meanContributorScore: 0.5,
+      hitAt5: false,
+      rank1: false,
+      currentTruthAt1: false,
+    },
+    {
+      queryId: "na-3",
+      family: "no-answer",
+      isPositive: false,
+      meanContributorScore: 0.2,
+      hitAt5: false,
+      rank1: false,
+      currentTruthAt1: false,
+    },
+    {
+      queryId: "na-4",
+      family: "no-answer",
+      isPositive: false,
+      meanContributorScore: 0.5,
+      isNoAnswerHardNegative: true,
+      hitAt5: false,
+      rank1: false,
+      currentTruthAt1: false,
+    },
     // Positive queries: 4 total. 2 are hits at 5 (rank1: only 1 of them is rank1).
-    { queryId: "p-1", family: "exact", isPositive: true, meanContributorScore: 0.5, hitAt5: true, rank1: true, currentTruthAt1: true },
-    { queryId: "p-2", family: "exact", isPositive: true, meanContributorScore: 0.5, hitAt5: true, rank1: false, currentTruthAt1: true },
-    { queryId: "p-3", family: "paraphrase", isPositive: true, meanContributorScore: 0.2, hitAt5: true, rank1: false, currentTruthAt1: false },
-    { queryId: "p-4", family: "paraphrase", isPositive: true, meanContributorScore: 0.2, hitAt5: false, rank1: false, currentTruthAt1: false },
+    {
+      queryId: "p-1",
+      family: "exact",
+      isPositive: true,
+      meanContributorScore: 0.5,
+      hitAt5: true,
+      rank1: true,
+      currentTruthAt1: true,
+    },
+    {
+      queryId: "p-2",
+      family: "exact",
+      isPositive: true,
+      meanContributorScore: 0.5,
+      hitAt5: true,
+      rank1: false,
+      currentTruthAt1: true,
+    },
+    {
+      queryId: "p-3",
+      family: "paraphrase",
+      isPositive: true,
+      meanContributorScore: 0.2,
+      hitAt5: true,
+      rank1: false,
+      currentTruthAt1: false,
+    },
+    {
+      queryId: "p-4",
+      family: "paraphrase",
+      isPositive: true,
+      meanContributorScore: 0.2,
+      hitAt5: false,
+      rank1: false,
+      currentTruthAt1: false,
+    },
   ]);
   const decisions = evaluatePolicy(policy, perQuery);
   const m = computePolicyMetrics(policy, decisions);
@@ -507,10 +597,7 @@ test("metrics: TNR, positive abstention, hit@5 / rank1 / currentTruthAt1 retenti
   assert.equal(m.positiveAbstainedByFamily["paraphrase"]!.abstained, 2);
   // FP / FN lists.
   assert.equal(m.falsePositives.length, 2);
-  assert.deepEqual(
-    m.falsePositives.map((fp) => fp.queryId).sort(),
-    ["p-3", "p-4"],
-  );
+  assert.deepEqual(m.falsePositives.map((fp) => fp.queryId).sort(), ["p-3", "p-4"]);
   // FN: na-2 (no-answer, score 0.5, no flag) was
   // wrongly retained.
   assert.equal(m.falseNegatives.length, 1);
@@ -624,7 +711,7 @@ test("policy: built-in policy set covers the brief's four primary policies + 11 
   ]) {
     assert.ok(
       BUILTIN_POLICIES.find((p) => p.id === id),
-      `expected built-in primary policy '${id}'`,
+      `expected built-in primary policy '${id}'`
     );
   }
   // The brief's ablation grid.
@@ -643,20 +730,14 @@ test("policy: built-in policy set covers the brief's four primary policies + 11 
   ]) {
     assert.ok(
       BUILTIN_POLICIES.find((p) => p.id === id),
-      `expected built-in ablation '${id}'`,
+      `expected built-in ablation '${id}'`
     );
   }
   // 4 primary + 11 ablations = 15.
   assert.equal(BUILTIN_POLICIES.length, 15);
   // 4 primary, 11 ablations.
-  assert.equal(
-    BUILTIN_POLICIES.filter((p) => p.category === "primary").length,
-    4,
-  );
-  assert.equal(
-    BUILTIN_POLICIES.filter((p) => p.category === "ablation").length,
-    11,
-  );
+  assert.equal(BUILTIN_POLICIES.filter((p) => p.category === "primary").length, 4);
+  assert.equal(BUILTIN_POLICIES.filter((p) => p.category === "ablation").length, 11);
 });
 
 // ---------------------------------------------------------------------------
@@ -679,7 +760,7 @@ test("policy: same policy + same per-query input -> same decisions, every time",
   // function is order-preserving, not commutative).
   assert.deepEqual(
     decisions1.map((d) => d.queryId),
-    decisions3.map((d) => d.queryId).reverse(),
+    decisions3.map((d) => d.queryId).reverse()
   );
 });
 
@@ -703,11 +784,11 @@ test("policy: metrics are deterministic (same input -> same numbers)", () => {
   // FP / FN lists are stable in the same order.
   assert.deepEqual(
     m1.falsePositives.map((fp) => fp.queryId),
-    m2.falsePositives.map((fp) => fp.queryId),
+    m2.falsePositives.map((fp) => fp.queryId)
   );
   assert.deepEqual(
     m1.falseNegatives.map((fn) => fn.queryId),
-    m2.falseNegatives.map((fn) => fn.queryId),
+    m2.falseNegatives.map((fn) => fn.queryId)
   );
 });
 
@@ -737,9 +818,7 @@ test("policy: end-to-end on the hybrid benchmark (stub)", () => {
     assert.equal(typeof row.gateCounts.falsePrem, "number");
   }
   // The recommended moderate policy must be present.
-  const recommended = policyReport.policies.find(
-    (p) => p.policyId === "moderate-score-0.40",
-  );
+  const recommended = policyReport.policies.find((p) => p.policyId === "moderate-score-0.40");
   assert.ok(recommended);
   // The TNR must be > 0 (the policy must catch at
   // least one no-answer query on the corpus).
@@ -747,10 +826,7 @@ test("policy: end-to-end on the hybrid benchmark (stub)", () => {
   // The artifact carries the per-query input + the
   // per-policy decision blocks.
   assert.ok(policyReport.perQuery.length > 0);
-  assert.equal(
-    policyReport.decisions.length,
-    BUILTIN_POLICIES.length,
-  );
+  assert.equal(policyReport.decisions.length, BUILTIN_POLICIES.length);
 });
 
 test("policy: end-to-end on the dense hybrid benchmark (stub embedder)", async () => {
@@ -775,21 +851,17 @@ test("policy: end-to-end on the dense hybrid benchmark (stub embedder)", async (
   assert.equal(policyReport.policies.length, BUILTIN_POLICIES.length);
   // On a dense hybrid run the contributor signals
   // are populated, so the score gate is meaningful.
-  const recommended = policyReport.policies.find(
-    (p) => p.policyId === "moderate-score-0.40",
-  );
+  const recommended = policyReport.policies.find((p) => p.policyId === "moderate-score-0.40");
   assert.ok(recommended);
   // The flag-only baseline's TNR is the
   // (isNoAnswerHardNegative OR isFalsePremiseLike)
   // count among no-answer queries; it must be <= the
   // recommended policy's TNR.
-  const flagOnly = policyReport.policies.find(
-    (p) => p.policyId === "flag-only-zero-hit-cost",
-  );
+  const flagOnly = policyReport.policies.find((p) => p.policyId === "flag-only-zero-hit-cost");
   assert.ok(flagOnly);
   assert.ok(
     recommended.noAnswerAbstained >= flagOnly.noAnswerAbstained,
-    "recommended policy must catch at least as many no-answer queries as the flag-only baseline",
+    "recommended policy must catch at least as many no-answer queries as the flag-only baseline"
   );
 });
 
@@ -817,12 +889,12 @@ test("policy: artifact is written to the abstention-policy prefix and is byte-st
     assert.match(
       path.basename(file),
       /^retrieval-abstention-policy-/,
-      `policy file prefix mismatch: ${path.basename(file)}`,
+      `policy file prefix mismatch: ${path.basename(file)}`
     );
     // The file does NOT carry the existing prefixes.
     assert.doesNotMatch(
       path.basename(file),
-      /^retrieval-(baseline|fts5|vector|hybrid|compare|calibration|calibration-dense|vector-dense|hybrid-dense|compare-dense|abstention-audit)/,
+      /^retrieval-(baseline|fts5|vector|hybrid|compare|calibration|calibration-dense|vector-dense|hybrid-dense|compare-dense|abstention-audit)/
     );
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
@@ -843,10 +915,7 @@ test("policy: human report includes the policy frontier table + per-family + FP/
     "honest reading",
     "READ THIS FIRST: this is a BENCHMARK-ONLY study",
   ]) {
-    assert.ok(
-      out.includes(section),
-      `policy human report missing section: ${section}`,
-    );
+    assert.ok(out.includes(section), `policy human report missing section: ${section}`);
   }
 });
 
@@ -855,11 +924,7 @@ test("policy: human report includes the policy frontier table + per-family + FP/
 // ---------------------------------------------------------------------------
 
 test("policy CLI: --abstention-policy is parsed correctly", () => {
-  const opts = parseRetrievalCli([
-    "--variant",
-    "hybrid",
-    "--abstention-policy",
-  ]);
+  const opts = parseRetrievalCli(["--variant", "hybrid", "--abstention-policy"]);
   assert.equal(opts.abstentionPolicy, true);
   assert.equal(opts.variant, "hybrid");
 });
@@ -885,35 +950,25 @@ test("policy: production recall() controller is not modified", () => {
   // controller's source code must not import any
   // policy module.
   const recallSrc = fs.readFileSync(
-    path.join(
-      import.meta.dirname,
-      "..",
-      "src",
-      "controller",
-      "recall-controller.ts",
-    ),
-    "utf8",
+    path.join(import.meta.dirname, "..", "src", "controller", "recall-controller.ts"),
+    "utf8"
   );
   assert.doesNotMatch(
     recallSrc,
     /abstention-policy|runAbstentionPolicy|abstentionPolicy/,
-    "recall controller must NOT import abstention-policy modules",
+    "recall controller must NOT import abstention-policy modules"
   );
   // The MCP server still exposes exactly two tools.
   const serverSrc = fs.readFileSync(
     path.join(import.meta.dirname, "..", "src", "server.ts"),
-    "utf8",
+    "utf8"
   );
   const toolCallCount = (serverSrc.match(/server\.registerTool\(/g) ?? []).length;
-  assert.equal(
-    toolCallCount,
-    2,
-    `server.ts must register exactly 2 tools, found ${toolCallCount}`,
-  );
+  assert.equal(toolCallCount, 2, `server.ts must register exactly 2 tools, found ${toolCallCount}`);
   assert.deepEqual(
     [...PUBLIC_TOOL_NAMES],
     ["remember", "recall"],
-    "public MCP tool surface must remain exactly remember + recall",
+    "public MCP tool surface must remain exactly remember + recall"
   );
 });
 
@@ -1014,10 +1069,7 @@ test("policy: onlyPolicyIds filter restricts the report to the named policies", 
   const policyReport = runAbstentionPolicyFromBenchmarkReport(report, {
     variant: "hybrid",
     config: {
-      onlyPolicyIds: [
-        "flag-only-zero-hit-cost",
-        "moderate-score-0.40",
-      ],
+      onlyPolicyIds: ["flag-only-zero-hit-cost", "moderate-score-0.40"],
     },
   });
   assert.equal(policyReport.policies.length, 2);
@@ -1062,7 +1114,7 @@ test("docs/experiments.md: per-query FP bullet headers match the number of query
     "src",
     "benchmark",
     "docs",
-    "experiments.md",
+    "experiments.md"
   );
   const doc = fs.readFileSync(docsPath, "utf8");
 
@@ -1073,7 +1125,10 @@ test("docs/experiments.md: per-query FP bullet headers match the number of query
    * substring in the header (e.g. "paraphrase
    * queries:" or "orientation queries:").
    */
-  const checkBullet = (headerAnchor: string, idPrefix: string): {
+  const checkBullet = (
+    headerAnchor: string,
+    idPrefix: string
+  ): {
     header: number;
     body: number;
   } => {
@@ -1081,15 +1136,9 @@ test("docs/experiments.md: per-query FP bullet headers match the number of query
     // so the bullet is on one line.
     // We match the first bullet that starts with
     // "- <N> <headerAnchor>" and capture the count.
-    const re = new RegExp(
-      `^- (\\d+) ${headerAnchor}: (.+)$`,
-      "m",
-    );
+    const re = new RegExp(`^- (\\d+) ${headerAnchor}: (.+)$`, "m");
     const m = doc.match(re);
-    assert.ok(
-      m,
-      `experiments.md FP bullet for ${headerAnchor} not found`,
-    );
+    assert.ok(m, `experiments.md FP bullet for ${headerAnchor} not found`);
     const header = Number(m![1]);
     const body = m![2];
     // Count distinct backtick-quoted query IDs with
@@ -1106,13 +1155,13 @@ test("docs/experiments.md: per-query FP bullet headers match the number of query
   assert.equal(
     para.header,
     para.body,
-    `experiments.md paraphrase FP bullet header (${para.header}) does not match body count (${para.body})`,
+    `experiments.md paraphrase FP bullet header (${para.header}) does not match body count (${para.body})`
   );
 
   const orient = checkBullet("orientation queries", "orient");
   assert.equal(
     orient.header,
     orient.body,
-    `experiments.md orientation FP bullet header (${orient.header}) does not match body count (${orient.body})`,
+    `experiments.md orientation FP bullet header (${orient.header}) does not match body count (${orient.body})`
   );
 });

@@ -34,17 +34,17 @@
  *      modules.
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { test } from "node:test";
 import url from "node:url";
 
 import {
-  detectAmbiguity,
   AMBIGUITY_CONFIDENCE_THRESHOLD,
   MAX_AMBIGUITY_IDS,
   type SafeMemorySummaryWithRelationship,
+  detectAmbiguity,
 } from "../src/retrieval/ambiguity.ts";
 
 // ---------------------------------------------------------------------------
@@ -54,7 +54,7 @@ import {
 let nextId = 1;
 
 function mkCandidate(
-  overrides: Partial<SafeMemorySummaryWithRelationship> = {},
+  overrides: Partial<SafeMemorySummaryWithRelationship> = {}
 ): SafeMemorySummaryWithRelationship {
   const id = overrides.id ?? nextId++;
   return {
@@ -164,7 +164,7 @@ test("detectAmbiguity: stored mutual conflictsWith above threshold -> conflictin
   // The point estimate is min(0.95, 0.92) = 0.92.
   assert.ok(
     out.confidence >= AMBIGUITY_CONFIDENCE_THRESHOLD,
-    `expected confidence >= ${AMBIGUITY_CONFIDENCE_THRESHOLD}, got ${out.confidence}`,
+    `expected confidence >= ${AMBIGUITY_CONFIDENCE_THRESHOLD}, got ${out.confidence}`
   );
   assert.ok(out.confidence <= 1, "confidence bounded to [0, 1]");
 });
@@ -250,7 +250,7 @@ test("detectAmbiguity: stored mutual olderVariantsOf above threshold -> older-va
   assert.deepEqual(out.memoryIds, [30, 31]);
   assert.ok(
     out.confidence >= AMBIGUITY_CONFIDENCE_THRESHOLD,
-    `expected confidence >= ${AMBIGUITY_CONFIDENCE_THRESHOLD}, got ${out.confidence}`,
+    `expected confidence >= ${AMBIGUITY_CONFIDENCE_THRESHOLD}, got ${out.confidence}`
   );
 });
 
@@ -318,7 +318,7 @@ test("detectAmbiguity: asymmetric negation + answer alignment -> conflicting-can
   assert.deepEqual(out.memoryIds, [50, 51]);
   assert.ok(
     out.confidence >= AMBIGUITY_CONFIDENCE_THRESHOLD,
-    `expected confidence >= ${AMBIGUITY_CONFIDENCE_THRESHOLD}, got ${out.confidence}`,
+    `expected confidence >= ${AMBIGUITY_CONFIDENCE_THRESHOLD}, got ${out.confidence}`
   );
   assert.ok(out.confidence <= 1);
 });
@@ -446,20 +446,19 @@ test("detectAmbiguity: emitted memoryIds array is bounded to MAX_AMBIGUITY_IDS",
   });
   // The detector needs a *mutual* pointer. We mark the
   // first three candidates as pointing back at `a`.
-  const others: SafeMemorySummaryWithRelationship[] = [
-    101, 102, 103, 104, 105, 106, 107, 108,
-  ].map((id) =>
-    mkCandidate({
-      id,
-      memoryContent: "we use Postgres",
-      relationship: {
-        derivedSchemaVersion: "ccm-draft-1",
-        derivedAt: 0,
-        conflictsWith: id <= 103 ? [100] : [],
-        olderVariantsOf: [],
-        detectionConfidence: id <= 103 ? 0.95 : 0,
-      },
-    }),
+  const others: SafeMemorySummaryWithRelationship[] = [101, 102, 103, 104, 105, 106, 107, 108].map(
+    (id) =>
+      mkCandidate({
+        id,
+        memoryContent: "we use Postgres",
+        relationship: {
+          derivedSchemaVersion: "ccm-draft-1",
+          derivedAt: 0,
+          conflictsWith: id <= 103 ? [100] : [],
+          olderVariantsOf: [],
+          detectionConfidence: id <= 103 ? 0.95 : 0,
+        },
+      })
   );
   const out = detectAmbiguity({
     topCandidates: [a, ...others],
@@ -526,26 +525,20 @@ test("detectAmbiguity: output never references raw text", () => {
   const json = JSON.stringify(out);
   // The detector must never carry a `raw` / `text` / `input`
   // / `query` field on the signal.
-  for (const forbidden of [
-    "raw",
-    "text",
-    "input",
-    "query",
-    "answer",
-  ]) {
+  for (const forbidden of ["raw", "text", "input", "query", "answer"]) {
     // `answer` is the call argument; the detector must not
     // echo its content. We check that the raw `answer`
     // string is not in the serialized output.
     if (forbidden === "answer") {
       assert.ok(
         !json.includes("The team uses Postgres"),
-        `signal must not include the synthesized answer text`,
+        `signal must not include the synthesized answer text`
       );
     } else {
       assert.equal(
         (out as unknown as Record<string, unknown>)[forbidden],
         undefined,
-        `signal must not include a '${forbidden}' field`,
+        `signal must not include a '${forbidden}' field`
       );
     }
   }
@@ -573,13 +566,13 @@ test("ambiguity detector: does not import benchmark experiment modules", async (
     assert.equal(
       text.includes(tok),
       false,
-      `ambiguity.ts must not reference benchmark experiment module "${tok}"`,
+      `ambiguity.ts must not reference benchmark experiment module "${tok}"`
     );
   }
   assert.equal(
     /from\s+["'][^"']*benchmark\//.test(text),
     false,
-    "ambiguity.ts must not import from src/benchmark/",
+    "ambiguity.ts must not import from src/benchmark/"
   );
 });
 

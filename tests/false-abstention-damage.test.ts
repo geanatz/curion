@@ -44,59 +44,18 @@
  * `.curion/benchmark/`).
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { test } from "node:test";
 
-import {
-  BUILTIN_NO_ANSWER_POLICIES,
-  buildNoAnswerPolicyPerQuery,
-  computeNoAnswerPolicyMetrics,
-  evaluateNoAnswerPolicy,
-  runNoAnswerPolicyExperiment,
-  type NoAnswerPolicy,
-  type NoAnswerPolicyPerQuery,
-} from "../src/benchmark/no-answer-abstention.js";
-import {
-  buildFalseAbstentionDamageReport,
-  classifyFalseAbstention,
-  DAMAGE_CATEGORIES,
-  formatFalseAbstentionDamageReport,
-  scoreBandFor,
-  SCORE_BANDS,
-  type DamageCategory,
-  type FalseAbstentionDamageEntry,
-  type FalseAbstentionDamageReport,
-  type SemanticEvidenceMap,
-} from "../src/benchmark/false-abstention-damage.js";
-import {
-  classifyCandidateSetSufficiency,
-  buildSufficiencyReport,
-} from "../src/benchmark/sufficiency-diagnostic.js";
-import {
-  evaluateQuery,
-  type AbstentionSignals,
-  type QueryEval,
-} from "../src/benchmark/metrics.js";
-import {
-  BENCHMARK_QUERIES,
-  type BenchmarkQuery,
-} from "../src/benchmark/queries.js";
-import { rankLexical } from "../src/retrieval/lexical.js";
-import {
-  buildCandidates,
-  runRetrievalBenchmark,
-} from "../src/benchmark/retrieval-runner.js";
 import { BENCHMARK_RECORDS } from "../src/benchmark/corpus.js";
-import { PUBLIC_TOOL_NAMES } from "../src/server.js";
-import { detectQueryShape, buildCorpusTokenSets } from "../src/benchmark/query-shapes.js";
 import {
   findMostRecentArtifact,
   parseFalseAbstentionDamageCliArgs,
-  readNoAnswerAbstentionArtifact,
   readAbstentionAuditArtifact,
+  readNoAnswerAbstentionArtifact,
   readSemanticEvidenceFile,
   reconstructPerQuery,
   runFalseAbstentionDamageAnalysis,
@@ -104,8 +63,37 @@ import {
   writeFalseAbstentionDamageReport,
 } from "../src/benchmark/false-abstention-damage-runner.js";
 import {
-  extractRank1MissesFromLog,
-} from "../src/benchmark/scripts/extract-semantic-evidence.js";
+  DAMAGE_CATEGORIES,
+  type DamageCategory,
+  type FalseAbstentionDamageEntry,
+  type FalseAbstentionDamageReport,
+  SCORE_BANDS,
+  type SemanticEvidenceMap,
+  buildFalseAbstentionDamageReport,
+  classifyFalseAbstention,
+  formatFalseAbstentionDamageReport,
+  scoreBandFor,
+} from "../src/benchmark/false-abstention-damage.js";
+import { type AbstentionSignals, type QueryEval, evaluateQuery } from "../src/benchmark/metrics.js";
+import {
+  BUILTIN_NO_ANSWER_POLICIES,
+  type NoAnswerPolicy,
+  type NoAnswerPolicyPerQuery,
+  buildNoAnswerPolicyPerQuery,
+  computeNoAnswerPolicyMetrics,
+  evaluateNoAnswerPolicy,
+  runNoAnswerPolicyExperiment,
+} from "../src/benchmark/no-answer-abstention.js";
+import { BENCHMARK_QUERIES, type BenchmarkQuery } from "../src/benchmark/queries.js";
+import { buildCorpusTokenSets, detectQueryShape } from "../src/benchmark/query-shapes.js";
+import { buildCandidates, runRetrievalBenchmark } from "../src/benchmark/retrieval-runner.js";
+import { extractRank1MissesFromLog } from "../src/benchmark/scripts/extract-semantic-evidence.js";
+import {
+  buildSufficiencyReport,
+  classifyCandidateSetSufficiency,
+} from "../src/benchmark/sufficiency-diagnostic.js";
+import { rankLexical } from "../src/retrieval/lexical.js";
+import { PUBLIC_TOOL_NAMES } from "../src/server.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -146,7 +134,7 @@ function mkPerQuery(
     rank1?: boolean;
     currentTruthAt1?: boolean;
     hitAt5?: boolean;
-  }>,
+  }>
 ): NoAnswerPolicyPerQuery[] {
   return specs.map((s) => {
     const signals: AbstentionSignals = {
@@ -228,11 +216,7 @@ function queryById(id: string): BenchmarkQuery {
   return q;
 }
 
-function evalFrom(
-  q: BenchmarkQuery,
-  topIds: number[],
-  topScores: number[],
-): QueryEval {
+function evalFrom(q: BenchmarkQuery, topIds: number[], topScores: number[]): QueryEval {
   return evaluateQuery(
     q.id,
     q.family,
@@ -240,7 +224,7 @@ function evalFrom(
     q.expectedIds,
     q.currentTruthIds,
     topIds,
-    topScores,
+    topScores
   );
 }
 
@@ -262,7 +246,7 @@ test("false-abstention-damage: DAMAGE_CATEGORIES is the documented stable set", 
       "multi-gate-conjunction-honest",
       "labeled-oracle-misclassification",
       "unclassified",
-    ],
+    ]
   );
   // Every category has a non-empty
   // explanation (the per-FP entry's
@@ -287,7 +271,7 @@ test("false-abstention-damage: DAMAGE_CATEGORIES is the documented stable set", 
       rank1: true,
       hitAt5: true,
     },
-    pq,
+    pq
   );
   // score-below-0.3 + rank1=true -> recoverable
   assert.equal(cat, "score-threshold-on-recoverable");
@@ -316,7 +300,7 @@ test("false-abstention-damage: SCORE_BANDS table is the documented stable set", 
   assert.equal(SCORE_BANDS[4]!.max, 0.75);
   assert.equal(SCORE_BANDS[5]!.label, "topScore>=0.75");
   assert.equal(SCORE_BANDS[5]!.min, 0.75);
-  assert.equal(SCORE_BANDS[5]!.max, Infinity);
+  assert.equal(SCORE_BANDS[5]!.max, Number.POSITIVE_INFINITY);
 });
 
 // ---------------------------------------------------------------------------
@@ -350,7 +334,7 @@ test("false-abstention-damage: ranker-empty-recoverable when ranker returned 0 c
       rank1: false,
       hitAt5: false,
     },
-    pq,
+    pq
   );
   assert.equal(cat, "ranker-empty-recoverable");
 });
@@ -383,7 +367,7 @@ test("false-abstention-damage: score-threshold-on-recoverable when rank-1 was ri
       rank1: true,
       hitAt5: true,
     },
-    pq,
+    pq
   );
   assert.equal(cat, "score-threshold-on-recoverable");
 });
@@ -418,7 +402,7 @@ test("false-abstention-damage: score-threshold-on-recoverable also fires on hit@
       rank1: false,
       hitAt5: true,
     },
-    pq,
+    pq
   );
   assert.equal(cat, "score-threshold-on-recoverable");
 });
@@ -448,7 +432,7 @@ test("false-abstention-damage: score-threshold-on-real-failure when ranker faile
       rank1: false,
       hitAt5: false,
     },
-    pq,
+    pq
   );
   // topScore=0, returnedCount=4, topKSize=4
   // -> NOT empty (returnedCount > 0), so
@@ -480,7 +464,7 @@ test("false-abstention-damage: sufficiency-label-honest when only the label gate
       rank1: false,
       hitAt5: false,
     },
-    pq,
+    pq
   );
   assert.equal(cat, "sufficiency-label-honest");
 });
@@ -503,12 +487,11 @@ test("false-abstention-damage: multi-gate-conjunction-honest when both fired", (
     {
       queryId: "q",
       family: "paraphrase",
-      reason:
-        "score-below-0.3+sufficiency-in-insufficient|confabulation",
+      reason: "score-below-0.3+sufficiency-in-insufficient|confabulation",
       rank1: false,
       hitAt5: false,
     },
-    pq,
+    pq
   );
   assert.equal(cat, "multi-gate-conjunction-honest");
 });
@@ -541,7 +524,7 @@ test("false-abstention-damage: labeled-near-miss-or-divergent on fixture labels"
       hitAt5: false,
       queryLabels: ["nearMissCurrentCluster"],
     },
-    pq,
+    pq
   );
   assert.equal(cat, "labeled-near-miss-or-divergent");
 });
@@ -567,7 +550,7 @@ test("false-abstention-damage: labeled-near-miss-or-divergent on divergentTempor
       hitAt5: true,
       queryLabels: ["divergentTemporal"],
     },
-    pq,
+    pq
   );
   assert.equal(cat, "labeled-near-miss-or-divergent");
 });
@@ -605,7 +588,7 @@ test("false-abstention-damage: labeled-oracle-misclassification on hardNegative"
       hitAt5: true,
       queryLabels: ["hardNegative"],
     },
-    pq,
+    pq
   );
   // Note: the family is "no-answer" but
   // isPositive=true, so this is a
@@ -651,7 +634,7 @@ test("false-abstention-damage: priority order — ranker-empty beats score-thres
       rank1: true,
       hitAt5: true,
     },
-    pq,
+    pq
   );
   assert.equal(cat, "ranker-empty-recoverable");
 });
@@ -782,9 +765,7 @@ test("false-abstention-damage: per-category summary aggregates counts and rates"
   // The per-category summary is sorted by
   // count descending; ties broken by
   // DAMAGE_CATEGORIES order.
-  const counts = report.categorySummary.map(
-    (c) => [c.category, c.count] as const,
-  );
+  const counts = report.categorySummary.map((c) => [c.category, c.count] as const);
   // Each of the 4 FPs lands in a different
   // category.
   for (const cat of [
@@ -880,27 +861,15 @@ test("false-abstention-damage: per-family per-category cross-tab is correct", ()
   // (sort-by-name).
   assert.equal(report.familyBreakdown[0]!.family, "orientation");
   assert.equal(report.familyBreakdown[0]!.count, 1);
-  assert.equal(
-    report.familyBreakdown[0]!.byCategory["sufficiency-label-honest"],
-    1,
-  );
+  assert.equal(report.familyBreakdown[0]!.byCategory["sufficiency-label-honest"], 1);
   assert.equal(report.familyBreakdown[1]!.family, "paraphrase");
   assert.equal(report.familyBreakdown[1]!.count, 3);
   // p1 -> ranker-empty-recoverable
   // p2 -> score-threshold-on-recoverable
   // p3 -> multi-gate-conjunction-honest (both gates fired)
-  assert.equal(
-    report.familyBreakdown[1]!.byCategory["ranker-empty-recoverable"],
-    1,
-  );
-  assert.equal(
-    report.familyBreakdown[1]!.byCategory["score-threshold-on-recoverable"],
-    1,
-  );
-  assert.equal(
-    report.familyBreakdown[1]!.byCategory["multi-gate-conjunction-honest"],
-    1,
-  );
+  assert.equal(report.familyBreakdown[1]!.byCategory["ranker-empty-recoverable"], 1);
+  assert.equal(report.familyBreakdown[1]!.byCategory["score-threshold-on-recoverable"], 1);
+  assert.equal(report.familyBreakdown[1]!.byCategory["multi-gate-conjunction-honest"], 1);
 });
 
 test("false-abstention-damage: per-score-band per-category cross-tab is correct", () => {
@@ -966,24 +935,15 @@ test("false-abstention-damage: per-score-band per-category cross-tab is correct"
   assert.equal(report.scoreBandBreakdown.length, 6);
   assert.equal(report.scoreBandBreakdown[0]!.band, "topScore<0.10");
   assert.equal(report.scoreBandBreakdown[0]!.count, 1);
-  assert.equal(
-    report.scoreBandBreakdown[0]!.byCategory["ranker-empty-recoverable"],
-    1,
-  );
+  assert.equal(report.scoreBandBreakdown[0]!.byCategory["ranker-empty-recoverable"], 1);
   assert.equal(report.scoreBandBreakdown[1]!.band, "0.10<=topScore<0.20");
   assert.equal(report.scoreBandBreakdown[1]!.count, 0);
   assert.equal(report.scoreBandBreakdown[2]!.band, "0.20<=topScore<0.30");
   assert.equal(report.scoreBandBreakdown[2]!.count, 1);
-  assert.equal(
-    report.scoreBandBreakdown[2]!.byCategory["score-threshold-on-recoverable"],
-    1,
-  );
+  assert.equal(report.scoreBandBreakdown[2]!.byCategory["score-threshold-on-recoverable"], 1);
   assert.equal(report.scoreBandBreakdown[3]!.band, "0.30<=topScore<0.50");
   assert.equal(report.scoreBandBreakdown[3]!.count, 1);
-  assert.equal(
-    report.scoreBandBreakdown[3]!.byCategory["sufficiency-label-honest"],
-    1,
-  );
+  assert.equal(report.scoreBandBreakdown[3]!.byCategory["sufficiency-label-honest"], 1);
   assert.equal(report.scoreBandBreakdown[4]!.band, "0.50<=topScore<0.75");
   assert.equal(report.scoreBandBreakdown[4]!.count, 1);
   assert.equal(report.scoreBandBreakdown[5]!.band, "topScore>=0.75");
@@ -1160,7 +1120,7 @@ test("false-abstention-damage: report is deterministic for the same input", () =
   });
   // Strip the wall-clock `generatedAt` field.
   const stripTimestamp = (
-    r: FalseAbstentionDamageReport,
+    r: FalseAbstentionDamageReport
   ): Omit<FalseAbstentionDamageReport, "generatedAt"> => {
     const { generatedAt: _unused, ...rest } = r;
     void _unused;
@@ -1246,16 +1206,13 @@ test("false-abstention-damage: per-FP entry has a non-empty categoryExplanation"
   for (const e of report.entries) {
     assert.ok(
       e.categoryExplanation.length > 0,
-      `entry ${e.queryId} categoryExplanation must be non-empty`,
+      `entry ${e.queryId} categoryExplanation must be non-empty`
     );
   }
   // The category summary rows have
   // explanations too.
   for (const c of report.categorySummary) {
-    assert.ok(
-      c.explanation.length > 0,
-      `category ${c.category} explanation must be non-empty`,
-    );
+    assert.ok(c.explanation.length > 0, `category ${c.category} explanation must be non-empty`);
   }
 });
 
@@ -1275,7 +1232,16 @@ test("false-abstention-damage: end-to-end on the lexical baseline no-answer arti
   const corpusTokenSets = buildCorpusTokenSets(BENCHMARK_RECORDS);
   const evals: QueryEval[] = [];
   const signalsByQueryId = new Map<string, AbstentionSignals>();
-  const sufficiencyLabelByQueryId = new Map<string, "sufficient" | "partial" | "insufficient" | "wrong-current-truth" | "near-miss" | "confabulation" | "no-answer-correct">();
+  const sufficiencyLabelByQueryId = new Map<
+    string,
+    | "sufficient"
+    | "partial"
+    | "insufficient"
+    | "wrong-current-truth"
+    | "near-miss"
+    | "confabulation"
+    | "no-answer-correct"
+  >();
   const labelsByQueryId = new Map<string, string[]>();
   for (const q of BENCHMARK_QUERIES) {
     const ranked = rankLexical(q.query, candidates, {
@@ -1291,7 +1257,7 @@ test("false-abstention-damage: end-to-end on the lexical baseline no-answer arti
       q.expectedIds,
       q.currentTruthIds,
       topIds,
-      topScores,
+      topScores
     );
     evals.push(e);
     const flags = detectQueryShape(q, corpusTokenSets);
@@ -1318,25 +1284,18 @@ test("false-abstention-damage: end-to-end on the lexical baseline no-answer arti
   }
   // Build the no-answer report for the
   // production-like candidate.
-  const noAnswerPolicy = findPolicy(
-    "score-or-sufficiency-insufficient",
-  );
+  const noAnswerPolicy = findPolicy("score-or-sufficiency-insufficient");
   const perQuery = buildNoAnswerPolicyPerQuery({
     evals,
     signalsByQueryId,
     sufficiencyLabelByQueryId,
     labelsByQueryId,
   });
-  const noAnswerDecisions = evaluateNoAnswerPolicy(
-    noAnswerPolicy,
-    perQuery,
-  );
+  const noAnswerDecisions = evaluateNoAnswerPolicy(noAnswerPolicy, perQuery);
   // The 30 FPs are the positive queries
   // the policy abstained on. Sanity-check
   // the count.
-  const fpCount = noAnswerDecisions.filter(
-    (d) => d.abstain && d.isPositive,
-  ).length;
+  const fpCount = noAnswerDecisions.filter((d) => d.abstain && d.isPositive).length;
   assert.equal(fpCount, 30);
   // Run the damage report.
   const report = buildFalseAbstentionDamageReport({
@@ -1366,12 +1325,10 @@ test("false-abstention-damage: end-to-end on the lexical baseline no-answer arti
   // The category summary is non-trivial:
   // at least the 4 priority-2..5
   // categories should be populated.
-  const populated = report.categorySummary.filter(
-    (c) => c.count > 0,
-  );
+  const populated = report.categorySummary.filter((c) => c.count > 0);
   assert.ok(
     populated.length >= 2,
-    `expected at least 2 populated categories, got ${populated.length}`,
+    `expected at least 2 populated categories, got ${populated.length}`
   );
   // Honest reading: a non-zero fraction
   // of the damage must be in
@@ -1379,21 +1336,15 @@ test("false-abstention-damage: end-to-end on the lexical baseline no-answer arti
   // `multi-gate-conjunction-honest` (the
   // "ranker genuinely failed" reading).
   const honestDamage =
-    (report.categorySummary.find(
-      (c) => c.category === "sufficiency-label-honest",
-    )?.count ?? 0) +
-    (report.categorySummary.find(
-      (c) => c.category === "multi-gate-conjunction-honest",
-    )?.count ?? 0) +
-    (report.categorySummary.find(
-      (c) => c.category === "score-threshold-on-real-failure",
-    )?.count ?? 0) +
-    (report.categorySummary.find(
-      (c) => c.category === "ranker-empty-recoverable",
-    )?.count ?? 0);
+    (report.categorySummary.find((c) => c.category === "sufficiency-label-honest")?.count ?? 0) +
+    (report.categorySummary.find((c) => c.category === "multi-gate-conjunction-honest")?.count ??
+      0) +
+    (report.categorySummary.find((c) => c.category === "score-threshold-on-real-failure")?.count ??
+      0) +
+    (report.categorySummary.find((c) => c.category === "ranker-empty-recoverable")?.count ?? 0);
   assert.ok(
     honestDamage > 0,
-    "expected at least one 'honest damage' category to be populated on the lexical baseline",
+    "expected at least one 'honest damage' category to be populated on the lexical baseline"
   );
   // The `score-threshold-on-recoverable`
   // category captures the rank-1-was-right
@@ -1402,30 +1353,20 @@ test("false-abstention-damage: end-to-end on the lexical baseline no-answer arti
   // para-review-style, para-secret-handling,
   // multi-security-posture).
   const recoverableCount =
-    report.categorySummary.find(
-      (c) => c.category === "score-threshold-on-recoverable",
-    )?.count ?? 0;
+    report.categorySummary.find((c) => c.category === "score-threshold-on-recoverable")?.count ?? 0;
   assert.ok(
     recoverableCount >= 1,
-    `expected at least one score-threshold-on-recoverable FP, got ${recoverableCount}`,
+    `expected at least one score-threshold-on-recoverable FP, got ${recoverableCount}`
   );
   // The category summary sums to 30.
-  const total = report.categorySummary.reduce(
-    (a, c) => a + c.count,
-    0,
-  );
+  const total = report.categorySummary.reduce((a, c) => a + c.count, 0);
   assert.equal(total, 30);
   // The per-score-band breakdown is
   // non-trivial: the lexical baseline's
   // score distribution is concentrated
   // in the 0.20-0.30 band.
-  const bandWithMost = report.scoreBandBreakdown.reduce(
-    (a, b) => (b.count > a.count ? b : a),
-  );
-  assert.ok(
-    bandWithMost.count > 0,
-    "at least one score band must be populated",
-  );
+  const bandWithMost = report.scoreBandBreakdown.reduce((a, b) => (b.count > a.count ? b : a));
+  assert.ok(bandWithMost.count > 0, "at least one score band must be populated");
   // The human report renders without
   // error.
   const text = formatFalseAbstentionDamageReport(report);
@@ -1447,7 +1388,16 @@ test("false-abstention-damage: end-to-end with semantic evidence annotates 30 FP
   const corpusTokenSets = buildCorpusTokenSets(BENCHMARK_RECORDS);
   const evals: QueryEval[] = [];
   const signalsByQueryId = new Map<string, AbstentionSignals>();
-  const sufficiencyLabelByQueryId = new Map<string, "sufficient" | "partial" | "insufficient" | "wrong-current-truth" | "near-miss" | "confabulation" | "no-answer-correct">();
+  const sufficiencyLabelByQueryId = new Map<
+    string,
+    | "sufficient"
+    | "partial"
+    | "insufficient"
+    | "wrong-current-truth"
+    | "near-miss"
+    | "confabulation"
+    | "no-answer-correct"
+  >();
   const labelsByQueryId = new Map<string, string[]>();
   for (const q of BENCHMARK_QUERIES) {
     const ranked = rankLexical(q.query, candidates, {
@@ -1463,7 +1413,7 @@ test("false-abstention-damage: end-to-end with semantic evidence annotates 30 FP
       q.expectedIds,
       q.currentTruthIds,
       topIds,
-      topScores,
+      topScores
     );
     evals.push(e);
     const flags = detectQueryShape(q, corpusTokenSets);
@@ -1499,13 +1449,10 @@ test("false-abstention-damage: end-to-end with semantic evidence annotates 30 FP
   const evidencePath = path.join(
     import.meta.dirname,
     "..",
-    "src/benchmark/data/false-abstention-damage-semantic-evidence.json",
+    "src/benchmark/data/false-abstention-damage-semantic-evidence.json"
   );
   const semantic = readSemanticEvidenceFile(evidencePath);
-  assert.ok(
-    semantic.byQueryId.size > 0,
-    "pre-computed semantic evidence must be non-empty",
-  );
+  assert.ok(semantic.byQueryId.size > 0, "pre-computed semantic evidence must be non-empty");
   const report = buildFalseAbstentionDamageReport({
     recordCount: BENCHMARK_RECORDS.length,
     perQuery,
@@ -1513,10 +1460,7 @@ test("false-abstention-damage: end-to-end with semantic evidence annotates 30 FP
   });
   // Rollup is present.
   assert.ok(report.semanticRollup);
-  assert.equal(
-    report.semanticRollup!.evidenceSource,
-    "embeddinggemma-hybrid-dense-176-queries-v1",
-  );
+  assert.equal(report.semanticRollup!.evidenceSource, "embeddinggemma-hybrid-dense-176-queries-v1");
   // The total FPs are 30.
   assert.equal(report.config.falseAbstainedTotal, 30);
   // The 30 FPs are the lexical-baseline
@@ -1524,20 +1468,17 @@ test("false-abstention-damage: end-to-end with semantic evidence annotates 30 FP
   // evidence should cover most of them
   // (the rank-1 misses are 41 in total;
   // the FPs are a subset).
-  const annotated = report.entries.filter(
-    (e) => e.semanticRecoverable !== undefined,
-  ).length;
+  const annotated = report.entries.filter((e) => e.semanticRecoverable !== undefined).length;
   assert.ok(
     annotated >= 20,
-    `expected at least 20 of 30 FPs to be in the semantic evidence map, got ${annotated}`,
+    `expected at least 20 of 30 FPs to be in the semantic evidence map, got ${annotated}`
   );
   // The honest finding: most FPs are
   // `also-miss` on the dense path. The
   // small recoverable set is the rank-1-
   // was-right cases (and possibly some
   // `uncovered` cases).
-  const recoverable =
-    report.semanticRollup!.recoverable;
+  const recoverable = report.semanticRollup!.recoverable;
   const alsoMisses = report.semanticRollup!.alsoMisses;
   // Pin the headline finding: of the
   // annotated FPs, the vast majority are
@@ -1546,7 +1487,7 @@ test("false-abstention-damage: end-to-end with semantic evidence annotates 30 FP
   // (the rank-1-was-right cases).
   assert.ok(
     alsoMisses > recoverable,
-    `expected also-misses > recoverable (the dense path cannot recover the ranker-failed cases), got also-miss=${alsoMisses} recoverable=${recoverable}`,
+    `expected also-misses > recoverable (the dense path cannot recover the ranker-failed cases), got also-miss=${alsoMisses} recoverable=${recoverable}`
   );
   // The recoverable set is at least 1
   // (the rank-1-was-right cases like
@@ -1555,7 +1496,7 @@ test("false-abstention-damage: end-to-end with semantic evidence annotates 30 FP
   // (30).
   assert.ok(
     recoverable >= 1 && recoverable <= 30,
-    `recoverable count must be in [1, 30], got ${recoverable}`,
+    `recoverable count must be in [1, 30], got ${recoverable}`
   );
 });
 
@@ -1641,10 +1582,7 @@ test("false-abstention-damage: findMostRecentArtifact picks the newest by mtime"
     const future = new Date(Date.now() + 60_000);
     fs.writeFileSync(b, "{}", "utf8");
     fs.utimesSync(b, future, future);
-    const newest = findMostRecentArtifact(
-      dir,
-      "retrieval-no-answer-abstention-",
-    );
+    const newest = findMostRecentArtifact(dir, "retrieval-no-answer-abstention-");
     assert.equal(newest, b);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -1681,15 +1619,9 @@ test("false-abstention-damage: parseFalseAbstentionDamageCliArgs handles empty a
 });
 
 test("false-abstention-damage: parseFalseAbstentionDamageCliArgs ignores unknown flags", () => {
-  const args = parseFalseAbstentionDamageCliArgs([
-    "--unknown-flag",
-    "--no-write",
-  ]);
+  const args = parseFalseAbstentionDamageCliArgs(["--unknown-flag", "--no-write"]);
   assert.equal(args.noWrite, true);
-  assert.equal(
-    (args as Record<string, unknown>)["unknownFlag"],
-    undefined,
-  );
+  assert.equal((args as Record<string, unknown>)["unknownFlag"], undefined);
 });
 
 test("false-abstention-damage: readSemanticEvidenceFile validates the shape", () => {
@@ -1703,7 +1635,7 @@ test("false-abstention-damage: readSemanticEvidenceFile validates the shape", ()
         source: "test-v1",
         byQueryId: { q1: "hit", q2: "miss" },
       }),
-      "utf8",
+      "utf8"
     );
     const parsed = readSemanticEvidenceFile(valid);
     assert.equal(parsed.source, "test-v1");
@@ -1711,11 +1643,7 @@ test("false-abstention-damage: readSemanticEvidenceFile validates the shape", ()
     assert.equal(parsed.byQueryId.get("q2"), "miss");
     // Missing source -> throws.
     const noSource = path.join(dir, "nosource.json");
-    fs.writeFileSync(
-      noSource,
-      JSON.stringify({ byQueryId: {} }),
-      "utf8",
-    );
+    fs.writeFileSync(noSource, JSON.stringify({ byQueryId: {} }), "utf8");
     assert.throws(() => readSemanticEvidenceFile(noSource));
     // Bad value -> throws.
     const badValue = path.join(dir, "badvalue.json");
@@ -1725,7 +1653,7 @@ test("false-abstention-damage: readSemanticEvidenceFile validates the shape", ()
         source: "test-v1",
         byQueryId: { q1: "wrong" },
       }),
-      "utf8",
+      "utf8"
     );
     assert.throws(() => readSemanticEvidenceFile(badValue));
   } finally {
@@ -1744,7 +1672,16 @@ test("false-abstention-damage: runFalseAbstentionDamageCli round-trips a report"
   const corpusTokenSets = buildCorpusTokenSets(BENCHMARK_RECORDS);
   const evals: QueryEval[] = [];
   const signalsByQueryId = new Map<string, AbstentionSignals>();
-  const sufficiencyLabelByQueryId = new Map<string, "sufficient" | "partial" | "insufficient" | "wrong-current-truth" | "near-miss" | "confabulation" | "no-answer-correct">();
+  const sufficiencyLabelByQueryId = new Map<
+    string,
+    | "sufficient"
+    | "partial"
+    | "insufficient"
+    | "wrong-current-truth"
+    | "near-miss"
+    | "confabulation"
+    | "no-answer-correct"
+  >();
   const labelsByQueryId = new Map<string, string[]>();
   for (const q of BENCHMARK_QUERIES) {
     const ranked = rankLexical(q.query, candidates, {
@@ -1760,7 +1697,7 @@ test("false-abstention-damage: runFalseAbstentionDamageCli round-trips a report"
       q.expectedIds,
       q.currentTruthIds,
       topIds,
-      topScores,
+      topScores
     );
     evals.push(e);
     const flags = detectQueryShape(q, corpusTokenSets);
@@ -1799,13 +1736,9 @@ test("false-abstention-damage: runFalseAbstentionDamageCli round-trips a report"
   try {
     const noAnswerFile = path.join(
       dir,
-      "retrieval-no-answer-abstention-2026-06-13T00-00-00-000Z.json",
+      "retrieval-no-answer-abstention-2026-06-13T00-00-00-000Z.json"
     );
-    fs.writeFileSync(
-      noAnswerFile,
-      JSON.stringify(noAnswerReport),
-      "utf8",
-    );
+    fs.writeFileSync(noAnswerFile, JSON.stringify(noAnswerReport), "utf8");
     // Capture stdout / stderr.
     const realStdoutWrite = process.stdout.write.bind(process.stdout);
     const realStderrWrite = process.stderr.write.bind(process.stderr);
@@ -1850,7 +1783,7 @@ test("false-abstention-damage: runFalseAbstentionDamageCli throws on unknown pol
   try {
     const noAnswerFile = path.join(
       dir,
-      "retrieval-no-answer-abstention-2026-06-13T00-00-00-000Z.json",
+      "retrieval-no-answer-abstention-2026-06-13T00-00-00-000Z.json"
     );
     fs.writeFileSync(
       noAnswerFile,
@@ -1871,20 +1804,17 @@ test("false-abstention-damage: runFalseAbstentionDamageCli throws on unknown pol
           },
         ],
       }),
-      "utf8",
+      "utf8"
     );
-    await assert.rejects(
-      async () => {
-        await runFalseAbstentionDamageCli({
-          noAnswerArtifact: noAnswerFile,
-          outDir: dir,
-          policyId: "this-policy-does-not-exist",
-          noStdout: true,
-          noWrite: true,
-        });
-      },
-      /this-policy-does-not-exist/,
-    );
+    await assert.rejects(async () => {
+      await runFalseAbstentionDamageCli({
+        noAnswerArtifact: noAnswerFile,
+        outDir: dir,
+        policyId: "this-policy-does-not-exist",
+        noStdout: true,
+        noWrite: true,
+      });
+    }, /this-policy-does-not-exist/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -1955,7 +1885,7 @@ test("false-abstention-damage: production source tree must NOT import the diagno
     assert.doesNotMatch(
       src,
       /false-abstention-damage/,
-      `${rel} must NOT import the false-abstention damage diagnostic module`,
+      `${rel} must NOT import the false-abstention damage diagnostic module`
     );
   }
 });
@@ -1964,7 +1894,7 @@ test("false-abstention-damage: public MCP API is unchanged (remember + recall on
   assert.deepEqual(
     [...PUBLIC_TOOL_NAMES],
     ["remember", "recall"],
-    "public MCP tool surface must remain exactly remember + recall",
+    "public MCP tool surface must remain exactly remember + recall"
   );
 });
 
@@ -1979,11 +1909,7 @@ test("false-abstention-damage: existing report shapes are unchanged", () => {
   // disturb the existing report
   // contracts.
   const lex = runRetrievalBenchmark({ variant: "lexical" });
-  const lexDiag = buildSufficiencyReport(
-    "lexical",
-    lex.evals,
-    BENCHMARK_QUERIES,
-  );
+  const lexDiag = buildSufficiencyReport("lexical", lex.evals, BENCHMARK_QUERIES);
   // Diagnostic shape is unchanged.
   assert.equal(lexDiag.variant, "lexical");
   assert.equal(lexDiag.diagnostics.length, BENCHMARK_QUERIES.length);
@@ -1995,10 +1921,7 @@ test("false-abstention-damage: existing report shapes are unchanged", () => {
     "no-answer",
     "orientation",
   ] as const) {
-    assert.ok(
-      lexDiag.perFamily[family],
-      `diagnostic per-family missing ${family}`,
-    );
+    assert.ok(lexDiag.perFamily[family], `diagnostic per-family missing ${family}`);
   }
   // The no-answer experiment shape is
   // unchanged.
@@ -2006,7 +1929,16 @@ test("false-abstention-damage: existing report shapes are unchanged", () => {
   const corpusTokenSets = buildCorpusTokenSets(BENCHMARK_RECORDS);
   const evals: QueryEval[] = [];
   const signalsByQueryId = new Map<string, AbstentionSignals>();
-  const sufficiencyLabelByQueryId = new Map<string, "sufficient" | "partial" | "insufficient" | "wrong-current-truth" | "near-miss" | "confabulation" | "no-answer-correct">();
+  const sufficiencyLabelByQueryId = new Map<
+    string,
+    | "sufficient"
+    | "partial"
+    | "insufficient"
+    | "wrong-current-truth"
+    | "near-miss"
+    | "confabulation"
+    | "no-answer-correct"
+  >();
   const labelsByQueryId = new Map<string, string[]>();
   for (const q of BENCHMARK_QUERIES) {
     const ranked = rankLexical(q.query, candidates, {
@@ -2022,7 +1954,7 @@ test("false-abstention-damage: existing report shapes are unchanged", () => {
       q.expectedIds,
       q.currentTruthIds,
       topIds,
-      topScores,
+      topScores
     );
     evals.push(e);
     const flags = detectQueryShape(q, corpusTokenSets);
@@ -2057,14 +1989,11 @@ test("false-abstention-damage: existing report shapes are unchanged", () => {
     recordCount: BENCHMARK_RECORDS.length,
     perQuery,
   });
-  assert.equal(
-    noAnswerReport.config.total,
-    BENCHMARK_QUERIES.length,
-  );
+  assert.equal(noAnswerReport.config.total, BENCHMARK_QUERIES.length);
   // The production-like candidate row is
   // unchanged.
   const candidate = noAnswerReport.policies.find(
-    (p) => p.policyId === "score-or-sufficiency-insufficient",
+    (p) => p.policyId === "score-or-sufficiency-insufficient"
   );
   assert.ok(candidate);
   assert.equal(candidate!.category, "production-like");
@@ -2116,13 +2045,13 @@ test("false-abstention-damage: the diagnostic is framed as fixture-shaped, not d
   // mentions "fixture" or "deliberately"
   // (the honest framing).
   const nearMiss = report.categorySummary.find(
-    (c) => c.category === "labeled-near-miss-or-divergent",
+    (c) => c.category === "labeled-near-miss-or-divergent"
   );
   assert.ok(nearMiss);
   assert.match(
     nearMiss!.explanation,
     /fixture|adversarial/,
-    `labeled-near-miss-or-divergent explanation must mention "fixture" or "adversarial" honestly`,
+    `labeled-near-miss-or-divergent explanation must mention "fixture" or "adversarial" honestly`
   );
   // The per-FP entry's
   // `categoryExplanation` also carries
@@ -2131,7 +2060,7 @@ test("false-abstention-damage: the diagnostic is framed as fixture-shaped, not d
   assert.match(
     q1.categoryExplanation,
     /fixture|adversarial/,
-    `per-FP explanation must mention "fixture" or "adversarial" honestly`,
+    `per-FP explanation must mention "fixture" or "adversarial" honestly`
   );
 });
 
@@ -2178,7 +2107,7 @@ test("false-abstention-damage: per-FP entry has the documented shape", () => {
   for (const f of expectedFields) {
     assert.ok(
       f in entry,
-      `entry must have field '${String(f)}', got keys: ${Object.keys(entry).join(", ")}`,
+      `entry must have field '${String(f)}', got keys: ${Object.keys(entry).join(", ")}`
     );
   }
   // `sufficiencyLabel` and `queryLabels`
@@ -2229,32 +2158,17 @@ test("false-abstention-damage: reuses the prior experiment's evaluator without m
   // (the source of truth).
   assert.equal(report.decisions.length, priorDecisions.length);
   for (let i = 0; i < report.decisions.length; i++) {
-    assert.equal(
-      report.decisions[i]!.queryId,
-      priorDecisions[i]!.queryId,
-    );
-    assert.equal(
-      report.decisions[i]!.abstain,
-      priorDecisions[i]!.abstain,
-    );
-    assert.equal(
-      report.decisions[i]!.reason,
-      priorDecisions[i]!.reason,
-    );
+    assert.equal(report.decisions[i]!.queryId, priorDecisions[i]!.queryId);
+    assert.equal(report.decisions[i]!.abstain, priorDecisions[i]!.abstain);
+    assert.equal(report.decisions[i]!.reason, priorDecisions[i]!.reason);
   }
   // The `computeNoAnswerPolicyMetrics`
   // helper is reusable; pin the
   // contract that the prior experiment's
   // positive-abstained count matches the
   // damage report's `falseAbstainedTotal`.
-  const priorMetrics = computeNoAnswerPolicyMetrics(
-    policy,
-    priorDecisions,
-  );
-  assert.equal(
-    report.config.falseAbstainedTotal,
-    priorMetrics.positiveAbstained,
-  );
+  const priorMetrics = computeNoAnswerPolicyMetrics(policy, priorDecisions);
+  assert.equal(report.config.falseAbstainedTotal, priorMetrics.positiveAbstained);
 });
 
 // `reconstructPerQuery` is a thin helper
@@ -2291,10 +2205,7 @@ test("false-abstention-damage: reconstructPerQuery preserves the per-query shape
       },
     ],
   };
-  const out = reconstructPerQuery(
-    fakeArtifact,
-    "score-or-sufficiency-insufficient",
-  );
+  const out = reconstructPerQuery(fakeArtifact, "score-or-sufficiency-insufficient");
   assert.equal(out.length, 1);
   assert.equal(out[0]!.queryId, "q1");
   assert.equal(out[0]!.family, "paraphrase");
@@ -2358,6 +2269,6 @@ test("false-abstention-damage: runFalseAbstentionDamageAnalysis throws on unknow
         noAnswerArtifact: fakeArtifact,
         policyId: "this-policy-does-not-exist",
       }),
-    /this-policy-does-not-exist/,
+    /this-policy-does-not-exist/
   );
 });

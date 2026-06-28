@@ -218,13 +218,13 @@
 // Imports
 // ---------------------------------------------------------------------------
 
-import type { BenchmarkQuery } from "./queries.js";
 import type { QueryEval } from "./metrics.js";
+import type { BenchmarkQuery } from "./queries.js";
 import { STALE_TEMPORAL_IDS } from "./temporal-truth-diagnostic.js";
 import {
-  classifyTemporalTruthFailure,
-  type TemporalTruthCategory,
   TEMPORAL_TRUTH_CATEGORIES,
+  type TemporalTruthCategory,
+  classifyTemporalTruthFailure,
 } from "./temporal-truth-diagnostic.js";
 
 // ---------------------------------------------------------------------------
@@ -294,13 +294,15 @@ export type TemporalRerankRule =
   | { kind: "oracle-current-truth-promote-first-only" }
   | { kind: "fixture-shaped-stale-demote" }
   | { kind: "fixture-shaped-stale-demote-current-promote" }
-  | { kind: "mild-heuristic-temporal-current"; /** The narrow embedded "stale-like" set the
-   * runtime detector uses. The set is a NARROW subset
-   * of the legacy cluster + docs-team release. The
-   * default is a documented constant
-   * (`DEFAULT_MILD_HEURISTIC_STALE_IDS`); a future
-   * variant can override it. */
-  staleLikeIds: ReadonlySet<number> };
+  | {
+      kind: "mild-heuristic-temporal-current" /** The narrow embedded "stale-like" set the
+       * runtime detector uses. The set is a NARROW subset
+       * of the legacy cluster + docs-team release. The
+       * default is a documented constant
+       * (`DEFAULT_MILD_HEURISTIC_STALE_IDS`); a future
+       * variant can override it. */;
+      staleLikeIds: ReadonlySet<number>;
+    };
 
 /**
  * The default "stale-like" set the
@@ -372,58 +374,57 @@ export interface TemporalRerankVariant {
  * are fixture-shaped variants. The last is the
  * production-like mild-heuristic variant.
  */
-export const BUILTIN_TEMPORAL_RERANK_VARIANTS: ReadonlyArray<TemporalRerankVariant> =
-  [
-    // ---- Baseline (no re-rank) ----
-    {
-      id: "baseline-no-rerank",
-      description:
-        "Baseline: no re-ranking. The lexical baseline's existing top-K order is used as-is. The reference row; production-like. This is the row a production deployment would use today.",
-      category: "production-like",
-      rule: { kind: "none" },
+export const BUILTIN_TEMPORAL_RERANK_VARIANTS: ReadonlyArray<TemporalRerankVariant> = [
+  // ---- Baseline (no re-rank) ----
+  {
+    id: "baseline-no-rerank",
+    description:
+      "Baseline: no re-ranking. The lexical baseline's existing top-K order is used as-is. The reference row; production-like. This is the row a production deployment would use today.",
+    category: "production-like",
+    rule: { kind: "none" },
+  },
+  // ---- Oracle: current-truth promotion ----
+  {
+    id: "oracle-current-truth-promote-all",
+    description:
+      "Oracle: promote every candidate whose id is in currentTruthIds to the TOP of the top-K, preserving the relative order of promoted and non-promoted candidates. Uses fixture truth (currentTruthIds). The 'if we knew which records are current, promote them all' ceiling. Clearly NOT production-like; research-only.",
+    category: "oracle",
+    rule: { kind: "oracle-current-truth-promote" },
+  },
+  {
+    id: "oracle-current-truth-promote-first-only",
+    description:
+      "Oracle: same shape as the previous variant, but promote only the FIRST currentTruthId encountered in the top-K to rank-1 (the rest of the top-K order is preserved). Tighter intervention. Research-only.",
+    category: "oracle",
+    rule: { kind: "oracle-current-truth-promote-first-only" },
+  },
+  // ---- Fixture-shaped: stale demotion ----
+  {
+    id: "fixture-shaped-stale-demote",
+    description:
+      "Fixture-shaped: demote every candidate whose id is in STALE_TEMPORAL_IDS to the BOTTOM of the top-K, preserving the relative order of demoted and non-demoted candidates. Uses the prior diagnostic's hand-curated stale-record set. Clearly NOT production-like; the stale set is fixture truth about the corpus.",
+    category: "fixture-shaped",
+    rule: { kind: "fixture-shaped-stale-demote" },
+  },
+  {
+    id: "fixture-shaped-stale-demote-current-promote",
+    description:
+      "Fixture-shaped + oracle: combination. First demote STALE_TEMPORAL_IDS candidates to the bottom, then promote currentTruthIds candidates to the top. Uses both STALE_TEMPORAL_IDS and currentTruthIds (fixture truth). The 'if we had the prior diagnostic's full stale set AND the oracle current-truth set, what's the best re-rank ceiling?' reading.",
+    category: "fixture-shaped",
+    rule: { kind: "fixture-shaped-stale-demote-current-promote" },
+  },
+  // ---- Production-like: mild heuristic ----
+  {
+    id: "mild-heuristic-temporal-current",
+    description:
+      "Production-like: research probe. If the query is flagged as a temporal-current query by the runtime isTemporalCurrent detector (the abstention-audit flag, a token-presence detector for 'current' / 'now' / 'today'), demote any candidate whose id is in the embedded narrow 'stale-like' set (legacy 21..24 + docs-team 112) to the bottom. Honest framing: the runtime signal is heuristic; the embedded set is a NARROW hand-curated subset. A reviewer who wants a deployable rule reads this row, but should not mistake the row for a production-grade recovery.",
+    category: "production-like",
+    rule: {
+      kind: "mild-heuristic-temporal-current",
+      staleLikeIds: DEFAULT_MILD_HEURISTIC_STALE_IDS,
     },
-    // ---- Oracle: current-truth promotion ----
-    {
-      id: "oracle-current-truth-promote-all",
-      description:
-        "Oracle: promote every candidate whose id is in currentTruthIds to the TOP of the top-K, preserving the relative order of promoted and non-promoted candidates. Uses fixture truth (currentTruthIds). The 'if we knew which records are current, promote them all' ceiling. Clearly NOT production-like; research-only.",
-      category: "oracle",
-      rule: { kind: "oracle-current-truth-promote" },
-    },
-    {
-      id: "oracle-current-truth-promote-first-only",
-      description:
-        "Oracle: same shape as the previous variant, but promote only the FIRST currentTruthId encountered in the top-K to rank-1 (the rest of the top-K order is preserved). Tighter intervention. Research-only.",
-      category: "oracle",
-      rule: { kind: "oracle-current-truth-promote-first-only" },
-    },
-    // ---- Fixture-shaped: stale demotion ----
-    {
-      id: "fixture-shaped-stale-demote",
-      description:
-        "Fixture-shaped: demote every candidate whose id is in STALE_TEMPORAL_IDS to the BOTTOM of the top-K, preserving the relative order of demoted and non-demoted candidates. Uses the prior diagnostic's hand-curated stale-record set. Clearly NOT production-like; the stale set is fixture truth about the corpus.",
-      category: "fixture-shaped",
-      rule: { kind: "fixture-shaped-stale-demote" },
-    },
-    {
-      id: "fixture-shaped-stale-demote-current-promote",
-      description:
-        "Fixture-shaped + oracle: combination. First demote STALE_TEMPORAL_IDS candidates to the bottom, then promote currentTruthIds candidates to the top. Uses both STALE_TEMPORAL_IDS and currentTruthIds (fixture truth). The 'if we had the prior diagnostic's full stale set AND the oracle current-truth set, what's the best re-rank ceiling?' reading.",
-      category: "fixture-shaped",
-      rule: { kind: "fixture-shaped-stale-demote-current-promote" },
-    },
-    // ---- Production-like: mild heuristic ----
-    {
-      id: "mild-heuristic-temporal-current",
-      description:
-        "Production-like: research probe. If the query is flagged as a temporal-current query by the runtime isTemporalCurrent detector (the abstention-audit flag, a token-presence detector for 'current' / 'now' / 'today'), demote any candidate whose id is in the embedded narrow 'stale-like' set (legacy 21..24 + docs-team 112) to the bottom. Honest framing: the runtime signal is heuristic; the embedded set is a NARROW hand-curated subset. A reviewer who wants a deployable rule reads this row, but should not mistake the row for a production-grade recovery.",
-      category: "production-like",
-      rule: {
-        kind: "mild-heuristic-temporal-current",
-        staleLikeIds: DEFAULT_MILD_HEURISTIC_STALE_IDS,
-      },
-    },
-  ];
+  },
+];
 
 // ---------------------------------------------------------------------------
 // Re-rank rule application
@@ -583,7 +584,7 @@ export function applyRerankRule(args: {
   throw new Error(
     `applyRerankRule: unknown rule kind "${
       (rule as { kind: string }).kind
-    }" for query "${e.queryId}"`,
+    }" for query "${e.queryId}"`
   );
 }
 
@@ -852,7 +853,7 @@ export function evaluateTemporalRerankVariant(args: {
   if (evals.length !== queries.length) {
     throw new Error(
       `evaluateTemporalRerankVariant: evals.length (${evals.length}) must match ` +
-        `queries.length (${queries.length}) for variant "${variant.id}"`,
+        `queries.length (${queries.length}) for variant "${variant.id}"`
     );
   }
 
@@ -863,7 +864,7 @@ export function evaluateTemporalRerankVariant(args: {
     if (e.queryId !== q.id) {
       throw new Error(
         `evaluateTemporalRerankVariant: evals[${i}].queryId="${e.queryId}" does ` +
-          `not match queries[${i}].id="${q.id}" for variant "${variant.id}"`,
+          `not match queries[${i}].id="${q.id}" for variant "${variant.id}"`
       );
     }
     if (q.family !== "temporal") continue; // temporal slice only
@@ -933,8 +934,7 @@ export function evaluateTemporalRerankForQuery(args: {
   // did not surface a current-truth candidate
   // either.
   const unchangedBecauseCurrentMissing =
-    baselineDiag.topKHasCurrentTruth === false &&
-    afterDiag.topKHasCurrentTruth === false;
+    baselineDiag.topKHasCurrentTruth === false && afterDiag.topKHasCurrentTruth === false;
 
   // The clean / fixture-ambiguous split is on
   // the baseline's `isDivergentLabeled` flag.
@@ -952,15 +952,13 @@ export function evaluateTemporalRerankForQuery(args: {
     baselineTop1Id: baselineDiag.top1Id,
     baselineCurrentTruthAt1: baselineDiag.top1IsCurrentTruth,
     baselineStaleTop1: baselineDiag.top1IsStale,
-    baselineStaleOverCurrent:
-      baselineDiag.top1IsStale && baselineDiag.topKHasCurrentTruth,
+    baselineStaleOverCurrent: baselineDiag.top1IsStale && baselineDiag.topKHasCurrentTruth,
     baselineCategory: baselineDiag.category,
     baselineIsDivergentLabeled: baselineDiag.isDivergentLabeled,
     afterTop1Id: afterDiag.top1Id,
     afterCurrentTruthAt1: afterDiag.top1IsCurrentTruth,
     afterStaleTop1: afterDiag.top1IsStale,
-    afterStaleOverCurrent:
-      afterDiag.top1IsStale && afterDiag.topKHasCurrentTruth,
+    afterStaleOverCurrent: afterDiag.top1IsStale && afterDiag.topKHasCurrentTruth,
     afterCategory: afterDiag.category,
     categoryChange,
     regression,
@@ -979,7 +977,7 @@ export function evaluateTemporalRerankForQuery(args: {
  * same metrics block.
  */
 export function aggregateTemporalRerankPerQuery(
-  perQuery: ReadonlyArray<TemporalRerankPerQuery>,
+  perQuery: ReadonlyArray<TemporalRerankPerQuery>
 ): TemporalRerankVariantMetrics {
   const total = perQuery.length;
   let cleanTotal = 0;
@@ -1041,40 +1039,32 @@ export function aggregateTemporalRerankPerQuery(
       afterCurrentMissing += 1;
     }
     if (p.regression) regressionCount += 1;
-    if (p.unchangedBecauseCurrentMissing)
-      unchangedBecauseCurrentMissing += 1;
+    if (p.unchangedBecauseCurrentMissing) unchangedBecauseCurrentMissing += 1;
 
     if (p.isClean) {
       if (p.baselineCurrentTruthAt1) cleanBaselineCurrentTruthAt1 += 1;
       if (p.afterCurrentTruthAt1) cleanAfterCurrentTruthAt1 += 1;
       if (p.regression) cleanRegressionCount += 1;
     } else {
-      if (p.baselineCurrentTruthAt1)
-        fixtureAmbiguousBaselineCurrentTruthAt1 += 1;
-      if (p.afterCurrentTruthAt1)
-        fixtureAmbiguousAfterCurrentTruthAt1 += 1;
+      if (p.baselineCurrentTruthAt1) fixtureAmbiguousBaselineCurrentTruthAt1 += 1;
+      if (p.afterCurrentTruthAt1) fixtureAmbiguousAfterCurrentTruthAt1 += 1;
       if (p.regression) fixtureAmbiguousRegressionCount += 1;
     }
 
-    perCategoryChange[p.categoryChange] =
-      (perCategoryChange[p.categoryChange] ?? 0) + 1;
+    perCategoryChange[p.categoryChange] = (perCategoryChange[p.categoryChange] ?? 0) + 1;
   }
 
   const safeDiv = (n: number, d: number): number => (d > 0 ? n / d : 0);
   const currentTruthAt1Delta = afterCurrentTruthAt1 - baselineCurrentTruthAt1;
   const currentTruthAt1RateDelta =
-    safeDiv(afterCurrentTruthAt1, total) -
-    safeDiv(baselineCurrentTruthAt1, total);
+    safeDiv(afterCurrentTruthAt1, total) - safeDiv(baselineCurrentTruthAt1, total);
   const staleTop1Delta = afterStaleTop1 - baselineStaleTop1;
-  const staleOverCurrentDelta =
-    afterStaleOverCurrent - baselineStaleOverCurrent;
+  const staleOverCurrentDelta = afterStaleOverCurrent - baselineStaleOverCurrent;
   const currentMissingDelta = afterCurrentMissing - baselineCurrentMissing;
 
-  const cleanCurrentTruthAt1Delta =
-    cleanAfterCurrentTruthAt1 - cleanBaselineCurrentTruthAt1;
+  const cleanCurrentTruthAt1Delta = cleanAfterCurrentTruthAt1 - cleanBaselineCurrentTruthAt1;
   const fixtureAmbiguousCurrentTruthAt1Delta =
-    fixtureAmbiguousAfterCurrentTruthAt1 -
-    fixtureAmbiguousBaselineCurrentTruthAt1;
+    fixtureAmbiguousAfterCurrentTruthAt1 - fixtureAmbiguousBaselineCurrentTruthAt1;
 
   return {
     total,
@@ -1132,9 +1122,10 @@ export function aggregateTemporalRerankPerQuery(
  *     that did not help; the report surfaces the
  *     raw numbers so a reviewer can audit.
  */
-export function computeTemporalRerankVerdict(
-  metrics: TemporalRerankVariantMetrics,
-): { verdict: TemporalRerankVerdict; note: string } {
+export function computeTemporalRerankVerdict(metrics: TemporalRerankVariantMetrics): {
+  verdict: TemporalRerankVerdict;
+  note: string;
+} {
   if (metrics.regressionCount > 0) {
     return {
       verdict: "unsafe",
@@ -1284,15 +1275,13 @@ export function buildTemporalRerankReport(args: {
   if (evals.length !== queries.length) {
     throw new Error(
       `buildTemporalRerankReport: evals.length (${evals.length}) must match ` +
-        `queries.length (${queries.length})`,
+        `queries.length (${queries.length})`
     );
   }
   // Build the per-variant rows.
   const rows: TemporalRerankVariantRow[] = [];
   for (const v of variants) {
-    rows.push(
-      buildTemporalRerankVariantRow({ variant: v, evals, queries }),
-    );
+    rows.push(buildTemporalRerankVariantRow({ variant: v, evals, queries }));
   }
   // Temporal slice size: count temporal queries
   // in the input. We count the queries the
@@ -1357,7 +1346,7 @@ export function buildTemporalRerankReport(args: {
     if (missQueries.length !== miss) {
       throw new Error(
         `buildTemporalRerankReport: semantic overlay miss mismatch ` +
-          `(${missQueries.length} vs ${miss})`,
+          `(${missQueries.length} vs ${miss})`
       );
     }
   }
@@ -1393,25 +1382,19 @@ export function buildTemporalRerankReport(args: {
  * reviewer can `diff` two runs. The function
  * is pure.
  */
-export function formatTemporalRerankReport(
-  report: TemporalRerankReport,
-): string {
+export function formatTemporalRerankReport(report: TemporalRerankReport): string {
   const out: string[] = [];
-  out.push(
-    `# Temporal ranking-preference re-ranker diagnostic (source: ${report.sourceVariant})`,
-  );
+  out.push(`# Temporal ranking-preference re-ranker diagnostic (source: ${report.sourceVariant})`);
   if (report.recordCount !== null) {
     out.push(`#   (records: ${report.recordCount})`);
   }
-  out.push(
-    `#   (temporal queries: ${report.temporalQueryCount})`,
-  );
+  out.push(`#   (temporal queries: ${report.temporalQueryCount})`);
   out.push("");
 
   out.push("## Variant table (temporal slice)");
   out.push("");
   out.push(
-    "  category | variant | n | baseline@1 | after@1 | delta | staleTop1 baseline->after | staleOverCurrent baseline->after | currentMissing baseline->after | regressions | unchanged-missing | verdict",
+    "  category | variant | n | baseline@1 | after@1 | delta | staleTop1 baseline->after | staleOverCurrent baseline->after | currentMissing baseline->after | regressions | unchanged-missing | verdict"
   );
   for (const row of report.variants) {
     const m = row.metrics;
@@ -1429,14 +1412,14 @@ export function formatTemporalRerankReport(
         `(${signedInt(m.currentMissingDelta).padStart(2)}) | ` +
         `${String(m.regressionCount).padStart(11)} | ` +
         `${String(m.unchangedBecauseCurrentMissing).padStart(18)} | ` +
-        `${row.verdict}`,
+        `${row.verdict}`
     );
   }
   out.push("");
   out.push("## Variant table (clean / fixture-ambiguous split)");
   out.push("");
   out.push(
-    "  category | variant | cleanN | cleanBaseline@1 | cleanAfter@1 | cleanDelta | cleanRegressions | ambigN | ambigBaseline@1 | ambigAfter@1 | ambigDelta | ambigRegressions",
+    "  category | variant | cleanN | cleanBaseline@1 | cleanAfter@1 | cleanDelta | cleanRegressions | ambigN | ambigBaseline@1 | ambigAfter@1 | ambigDelta | ambigRegressions"
   );
   for (const row of report.variants) {
     const m = row.metrics;
@@ -1451,7 +1434,7 @@ export function formatTemporalRerankReport(
         `${String(m.fixtureAmbiguousBaselineCurrentTruthAt1).padStart(15)} | ` +
         `${String(m.fixtureAmbiguousAfterCurrentTruthAt1).padStart(12)} | ` +
         `${signedInt(m.fixtureAmbiguousCurrentTruthAt1Delta).padStart(10)} | ` +
-        `${String(m.fixtureAmbiguousRegressionCount).padStart(17)}`,
+        `${String(m.fixtureAmbiguousRegressionCount).padStart(17)}`
     );
   }
   out.push("");
@@ -1471,7 +1454,7 @@ export function formatTemporalRerankReport(
     "  The table maps (baseline-category -> after-category) -> count for each variant. " +
       "The columns are the union of all observed change keys, sorted by count " +
       "descending. The dominant 'X -> X' diagonal is the unchanged-count; the " +
-      "off-diagonal rows are the per-variant recoveries.",
+      "off-diagonal rows are the per-variant recoveries."
   );
   out.push("");
   // For each variant, list the (change -> count)
@@ -1509,7 +1492,7 @@ export function formatTemporalRerankReport(
         "for each variant, the count is the number of baseline-miss queries " +
         "whose after-re-rank top-1 IS a currentTruthId. A non-zero count means " +
         "'the current fact was in the top-K; the re-ranker could have recovered " +
-        "it regardless of the dense ranker's miss'.",
+        "it regardless of the dense ranker's miss'."
     );
     out.push("");
     out.push("  recovered-by-variant (baseline-miss queries, after-currentTruthAt1):");
@@ -1528,7 +1511,7 @@ export function formatTemporalRerankReport(
       "is a NARROW hand-curated subset of the legacy cluster. The variant is a " +
       "research probe, not a production-grade recovery. A reviewer who wants " +
       "to reason about a deployable rule reads the production-like rows; the " +
-      "oracle / fixture-shaped rows are the research / oracle-like ceiling.",
+      "oracle / fixture-shaped rows are the research / oracle-like ceiling."
   );
   out.push("");
   return out.join("\n");

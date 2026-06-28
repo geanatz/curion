@@ -139,8 +139,7 @@ const REASONING_KEY_PATTERNS: ReadonlyArray<RegExp> = [
  * `<think>` may appear with leading whitespace, line breaks, or
  * HTML escaping; we accept the common variants conservatively.
  */
-const REASONING_BLOCK_RE: RegExp =
-  /<\s*think\s*>[\s\S]*?<\s*\/\s*think\s*>/gi;
+const REASONING_BLOCK_RE: RegExp = /<\s*think\s*>[\s\S]*?<\s*\/\s*think\s*>/gi;
 
 /**
  * URL basic-auth credentials: `scheme://user:password@host`.
@@ -149,8 +148,7 @@ const REASONING_BLOCK_RE: RegExp =
  * visible but the password is gone. The scheme and path are
  * preserved unchanged.
  */
-const URL_BASIC_AUTH_RE: RegExp =
-  /([a-zA-Z][a-zA-Z0-9+.\-]*:\/\/)([^/\s?#"]+)(@)/g;
+const URL_BASIC_AUTH_RE: RegExp = /([a-zA-Z][a-zA-Z0-9+.\-]*:\/\/)([^/\s?#"]+)(@)/g;
 
 /**
  * JSON-in-string credential fields. Catches occurrences like
@@ -222,7 +220,7 @@ function walk(
   value: unknown,
   depth: number,
   seen: WeakSet<object>,
-  opts: Required<RedactOptions>,
+  opts: Required<RedactOptions>
 ): unknown {
   if (value === null || value === undefined) return value;
   if (typeof value === "string") {
@@ -271,7 +269,7 @@ function walkObject(
   obj: Record<string, unknown>,
   depth: number,
   seen: WeakSet<object>,
-  opts: Required<RedactOptions>,
+  opts: Required<RedactOptions>
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   let kept = 0;
@@ -301,10 +299,7 @@ function walkObject(
 // String scrubbing
 // ---------------------------------------------------------------------------
 
-function redactStringValue(
-  value: string,
-  opts: Required<RedactOptions>,
-): string {
+function redactStringValue(value: string, opts: Required<RedactOptions>): string {
   if (value.length === 0) return value;
   let out = value;
   if (opts.stripThinkingBlocks) {

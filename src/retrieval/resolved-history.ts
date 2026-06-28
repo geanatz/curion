@@ -147,11 +147,7 @@ export const MAX_RESOLVED_HISTORY_IDS = 16;
  * resolution evidence). The bigram match is exact
  * substring on the lowercased copy.
  */
-const PREVIOUS_SIDE_MARKERS: ReadonlySet<string> = new Set([
-  "previous",
-  "old",
-  "superseded",
-]);
+const PREVIOUS_SIDE_MARKERS: ReadonlySet<string> = new Set(["previous", "old", "superseded"]);
 
 /**
  * The "current / replaced" side of the closed marker
@@ -161,10 +157,7 @@ const PREVIOUS_SIDE_MARKERS: ReadonlySet<string> = new Set([
  * IS the replacement" (i.e. the row that took over
  * from the previous side).
  */
-const CURRENT_SIDE_MARKERS: ReadonlySet<string> = new Set([
-  "current",
-  "replaced",
-]);
+const CURRENT_SIDE_MARKERS: ReadonlySet<string> = new Set(["current", "replaced"]);
 
 /**
  * The two-token bigram that forms the "no longer"
@@ -444,13 +437,10 @@ function findRowMarkerFlags(text: string): RowMarkerFlags {
  * stored-conflict pairs (Phase D wins), or stored-
  * older-variant pairs (Phase D wins).
  */
-export function detectResolvedHistory(
-  input: ResolvedHistoryInput,
-): ResolvedHistorySignal {
+export function detectResolvedHistory(input: ResolvedHistoryInput): ResolvedHistorySignal {
   const { topCandidates, answer } = input;
-  const asOf = typeof input.asOf === "number" && Number.isFinite(input.asOf)
-    ? Math.trunc(input.asOf)
-    : 0;
+  const asOf =
+    typeof input.asOf === "number" && Number.isFinite(input.asOf) ? Math.trunc(input.asOf) : 0;
 
   // Defensive: a non-array `topCandidates` becomes an
   // empty list. The type is `readonly` so a structural
@@ -556,7 +546,7 @@ function evaluatePair(
   b: ResolvedHistoryCandidate,
   bFlag: RowMarkerFlags,
   answer: string,
-  asOf: number,
+  asOf: number
 ): ResolvedHistorySignal | null {
   // ---- Pattern A: mutual markers ----
   // Assignment 1: a = previous-side, b = current-side.
@@ -608,7 +598,7 @@ function finalizePatternA(
   previous: ResolvedHistoryCandidate,
   current: ResolvedHistoryCandidate,
   answer: string,
-  asOf: number,
+  asOf: number
 ): ResolvedHistorySignal | null {
   const overlap = contentJaccard(answer, current.memoryContent);
   if (overlap < RESOLVED_HISTORY_ANSWER_OVERLAP_THRESHOLD) {
@@ -641,7 +631,7 @@ function finalizePatternB(
   previous: ResolvedHistoryCandidate,
   current: ResolvedHistoryCandidate,
   answer: string,
-  asOf: number,
+  asOf: number
 ): ResolvedHistorySignal | null {
   const overlap = contentJaccard(answer, current.memoryContent);
   if (overlap < RESOLVED_HISTORY_ANSWER_OVERLAP_THRESHOLD) {
@@ -678,7 +668,7 @@ function buildSignal(
   previousId: number,
   currentId: number,
   confidence: number,
-  asOf: number,
+  asOf: number
 ): ResolvedHistorySignal {
   const bounded = clamp01(confidence);
   // Defensive gate: the per-pattern constants are
@@ -688,9 +678,10 @@ function buildSignal(
   // emit, but the detector's callers (Phase I / J)
   // will gate on the threshold; we re-assert the
   // floor here as belt-and-braces.
-  const final = bounded >= RESOLVED_HISTORY_CONFIDENCE_THRESHOLD
-    ? bounded
-    : RESOLVED_HISTORY_CONFIDENCE_THRESHOLD;
+  const final =
+    bounded >= RESOLVED_HISTORY_CONFIDENCE_THRESHOLD
+      ? bounded
+      : RESOLVED_HISTORY_CONFIDENCE_THRESHOLD;
   const sorted = [previousId, currentId].sort((x, y) => x - y);
   return {
     kind: "resolved-history",
@@ -715,7 +706,7 @@ function buildSignal(
 function hasMutualStoredConflict(
   list: readonly ResolvedHistoryCandidate[],
   aId: number,
-  bId: number,
+  bId: number
 ): boolean {
   const a = list.find((x) => x.id === aId);
   const b = list.find((x) => x.id === bId);
@@ -723,8 +714,7 @@ function hasMutualStoredConflict(
   const bBlock = b ? readRelationshipBlock(b) : undefined;
   if (!aBlock || !bBlock) return false;
   return (
-    safeIncludesNumber(aBlock.conflictsWith, bId) &&
-    safeIncludesNumber(bBlock.conflictsWith, aId)
+    safeIncludesNumber(aBlock.conflictsWith, bId) && safeIncludesNumber(bBlock.conflictsWith, aId)
   );
 }
 
@@ -738,7 +728,7 @@ function hasMutualStoredConflict(
 function hasMutualStoredOlderVariant(
   list: readonly ResolvedHistoryCandidate[],
   aId: number,
-  bId: number,
+  bId: number
 ): boolean {
   const a = list.find((x) => x.id === aId);
   const b = list.find((x) => x.id === bId);
@@ -760,10 +750,7 @@ function hasMutualStoredOlderVariant(
  * and absent in the first version of the storage /
  * writer, so a missing key is a `false`.
  */
-function hasReferentialPointer(
-  current: ResolvedHistoryCandidate,
-  previousId: number,
-): boolean {
+function hasReferentialPointer(current: ResolvedHistoryCandidate, previousId: number): boolean {
   const block = readRelationshipBlock(current);
   if (!block) return false;
   if (safeIncludesNumber(block.supersedes, previousId)) return true;
@@ -798,12 +785,8 @@ function hasReferentialPointer(
 function contentJaccard(a: string, b: string): number {
   if (typeof a !== "string" || typeof b !== "string") return 0;
   if (a.length === 0 || b.length === 0) return 0;
-  const aTokens = tokenize(a).filter(
-    (t) => t.length >= RESOLVED_HISTORY_ANSWER_MIN_TOKEN_LEN,
-  );
-  const bTokens = tokenize(b).filter(
-    (t) => t.length >= RESOLVED_HISTORY_ANSWER_MIN_TOKEN_LEN,
-  );
+  const aTokens = tokenize(a).filter((t) => t.length >= RESOLVED_HISTORY_ANSWER_MIN_TOKEN_LEN);
+  const bTokens = tokenize(b).filter((t) => t.length >= RESOLVED_HISTORY_ANSWER_MIN_TOKEN_LEN);
   if (aTokens.length === 0 || bTokens.length === 0) return 0;
   const counts = new Map<string, { a: number; b: number }>();
   for (const t of aTokens) {
@@ -826,10 +809,7 @@ function contentJaccard(a: string, b: string): number {
   return inter / union;
 }
 
-function safeIncludesNumber(
-  arr: readonly number[] | undefined,
-  id: number,
-): boolean {
+function safeIncludesNumber(arr: readonly number[] | undefined, id: number): boolean {
   if (!Array.isArray(arr)) return false;
   for (const x of arr) {
     if (typeof x === "number" && Number.isFinite(x) && x === id) return true;
@@ -861,9 +841,7 @@ function clamp01(n: number): number {
  * `listActiveMemorySummaries` for malformed metadata
  * (Phase B, conservative spec).
  */
-function isResolvedHistoryCandidate(
-  v: unknown,
-): v is ResolvedHistoryCandidate {
+function isResolvedHistoryCandidate(v: unknown): v is ResolvedHistoryCandidate {
   if (typeof v !== "object" || v === null) return false;
   const o = v as Record<string, unknown>;
   if (typeof o.id !== "number" || !Number.isFinite(o.id)) return false;
@@ -887,7 +865,7 @@ function isResolvedHistoryCandidate(
  * without dropping the row.
  */
 function readRelationshipBlock(
-  v: ResolvedHistoryCandidate,
+  v: ResolvedHistoryCandidate
 ): SafeMemorySummaryRelationshipForwardCompatible | undefined {
   const r = (v as unknown as Record<string, unknown>).relationship;
   if (r === undefined || r === null) return undefined;
@@ -988,7 +966,7 @@ export const RESOLVED_HISTORY_NOTE_TEXT =
  * collapses to the empty string.
  */
 export function formatResolvedHistoryNote(
-  signal: ResolvedHistorySignal | null | undefined,
+  signal: ResolvedHistorySignal | null | undefined
 ): string {
   if (signal === null || signal === undefined) return "";
   if (typeof signal !== "object") return "";

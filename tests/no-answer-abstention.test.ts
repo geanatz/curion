@@ -32,48 +32,38 @@
  * tests (real corpus + query set + ranker).
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { test } from "node:test";
 
-import {
-  BUILTIN_NO_ANSWER_POLICIES,
-  buildNoAnswerPolicyPerQuery,
-  computeNoAnswerPolicyMetrics,
-  evaluateNoAnswerPolicy,
-  formatNoAnswerPolicyReport,
-  runNoAnswerPolicyExperiment,
-  type NoAnswerPolicy,
-  type NoAnswerPolicyPerQuery,
-} from "../src/benchmark/no-answer-abstention.ts";
+import { BENCHMARK_RECORDS } from "../src/benchmark/corpus.ts";
+import { type AbstentionSignals, type QueryEval, evaluateQuery } from "../src/benchmark/metrics.ts";
 import {
   runNoAnswerAbstentionExperiment,
   writeNoAnswerAbstentionReport,
 } from "../src/benchmark/no-answer-abstention-runner.ts";
 import {
-  classifyCandidateSetSufficiency,
-  buildSufficiencyReport,
-} from "../src/benchmark/sufficiency-diagnostic.ts";
-import {
-  evaluateQuery,
-  type AbstentionSignals,
-  type QueryEval,
-} from "../src/benchmark/metrics.ts";
-import {
-  BENCHMARK_QUERIES,
-  type BenchmarkQuery,
-} from "../src/benchmark/queries.ts";
-import { rankLexical } from "../src/retrieval/lexical.ts";
-import {
-  buildCandidates,
-  runRetrievalBenchmark,
-} from "../src/benchmark/retrieval-runner.ts";
-import { BENCHMARK_RECORDS } from "../src/benchmark/corpus.ts";
-import { PUBLIC_TOOL_NAMES } from "../src/server.ts";
+  BUILTIN_NO_ANSWER_POLICIES,
+  type NoAnswerPolicy,
+  type NoAnswerPolicyPerQuery,
+  buildNoAnswerPolicyPerQuery,
+  computeNoAnswerPolicyMetrics,
+  evaluateNoAnswerPolicy,
+  formatNoAnswerPolicyReport,
+  runNoAnswerPolicyExperiment,
+} from "../src/benchmark/no-answer-abstention.ts";
+import { BENCHMARK_QUERIES, type BenchmarkQuery } from "../src/benchmark/queries.ts";
 import { detectQueryShape } from "../src/benchmark/query-shapes.ts";
 import { buildCorpusTokenSets } from "../src/benchmark/query-shapes.ts";
+import { buildCandidates, runRetrievalBenchmark } from "../src/benchmark/retrieval-runner.ts";
+import {
+  buildSufficiencyReport,
+  classifyCandidateSetSufficiency,
+} from "../src/benchmark/sufficiency-diagnostic.ts";
+import { rankLexical } from "../src/retrieval/lexical.ts";
+import { PUBLIC_TOOL_NAMES } from "../src/server.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -114,7 +104,7 @@ function mkPerQuery(
     rank1?: boolean;
     currentTruthAt1?: boolean;
     hitAt5?: boolean;
-  }>,
+  }>
 ): NoAnswerPolicyPerQuery[] {
   return specs.map((s) => {
     const signals: AbstentionSignals = {
@@ -176,11 +166,7 @@ function queryById(id: string): BenchmarkQuery {
   return q;
 }
 
-function evalFrom(
-  q: BenchmarkQuery,
-  topIds: number[],
-  topScores: number[],
-): QueryEval {
+function evalFrom(q: BenchmarkQuery, topIds: number[], topScores: number[]): QueryEval {
   return evaluateQuery(
     q.id,
     q.family,
@@ -188,7 +174,7 @@ function evalFrom(
     q.expectedIds,
     q.currentTruthIds,
     topIds,
-    topScores,
+    topScores
   );
 }
 
@@ -232,15 +218,12 @@ test("no-answer: BUILTIN_NO_ANSWER_POLICIES is the documented stable set", () =>
   // "none" baseline).
   for (const p of BUILTIN_NO_ANSWER_POLICIES) {
     assert.ok(p.id.length > 0, `policy id must be non-empty`);
-    assert.ok(
-      p.description.length > 0,
-      `policy ${p.id} description must be non-empty`,
-    );
+    assert.ok(p.description.length > 0, `policy ${p.id} description must be non-empty`);
     assert.ok(
       p.category === "production-like" ||
         p.category === "fixture-shaped" ||
         p.category === "oracle",
-      `policy ${p.id} category must be production-like, fixture-shaped, or oracle`,
+      `policy ${p.id} category must be production-like, fixture-shaped, or oracle`
     );
     assert.ok(Array.isArray(p.gates), `policy ${p.id} gates must be an array`);
   }
@@ -249,15 +232,9 @@ test("no-answer: BUILTIN_NO_ANSWER_POLICIES is the documented stable set", () =>
   // is `oracle`, never `production-like` or
   // `fixture-shaped`.
   for (const p of BUILTIN_NO_ANSWER_POLICIES) {
-    const usesFixtureLabels = p.gates.some(
-      (g) => g.kind === "queryLabelsIn",
-    );
+    const usesFixtureLabels = p.gates.some((g) => g.kind === "queryLabelsIn");
     if (usesFixtureLabels) {
-      assert.equal(
-        p.category,
-        "oracle",
-        `policy ${p.id} uses fixture labels and must be oracle`,
-      );
+      assert.equal(p.category, "oracle", `policy ${p.id} uses fixture labels and must be oracle`);
     }
   }
 });
@@ -291,20 +268,16 @@ test("no-answer: fixture-shaped boundary — family-keyed policies are NOT produ
       assert.equal(
         p.category,
         "fixture-shaped",
-        `policy ${p.id} uses the family gate (fixture truth) and MUST be fixture-shaped, not ${p.category}`,
+        `policy ${p.id} uses the family gate (fixture truth) and MUST be fixture-shaped, not ${p.category}`
       );
     }
   }
   // Pin the specific fixture-shaped policies by
   // id so a future rename is a deliberate,
   // visible change.
-  const familyPol = BUILTIN_NO_ANSWER_POLICIES.find(
-    (p) => p.id === "family-no-answer",
-  )!;
+  const familyPol = BUILTIN_NO_ANSWER_POLICIES.find((p) => p.id === "family-no-answer")!;
   assert.equal(familyPol.category, "fixture-shaped");
-  const comboPol = BUILTIN_NO_ANSWER_POLICIES.find(
-    (p) => p.id === "score-or-family-no-answer",
-  )!;
+  const comboPol = BUILTIN_NO_ANSWER_POLICIES.find((p) => p.id === "score-or-family-no-answer")!;
   assert.equal(comboPol.category, "fixture-shaped");
 });
 
@@ -319,16 +292,13 @@ test("no-answer: production-like boundary — runtime-only policies are producti
   // runtime-only policy as fixture-shaped.
   for (const p of BUILTIN_NO_ANSWER_POLICIES) {
     const usesFixtureTruthSignal = p.gates.some(
-      (g) =>
-        g.kind === "family" ||
-        g.kind === "queryShapeFlag" ||
-        g.kind === "queryLabelsIn",
+      (g) => g.kind === "family" || g.kind === "queryShapeFlag" || g.kind === "queryLabelsIn"
     );
     if (!usesFixtureTruthSignal) {
       assert.equal(
         p.category,
         "production-like",
-        `policy ${p.id} uses only runtime signals and MUST be production-like, not ${p.category}`,
+        `policy ${p.id} uses only runtime signals and MUST be production-like, not ${p.category}`
       );
     }
   }
@@ -354,7 +324,7 @@ test("no-answer: production-like boundary — runtime-only policies are producti
     assert.equal(
       pol!.category,
       "production-like",
-      `policy ${id} should be production-like (runtime-only signals), got ${pol!.category}`,
+      `policy ${id} should be production-like (runtime-only signals), got ${pol!.category}`
     );
   }
 });
@@ -374,29 +344,16 @@ test("no-answer: category counts on the run are consistent with the policy set",
     perQuery,
   });
   const actual = {
-    production: report.policies.filter(
-      (p) => p.category === "production-like",
-    ).length,
-    fixture: report.policies.filter(
-      (p) => p.category === "fixture-shaped",
-    ).length,
+    production: report.policies.filter((p) => p.category === "production-like").length,
+    fixture: report.policies.filter((p) => p.category === "fixture-shaped").length,
     oracle: report.policies.filter((p) => p.category === "oracle").length,
   };
   const expected = {
-    production: BUILTIN_NO_ANSWER_POLICIES.filter(
-      (p) => p.category === "production-like",
-    ).length,
-    fixture: BUILTIN_NO_ANSWER_POLICIES.filter(
-      (p) => p.category === "fixture-shaped",
-    ).length,
-    oracle: BUILTIN_NO_ANSWER_POLICIES.filter((p) => p.category === "oracle")
-      .length,
+    production: BUILTIN_NO_ANSWER_POLICIES.filter((p) => p.category === "production-like").length,
+    fixture: BUILTIN_NO_ANSWER_POLICIES.filter((p) => p.category === "fixture-shaped").length,
+    oracle: BUILTIN_NO_ANSWER_POLICIES.filter((p) => p.category === "oracle").length,
   };
-  assert.deepEqual(
-    actual,
-    expected,
-    `category counts on the report must match the policy set`,
-  );
+  assert.deepEqual(actual, expected, `category counts on the report must match the policy set`);
   // Config block exposes the same counts under
   // separate keys. The block is the human-
   // report / artifact's source of truth.
@@ -412,8 +369,8 @@ test("no-answer: category counts on the run are consistent with the policy set",
 test("no-answer: topScoreBelow gate abstains on low top-1, retains on high", () => {
   const policy = findPolicy("score-below-0.30");
   const perQuery = mkPerQuery([
-    { queryId: "q1", family: "exact", isPositive: true, topScore: 0.10 },
-    { queryId: "q2", family: "exact", isPositive: true, topScore: 0.50 },
+    { queryId: "q1", family: "exact", isPositive: true, topScore: 0.1 },
+    { queryId: "q2", family: "exact", isPositive: true, topScore: 0.5 },
     { queryId: "q3", family: "no-answer", isPositive: false, topScore: 0.25 },
   ]);
   const decisions = evaluateNoAnswerPolicy(policy, perQuery);
@@ -451,7 +408,13 @@ test("no-answer: top1Top2RatioBelow gate handles Infinity correctly", () => {
   };
   const perQuery = mkPerQuery([
     // ratio=2.0 (cap from Infinity) -> NOT below 1.5 -> retains
-    { queryId: "q1", family: "exact", isPositive: true, topScore: 0.5, top1Top2Ratio: Number.POSITIVE_INFINITY },
+    {
+      queryId: "q1",
+      family: "exact",
+      isPositive: true,
+      topScore: 0.5,
+      top1Top2Ratio: Number.POSITIVE_INFINITY,
+    },
     // ratio=1.0 -> below 1.5 -> abstains
     { queryId: "q2", family: "exact", isPositive: true, topScore: 0.5, top1Top2Ratio: 1.0 },
     // ratio=3.0 -> NOT below 1.5 -> retains
@@ -511,7 +474,12 @@ test("no-answer: sufficiencyLabelIn gate abstains on insufficient + confabulatio
     { queryId: "q2", family: "no-answer", isPositive: false, sufficiencyLabel: "confabulation" },
     { queryId: "q3", family: "exact", isPositive: true, sufficiencyLabel: "sufficient" },
     { queryId: "q4", family: "exact", isPositive: true, sufficiencyLabel: "partial" },
-    { queryId: "q5", family: "no-answer", isPositive: false, sufficiencyLabel: "no-answer-correct" },
+    {
+      queryId: "q5",
+      family: "no-answer",
+      isPositive: false,
+      sufficiencyLabel: "no-answer-correct",
+    },
   ]);
   const decisions = evaluateNoAnswerPolicy(policy, perQuery);
   assert.equal(decisions[0]!.abstain, true);
@@ -566,7 +534,12 @@ test("no-answer: oracle-fixture-label-any-labeled abstains on any labeled subset
   const policy = findPolicy("oracle-fixture-label-any-labeled");
   const perQuery = mkPerQuery([
     { queryId: "q1", family: "no-answer", isPositive: false, queryLabels: ["hardNegative"] },
-    { queryId: "q2", family: "paraphrase", isPositive: true, queryLabels: ["adversarialParaphrase"] },
+    {
+      queryId: "q2",
+      family: "paraphrase",
+      isPositive: true,
+      queryLabels: ["adversarialParaphrase"],
+    },
     { queryId: "q3", family: "temporal", isPositive: true, queryLabels: ["divergentTemporal"] },
     { queryId: "q4", family: "exact", isPositive: true, queryLabels: ["nearMissCurrentCluster"] },
     { queryId: "q5", family: "exact", isPositive: true }, // no labels
@@ -623,9 +596,7 @@ test("no-answer: gate with active=false is skipped", () => {
     id: "test-inactive",
     description: "test",
     category: "production-like",
-    gates: [
-      { kind: "topScoreBelow", threshold: 0.5, active: false },
-    ],
+    gates: [{ kind: "topScoreBelow", threshold: 0.5, active: false }],
   };
   const perQuery = mkPerQuery([
     { queryId: "q1", family: "exact", isPositive: true, topScore: 0.1 },
@@ -768,7 +739,12 @@ test("no-answer: abstainedBySufficiencyLabel breakdown is correct", () => {
     { queryId: "q1", family: "no-answer", isPositive: false, sufficiencyLabel: "confabulation" },
     { queryId: "q2", family: "exact", isPositive: true, sufficiencyLabel: "insufficient" },
     { queryId: "q3", family: "exact", isPositive: true, sufficiencyLabel: "sufficient" },
-    { queryId: "q4", family: "no-answer", isPositive: false, sufficiencyLabel: "no-answer-correct" },
+    {
+      queryId: "q4",
+      family: "no-answer",
+      isPositive: false,
+      sufficiencyLabel: "no-answer-correct",
+    },
   ]);
   const decisions = evaluateNoAnswerPolicy(policy, perQuery);
   const m = computeNoAnswerPolicyMetrics(policy, decisions);
@@ -882,10 +858,7 @@ test("no-answer: evaluateNoAnswerPolicy does not mutate perQuery", () => {
     assert.equal(perQuery[i]!.signals.top1Top2Gap, signalsBefore[i]!.top1Top2Gap);
   }
   for (let i = 0; i < perQuery.length; i++) {
-    assert.deepEqual(
-      perQuery[i]!.queryLabels ?? [],
-      labelsBefore[i] ?? [],
-    );
+    assert.deepEqual(perQuery[i]!.queryLabels ?? [], labelsBefore[i] ?? []);
   }
 });
 
@@ -982,7 +955,16 @@ test("no-answer: lexical baseline on the fixture corpus is well-formed", () => {
   const corpusTokenSets = buildCorpusTokenSets(BENCHMARK_RECORDS);
   const evals: QueryEval[] = [];
   const signalsByQueryId = new Map<string, AbstentionSignals>();
-  const sufficiencyLabelByQueryId = new Map<string, "sufficient" | "partial" | "insufficient" | "wrong-current-truth" | "near-miss" | "confabulation" | "no-answer-correct">();
+  const sufficiencyLabelByQueryId = new Map<
+    string,
+    | "sufficient"
+    | "partial"
+    | "insufficient"
+    | "wrong-current-truth"
+    | "near-miss"
+    | "confabulation"
+    | "no-answer-correct"
+  >();
   const labelsByQueryId = new Map<string, string[]>();
   for (const q of BENCHMARK_QUERIES) {
     const ranked = rankLexical(q.query, candidates, {
@@ -998,7 +980,7 @@ test("no-answer: lexical baseline on the fixture corpus is well-formed", () => {
       q.expectedIds,
       q.currentTruthIds,
       topIds,
-      topScores,
+      topScores
     );
     evals.push(e);
     // Build the audit's per-query signal block.
@@ -1041,10 +1023,7 @@ test("no-answer: lexical baseline on the fixture corpus is well-formed", () => {
   });
   // ---- Headline shape ----
   assert.equal(report.config.total, BENCHMARK_QUERIES.length);
-  assert.equal(
-    report.config.noAnswerCount + report.config.positiveCount,
-    report.config.total,
-  );
+  assert.equal(report.config.noAnswerCount + report.config.positiveCount, report.config.total);
   // The fixture has 46 no-answer queries, so
   // the baseline-no-policy row should show
   // 0 no-answer abstentions: the baseline
@@ -1057,9 +1036,7 @@ test("no-answer: lexical baseline on the fixture corpus is well-formed", () => {
   // NOT by this experiment's policy metrics.
   // A reviewer who wants the natural-empty
   // abstention count reads the audit artifact.
-  const baseline = report.policies.find(
-    (p) => p.policyId === "baseline-no-policy",
-  )!;
+  const baseline = report.policies.find((p) => p.policyId === "baseline-no-policy")!;
   assert.equal(baseline.noAnswerAbstained, 0);
   assert.equal(baseline.noAnswerAbstainedRate, 0);
   // Sanity: the 3 naturally-abstained
@@ -1076,9 +1053,7 @@ test("no-answer: lexical baseline on the fixture corpus is well-formed", () => {
   // positive query has family="no-answer").
   // The strong reading is NOT deployable: the
   // `family` field is fixture truth.
-  const famPol = report.policies.find(
-    (p) => p.policyId === "family-no-answer",
-  )!;
+  const famPol = report.policies.find((p) => p.policyId === "family-no-answer")!;
   assert.equal(famPol.category, "fixture-shaped");
   assert.equal(famPol.noAnswerAbstained, 46);
   assert.equal(famPol.noAnswerAbstainedRate, 1);
@@ -1090,9 +1065,7 @@ test("no-answer: lexical baseline on the fixture corpus is well-formed", () => {
   // score-only sub-rule is the
   // `score-below-0.30` rule; the family
   // sub-rule is the fixture-shaped ceiling.
-  const fixPol = report.policies.find(
-    (p) => p.policyId === "score-or-family-no-answer",
-  )!;
+  const fixPol = report.policies.find((p) => p.policyId === "score-or-family-no-answer")!;
   assert.equal(fixPol.category, "fixture-shaped");
   assert.equal(fixPol.noAnswerAbstained, 46);
   // The genuinely production-like candidate
@@ -1102,7 +1075,7 @@ test("no-answer: lexical baseline on the fixture corpus is well-formed", () => {
   // candidate-set sufficiency label). It does
   // NOT use the `family` field.
   const prodCandidate = report.policies.find(
-    (p) => p.policyId === "score-or-sufficiency-insufficient",
+    (p) => p.policyId === "score-or-sufficiency-insufficient"
   )!;
   assert.equal(prodCandidate.category, "production-like");
   // The candidate is a strict superset of
@@ -1117,16 +1090,16 @@ test("no-answer: lexical baseline on the fixture corpus is well-formed", () => {
   // which can shift with the corpus).
   assert.ok(
     prodCandidate.noAnswerAbstained >= 0,
-    `production-like candidate must be well-formed, got ${prodCandidate.noAnswerAbstained} no-answer abstentions`,
+    `production-like candidate must be well-formed, got ${prodCandidate.noAnswerAbstained} no-answer abstentions`
   );
   assert.ok(
     prodCandidate.noAnswerAbstained <= prodCandidate.noAnswerCount,
-    `production-like candidate cannot abstain on more no-answer queries than exist`,
+    `production-like candidate cannot abstain on more no-answer queries than exist`
   );
   assert.equal(
     prodCandidate.noAnswerCount,
     fixPol.noAnswerCount,
-    `no-answer count must be the same across the report`,
+    `no-answer count must be the same across the report`
   );
   // The oracle any-labeled policy is the
   // ceiling: it abstains on every query that
@@ -1135,9 +1108,7 @@ test("no-answer: lexical baseline on the fixture corpus is well-formed", () => {
   // every labeled no-answer query, but also
   // on a few labeled positive queries (the
   // adversarial paraphrase / near-miss cases).
-  const oraclePol = report.policies.find(
-    (p) => p.policyId === "oracle-fixture-label-any-labeled",
-  )!;
+  const oraclePol = report.policies.find((p) => p.policyId === "oracle-fixture-label-any-labeled")!;
   // The oracle's recall is bounded by the
   // labeled subset of the corpus: a no-answer
   // query that has NO `hardNegative`,
@@ -1155,11 +1126,11 @@ test("no-answer: lexical baseline on the fixture corpus is well-formed", () => {
   // are unlabeled).
   assert.ok(
     oraclePol.noAnswerAbstainedRate > 0,
-    `oracle should abstain on at least one labeled no-answer query, got rate=${oraclePol.noAnswerAbstainedRate}`,
+    `oracle should abstain on at least one labeled no-answer query, got rate=${oraclePol.noAnswerAbstainedRate}`
   );
   assert.ok(
     oraclePol.noAnswerAbstainedRate < 1.0,
-    `oracle should NOT abstain on every no-answer query (easy queries have no labels), got rate=${oraclePol.noAnswerAbstainedRate}`,
+    `oracle should NOT abstain on every no-answer query (easy queries have no labels), got rate=${oraclePol.noAnswerAbstainedRate}`
   );
   // The "fixture-label" oracle abstains on
   // every no-answer query that carries the
@@ -1167,16 +1138,14 @@ test("no-answer: lexical baseline on the fixture corpus is well-formed", () => {
   // is at least 1 (the fixture has labeled
   // hard-negatives) and at most the no-answer
   // count.
-  const oracleHardneg = report.policies.find(
-    (p) => p.policyId === "oracle-fixture-label-hardneg",
-  )!;
+  const oracleHardneg = report.policies.find((p) => p.policyId === "oracle-fixture-label-hardneg")!;
   assert.ok(
     oracleHardneg.noAnswerAbstained >= 1,
-    `oracle-fixture-label-hardneg should abstain on at least one labeled no-answer query, got ${oracleHardneg.noAnswerAbstained}`,
+    `oracle-fixture-label-hardneg should abstain on at least one labeled no-answer query, got ${oracleHardneg.noAnswerAbstained}`
   );
   assert.ok(
     oracleHardneg.noAnswerAbstained <= 46,
-    `oracle-fixture-label-hardneg abstains at most on the no-answer count`,
+    `oracle-fixture-label-hardneg abstains at most on the no-answer count`
   );
   // ---- Per-family breakdown for the
   //      production-like candidate ----
@@ -1197,21 +1166,12 @@ test("no-answer: lexical baseline on the fixture corpus is well-formed", () => {
   // asserting exact rates (the rates depend
   // on the corpus's per-family score and
   // sufficiency distribution).
-  for (const family of [
-    "exact",
-    "paraphrase",
-    "temporal",
-    "multi-hop",
-    "orientation",
-  ]) {
+  for (const family of ["exact", "paraphrase", "temporal", "multi-hop", "orientation"]) {
     const slot = prodCandidate.positiveAbstainedByFamily[family];
-    assert.ok(
-      slot,
-      `production-like candidate must report a ${family} breakdown`,
-    );
+    assert.ok(slot, `production-like candidate must report a ${family} breakdown`);
     assert.ok(
       slot!.total > 0,
-      `production-like candidate must have ${family} total > 0 on the fixture corpus`,
+      `production-like candidate must have ${family} total > 0 on the fixture corpus`
     );
   }
   // ---- Human report is well-formed ----
@@ -1249,13 +1209,11 @@ test("no-answer: human report is byte-stable for the same input", () => {
   const aText = formatNoAnswerPolicyReport(r1);
   const bText = formatNoAnswerPolicyReport(r2);
   const stripGeneratedAt = (s: string): string[] =>
-    s
-      .split("\n")
-      .filter((l) => !l.startsWith("generated at:"));
+    s.split("\n").filter((l) => !l.startsWith("generated at:"));
   assert.deepEqual(
     stripGeneratedAt(aText),
     stripGeneratedAt(bText),
-    `human report must be byte-stable for the same input (ignoring the generated-at line)`,
+    `human report must be byte-stable for the same input (ignoring the generated-at line)`
   );
 });
 
@@ -1310,7 +1268,7 @@ test("no-answer: production source tree must NOT import the experiment modules",
     assert.doesNotMatch(
       src,
       /no-answer-abstention/,
-      `${rel} must NOT import the no-answer abstention experiment module`,
+      `${rel} must NOT import the no-answer abstention experiment module`
     );
   }
 });
@@ -1321,7 +1279,7 @@ test("no-answer: public MCP API is unchanged (remember + recall only)", () => {
   assert.deepEqual(
     [...PUBLIC_TOOL_NAMES],
     ["remember", "recall"],
-    "public MCP tool surface must remain exactly remember + recall",
+    "public MCP tool surface must remain exactly remember + recall"
   );
 });
 
@@ -1343,11 +1301,7 @@ test("no-answer: existing audit / calibration / diagnostic / policy reports are 
   // doesn't disturb the existing report
   // contracts.
   const lex = runRetrievalBenchmark({ variant: "lexical" });
-  const lexDiag = buildSufficiencyReport(
-    "lexical",
-    lex.evals,
-    BENCHMARK_QUERIES,
-  );
+  const lexDiag = buildSufficiencyReport("lexical", lex.evals, BENCHMARK_QUERIES);
   // Diagnostic shape is unchanged.
   assert.equal(lexDiag.variant, "lexical");
   assert.equal(lexDiag.diagnostics.length, BENCHMARK_QUERIES.length);

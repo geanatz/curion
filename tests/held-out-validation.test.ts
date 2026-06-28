@@ -59,38 +59,38 @@
  * not the test suite.
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { test } from "node:test";
 
-import { BENCHMARK_QUERIES } from "../src/benchmark/queries.ts";
+import { BUILTIN_POLICIES } from "../src/benchmark/abstention-policy.ts";
 import { BENCHMARK_RECORDS } from "../src/benchmark/corpus.ts";
 import {
+  HELD_OUT_MIN_FAMILY_COUNTS,
+  HELD_OUT_MIN_NO_ANSWER_COUNT,
   HELD_OUT_QUERIES,
   HELD_OUT_QUERY_IDS,
   HELD_OUT_TOTAL_COUNT,
-  HELD_OUT_MIN_FAMILY_COUNTS,
-  HELD_OUT_MIN_NO_ANSWER_COUNT,
 } from "../src/benchmark/held-out-queries.ts";
+import { parseHeldOutCli } from "../src/benchmark/held-out-runner.ts";
 import {
+  FROZEN_TRANSFER_BASELINES,
+  HELD_OUT_LIMITATIONS,
+  type HeldOutValidationReport,
+  PRIMARY_POLICY_ID,
+  PRIMARY_POLICY_IDS,
   buildHeldOutReport,
   formatHeldOutReport,
   runHeldOutEvals,
   writeHeldOutReport,
-  FROZEN_TRANSFER_BASELINES,
-  PRIMARY_POLICY_IDS,
-  PRIMARY_POLICY_ID,
-  HELD_OUT_LIMITATIONS,
-  type HeldOutValidationReport,
 } from "../src/benchmark/held-out-validation.ts";
-import { BUILTIN_POLICIES } from "../src/benchmark/abstention-policy.ts";
-import { StubDeterministicDenseEmbedder } from "../src/benchmark/variants/dense-embedder.ts";
-import type { BenchmarkQuery, BenchmarkQueryFamily } from "../src/benchmark/queries.ts";
-import { PUBLIC_TOOL_NAMES } from "../src/server.ts";
-import { parseHeldOutCli } from "../src/benchmark/held-out-runner.ts";
+import { BENCHMARK_QUERIES } from "../src/benchmark/queries.ts";
+import type { BenchmarkQueryFamily } from "../src/benchmark/queries.ts";
 import { runRetrievalBenchmark } from "../src/benchmark/retrieval-runner.ts";
+import { StubDeterministicDenseEmbedder } from "../src/benchmark/variants/dense-embedder.ts";
+import { PUBLIC_TOOL_NAMES } from "../src/server.ts";
 
 // ---------------------------------------------------------------------------
 // 1. Held-out query slice integrity
@@ -101,12 +101,9 @@ test("held-out queries: ids are unique within the held-out set", () => {
   for (const q of HELD_OUT_QUERIES) {
     assert.ok(
       typeof q.id === "string" && q.id.length > 0,
-      `held-out query id must be a non-empty string, got ${q.id}`,
+      `held-out query id must be a non-empty string, got ${q.id}`
     );
-    assert.ok(
-      q.id.startsWith("held-"),
-      `held-out query id must be prefixed 'held-', got ${q.id}`,
-    );
+    assert.ok(q.id.startsWith("held-"), `held-out query id must be prefixed 'held-', got ${q.id}`);
     assert.ok(!seen.has(q.id), `duplicate held-out query id: ${q.id}`);
     seen.add(q.id);
   }
@@ -115,10 +112,7 @@ test("held-out queries: ids are unique within the held-out set", () => {
 test("held-out queries: ids do not collide with the dev set", () => {
   const devIds = new Set(BENCHMARK_QUERIES.map((q) => q.id));
   for (const q of HELD_OUT_QUERIES) {
-    assert.ok(
-      !devIds.has(q.id),
-      `held-out query id '${q.id}' collides with a dev-set id`,
-    );
+    assert.ok(!devIds.has(q.id), `held-out query id '${q.id}' collides with a dev-set id`);
   }
 });
 
@@ -135,7 +129,7 @@ test("held-out queries: families are valid and exactly cover the 6 families", ()
   for (const q of HELD_OUT_QUERIES) {
     assert.ok(
       validFamilies.has(q.family),
-      `held-out query '${q.id}' has unknown family '${q.family}'`,
+      `held-out query '${q.id}' has unknown family '${q.family}'`
     );
     seenFamilies.add(q.family);
   }
@@ -149,10 +143,7 @@ test("held-out queries: families are valid and exactly cover the 6 families", ()
     "no-answer",
     "orientation",
   ]) {
-    assert.ok(
-      seenFamilies.has(required),
-      `held-out query set is missing the "${required}" family`,
-    );
+    assert.ok(seenFamilies.has(required), `held-out query set is missing the "${required}" family`);
   }
 });
 
@@ -160,15 +151,12 @@ test("held-out queries: expected / current truth ids resolve to real records", (
   const validIds = new Set<number>(BENCHMARK_RECORDS.map((r) => r.id));
   for (const q of HELD_OUT_QUERIES) {
     for (const id of q.expectedIds) {
-      assert.ok(
-        validIds.has(id),
-        `held-out query '${q.id}' expects missing record id ${id}`,
-      );
+      assert.ok(validIds.has(id), `held-out query '${q.id}' expects missing record id ${id}`);
     }
     for (const id of q.currentTruthIds) {
       assert.ok(
         validIds.has(id),
-        `held-out query '${q.id}' has currentTruth id ${id} that is not in the corpus`,
+        `held-out query '${q.id}' has currentTruth id ${id} that is not in the corpus`
       );
     }
   }
@@ -180,21 +168,21 @@ test("held-out queries: no-answer queries have empty expected / current truth", 
       assert.equal(
         q.expectedIds.length,
         0,
-        `no-answer held-out query '${q.id}' must have empty expectedIds`,
+        `no-answer held-out query '${q.id}' must have empty expectedIds`
       );
       assert.equal(
         q.currentTruthIds.length,
         0,
-        `no-answer held-out query '${q.id}' must have empty currentTruthIds`,
+        `no-answer held-out query '${q.id}' must have empty currentTruthIds`
       );
     } else {
       assert.ok(
         q.expectedIds.length > 0,
-        `positive held-out query '${q.id}' must have at least one expected id`,
+        `positive held-out query '${q.id}' must have at least one expected id`
       );
       assert.ok(
         q.currentTruthIds.length > 0,
-        `positive held-out query '${q.id}' must have at least one currentTruth id`,
+        `positive held-out query '${q.id}' must have at least one currentTruth id`
       );
     }
   }
@@ -206,7 +194,7 @@ test("held-out queries: non-temporal currentTruthIds is a subset of expectedIds"
     for (const id of q.currentTruthIds) {
       assert.ok(
         q.expectedIds.includes(id),
-        `held-out query '${q.id}' has currentTruth id ${id} not in expectedIds`,
+        `held-out query '${q.id}' has currentTruth id ${id} not in expectedIds`
       );
     }
   }
@@ -220,7 +208,7 @@ test("held-out queries: per-family minimum coverage is met", () => {
   for (const [family, min] of Object.entries(HELD_OUT_MIN_FAMILY_COUNTS)) {
     assert.ok(
       (counts[family] ?? 0) >= min,
-      `family '${family}' has ${counts[family] ?? 0} held-out queries, expected at least ${min}`,
+      `family '${family}' has ${counts[family] ?? 0} held-out queries, expected at least ${min}`
     );
   }
 });
@@ -229,18 +217,18 @@ test("held-out queries: no-answer minimum is met", () => {
   const naCount = HELD_OUT_QUERIES.filter((q) => q.family === "no-answer").length;
   assert.ok(
     naCount >= HELD_OUT_MIN_NO_ANSWER_COUNT,
-    `no-answer family has ${naCount} held-out queries, expected at least ${HELD_OUT_MIN_NO_ANSWER_COUNT}`,
+    `no-answer family has ${naCount} held-out queries, expected at least ${HELD_OUT_MIN_NO_ANSWER_COUNT}`
   );
 });
 
 test("held-out queries: total count is in the brief's ~24-40 range", () => {
   assert.ok(
     HELD_OUT_TOTAL_COUNT >= 24,
-    `held-out set has ${HELD_OUT_TOTAL_COUNT} queries, expected at least 24`,
+    `held-out set has ${HELD_OUT_TOTAL_COUNT} queries, expected at least 24`
   );
   assert.ok(
     HELD_OUT_TOTAL_COUNT <= 40,
-    `held-out set has ${HELD_OUT_TOTAL_COUNT} queries, expected at most 40`,
+    `held-out set has ${HELD_OUT_TOTAL_COUNT} queries, expected at most 40`
   );
 });
 
@@ -258,15 +246,15 @@ test("held-out queries: no secret / credential-shaped content", () => {
     { re: /\bAIza[A-Za-z0-9_\-]{30,}\b/g, label: "google-api-key" },
     { re: /\bnvapi-[A-Za-z0-9_\-]{20,}\b/g, label: "nvidia-nim-key" },
     { re: /\bbearer\s+[A-Za-z0-9._\-+/=]{20,}\b/gi, label: "bearer-token" },
-    { re: /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----/g, label: "pem-private-key" },
+    {
+      re: /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----/g,
+      label: "pem-private-key",
+    },
   ];
   for (const q of HELD_OUT_QUERIES) {
     for (const { re, label } of shapes) {
       re.lastIndex = 0;
-      assert.ok(
-        !re.test(q.query),
-        `held-out query '${q.id}' has ${label} pattern in query text`,
-      );
+      assert.ok(!re.test(q.query), `held-out query '${q.id}' has ${label} pattern in query text`);
     }
   }
 });
@@ -274,7 +262,7 @@ test("held-out queries: no secret / credential-shaped content", () => {
 test("held-out queries: HELD_OUT_QUERY_IDS is the held-out query id list in declaration order", () => {
   assert.deepEqual(
     [...HELD_OUT_QUERY_IDS],
-    HELD_OUT_QUERIES.map((q) => q.id),
+    HELD_OUT_QUERIES.map((q) => q.id)
   );
 });
 
@@ -342,7 +330,7 @@ test("held-out runner: buildHeldOutReport produces a well-formed report (hybrid-
     // for hybrid-dense runs.
     assert.ok(
       report.meta.embedder !== undefined,
-      "hybrid-dense report must carry embedder metadata",
+      "hybrid-dense report must carry embedder metadata"
     );
     assert.equal(report.meta.embedder!.backend, "stub-dense");
   })();
@@ -387,7 +375,7 @@ test("held-out runner: policies are the same BUILTIN_POLICIES (frozen, not tuned
     assert.deepEqual(
       reportIds,
       builtInIds,
-      "held-out report must use the same BUILTIN_POLICIES the dev set uses (frozen policy)",
+      "held-out report must use the same BUILTIN_POLICIES the dev set uses (frozen policy)"
     );
   })();
 });
@@ -409,7 +397,7 @@ test("held-out runner: transfer block is present for the four primary policies o
       assert.ok(row, `missing primary policy row: ${policyId}`);
       assert.ok(
         row!.transfer !== undefined,
-        `primary policy '${policyId}' must have a transfer block`,
+        `primary policy '${policyId}' must have a transfer block`
       );
     }
     // At least one ablation should NOT have a
@@ -418,12 +406,10 @@ test("held-out runner: transfer block is present for the four primary policies o
     // policies).
     const ablations = report.policies.filter((p) => p.category === "ablation");
     assert.ok(ablations.length > 0, "expected at least one ablation policy");
-    const ablationWithoutTransfer = ablations.find(
-      (p) => p.transfer === undefined,
-    );
+    const ablationWithoutTransfer = ablations.find((p) => p.transfer === undefined);
     assert.ok(
       ablationWithoutTransfer !== undefined,
-      "at least one ablation policy should NOT have a transfer block",
+      "at least one ablation policy should NOT have a transfer block"
     );
   })();
 });
@@ -446,11 +432,11 @@ test("held-out runner: writeHeldOutReport writes a well-formed artifact", () => 
       assert.ok(file.startsWith(tmp), `artifact must be under tmp dir, got ${file}`);
       assert.ok(
         path.basename(file).startsWith("retrieval-held-out-validation-"),
-        `artifact must use the held-out prefix, got ${path.basename(file)}`,
+        `artifact must use the held-out prefix, got ${path.basename(file)}`
       );
       assert.ok(
         path.basename(file).endsWith(".json"),
-        `artifact must be a JSON file, got ${path.basename(file)}`,
+        `artifact must be a JSON file, got ${path.basename(file)}`
       );
       // Re-read the file and assert the
       // report is byte-stable.
@@ -477,7 +463,10 @@ test("held-out runner: formatHeldOutReport produces a non-empty report with the 
       evals: evalsResult.evals,
     });
     const human = formatHeldOutReport(report);
-    assert.ok(typeof human === "string" && human.length > 0, "human report must be a non-empty string");
+    assert.ok(
+      typeof human === "string" && human.length > 0,
+      "human report must be a non-empty string"
+    );
     for (const section of [
       "=== curion retrieval held-out validation ===",
       "--- meta ---",
@@ -489,10 +478,7 @@ test("held-out runner: formatHeldOutReport produces a non-empty report with the 
       "moderate-score-0.40",
       "flag-only-zero-hit-cost",
     ]) {
-      assert.ok(
-        human.includes(section),
-        `human report missing section: ${section}`,
-      );
+      assert.ok(human.includes(section), `human report missing section: ${section}`);
     }
   })();
 });
@@ -507,7 +493,7 @@ test("held-out runner: limitations block is non-empty and surfaces same-corpus /
   ]) {
     assert.ok(
       HELD_OUT_LIMITATIONS.some((lim) => lim.includes(required)),
-      `limitations block must mention '${required}'`,
+      `limitations block must mention '${required}'`
     );
   }
 });
@@ -520,7 +506,7 @@ test("held-out runner: FROZEN_TRANSFER_BASELINES covers the four primary policie
   for (const id of PRIMARY_POLICY_IDS) {
     assert.ok(
       FROZEN_TRANSFER_BASELINES[id] !== undefined,
-      `FROZEN_TRANSFER_BASELINES must cover primary policy '${id}'`,
+      `FROZEN_TRANSFER_BASELINES must cover primary policy '${id}'`
     );
   }
 });
@@ -555,9 +541,7 @@ test("held-out runner: transfer deltas are honest (held-out minus frozen baselin
       // Spot-check the math: tnrDelta is
       // held-out TNR% minus baseline TNR%.
       const expectedTnrDelta =
-        Math.round(
-          (row!.noAnswerAbstainedRate * 100 - baseline.tnrPct) * 100,
-        ) / 100;
+        Math.round((row!.noAnswerAbstainedRate * 100 - baseline.tnrPct) * 100) / 100;
       assert.equal(transfer.tnrDelta, expectedTnrDelta);
       // F1 delta is raw difference.
       const expectedF1Delta = Math.round((row!.f1 - baseline.f1) * 100) / 100;
@@ -616,48 +600,42 @@ test("held-out runner: production recall() controller does not import held-out m
   // The production recall controller's source
   // must not import any held-out module.
   const recallSrc = fs.readFileSync(
-    path.join(
-      import.meta.dirname,
-      "..",
-      "src",
-      "controller",
-      "recall-controller.ts",
-    ),
-    "utf8",
+    path.join(import.meta.dirname, "..", "src", "controller", "recall-controller.ts"),
+    "utf8"
   );
   assert.doesNotMatch(
     recallSrc,
     /held-out|heldOut|buildHeldOutReport|runHeldOutEvals/,
-    "recall controller must NOT import held-out modules",
+    "recall controller must NOT import held-out modules"
   );
   // The production server / tools also must
   // not import the held-out modules.
   const serverSrc = fs.readFileSync(
     path.join(import.meta.dirname, "..", "src", "server.ts"),
-    "utf8",
+    "utf8"
   );
   assert.doesNotMatch(
     serverSrc,
     /held-out|heldOut|buildHeldOutReport|runHeldOutEvals/,
-    "server.ts must NOT import held-out modules",
+    "server.ts must NOT import held-out modules"
   );
   const toolsRecallSrc = fs.readFileSync(
     path.join(import.meta.dirname, "..", "src", "tools", "recall.ts"),
-    "utf8",
+    "utf8"
   );
   assert.doesNotMatch(
     toolsRecallSrc,
     /held-out|heldOut|buildHeldOutReport|runHeldOutEvals/,
-    "src/tools/recall.ts must NOT import held-out modules",
+    "src/tools/recall.ts must NOT import held-out modules"
   );
   const toolsRememberSrc = fs.readFileSync(
     path.join(import.meta.dirname, "..", "src", "tools", "remember.ts"),
-    "utf8",
+    "utf8"
   );
   assert.doesNotMatch(
     toolsRememberSrc,
     /held-out|heldOut|buildHeldOutReport|runHeldOutEvals/,
-    "src/tools/remember.ts must NOT import held-out modules",
+    "src/tools/remember.ts must NOT import held-out modules"
   );
 });
 
@@ -702,10 +680,7 @@ test("held-out runner: parseHeldOutCli rejects unknown flags", () => {
 });
 
 test("held-out runner: parseHeldOutCli rejects unknown variants", () => {
-  assert.throws(
-    () => parseHeldOutCli(["--variant", "all"]),
-    /lexical\|hybrid\|hybrid-dense/,
-  );
+  assert.throws(() => parseHeldOutCli(["--variant", "all"]), /lexical\|hybrid\|hybrid-dense/);
 });
 
 test("held-out runner: parseHeldOutCli accepts the four documented variants", () => {
@@ -728,7 +703,7 @@ test("held-out runner: parseHeldOutCli accepts the four documented variants", ()
  */
 function assertHeldOutReportShape(
   report: HeldOutValidationReport,
-  expectedVariant: "lexical" | "hybrid" | "hybrid-dense",
+  expectedVariant: "lexical" | "hybrid" | "hybrid-dense"
 ): void {
   // Top-level keys
   for (const k of [
@@ -760,33 +735,28 @@ function assertHeldOutReportShape(
   assert.equal(report.policies.length, BUILTIN_POLICIES.length);
   // The four primary policies are the four
   // PRIMARY_POLICY_IDS, in order.
-  const primaryRows = report.policies.filter((p) =>
-    PRIMARY_POLICY_IDS.includes(p.policyId),
-  );
+  const primaryRows = report.policies.filter((p) => PRIMARY_POLICY_IDS.includes(p.policyId));
   assert.equal(primaryRows.length, PRIMARY_POLICY_IDS.length);
   // Per-query block
   assert.equal(report.perQuery.length, HELD_OUT_QUERIES.length);
   for (const p of report.perQuery) {
     assert.ok(
       HELD_OUT_QUERY_IDS.includes(p.queryId),
-      `per-query entry has unknown queryId: ${p.queryId}`,
+      `per-query entry has unknown queryId: ${p.queryId}`
     );
   }
   // Per-family block
   assert.ok(
     report.perFamilyByPolicy[PRIMARY_POLICY_ID] !== undefined,
-    "perFamilyByPolicy must have a block for the primary policy",
+    "perFamilyByPolicy must have a block for the primary policy"
   );
   // Per-query FP / FN block
   assert.ok(
     report.perQueryFpFnByPolicy[PRIMARY_POLICY_ID] !== undefined,
-    "perQueryFpFnByPolicy must have a block for the primary policy",
+    "perQueryFpFnByPolicy must have a block for the primary policy"
   );
   // Evals block
   assert.equal(report.evals.length, HELD_OUT_QUERIES.length);
   // Limitations block
-  assert.ok(
-    report.limitations.length > 0,
-    "limitations block must be non-empty",
-  );
+  assert.ok(report.limitations.length > 0, "limitations block must be non-empty");
 }

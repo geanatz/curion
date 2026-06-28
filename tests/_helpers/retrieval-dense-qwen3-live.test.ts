@@ -44,17 +44,17 @@
  *   node --import tsx --test tests/_helpers/retrieval-dense-qwen3-live.test.ts
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
-import path from "node:path";
-import os from "node:os";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { test } from "node:test";
 
-import {
-  Qwen3Embedder,
-  type EmbedderMetadata,
-} from "../../src/benchmark/variants/qwen3-embedder.ts";
 import type { EmbedderMetadata as DenseEmbedderMetadata } from "../../src/benchmark/variants/dense-embedder.ts";
+import {
+  type EmbedderMetadata,
+  Qwen3Embedder,
+} from "../../src/benchmark/variants/qwen3-embedder.ts";
 
 /**
  * Build a sandboxed cache directory for the live
@@ -63,9 +63,7 @@ import type { EmbedderMetadata as DenseEmbedderMetadata } from "../../src/benchm
  * `.curion/` directory.
  */
 function makeCacheDir(): string {
-  return fs.mkdtempSync(
-    path.join(os.tmpdir(), "curion-qwen3-live-cache-"),
-  );
+  return fs.mkdtempSync(path.join(os.tmpdir(), "curion-qwen3-live-cache-"));
 }
 
 /**
@@ -122,10 +120,7 @@ test("Qwen3Embedder live: init() produces a real semantic embedding with the doc
   const meta: EmbedderMetadata = embedder.metadata as EmbedderMetadata & DenseEmbedderMetadata;
   assert.equal(meta.status, "ready", "embedder metadata should report ready");
   assert.equal(meta.backend, "qwen3");
-  assert.equal(
-    meta.modelId,
-    "onnx-community/Qwen3-Embedding-0.6B-ONNX",
-  );
+  assert.equal(meta.modelId, "onnx-community/Qwen3-Embedding-0.6B-ONNX");
   // The conventional Qwen3-Embedding-0.6B dim
   // is 1024. The `init()` probe may overwrite
   // the placeholder if the model reports a
@@ -138,13 +133,13 @@ test("Qwen3Embedder live: init() produces a real semantic embedding with the doc
   // non-negative number.
   assert.ok(
     typeof meta.loadMs === "number" && meta.loadMs >= 0,
-    "loadMs must be a non-negative number",
+    "loadMs must be a non-negative number"
   );
   // The runtime version is captured when the
   // library exposes one.
   assert.ok(
     typeof meta.runtimeVersion === "string",
-    "runtimeVersion must be a string on a ready embedder",
+    "runtimeVersion must be a string on a ready embedder"
   );
   // Embed two pairs: a semantically related
   // pair and an unrelated pair. The cosine
@@ -155,12 +150,8 @@ test("Qwen3Embedder live: init() produces a real semantic embedding with the doc
   // side; the documents are forwarded verbatim.
   // The test exercises both code paths.
   const a = await embedder.embedQuery("Postgres is the primary data store");
-  const b = await embedder.embedDocument(
-    "Postgres is used for storage of project memory",
-  );
-  const c = await embedder.embedDocument(
-    "The kitchen dishwasher runs nightly",
-  );
+  const b = await embedder.embedDocument("Postgres is used for storage of project memory");
+  const c = await embedder.embedDocument("The kitchen dishwasher runs nightly");
   // Manual cosine similarity (the helper is in
   // `vector.ts`; we re-implement it inline to
   // keep this test independent of the ranker).
@@ -184,7 +175,7 @@ test("Qwen3Embedder live: init() produces a real semantic embedding with the doc
   assert.ok(
     related > unrelated,
     `semantically related pair should have higher cosine: ` +
-      `related=${related.toFixed(4)} vs unrelated=${unrelated.toFixed(4)}`,
+      `related=${related.toFixed(4)} vs unrelated=${unrelated.toFixed(4)}`
   );
   // L2 normalization: both vectors should be
   // unit length (the Qwen3 backend applies
@@ -196,36 +187,28 @@ test("Qwen3Embedder live: init() produces a real semantic embedding with the doc
   };
   assert.ok(Math.abs(norm(a) - 1) < 1e-3, "vector a should be L2-normalized");
   assert.ok(Math.abs(norm(b) - 1) < 1e-3, "vector b should be L2-normalized");
-  assert.ok(
-    Math.abs(norm(c) - 1) < 1e-3,
-    "vector c should be L2-normalized",
-  );
+  assert.ok(Math.abs(norm(c) - 1) < 1e-3, "vector c should be L2-normalized");
   // Determinism: re-embed `a` and check it is
   // bit-identical. ONNX Runtime is
   // bit-deterministic for a fixed input and a
   // fixed model.
   const a2 = await embedder.embedQuery("Postgres is the primary data store");
-  assert.deepEqual(
-    a,
-    a2,
-    "embedQuery must be deterministic for the same input",
-  );
+  assert.deepEqual(a, a2, "embedQuery must be deterministic for the same input");
   // The embedder's `embedCount` and `embedMs`
   // are updated on every call. Note: the
   // embedder reassigns `metadata` on each
   // update, so we read the latest snapshot via
   // the property accessor rather than the `meta`
   // local captured at init time.
-  const latestMeta: EmbedderMetadata = embedder.metadata as EmbedderMetadata & DenseEmbedderMetadata;
+  const latestMeta: EmbedderMetadata = embedder.metadata as EmbedderMetadata &
+    DenseEmbedderMetadata;
   assert.ok(
-    typeof latestMeta.embedCount === "number" &&
-      latestMeta.embedCount >= 3,
-    "embedCount should be >= 3 after three embed calls",
+    typeof latestMeta.embedCount === "number" && latestMeta.embedCount >= 3,
+    "embedCount should be >= 3 after three embed calls"
   );
   assert.ok(
-    typeof latestMeta.embedMs === "number" &&
-      latestMeta.embedMs >= 0,
-    "embedMs should be a non-negative number",
+    typeof latestMeta.embedMs === "number" && latestMeta.embedMs >= 0,
+    "embedMs should be a non-negative number"
   );
   // Document vs query path: a query and a
   // document with the SAME plain text produce
@@ -247,6 +230,6 @@ test("Qwen3Embedder live: init() produces a real semantic embedding with the doc
   assert.equal(
     equal,
     false,
-    "Qwen3 live: embedQuery and embedDocument must produce different vectors for the same input text (instruction prefix)",
+    "Qwen3 live: embedQuery and embedDocument must produce different vectors for the same input text (instruction prefix)"
   );
 });

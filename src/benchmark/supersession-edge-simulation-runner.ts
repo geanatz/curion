@@ -75,17 +75,17 @@ import path from "node:path";
 import { BENCHMARK_QUERIES } from "./queries.js";
 import type { BenchmarkQuery } from "./queries.js";
 import {
+  type SupersessionRerankReport,
   buildSupersessionRerankReport,
   formatSupersessionRerankReport,
-  type SupersessionRerankReport,
 } from "./supersession-edge-simulation.js";
 import {
-  alignQueriesToEvals,
-  readBenchmarkArtifact,
-  readSemanticEvidenceFile,
-  findMostRecentArtifact,
   type BenchmarkArtifact,
   type SemanticEvidenceMap,
+  alignQueriesToEvals,
+  findMostRecentArtifact,
+  readBenchmarkArtifact,
+  readSemanticEvidenceFile,
 } from "./temporal-truth-diagnostic-runner.js";
 
 // ---------------------------------------------------------------------------
@@ -145,7 +145,7 @@ const ARTIFACT_FILE_PREFIX = "retrieval-supersession-edge-simulation";
  */
 export function writeSupersessionRerankReport(
   report: SupersessionRerankReport,
-  dir: string,
+  dir: string
 ): string {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -182,20 +182,17 @@ export interface SupersessionRerankCliArgs {
  * the public TypeScript surface (the function
  * does its own argument parsing).
  */
-export async function runSupersessionRerankCli(
-  args: SupersessionRerankCliArgs,
-): Promise<{
+export async function runSupersessionRerankCli(args: SupersessionRerankCliArgs): Promise<{
   report: SupersessionRerankReport;
   written?: string;
 }> {
   const outDir = args.outDir ?? ".curion/benchmark";
   const defaultBenchmark =
-    args.benchmarkArtifact ??
-    findMostRecentArtifact(outDir, "retrieval-baseline-");
+    args.benchmarkArtifact ?? findMostRecentArtifact(outDir, "retrieval-baseline-");
   if (!defaultBenchmark) {
     throw new Error(
       `runSupersessionRerankCli: no --benchmark-artifact given and no ` +
-        `retrieval-baseline-*.json found under ${outDir}`,
+        `retrieval-baseline-*.json found under ${outDir}`
     );
   }
   const benchmarkArtifact = readBenchmarkArtifact(defaultBenchmark);
@@ -214,21 +211,17 @@ export async function runSupersessionRerankCli(
   }
   if (!args.noStdout) {
     process.stderr.write(
-      `[supersession-edge-simulation] benchmark artifact: ${defaultBenchmark}\n`,
+      `[supersession-edge-simulation] benchmark artifact: ${defaultBenchmark}\n`
     );
     if (semantic) {
       process.stderr.write(
-        `[supersession-edge-simulation] semantic evidence:  ${args.semanticEvidence}\n`,
+        `[supersession-edge-simulation] semantic evidence:  ${args.semanticEvidence}\n`
       );
     }
     if (written) {
-      process.stderr.write(
-        `[supersession-edge-simulation] wrote:              ${written}\n`,
-      );
+      process.stderr.write(`[supersession-edge-simulation] wrote:              ${written}\n`);
     }
-    process.stdout.write(
-      formatSupersessionRerankReport(report) + "\n",
-    );
+    process.stdout.write(formatSupersessionRerankReport(report) + "\n");
   }
   return { report, ...(written ? { written } : {}) };
 }
@@ -246,7 +239,7 @@ export async function runSupersessionRerankCli(
  * them. The order of arguments does not matter.
  */
 export function parseSupersessionRerankCliArgs(
-  argv: ReadonlyArray<string>,
+  argv: ReadonlyArray<string>
 ): SupersessionRerankCliArgs {
   const out: SupersessionRerankCliArgs = {};
   for (let i = 0; i < argv.length; i++) {
@@ -280,7 +273,7 @@ export function parseSupersessionRerankCliArgs(
  * normally.
  */
 export async function main(
-  argv: ReadonlyArray<string> = process.argv.slice(2),
+  argv: ReadonlyArray<string> = process.argv.slice(2)
 ): Promise<SupersessionRerankReport> {
   const args = parseSupersessionRerankCliArgs(argv);
   const { report } = await runSupersessionRerankCli(args);
@@ -299,10 +292,7 @@ const isMainEntry = (() => {
   if (!Array.isArray(process.argv)) return false;
   const entry = process.argv[1];
   if (!entry) return false;
-  if (
-    !/supersession-edge-simulation-runner\.(ts|js)$/.test(entry)
-  )
-    return false;
+  if (!/supersession-edge-simulation-runner\.(ts|js)$/.test(entry)) return false;
   try {
     const url = new URL(import.meta.url);
     return url.pathname === entry || url.pathname.endsWith(entry);
@@ -314,7 +304,7 @@ const isMainEntry = (() => {
 if (isMainEntry) {
   main().catch((err) => {
     process.stderr.write(
-      `[supersession-edge-simulation] error: ${err instanceof Error ? err.message : String(err)}\n`,
+      `[supersession-edge-simulation] error: ${err instanceof Error ? err.message : String(err)}\n`
     );
     process.exit(1);
   });

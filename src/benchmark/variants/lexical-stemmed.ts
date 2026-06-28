@@ -69,8 +69,8 @@ import {
 } from "../../retrieval/lexical.js";
 import type {
   LexicalCandidate,
-  LexicalScoredCandidate,
   LexicalRankingOptions,
+  LexicalScoredCandidate,
 } from "../../retrieval/lexical.js";
 
 // ---------------------------------------------------------------------------
@@ -107,7 +107,7 @@ export interface LexicalStemmedRankingOptions extends LexicalRankingOptions {}
  */
 export function scoreStemmedCandidateDetailed(
   query: string,
-  candidateText: string,
+  candidateText: string
 ): { score: number; overlap: number } {
   const qTokens = tokenizeStemmed(query);
   if (qTokens.length === 0) return { score: 0, overlap: 0 };
@@ -128,10 +128,7 @@ export function scoreStemmedCandidateDetailed(
  * `scoreStemmedCandidateDetailed`; the ranker uses the detailed
  * form so it can also enforce the minimum-overlap floor.
  */
-export function scoreStemmedCandidate(
-  query: string,
-  candidateText: string,
-): number {
+export function scoreStemmedCandidate(query: string, candidateText: string): number {
   return scoreStemmedCandidateDetailed(query, candidateText).score;
 }
 
@@ -168,7 +165,7 @@ export function scoreStemmedCandidate(
 export function rankLexicalStemmed(
   query: string,
   candidates: ReadonlyArray<LexicalCandidate>,
-  options: LexicalStemmedRankingOptions = {},
+  options: LexicalStemmedRankingOptions = {}
 ): LexicalScoredCandidate[] {
   return rankLexicalStemmedInner(query, candidates, options);
 }
@@ -180,7 +177,7 @@ export function rankLexicalStemmed(
 function rankLexicalStemmedInner(
   query: string,
   candidates: ReadonlyArray<LexicalCandidate>,
-  options: LexicalStemmedRankingOptions,
+  options: LexicalStemmedRankingOptions
 ): LexicalScoredCandidate[] {
   const threshold = options.threshold ?? DEFAULT_RELEVANCE_THRESHOLD;
   const topK = options.topK ?? DEFAULT_TOP_K;
@@ -197,16 +194,9 @@ function rankLexicalStemmedInner(
   // for a candidate.
   const scored: LexicalScoredCandidate[] = [];
   for (const c of candidates) {
-    const matchText =
-      typeof c.text === "string" && c.text.length > 0 ? c.text : "";
-    const tagPart =
-      Array.isArray(c.tags) && c.tags.length > 0
-        ? ` ${c.tags.join(" ")}`
-        : "";
-    const { score, overlap } = scoreStemmedCandidateDetailed(
-      q,
-      `${matchText}${tagPart}`,
-    );
+    const matchText = typeof c.text === "string" && c.text.length > 0 ? c.text : "";
+    const tagPart = Array.isArray(c.tags) && c.tags.length > 0 ? ` ${c.tags.join(" ")}` : "";
+    const { score, overlap } = scoreStemmedCandidateDetailed(q, `${matchText}${tagPart}`);
     if (score >= threshold && overlap >= MIN_OVERLAP_TOKENS) {
       scored.push({ id: c.id, score });
     }

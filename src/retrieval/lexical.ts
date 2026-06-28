@@ -97,16 +97,88 @@ export const EXACT_PHRASE_BOOST = 0.2;
  *   - Drop the small English stop-word set below.
  */
 const STOP_WORDS: ReadonlySet<string> = new Set([
-  "the", "and", "for", "are", "but", "not", "you", "all", "any",
-  "can", "had", "her", "was", "one", "our", "out", "day", "get",
-  "has", "him", "his", "how", "man", "new", "now", "old", "see",
-  "two", "way", "who", "boy", "did", "its", "let", "put", "say",
-  "she", "too", "use", "this", "that", "with", "from", "have",
-  "they", "their", "there", "what", "when", "your", "were", "been",
-  "will", "would", "could", "should", "about", "into", "than",
-  "then", "them", "these", "those", "because", "where", "which",
-  "while", "whom", "ever", "very", "just", "also", "into", "over",
-  "such", "some", "only", "more", "most", "other", "than", "each",
+  "the",
+  "and",
+  "for",
+  "are",
+  "but",
+  "not",
+  "you",
+  "all",
+  "any",
+  "can",
+  "had",
+  "her",
+  "was",
+  "one",
+  "our",
+  "out",
+  "day",
+  "get",
+  "has",
+  "him",
+  "his",
+  "how",
+  "man",
+  "new",
+  "now",
+  "old",
+  "see",
+  "two",
+  "way",
+  "who",
+  "boy",
+  "did",
+  "its",
+  "let",
+  "put",
+  "say",
+  "she",
+  "too",
+  "use",
+  "this",
+  "that",
+  "with",
+  "from",
+  "have",
+  "they",
+  "their",
+  "there",
+  "what",
+  "when",
+  "your",
+  "were",
+  "been",
+  "will",
+  "would",
+  "could",
+  "should",
+  "about",
+  "into",
+  "than",
+  "then",
+  "them",
+  "these",
+  "those",
+  "because",
+  "where",
+  "which",
+  "while",
+  "whom",
+  "ever",
+  "very",
+  "just",
+  "also",
+  "into",
+  "over",
+  "such",
+  "some",
+  "only",
+  "more",
+  "most",
+  "other",
+  "than",
+  "each",
 ]);
 
 export function tokenize(text: string): string[] {
@@ -198,7 +270,7 @@ export function tokenizeStemmed(text: string): string[] {
  */
 export function scoreCandidateDetailed(
   query: string,
-  candidateText: string,
+  candidateText: string
 ): { score: number; overlap: number } {
   const qTokens = tokenize(query);
   if (qTokens.length === 0) return { score: 0, overlap: 0 };
@@ -237,10 +309,7 @@ export function scoreCandidate(query: string, candidateText: string): number {
   return scoreCandidateDetailed(query, candidateText).score;
 }
 
-function hasExactPhraseMatch(
-  qTokens: string[],
-  cTokens: string[],
-): boolean {
+function hasExactPhraseMatch(qTokens: string[], cTokens: string[]): boolean {
   // Build a set of every 2-token window in the candidate for O(1) lookup.
   const cWindows = new Set<string>();
   for (let i = 0; i + 1 < cTokens.length; i++) {
@@ -270,7 +339,7 @@ function hasExactPhraseMatch(
 export function rankLexical(
   query: string,
   candidates: ReadonlyArray<LexicalCandidate>,
-  options: LexicalRankingOptions = {},
+  options: LexicalRankingOptions = {}
 ): LexicalScoredCandidate[] {
   const threshold = options.threshold ?? DEFAULT_RELEVANCE_THRESHOLD;
   const topK = options.topK ?? DEFAULT_TOP_K;
@@ -281,18 +350,9 @@ export function rankLexical(
   // Pre-compute the candidate's match text once (summary + tags).
   const scored: LexicalScoredCandidate[] = [];
   for (const c of candidates) {
-    const matchText =
-      typeof c.text === "string" && c.text.length > 0
-        ? c.text
-        : "";
-    const tagPart =
-      Array.isArray(c.tags) && c.tags.length > 0
-        ? ` ${c.tags.join(" ")}`
-        : "";
-    const { score, overlap } = scoreCandidateDetailed(
-      q,
-      `${matchText}${tagPart}`,
-    );
+    const matchText = typeof c.text === "string" && c.text.length > 0 ? c.text : "";
+    const tagPart = Array.isArray(c.tags) && c.tags.length > 0 ? ` ${c.tags.join(" ")}` : "";
+    const { score, overlap } = scoreCandidateDetailed(q, `${matchText}${tagPart}`);
     // Apply both the threshold and the minimum-overlap floor.
     // A single shared stopword-y token (e.g. "project") is not
     // enough evidence that the candidate is about the same

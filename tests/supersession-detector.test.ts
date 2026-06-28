@@ -6,13 +6,10 @@
  * no provider calls.
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
+import { test } from "node:test";
 
-import {
-  detectSupersession,
-  MAX_SUPERSEDED_IDS,
-} from "../src/retrieval/supersession.ts";
+import { MAX_SUPERSEDED_IDS, detectSupersession } from "../src/retrieval/supersession.ts";
 import type { SafeMemorySummary } from "../src/storage/storage.ts";
 
 // ---------------------------------------------------------------------------
@@ -22,7 +19,7 @@ import type { SafeMemorySummary } from "../src/storage/storage.ts";
 function makeSummary(
   id: number,
   memoryContent: string,
-  opts: Partial<Omit<SafeMemorySummary, "id" | "memoryContent">> = {},
+  opts: Partial<Omit<SafeMemorySummary, "id" | "memoryContent">> = {}
 ): SafeMemorySummary {
   return {
     id,
@@ -42,13 +39,10 @@ function makeSummary(
 test("detectSupersession: MiniMax → NVIDIA with explicit 'use Y instead of X'", () => {
   // High overlap: old memory uses the exact deprecated phrase; candidate adds replacement.
   // Tokens: old=6, candidate=9, intersection=6, union=9, Jaccard=0.667 >= 0.5
-  const oldMemory = makeSummary(
-    1,
-    "We use MiniMax for text embeddings in the recall pipeline.",
-  );
+  const oldMemory = makeSummary(1, "We use MiniMax for text embeddings in the recall pipeline.");
   const candidate = makeSummary(
     2,
-    "We no longer use MiniMax for text embeddings in the recall pipeline; use NVIDIA NIM instead.",
+    "We no longer use MiniMax for text embeddings in the recall pipeline; use NVIDIA NIM instead."
   );
 
   const result = detectSupersession({ candidate, others: [oldMemory] });
@@ -59,13 +53,10 @@ test("detectSupersession: MiniMax → NVIDIA with explicit 'use Y instead of X'"
 });
 
 test("detectSupersession: 'use Y instead' fires on related memory with high overlap", () => {
-  const oldMemory = makeSummary(
-    10,
-    "We use MiniMax for text embeddings in the recall pipeline.",
-  );
+  const oldMemory = makeSummary(10, "We use MiniMax for text embeddings in the recall pipeline.");
   const candidate = makeSummary(
     11,
-    "We switched from MiniMax to NVIDIA NIM for text embeddings in the recall pipeline.",
+    "We switched from MiniMax to NVIDIA NIM for text embeddings in the recall pipeline."
   );
 
   const result = detectSupersession({ candidate, others: [oldMemory] });
@@ -75,13 +66,10 @@ test("detectSupersession: 'use Y instead' fires on related memory with high over
 });
 
 test("detectSupersession: 'use Y instead' does NOT fire on unrelated memory", () => {
-  const unrelated = makeSummary(
-    20,
-    "The project uses Redis for caching in the web tier.",
-  );
+  const unrelated = makeSummary(20, "The project uses Redis for caching in the web tier.");
   const candidate = makeSummary(
     21,
-    "We no longer use MiniMax for text embeddings; use NVIDIA NIM instead.",
+    "We no longer use MiniMax for text embeddings; use NVIDIA NIM instead."
   );
 
   const result = detectSupersession({ candidate, others: [unrelated] });
@@ -89,13 +77,10 @@ test("detectSupersession: 'use Y instead' does NOT fire on unrelated memory", ()
 });
 
 test("detectSupersession: 'use Y instead' does NOT fire on marginally overlapping memory", () => {
-  const oldMemory = makeSummary(
-    30,
-    "We use PostgreSQL for the main relational database.",
-  );
+  const oldMemory = makeSummary(30, "We use PostgreSQL for the main relational database.");
   const candidate = makeSummary(
     31,
-    "We no longer use SQLite for local development databases; use Docker Compose PostgreSQL instead.",
+    "We no longer use SQLite for local development databases; use Docker Compose PostgreSQL instead."
   );
 
   const result = detectSupersession({ candidate, others: [oldMemory] });
@@ -108,15 +93,13 @@ test("detectSupersession: 'use Y instead' does NOT fire on marginally overlappin
 
 test("detectSupersession: policy superseded by explicit 'previous X is superseded'", () => {
   // Candidate uses "supersedes" (positive polarity) with high overlap.
-  const oldPolicy = makeSummary(
-    100,
-    "Feature flags rollout policy for production rollouts.",
-    { kind: "policy" },
-  );
+  const oldPolicy = makeSummary(100, "Feature flags rollout policy for production rollouts.", {
+    kind: "policy",
+  });
   const candidate = makeSummary(
     101,
     "New blue-green deployment supersedes the old feature flags rollout policy for production rollouts.",
-    { kind: "policy" },
+    { kind: "policy" }
   );
 
   const result = detectSupersession({ candidate, others: [oldPolicy] });
@@ -130,12 +113,12 @@ test("detectSupersession: policy override via 'overrides'", () => {
   const oldPolicy = makeSummary(
     200,
     "Postgres is the data storage solution for all production workloads.",
-    { kind: "policy" },
+    { kind: "policy" }
   );
   const candidate = makeSummary(
     201,
     "New policy overrides the Postgres-only data storage rule for production workloads.",
-    { kind: "policy" },
+    { kind: "policy" }
   );
 
   const result = detectSupersession({ candidate, others: [oldPolicy] });
@@ -146,15 +129,13 @@ test("detectSupersession: policy override via 'overrides'", () => {
 
 test("detectSupersession: policy superseded by 'replaced by'", () => {
   // Candidate uses "replaces" (active voice, polarity +1) with high overlap.
-  const oldPolicy = makeSummary(
-    300,
-    "Central gateway service handles all internal API calls.",
-    { kind: "policy" },
-  );
+  const oldPolicy = makeSummary(300, "Central gateway service handles all internal API calls.", {
+    kind: "policy",
+  });
   const candidate = makeSummary(
     301,
     "Direct service mesh communication replaces the central gateway service for all internal API calls.",
-    { kind: "policy" },
+    { kind: "policy" }
   );
 
   const result = detectSupersession({ candidate, others: [oldPolicy] });
@@ -170,11 +151,11 @@ test("detectSupersession: policy superseded by 'replaced by'", () => {
 test("detectSupersession: 'supersedes' fires with high confidence", () => {
   const oldMemory = makeSummary(
     600,
-    "The old approach used synchronous batch processing for background jobs.",
+    "The old approach used synchronous batch processing for background jobs."
   );
   const candidate = makeSummary(
     601,
-    "New async pipeline supersedes the old synchronous batch processing approach for background jobs.",
+    "New async pipeline supersedes the old synchronous batch processing approach for background jobs."
   );
 
   const result = detectSupersession({ candidate, others: [oldMemory] });
@@ -190,11 +171,11 @@ test("detectSupersession: 'supersedes' fires with high confidence", () => {
 test("detectSupersession: no signal on unrelated memory with similar length", () => {
   const unrelated = makeSummary(
     700,
-    "The API server runs on Node.js 20 with Express and handles REST endpoints.",
+    "The API server runs on Node.js 20 with Express and handles REST endpoints."
   );
   const candidate = makeSummary(
     701,
-    "We no longer use MiniMax for text embeddings; use NVIDIA NIM instead.",
+    "We no longer use MiniMax for text embeddings; use NVIDIA NIM instead."
   );
 
   const result = detectSupersession({ candidate, others: [unrelated] });
@@ -204,11 +185,11 @@ test("detectSupersession: no signal on unrelated memory with similar length", ()
 test("detectSupersession: no signal when candidate has supersession phrase but no related memory", () => {
   const unrelated = makeSummary(
     800,
-    "The CI pipeline runs on GitHub Actions with Ubuntu runners and builds Docker images.",
+    "The CI pipeline runs on GitHub Actions with Ubuntu runners and builds Docker images."
   );
   const candidate = makeSummary(
     801,
-    "We no longer use Docker Swarm for container orchestration; use Kubernetes instead.",
+    "We no longer use Docker Swarm for container orchestration; use Kubernetes instead."
   );
 
   const result = detectSupersession({ candidate, others: [unrelated] });
@@ -218,7 +199,7 @@ test("detectSupersession: no signal when candidate has supersession phrase but n
 test("detectSupersession: no signal on same-id memory (cannot supersede itself)", () => {
   const candidate = makeSummary(
     900,
-    "We no longer use MiniMax for text embeddings; use NVIDIA NIM instead.",
+    "We no longer use MiniMax for text embeddings; use NVIDIA NIM instead."
   );
 
   const result = detectSupersession({ candidate, others: [candidate] });
@@ -228,11 +209,11 @@ test("detectSupersession: no signal on same-id memory (cannot supersede itself)"
 test("detectSupersession: no signal when candidate id <= other id (directionality)", () => {
   const candidate = makeSummary(
     1,
-    "We no longer use MiniMax for text embeddings; use NVIDIA NIM instead.",
+    "We no longer use MiniMax for text embeddings; use NVIDIA NIM instead."
   );
   const older = makeSummary(
     2,
-    "The project uses MiniMax for text embeddings in the recall pipeline.",
+    "The project uses MiniMax for text embeddings in the recall pipeline."
   );
 
   const result = detectSupersession({ candidate, others: [older] });
@@ -246,11 +227,11 @@ test("detectSupersession: no signal when candidate id <= other id (directionalit
 test("detectSupersession: no signal when candidate is ambiguous (no explicit phrasing)", () => {
   const oldMemory = makeSummary(
     1000,
-    "The project uses MiniMax for text embeddings in the recall pipeline.",
+    "The project uses MiniMax for text embeddings in the recall pipeline."
   );
   const candidate = makeSummary(
     1001,
-    "We evaluated NVIDIA NIM and decided to use it for text embeddings going forward in the recall pipeline.",
+    "We evaluated NVIDIA NIM and decided to use it for text embeddings going forward in the recall pipeline."
   );
 
   const result = detectSupersession({ candidate, others: [oldMemory] });
@@ -258,13 +239,10 @@ test("detectSupersession: no signal when candidate is ambiguous (no explicit phr
 });
 
 test("detectSupersession: no signal when candidate just describes a change without supersession phrasing", () => {
-  const oldMemory = makeSummary(
-    1100,
-    "Postgres 16 is the primary database for the project.",
-  );
+  const oldMemory = makeSummary(1100, "Postgres 16 is the primary database for the project.");
   const candidate = makeSummary(
     1101,
-    "After evaluation we upgraded to Postgres 17 for better performance in the project database.",
+    "After evaluation we upgraded to Postgres 17 for better performance in the project database."
   );
 
   const result = detectSupersession({ candidate, others: [oldMemory] });
@@ -283,7 +261,7 @@ test("detectSupersession: no signal on inactive related memory", () => {
   };
   const candidate = makeSummary(
     1201,
-    "We no longer use MiniMax for text embeddings in the recall pipeline; use NVIDIA NIM instead.",
+    "We no longer use MiniMax for text embeddings in the recall pipeline; use NVIDIA NIM instead."
   );
 
   const result = detectSupersession({ candidate, others: [inactiveMemory] });
@@ -303,13 +281,10 @@ test("detectSupersession: no signal when candidate memoryContent is empty", () =
 // ---------------------------------------------------------------------------
 
 test("detectSupersession: candidate with higher id can supersede lower id", () => {
-  const oldMemory = makeSummary(
-    1400,
-    "We use MiniMax for text embeddings in the recall pipeline.",
-  );
+  const oldMemory = makeSummary(1400, "We use MiniMax for text embeddings in the recall pipeline.");
   const candidate = makeSummary(
     1401,
-    "We no longer use MiniMax for text embeddings in the recall pipeline; use NVIDIA NIM instead.",
+    "We no longer use MiniMax for text embeddings in the recall pipeline; use NVIDIA NIM instead."
   );
 
   const result = detectSupersession({ candidate, others: [oldMemory] });
@@ -319,13 +294,10 @@ test("detectSupersession: candidate with higher id can supersede lower id", () =
 });
 
 test("detectSupersession: candidate with equal id does not supersede (same record)", () => {
-  const oldMemory = makeSummary(
-    1500,
-    "The project uses MiniMax for text embeddings.",
-  );
+  const oldMemory = makeSummary(1500, "The project uses MiniMax for text embeddings.");
   const candidate = makeSummary(
     1500,
-    "We no longer use MiniMax for text embeddings; use NVIDIA NIM instead.",
+    "We no longer use MiniMax for text embeddings; use NVIDIA NIM instead."
   );
 
   const result = detectSupersession({ candidate, others: [oldMemory] });
@@ -339,7 +311,7 @@ test("detectSupersession: candidate with equal id does not supersede (same recor
 test("detectSupersession: malformed others entries are skipped without crash", () => {
   const goodMemory = makeSummary(
     1600,
-    "We use MiniMax for text embeddings in the recall pipeline.",
+    "We use MiniMax for text embeddings in the recall pipeline."
   );
   const badMemory = {
     id: "not-a-number",
@@ -353,7 +325,7 @@ test("detectSupersession: malformed others entries are skipped without crash", (
 
   const candidate = makeSummary(
     1601,
-    "We no longer use MiniMax for text embeddings in the recall pipeline; use NVIDIA NIM instead.",
+    "We no longer use MiniMax for text embeddings in the recall pipeline; use NVIDIA NIM instead."
   );
 
   // Must not throw.
@@ -372,17 +344,11 @@ test("detectSupersession: malformed others entries are skipped without crash", (
 // ---------------------------------------------------------------------------
 
 test("detectSupersession: can supersede multiple related memories", () => {
-  const memory1 = makeSummary(
-    1700,
-    "We use MiniMax for text embeddings in the recall pipeline.",
-  );
-  const memory2 = makeSummary(
-    1701,
-    "MiniMax is used for text embeddings in the recall pipeline.",
-  );
+  const memory1 = makeSummary(1700, "We use MiniMax for text embeddings in the recall pipeline.");
+  const memory2 = makeSummary(1701, "MiniMax is used for text embeddings in the recall pipeline.");
   const candidate = makeSummary(
     1702,
-    "We no longer use MiniMax for text embeddings in the recall pipeline; use NVIDIA NIM instead.",
+    "We no longer use MiniMax for text embeddings in the recall pipeline; use NVIDIA NIM instead."
   );
 
   const result = detectSupersession({
@@ -398,17 +364,11 @@ test("detectSupersession: can supersede multiple related memories", () => {
 });
 
 test("detectSupersession: superseded ids are sorted ascending", () => {
-  const memory1 = makeSummary(
-    1802,
-    "We use MiniMax for text embeddings in the recall pipeline.",
-  );
-  const memory2 = makeSummary(
-    1801,
-    "MiniMax is used for text embeddings in the recall pipeline.",
-  );
+  const memory1 = makeSummary(1802, "We use MiniMax for text embeddings in the recall pipeline.");
+  const memory2 = makeSummary(1801, "MiniMax is used for text embeddings in the recall pipeline.");
   const candidate = makeSummary(
     1803,
-    "We no longer use MiniMax for text embeddings in the recall pipeline; use NVIDIA NIM instead.",
+    "We no longer use MiniMax for text embeddings in the recall pipeline; use NVIDIA NIM instead."
   );
 
   const result = detectSupersession({
@@ -426,15 +386,12 @@ test("detectSupersession: superseded ids are capped at MAX_SUPERSEDED_IDS", () =
   const manyMemories: SafeMemorySummary[] = [];
   for (let i = 0; i < 20; i++) {
     manyMemories.push(
-      makeSummary(
-        2000 + i,
-        "We use MiniMax for text embeddings in the recall pipeline.",
-      ),
+      makeSummary(2000 + i, "We use MiniMax for text embeddings in the recall pipeline.")
     );
   }
   const candidate = makeSummary(
     2100,
-    "We no longer use MiniMax for text embeddings in the recall pipeline; use NVIDIA NIM instead.",
+    "We no longer use MiniMax for text embeddings in the recall pipeline; use NVIDIA NIM instead."
   );
 
   const result = detectSupersession({
@@ -446,7 +403,7 @@ test("detectSupersession: superseded ids are capped at MAX_SUPERSEDED_IDS", () =
   if (!result) return;
   assert.ok(
     result.supersededIds.length <= MAX_SUPERSEDED_IDS,
-    `superseded ids must be capped at ${MAX_SUPERSEDED_IDS}`,
+    `superseded ids must be capped at ${MAX_SUPERSEDED_IDS}`
   );
 });
 
@@ -455,13 +412,10 @@ test("detectSupersession: superseded ids are capped at MAX_SUPERSEDED_IDS", () =
 // ---------------------------------------------------------------------------
 
 test("detectSupersession: confidence is overlap base + phrase boost", () => {
-  const oldMemory = makeSummary(
-    3000,
-    "We use MiniMax for text embeddings in recall.",
-  );
+  const oldMemory = makeSummary(3000, "We use MiniMax for text embeddings in recall.");
   const candidate = makeSummary(
     3001,
-    "We no longer use MiniMax for text embeddings in recall; use NVIDIA NIM instead.",
+    "We no longer use MiniMax for text embeddings in recall; use NVIDIA NIM instead."
   );
 
   const result = detectSupersession({ candidate, others: [oldMemory] });
@@ -474,7 +428,7 @@ test("detectSupersession: confidence is overlap base + phrase boost", () => {
 test("detectSupersession: returns null for empty others array", () => {
   const candidate = makeSummary(
     3100,
-    "We no longer use MiniMax for text embeddings; use NVIDIA NIM instead.",
+    "We no longer use MiniMax for text embeddings; use NVIDIA NIM instead."
   );
 
   const result = detectSupersession({ candidate, others: [] });
@@ -488,11 +442,11 @@ test("detectSupersession: returns null for empty others array", () => {
 test("detectSupersession: 'is deprecated' fires as supersession signal", () => {
   const oldMemory = makeSummary(
     4000,
-    "Legacy CSV import tool is used for data ingestion in the pipeline.",
+    "Legacy CSV import tool is used for data ingestion in the pipeline."
   );
   const candidate = makeSummary(
     4001,
-    "Legacy CSV import data ingestion pipeline tool is deprecated; use the new API-based ingestion pipeline instead.",
+    "Legacy CSV import data ingestion pipeline tool is deprecated; use the new API-based ingestion pipeline instead."
   );
 
   const result = detectSupersession({ candidate, others: [oldMemory] });
@@ -508,11 +462,11 @@ test("detectSupersession: 'is deprecated' fires as supersession signal", () => {
 test("detectSupersession: 'migrated from X to Y' fires", () => {
   const oldMemory = makeSummary(
     5000,
-    "The project uses MongoDB for the document store and data persistence.",
+    "The project uses MongoDB for the document store and data persistence."
   );
   const candidate = makeSummary(
     5001,
-    "We migrated from MongoDB to PostgreSQL for the document store and data persistence.",
+    "We migrated from MongoDB to PostgreSQL for the document store and data persistence."
   );
 
   const result = detectSupersession({ candidate, others: [oldMemory] });
@@ -529,11 +483,11 @@ test("detectSupersession: fires when overlap is at MIN_OVERLAP threshold", () =>
   // "migrated from X to Y" fires with active polarity.
   const oldMemory = makeSummary(
     6000,
-    "PostgreSQL is the main relational database for the production API service.",
+    "PostgreSQL is the main relational database for the production API service."
   );
   const candidate = makeSummary(
     6001,
-    "We migrated from PostgreSQL to Aurora for the main relational database in the production API service.",
+    "We migrated from PostgreSQL to Aurora for the main relational database in the production API service."
   );
 
   const result = detectSupersession({ candidate, others: [oldMemory] });
@@ -545,11 +499,11 @@ test("detectSupersession: fires when overlap is at MIN_OVERLAP threshold", () =>
 test("detectSupersession: returns null when overlap is below threshold even with supersession phrasing", () => {
   const oldMemory = makeSummary(
     7000,
-    "PostgreSQL handles all relational data storage for the API.",
+    "PostgreSQL handles all relational data storage for the API."
   );
   const candidate = makeSummary(
     7001,
-    "We no longer use MongoDB for document storage; use DynamoDB instead for the NoSQL data store.",
+    "We no longer use MongoDB for document storage; use DynamoDB instead for the NoSQL data store."
   );
 
   const result = detectSupersession({ candidate, others: [oldMemory] });
@@ -567,7 +521,7 @@ test("detectSupersession: raw input 'supersedes' survives provider rephrasing to
   // Old memory: MiniMax as the default provider
   const oldMemory = makeSummary(
     174,
-    "The Curion system policy sets MiniMax as the default provider for both remember and recall operations.",
+    "The Curion system policy sets MiniMax as the default provider for both remember and recall operations."
   );
 
   // Candidate with provider summary that rewrote "supersedes" to "superseding"
@@ -575,7 +529,7 @@ test("detectSupersession: raw input 'supersedes' survives provider rephrasing to
   // "superseding" but raw input said "supersedes"
   const candidate = makeSummary(
     175,
-    "The provider policy was updated to make NVIDIA NIM (openai/gpt-oss-120b) the sole default for both remember and recall operations, removing MiniMax as the default and superseding the previous MiniMax provider policy.",
+    "The provider policy was updated to make NVIDIA NIM (openai/gpt-oss-120b) the sole default for both remember and recall operations, removing MiniMax as the default and superseding the previous MiniMax provider policy."
   );
 
   // Raw input has explicit "supersedes" but provider rewrote to "superseding"
@@ -591,7 +545,7 @@ test("detectSupersession: raw input 'supersedes' survives provider rephrasing to
   assert.notEqual(
     result,
     null,
-    "explicit supersedes in raw input must survive provider rephrasing to superseding",
+    "explicit supersedes in raw input must survive provider rephrasing to superseding"
   );
   if (!result) return;
   assert.deepEqual(result.supersededIds, [174], "memory 174 must be superseded");
@@ -604,15 +558,12 @@ test("detectSupersession: raw input explicit supersedes uses reduced overlap thr
   // topically-related memories with moderate token divergence to pass.
 
   // Old memory: MiniMax embeddings
-  const oldMemory = makeSummary(
-    1,
-    "We use MiniMax for text embeddings in the recall pipeline.",
-  );
+  const oldMemory = makeSummary(1, "We use MiniMax for text embeddings in the recall pipeline.");
 
   // New memory: different phrasing about NVIDIA NIM
   const candidate = makeSummary(
     2,
-    "The provider policy was updated to make NVIDIA NIM the sole default, superseding the previous MiniMax provider policy.",
+    "The provider policy was updated to make NVIDIA NIM the sole default, superseding the previous MiniMax provider policy."
   );
 
   // Raw input has explicit "supersedes"
@@ -656,7 +607,7 @@ test("hasMeaningfulRelationshipData: supersession-only fields are meaningful", a
   assert.equal(
     hasMeaningfulRelationshipData(supersessionOnly),
     true,
-    "supersession-only block must be considered meaningful",
+    "supersession-only block must be considered meaningful"
   );
 });
 
@@ -677,6 +628,6 @@ test("hasMeaningfulRelationshipData: empty supersedes is not meaningful", async 
   assert.equal(
     hasMeaningfulRelationshipData(emptySupersession),
     false,
-    "empty supersedes array must not be considered meaningful",
+    "empty supersedes array must not be considered meaningful"
   );
 });

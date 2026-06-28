@@ -61,7 +61,7 @@
  * pin the math against known inputs.
  */
 
-import type { AbstentionSignals, QueryEval } from "./metrics.js";
+import type { AbstentionSignals } from "./metrics.js";
 
 // ---------------------------------------------------------------------------
 // AUROC
@@ -109,13 +109,10 @@ import type { AbstentionSignals, QueryEval } from "./metrics.js";
  *   - All labels the same returns `0.5`.
  *   - All scores the same returns `0.5`.
  */
-export function computeAuRoc(
-  labels: ReadonlyArray<0 | 1>,
-  scores: ReadonlyArray<number>,
-): number {
+export function computeAuRoc(labels: ReadonlyArray<0 | 1>, scores: ReadonlyArray<number>): number {
   if (labels.length !== scores.length) {
     throw new Error(
-      `computeAuRoc: labels (${labels.length}) and scores (${scores.length}) must have the same length`,
+      `computeAuRoc: labels (${labels.length}) and scores (${scores.length}) must have the same length`
     );
   }
   const n = labels.length;
@@ -234,11 +231,11 @@ export interface RiskCoveragePoint {
  */
 export function computeRiskCoverageCurve(
   labels: ReadonlyArray<0 | 1>,
-  scores: ReadonlyArray<number>,
+  scores: ReadonlyArray<number>
 ): RiskCoveragePoint[] {
   if (labels.length !== scores.length) {
     throw new Error(
-      `computeRiskCoverageCurve: labels (${labels.length}) and scores (${scores.length}) must have the same length`,
+      `computeRiskCoverageCurve: labels (${labels.length}) and scores (${scores.length}) must have the same length`
     );
   }
   const n = labels.length;
@@ -308,7 +305,7 @@ export function computeRiskCoverageCurve(
  */
 export function coverageAtFixedRisk(
   curve: ReadonlyArray<RiskCoveragePoint>,
-  riskTargets: ReadonlyArray<number>,
+  riskTargets: ReadonlyArray<number>
 ): Array<{ riskTarget: number; coverage: number; threshold: number }> {
   const out: Array<{ riskTarget: number; coverage: number; threshold: number }> = [];
   for (const t of riskTargets) {
@@ -341,7 +338,7 @@ export function coverageAtFixedRisk(
  */
 export function riskAtFixedCoverage(
   curve: ReadonlyArray<RiskCoveragePoint>,
-  coverageTargets: ReadonlyArray<number>,
+  coverageTargets: ReadonlyArray<number>
 ): Array<{ coverageTarget: number; risk: number; threshold: number }> {
   const out: Array<{ coverageTarget: number; risk: number; threshold: number }> = [];
   for (const t of coverageTargets) {
@@ -399,14 +396,10 @@ export type AuditSignalName = (typeof AUDIT_SIGNAL_NAMES)[number];
  * surfaced on the audit report.
  */
 export const AUDIT_SIGNAL_NOTES: Readonly<Record<AuditSignalName, string>> = {
-  topScore:
-    "Top-1 raw score (cosine / RRF / Jaccard; variant-specific scale).",
-  top1Top2Gap:
-    "Top-1 to top-2 absolute score gap. 0 if fewer than 2 candidates.",
-  top1Top2Ratio:
-    "Top-1 / top-2 score ratio. +Inf if top-2 is 0 (only candidate).",
-  returnedCount:
-    "Number of candidates the ranker returned (top-K may be < 5).",
+  topScore: "Top-1 raw score (cosine / RRF / Jaccard; variant-specific scale).",
+  top1Top2Gap: "Top-1 to top-2 absolute score gap. 0 if fewer than 2 candidates.",
+  top1Top2Ratio: "Top-1 / top-2 score ratio. +Inf if top-2 is 0 (only candidate).",
+  returnedCount: "Number of candidates the ranker returned (top-K may be < 5).",
   agreementCount:
     "Number of hybrid contributors (lexical / fts5 / vector-dense) that surfaced the top-1. Cap = 3.",
   minContributorRank:
@@ -415,10 +408,8 @@ export const AUDIT_SIGNAL_NOTES: Readonly<Record<AuditSignalName, string>> = {
     "Worst (largest) RRF rank across contributors. Low values = strong cross-source agreement.",
   meanContributorRank:
     "Mean RRF rank across contributors. 0 when none of the contributors surfaced the top-1.",
-  minContributorScore:
-    "Worst (smallest) raw per-source score across contributors.",
-  maxContributorScore:
-    "Best (largest) raw per-source score across contributors.",
+  minContributorScore: "Worst (smallest) raw per-source score across contributors.",
+  maxContributorScore: "Best (largest) raw per-source score across contributors.",
   meanContributorScore:
     "Mean raw per-source score across contributors. 0 when none of the contributors surfaced the top-1.",
 };
@@ -444,10 +435,7 @@ export const AUDIT_SIGNAL_NOTES: Readonly<Record<AuditSignalName, string>> = {
  * directions and reports the better one; see
  * `auditSignal`).
  */
-export function extractSignal(
-  signals: Readonly<AbstentionSignals>,
-  name: AuditSignalName,
-): number {
+export function extractSignal(signals: Readonly<AbstentionSignals>, name: AuditSignalName): number {
   switch (name) {
     case "topScore":
       return signals.topScore;
@@ -457,9 +445,7 @@ export function extractSignal(
       // +Infinity is not sortable. Cap at a large finite
       // number so the AUROC / curve math is well-defined.
       // The cap is the conventional "1.0e9" sentinel.
-      return Number.isFinite(signals.top1Top2Ratio)
-        ? signals.top1Top2Ratio
-        : 1.0e9;
+      return Number.isFinite(signals.top1Top2Ratio) ? signals.top1Top2Ratio : 1.0e9;
     case "returnedCount":
       return signals.returnedCount;
     case "agreementCount":
@@ -589,11 +575,11 @@ export function auditSignal(
     coverageTargets?: ReadonlyArray<number>;
     /** Risk targets for the coverage-at-risk summary. */
     riskTargets?: ReadonlyArray<number>;
-  } = {},
+  } = {}
 ): AuditSignalResult {
   if (signals.length !== labels.length) {
     throw new Error(
-      `auditSignal(${signalName}): signals (${signals.length}) and labels (${labels.length}) must have the same length`,
+      `auditSignal(${signalName}): signals (${signals.length}) and labels (${labels.length}) must have the same length`
     );
   }
   const scoresNatural = signals.map((s) => extractSignal(s, signalName));
@@ -617,12 +603,8 @@ export function auditSignal(
   // the natural direction is anti-predictive and the
   // audit had to invert to get a useful signal.
   const scoreIsHigherIsMorePositive = aurocNatural >= aurocInverted;
-  const auroc = scoreIsHigherIsMorePositive
-    ? aurocNatural
-    : aurocInverted;
-  const scoresForCurve = scoreIsHigherIsMorePositive
-    ? scoresNatural
-    : scoresInverted;
+  const auroc = scoreIsHigherIsMorePositive ? aurocNatural : aurocInverted;
+  const scoresForCurve = scoreIsHigherIsMorePositive ? scoresNatural : scoresInverted;
   const curve = computeRiskCoverageCurve(labels, scoresForCurve);
   const riskTargets = options.riskTargets ?? [0.05, 0.1, 0.2];
   const coverageTargets = options.coverageTargets ?? [0.5, 0.8, 0.95];
@@ -633,30 +615,15 @@ export function auditSignal(
   for (const s of signals) {
     if (signalName === "minContributorRank" && s.minContributorRank === null) {
       singleVariantMissing += 1;
-    } else if (
-      signalName === "maxContributorRank" &&
-      s.maxContributorRank === null
-    ) {
+    } else if (signalName === "maxContributorRank" && s.maxContributorRank === null) {
       singleVariantMissing += 1;
-    } else if (
-      signalName === "meanContributorRank" &&
-      s.meanContributorRank === null
-    ) {
+    } else if (signalName === "meanContributorRank" && s.meanContributorRank === null) {
       singleVariantMissing += 1;
-    } else if (
-      signalName === "minContributorScore" &&
-      s.minContributorScore === null
-    ) {
+    } else if (signalName === "minContributorScore" && s.minContributorScore === null) {
       singleVariantMissing += 1;
-    } else if (
-      signalName === "maxContributorScore" &&
-      s.maxContributorScore === null
-    ) {
+    } else if (signalName === "maxContributorScore" && s.maxContributorScore === null) {
       singleVariantMissing += 1;
-    } else if (
-      signalName === "meanContributorScore" &&
-      s.meanContributorScore === null
-    ) {
+    } else if (signalName === "meanContributorScore" && s.meanContributorScore === null) {
       singleVariantMissing += 1;
     }
   }
@@ -665,9 +632,7 @@ export function auditSignal(
     notes: AUDIT_SIGNAL_NOTES[signalName],
     auroc,
     scoreIsHigherIsMorePositive,
-    aurocOtherDirection: scoreIsHigherIsMorePositive
-      ? aurocInverted
-      : aurocNatural,
+    aurocOtherDirection: scoreIsHigherIsMorePositive ? aurocInverted : aurocNatural,
     riskCoverageCurve: curve,
     coverageAtRisk: coverageAtFixedRisk(curve, riskTargets),
     riskAtCoverage: riskAtFixedCoverage(curve, coverageTargets),
@@ -757,7 +722,7 @@ export function auditSlice(
   options: {
     coverageTargets?: ReadonlyArray<number>;
     riskTargets?: ReadonlyArray<number>;
-  } = {},
+  } = {}
 ): AuditSlice {
   const signalResults: AuditSignalResult[] = [];
   for (const s of AUDIT_SIGNAL_NAMES) {
@@ -766,10 +731,8 @@ export function auditSlice(
         ...(options.coverageTargets !== undefined
           ? { coverageTargets: options.coverageTargets }
           : {}),
-        ...(options.riskTargets !== undefined
-          ? { riskTargets: options.riskTargets }
-          : {}),
-      }),
+        ...(options.riskTargets !== undefined ? { riskTargets: options.riskTargets } : {}),
+      })
     );
   }
   let noAnswerCount = 0;
@@ -781,8 +744,7 @@ export function auditSlice(
   // (0.5) by definition; the on-disk artifact still
   // emits that value (so existing consumers do not
   // break), and the human report renders `n/a`.
-  const singleClass =
-    noAnswerCount === 0 || noAnswerCount === labels.length;
+  const singleClass = noAnswerCount === 0 || noAnswerCount === labels.length;
   return {
     name,
     description,

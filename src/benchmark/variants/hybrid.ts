@@ -94,19 +94,19 @@
  */
 
 import {
-  rankLexical,
   type LexicalCandidate,
-  type LexicalScoredCandidate,
   type LexicalRankingOptions,
+  type LexicalScoredCandidate,
+  rankLexical,
 } from "../../retrieval/lexical.js";
-import { rankFts5, type Fts5RankingOptions } from "./fts5.js";
-import { rankVector, type VectorRankingOptions } from "./vector.js";
-import {
-  rankDenseVectorWithMetadataAsync,
-  type DenseVectorRankingOptions,
-  type DenseVectorRankResult,
-} from "./dense-vector.js";
 import type { DenseEmbedder } from "./dense-embedder.js";
+import {
+  type DenseVectorRankResult,
+  type DenseVectorRankingOptions,
+  rankDenseVectorWithMetadataAsync,
+} from "./dense-vector.js";
+import { type Fts5RankingOptions, rankFts5 } from "./fts5.js";
+import { type VectorRankingOptions, rankVector } from "./vector.js";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -326,26 +326,16 @@ export const RRF_SWEEP_K_VALUES: readonly number[] = [20, 60, 100] as const;
  * The function is exported as a pure helper so tests can
  * assert on the math without going through the ranker.
  */
-export function rrfContribution(
-  rank: number | null,
-  weight: number,
-  k: number,
-): number {
+export function rrfContribution(rank: number | null, weight: number, k: number): number {
   if (rank === null) return 0;
   if (!Number.isFinite(rank) || rank < 1) {
-    throw new Error(
-      `rrfContribution: rank must be a positive integer or null (got ${rank})`,
-    );
+    throw new Error(`rrfContribution: rank must be a positive integer or null (got ${rank})`);
   }
   if (!Number.isFinite(weight) || weight < 0) {
-    throw new Error(
-      `rrfContribution: weight must be a non-negative finite number (got ${weight})`,
-    );
+    throw new Error(`rrfContribution: weight must be a non-negative finite number (got ${weight})`);
   }
   if (!Number.isFinite(k) || k <= 0) {
-    throw new Error(
-      `rrfContribution: k must be a positive finite number (got ${k})`,
-    );
+    throw new Error(`rrfContribution: k must be a positive finite number (got ${k})`);
   }
   if (weight === 0) return 0;
   return weight / (k + rank);
@@ -388,7 +378,7 @@ export function fuseRankings(
     weight: number;
   }>,
   k: number,
-  topK: number,
+  topK: number
 ): HybridScoredCandidate[] {
   if (!Number.isFinite(k) || k <= 0) {
     throw new Error(`fuseRankings: k must be a positive finite number (got ${k})`);
@@ -402,15 +392,28 @@ export function fuseRankings(
   // contribution is 0.
   const perVariantIndex: Map<
     number,
-    { label: "lexical" | "fts5" | "vector" | "vector-dense"; rank: number; score: number; weight: number }
+    {
+      label: "lexical" | "fts5" | "vector" | "vector-dense";
+      rank: number;
+      score: number;
+      weight: number;
+    }
   >[] = [];
   for (const r of rankings) {
     if (!Number.isFinite(r.weight) || r.weight < 0) {
       throw new Error(
-        `fuseRankings: weight must be a non-negative finite number (got ${r.weight} for ${r.label})`,
+        `fuseRankings: weight must be a non-negative finite number (got ${r.weight} for ${r.label})`
       );
     }
-    const idx = new Map<number, { label: "lexical" | "fts5" | "vector" | "vector-dense"; rank: number; score: number; weight: number }>();
+    const idx = new Map<
+      number,
+      {
+        label: "lexical" | "fts5" | "vector" | "vector-dense";
+        rank: number;
+        score: number;
+        weight: number;
+      }
+    >();
     for (let i = 0; i < r.list.length; i++) {
       const c = r.list[i]!;
       // First-seen wins on duplicates within a single
@@ -510,12 +513,10 @@ export function fuseRankings(
 export function rankHybrid(
   query: string,
   candidates: ReadonlyArray<LexicalCandidate>,
-  options: HybridRankingOptions = {},
+  options: HybridRankingOptions = {}
 ): HybridScoredCandidate[] {
   if (options.useDenseVector) {
-    throw new Error(
-      "rankHybrid: useDenseVector=true is async-only; use rankHybridAsync",
-    );
+    throw new Error("rankHybrid: useDenseVector=true is async-only; use rankHybridAsync");
   }
   const k = options.k ?? DEFAULT_RRF_K;
   if (!Number.isFinite(k) || k <= 0) {
@@ -529,9 +530,7 @@ export function rankHybrid(
   const wVec = weights.vector ?? 1;
   for (const w of [wLex, wFts, wVec]) {
     if (!Number.isFinite(w) || w < 0) {
-      throw new Error(
-        `rankHybrid: weights must be non-negative finite numbers (got ${w})`,
-      );
+      throw new Error(`rankHybrid: weights must be non-negative finite numbers (got ${w})`);
     }
   }
   // Per-variant options. The defaults use the same
@@ -576,7 +575,7 @@ export function rankHybrid(
       { label: "vector", list: vecList, weight: wVec },
     ],
     k,
-    topK,
+    topK
   );
   if (threshold > 0) {
     return fused.filter((c) => c.score >= threshold);
@@ -604,7 +603,7 @@ export function rankHybrid(
 export function rankHybridAsLexical(
   query: string,
   candidates: ReadonlyArray<LexicalCandidate>,
-  options: HybridRankingOptions = {},
+  options: HybridRankingOptions = {}
 ): LexicalScoredCandidate[] {
   return rankHybrid(query, candidates, options).map((c) => ({
     id: c.id,
@@ -656,7 +655,7 @@ export interface HybridAsyncRankResult {
 export async function rankHybridAsync(
   query: string,
   candidates: ReadonlyArray<LexicalCandidate>,
-  options: HybridRankingOptions = {},
+  options: HybridRankingOptions = {}
 ): Promise<HybridAsyncRankResult> {
   const k = options.k ?? DEFAULT_RRF_K;
   if (!Number.isFinite(k) || k <= 0) {
@@ -671,15 +670,11 @@ export async function rankHybridAsync(
   const wVecDense = weights.vectorDense ?? 1;
   for (const w of [wLex, wFts, wVec, wVecDense]) {
     if (!Number.isFinite(w) || w < 0) {
-      throw new Error(
-        `rankHybridAsync: weights must be non-negative finite numbers (got ${w})`,
-      );
+      throw new Error(`rankHybridAsync: weights must be non-negative finite numbers (got ${w})`);
     }
   }
   if (options.useDenseVector && !options.denseVectorEmbedder) {
-    throw new Error(
-      "rankHybridAsync: useDenseVector=true requires denseVectorEmbedder to be set",
-    );
+    throw new Error("rankHybridAsync: useDenseVector=true requires denseVectorEmbedder to be set");
   }
   const lexOpts: LexicalRankingOptions = {
     threshold: options.perVariantOptions?.lexical?.threshold ?? 0,
@@ -699,9 +694,7 @@ export async function rankHybridAsync(
     ...(options.perVariantOptions?.fts5 ?? {}),
   });
   let vecList: LexicalScoredCandidate[] = [];
-  let denseEmbeddingBackend:
-    | import("./dense-embedder.js").EmbedderMetadata
-    | undefined;
+  let denseEmbeddingBackend: import("./dense-embedder.js").EmbedderMetadata | undefined;
   let activeLabels: Array<"lexical" | "fts5" | "vector" | "vector-dense">;
   if (options.useDenseVector && options.denseVectorEmbedder) {
     const denseOpts: DenseVectorRankingOptions = {
@@ -721,8 +714,11 @@ export async function rankHybridAsync(
       // MiniLM) ignore the flag.
       kind: options.denseKind ?? "query",
     };
-    const denseRes: DenseVectorRankResult =
-      await rankDenseVectorWithMetadataAsync(query, candidates, denseOpts);
+    const denseRes: DenseVectorRankResult = await rankDenseVectorWithMetadataAsync(
+      query,
+      candidates,
+      denseOpts
+    );
     vecList = denseRes.hits;
     denseEmbeddingBackend = denseRes.embeddingBackend;
     activeLabels = ["lexical", "fts5", "vector-dense"];
@@ -735,17 +731,11 @@ export async function rankHybridAsync(
     vecList = rankVector(query, candidates, vecOpts);
     activeLabels = ["lexical", "fts5", "vector"];
   }
-  if (
-    lexProbe.length === 0 &&
-    ftsList.length === 0 &&
-    vecList.length === 0
-  ) {
+  if (lexProbe.length === 0 && ftsList.length === 0 && vecList.length === 0) {
     return {
       hits: [],
       contributors: activeLabels,
-      ...(denseEmbeddingBackend !== undefined
-        ? { embeddingBackend: denseEmbeddingBackend }
-        : {}),
+      ...(denseEmbeddingBackend !== undefined ? { embeddingBackend: denseEmbeddingBackend } : {}),
     };
   }
   const rankings: Array<{
@@ -762,13 +752,10 @@ export async function rankHybridAsync(
     rankings.push({ label: "vector", list: vecList, weight: wVec });
   }
   const fused = fuseRankings(rankings, k, topK);
-  const filtered =
-    threshold > 0 ? fused.filter((c) => c.score >= threshold) : fused;
+  const filtered = threshold > 0 ? fused.filter((c) => c.score >= threshold) : fused;
   return {
     hits: filtered,
     contributors: activeLabels,
-    ...(denseEmbeddingBackend !== undefined
-      ? { embeddingBackend: denseEmbeddingBackend }
-      : {}),
+    ...(denseEmbeddingBackend !== undefined ? { embeddingBackend: denseEmbeddingBackend } : {}),
   };
 }

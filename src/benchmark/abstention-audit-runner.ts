@@ -55,24 +55,16 @@ import fs from "node:fs";
 import path from "node:path";
 
 import {
-  type AbstentionSignals,
-  type QueryEval,
-} from "./metrics.js";
-import {
-  type AuditSlice,
   type AbstentionAuditConfig,
   type AbstentionAuditReport,
   type AuditPerQueryExamples,
+  type AuditSlice,
   auditSlice,
-  AUDIT_SIGNAL_NAMES,
 } from "./abstention-audit.js";
-import {
-  detectQueryShape,
-  buildCorpusTokenSets,
-  type QueryShapeFlags,
-} from "./query-shapes.js";
-import type { BenchmarkQuery } from "./queries.js";
 import type { BenchmarkMemoryRecord } from "./corpus.js";
+import type { AbstentionSignals, QueryEval } from "./metrics.js";
+import type { BenchmarkQuery } from "./queries.js";
+import { type QueryShapeFlags, buildCorpusTokenSets, detectQueryShape } from "./query-shapes.js";
 
 // ---------------------------------------------------------------------------
 // Per-query signal builder
@@ -98,13 +90,11 @@ import type { BenchmarkMemoryRecord } from "./corpus.js";
  */
 export function buildAbstentionSignals(
   eval_: QueryEval,
-  flags: QueryShapeFlags,
+  flags: QueryShapeFlags
 ): AbstentionSignals {
   // ---- Retrieval signals (top score + gap + ratio) ----
-  const topScore =
-    eval_.topScores.length > 0 ? (eval_.topScores[0] ?? 0) : 0;
-  const secondScore =
-    eval_.topScores.length > 1 ? (eval_.topScores[1] ?? 0) : 0;
+  const topScore = eval_.topScores.length > 0 ? (eval_.topScores[0] ?? 0) : 0;
+  const secondScore = eval_.topScores.length > 1 ? (eval_.topScores[1] ?? 0) : 0;
   const top1Top2Gap = topScore - secondScore;
   let top1Top2Ratio: number;
   if (topScore === 0 && secondScore === 0) top1Top2Ratio = 1.0;
@@ -218,17 +208,13 @@ export function buildSlices(
     isPositive: boolean;
     signals: AbstentionSignals;
   }>,
-  config: AbstentionAuditConfig,
+  config: AbstentionAuditConfig
 ): AuditSlice[] {
   const signals = perQuery.map((p) => p.signals);
   const labels: Array<0 | 1> = perQuery.map((p) => (p.isPositive ? 0 : 1));
   const opts = {
-    ...(config.riskTargets !== undefined
-      ? { riskTargets: config.riskTargets }
-      : {}),
-    ...(config.coverageTargets !== undefined
-      ? { coverageTargets: config.coverageTargets }
-      : {}),
+    ...(config.riskTargets !== undefined ? { riskTargets: config.riskTargets } : {}),
+    ...(config.coverageTargets !== undefined ? { coverageTargets: config.coverageTargets } : {}),
   };
   const slices: AuditSlice[] = [];
   // "all" — every query.
@@ -238,17 +224,15 @@ export function buildSlices(
       "Every query (the headline AUROC / risk-coverage reading).",
       signals,
       labels,
-      opts,
-    ),
+      opts
+    )
   );
   // Per-family slices.
   const families = new Set<string>();
   for (const p of perQuery) families.add(p.family);
   const sortedFamilies = [...families].sort();
   for (const f of sortedFamilies) {
-    const idx = perQuery
-      .map((p, i) => (p.family === f ? i : -1))
-      .filter((i) => i >= 0);
+    const idx = perQuery.map((p, i) => (p.family === f ? i : -1)).filter((i) => i >= 0);
     if (idx.length === 0) continue;
     slices.push(
       auditSlice(
@@ -256,8 +240,8 @@ export function buildSlices(
         `Per-family slice: family=${f}.`,
         idx.map((i) => signals[i]!),
         idx.map((i) => labels[i]!),
-        opts,
-      ),
+        opts
+      )
     );
   }
   // Per-shape slices.
@@ -268,8 +252,7 @@ export function buildSlices(
   }> = [
     {
       name: "no-answer-easy",
-      description:
-        "No-answer queries that are NOT hard-negatives (the 'easy abstain' slice).",
+      description: "No-answer queries that are NOT hard-negatives (the 'easy abstain' slice).",
       predicate: (p) => p.family === "no-answer" && !p.signals.isNoAnswerHardNegative,
     },
     {
@@ -282,15 +265,13 @@ export function buildSlices(
       name: "temporal-divergent",
       description:
         "Temporal queries whose `expectedIds` does NOT equal `currentTruthIds` (the labeled divergent cases).",
-      predicate: (p) =>
-        p.family === "temporal" && queryIsDivergent(p.queryId, perQuery),
+      predicate: (p) => p.family === "temporal" && queryIsDivergent(p.queryId, perQuery),
     },
     {
       name: "temporal-non-divergent",
       description:
         "Temporal queries whose `expectedIds` equals `currentTruthIds` (the non-divergent baseline).",
-      predicate: (p) =>
-        p.family === "temporal" && !queryIsDivergent(p.queryId, perQuery),
+      predicate: (p) => p.family === "temporal" && !queryIsDivergent(p.queryId, perQuery),
     },
     {
       name: "temporal-current",
@@ -300,8 +281,7 @@ export function buildSlices(
     },
     {
       name: "negation-like",
-      description:
-        "Queries the negation detector flagged (contain 'not' / 'no' / 'never' etc.).",
+      description: "Queries the negation detector flagged (contain 'not' / 'no' / 'never' etc.).",
       predicate: (p) => p.signals.isNegationLike,
     },
     {
@@ -312,21 +292,17 @@ export function buildSlices(
     },
     {
       name: "paraphrase-trap",
-      description:
-        "Paraphrase-family queries (the known-bad lexical baseline case).",
+      description: "Paraphrase-family queries (the known-bad lexical baseline case).",
       predicate: (p) => p.signals.isParaphraseTrap,
     },
     {
       name: "false-premise-like",
-      description:
-        "No-answer queries that mention a missing tool (a labeled false-premise case).",
+      description: "No-answer queries that mention a missing tool (a labeled false-premise case).",
       predicate: (p) => p.signals.isFalsePremiseLike,
     },
   ];
   for (const sh of shapeSlices) {
-    const idx = perQuery
-      .map((p, i) => (sh.predicate(p) ? i : -1))
-      .filter((i) => i >= 0);
+    const idx = perQuery.map((p, i) => (sh.predicate(p) ? i : -1)).filter((i) => i >= 0);
     if (idx.length === 0) continue;
     slices.push(
       auditSlice(
@@ -334,8 +310,8 @@ export function buildSlices(
         sh.description,
         idx.map((i) => signals[i]!),
         idx.map((i) => labels[i]!),
-        opts,
-      ),
+        opts
+      )
     );
   }
   return slices;
@@ -368,10 +344,7 @@ export const DIVERGENT_TEMPORAL_IDS: ReadonlySet<string> = new Set([
   "temp-superseded-retrieval-design-current",
 ]);
 
-function queryIsDivergent(
-  queryId: string,
-  perQuery: ReadonlyArray<{ queryId: string }>,
-): boolean {
+function queryIsDivergent(queryId: string, perQuery: ReadonlyArray<{ queryId: string }>): boolean {
   return DIVERGENT_TEMPORAL_IDS.has(queryId);
 }
 
@@ -401,13 +374,13 @@ export function buildPerQueryExamples(
     isPositive: boolean;
     signals: AbstentionSignals;
   }>,
-  perSlice = 5,
+  perSlice = 5
 ): AuditPerQueryExamples {
   const positives = perQuery.filter((p) => p.isPositive);
   const noAnswers = perQuery.filter((p) => !p.isPositive);
   const sortByScore = (
     a: { signals: AbstentionSignals; queryId: string },
-    b: { signals: AbstentionSignals; queryId: string },
+    b: { signals: AbstentionSignals; queryId: string }
   ): number => {
     if (a.signals.topScore !== b.signals.topScore) {
       return a.signals.topScore - b.signals.topScore;
@@ -576,10 +549,7 @@ const ARTIFACT_FILE_PREFIX = "retrieval-abstention-audit";
  * artifacts next to the regular reports without
  * confusing them.
  */
-export function writeAbstentionAuditReport(
-  report: AbstentionAuditReport,
-  dir: string,
-): string {
+export function writeAbstentionAuditReport(report: AbstentionAuditReport, dir: string): string {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   }
@@ -606,9 +576,7 @@ export function writeAbstentionAuditReport(
  * The function is pure: same report -> same string.
  * The CLI entry point writes the string to stdout.
  */
-export function formatAbstentionAuditReport(
-  report: AbstentionAuditReport,
-): string {
+export function formatAbstentionAuditReport(report: AbstentionAuditReport): string {
   const lines: string[] = [];
   lines.push("=== curion retrieval abstention audit ===");
   lines.push(`generated at: ${report.generatedAt}`);
@@ -620,31 +588,19 @@ export function formatAbstentionAuditReport(
   lines.push(`  no-answer:      ${report.config.noAnswerCount}`);
   lines.push(`  positive:       ${report.config.positiveCount}`);
   lines.push(
-    `  risk targets:   ${report.config.riskTargets.map((t) => `${(t * 100).toFixed(0)}%`).join(", ")}`,
+    `  risk targets:   ${report.config.riskTargets.map((t) => `${(t * 100).toFixed(0)}%`).join(", ")}`
   );
   lines.push(
-    `  cov. targets:   ${report.config.coverageTargets.map((t) => `${(t * 100).toFixed(0)}%`).join(", ")}`,
+    `  cov. targets:   ${report.config.coverageTargets.map((t) => `${(t * 100).toFixed(0)}%`).join(", ")}`
   );
   lines.push("");
   lines.push("READ THIS FIRST: this is a BENCHMARK-ONLY study.");
-  lines.push(
-    "  The audit measures how well simple retrieval-derived",
-  );
-  lines.push(
-    "  signals separate answerable from no-answer queries. It is",
-  );
-  lines.push(
-    "  NOT a deployment policy. The abstention gates it surfaces",
-  );
-  lines.push(
-    "  are NOT wired into the production `recall(text)` controller.",
-  );
-  lines.push(
-    "  The brief asks for an honest answer, not a sale. If a signal",
-  );
-  lines.push(
-    "  is weak on real data, the report says so.",
-  );
+  lines.push("  The audit measures how well simple retrieval-derived");
+  lines.push("  signals separate answerable from no-answer queries. It is");
+  lines.push("  NOT a deployment policy. The abstention gates it surfaces");
+  lines.push("  are NOT wired into the production `recall(text)` controller.");
+  lines.push("  The brief asks for an honest answer, not a sale. If a signal");
+  lines.push("  is weak on real data, the report says so.");
   lines.push("");
   // ---- Headline "all" slice AUROC table ----
   const allSlice = report.allSlices[0];
@@ -653,65 +609,47 @@ export function formatAbstentionAuditReport(
     return lines.join("\n");
   }
   lines.push("--- per-signal AUROC (slice=all) ---");
-  lines.push(
-    "  signal                       AUROC  direction         notes",
-  );
+  lines.push("  signal                       AUROC  direction         notes");
   // Sort the signals by AUROC descending so the
   // reviewer can see the strongest signals first.
-  const sortedSignals = [...allSlice.signalResults].sort(
-    (a, b) => b.auroc - a.auroc,
-  );
+  const sortedSignals = [...allSlice.signalResults].sort((a, b) => b.auroc - a.auroc);
   for (const s of sortedSignals) {
-    const dir = s.scoreIsHigherIsMorePositive
-      ? "higher=positive"
-      : "lower=positive ";
-    lines.push(
-      `  ${s.signal.padEnd(28)} ${s.auroc.toFixed(3)}  ${dir}  ${s.notes}`,
-    );
+    const dir = s.scoreIsHigherIsMorePositive ? "higher=positive" : "lower=positive ";
+    lines.push(`  ${s.signal.padEnd(28)} ${s.auroc.toFixed(3)}  ${dir}  ${s.notes}`);
   }
   lines.push("");
   // ---- Coverage at fixed risk on the top-3 signals ----
   lines.push("--- coverage at fixed risk (slice=all, top-3 signals) ---");
-  lines.push(
-    "  signal                  risk<=5%   risk<=10%   risk<=20%",
-  );
+  lines.push("  signal                  risk<=5%   risk<=10%   risk<=20%");
   for (const s of sortedSignals.slice(0, 3)) {
     const cov = s.coverageAtRisk;
     const c5 = cov.find((c) => Math.abs(c.riskTarget - 0.05) < 1e-9)?.coverage ?? 0;
     const c10 = cov.find((c) => Math.abs(c.riskTarget - 0.1) < 1e-9)?.coverage ?? 0;
     const c20 = cov.find((c) => Math.abs(c.riskTarget - 0.2) < 1e-9)?.coverage ?? 0;
     lines.push(
-      `  ${s.signal.padEnd(22)} ${(c5 * 100).toFixed(1).padStart(7)}%   ${(c10 * 100).toFixed(1).padStart(7)}%    ${(c20 * 100).toFixed(1).padStart(7)}%`,
+      `  ${s.signal.padEnd(22)} ${(c5 * 100).toFixed(1).padStart(7)}%   ${(c10 * 100).toFixed(1).padStart(7)}%    ${(c20 * 100).toFixed(1).padStart(7)}%`
     );
   }
   lines.push("");
   // ---- Risk at fixed coverage on the top-3 signals ----
   lines.push("--- risk at fixed coverage (slice=all, top-3 signals) ---");
-  lines.push(
-    "  signal                  cov>=50%   cov>=80%   cov>=95%",
-  );
+  lines.push("  signal                  cov>=50%   cov>=80%   cov>=95%");
   for (const s of sortedSignals.slice(0, 3)) {
     const risk = s.riskAtCoverage;
     const r50 = risk.find((c) => Math.abs(c.coverageTarget - 0.5) < 1e-9)?.risk ?? 1;
     const r80 = risk.find((c) => Math.abs(c.coverageTarget - 0.8) < 1e-9)?.risk ?? 1;
     const r95 = risk.find((c) => Math.abs(c.coverageTarget - 0.95) < 1e-9)?.risk ?? 1;
     lines.push(
-      `  ${s.signal.padEnd(22)} ${(r50 * 100).toFixed(1).padStart(7)}%   ${(r80 * 100).toFixed(1).padStart(7)}%   ${(r95 * 100).toFixed(1).padStart(7)}%`,
+      `  ${s.signal.padEnd(22)} ${(r50 * 100).toFixed(1).padStart(7)}%   ${(r80 * 100).toFixed(1).padStart(7)}%   ${(r95 * 100).toFixed(1).padStart(7)}%`
     );
   }
   lines.push("");
   // ---- Per-family slice AUROC table ----
   lines.push("--- per-family slice AUROC (top-3 signals) ---");
-  lines.push(
-    "  family                  n   noAns   bestSignal   AUROC   coverage@5%risk",
-  );
-  const familySlices = report.slices.filter(
-    (s) => s.name.startsWith("family:"),
-  );
+  lines.push("  family                  n   noAns   bestSignal   AUROC   coverage@5%risk");
+  const familySlices = report.slices.filter((s) => s.name.startsWith("family:"));
   for (const slice of familySlices) {
-    const sortedSliceSignals = [...slice.signalResults].sort(
-      (a, b) => b.auroc - a.auroc,
-    );
+    const sortedSliceSignals = [...slice.signalResults].sort((a, b) => b.auroc - a.auroc);
     const best = sortedSliceSignals[0];
     if (!best) continue;
     // A single-class slice has no positive / negative
@@ -725,32 +663,25 @@ export function formatAbstentionAuditReport(
     // make this decision).
     if (slice.singleClass) {
       lines.push(
-        `  ${slice.name.replace("family:", "").padEnd(22)} ${String(slice.total).padStart(3)}   ${String(slice.noAnswerCount).padStart(5)}   ${best.signal.padEnd(12)}     n/a            n/a  (single-class slice)`,
+        `  ${slice.name.replace("family:", "").padEnd(22)} ${String(slice.total).padStart(3)}   ${String(slice.noAnswerCount).padStart(5)}   ${best.signal.padEnd(12)}     n/a            n/a  (single-class slice)`
       );
       continue;
     }
-    const cov5 = best.coverageAtRisk.find((c) =>
-      Math.abs(c.riskTarget - 0.05) < 1e-9,
-    )?.coverage ?? 0;
+    const cov5 =
+      best.coverageAtRisk.find((c) => Math.abs(c.riskTarget - 0.05) < 1e-9)?.coverage ?? 0;
     lines.push(
-      `  ${slice.name.replace("family:", "").padEnd(22)} ${String(slice.total).padStart(3)}   ${String(slice.noAnswerCount).padStart(5)}   ${best.signal.padEnd(12)} ${best.auroc.toFixed(3)}    ${(cov5 * 100).toFixed(1)}%`,
+      `  ${slice.name.replace("family:", "").padEnd(22)} ${String(slice.total).padStart(3)}   ${String(slice.noAnswerCount).padStart(5)}   ${best.signal.padEnd(12)} ${best.auroc.toFixed(3)}    ${(cov5 * 100).toFixed(1)}%`
     );
   }
   lines.push("");
   // ---- Per-shape slice AUROC table ----
   lines.push("--- per-shape slice AUROC (top-3 signals) ---");
-  lines.push(
-    "  shape                   n   noAns   bestSignal   AUROC   coverage@5%risk",
-  );
+  lines.push("  shape                   n   noAns   bestSignal   AUROC   coverage@5%risk");
   const familyNames = new Set(familySlices.map((s) => s.name));
-  const shapeSlices = report.slices.filter(
-    (s) => !familyNames.has(s.name) && s.name !== "all",
-  );
+  const shapeSlices = report.slices.filter((s) => !familyNames.has(s.name) && s.name !== "all");
   for (const slice of shapeSlices) {
     if (slice.total === 0) continue;
-    const sortedSliceSignals = [...slice.signalResults].sort(
-      (a, b) => b.auroc - a.auroc,
-    );
+    const sortedSliceSignals = [...slice.signalResults].sort((a, b) => b.auroc - a.auroc);
     const best = sortedSliceSignals[0];
     if (!best) continue;
     // See the per-family block above for the
@@ -759,15 +690,14 @@ export function formatAbstentionAuditReport(
     // prior from a real reading.
     if (slice.singleClass) {
       lines.push(
-        `  ${slice.name.padEnd(22)} ${String(slice.total).padStart(3)}   ${String(slice.noAnswerCount).padStart(5)}   ${best.signal.padEnd(12)}     n/a            n/a  (single-class slice)`,
+        `  ${slice.name.padEnd(22)} ${String(slice.total).padStart(3)}   ${String(slice.noAnswerCount).padStart(5)}   ${best.signal.padEnd(12)}     n/a            n/a  (single-class slice)`
       );
       continue;
     }
-    const cov5 = best.coverageAtRisk.find((c) =>
-      Math.abs(c.riskTarget - 0.05) < 1e-9,
-    )?.coverage ?? 0;
+    const cov5 =
+      best.coverageAtRisk.find((c) => Math.abs(c.riskTarget - 0.05) < 1e-9)?.coverage ?? 0;
     lines.push(
-      `  ${slice.name.padEnd(22)} ${String(slice.total).padStart(3)}   ${String(slice.noAnswerCount).padStart(5)}   ${best.signal.padEnd(12)} ${best.auroc.toFixed(3)}    ${(cov5 * 100).toFixed(1)}%`,
+      `  ${slice.name.padEnd(22)} ${String(slice.total).padStart(3)}   ${String(slice.noAnswerCount).padStart(5)}   ${best.signal.padEnd(12)} ${best.auroc.toFixed(3)}    ${(cov5 * 100).toFixed(1)}%`
     );
   }
   lines.push("");
@@ -779,7 +709,7 @@ export function formatAbstentionAuditReport(
     lines.push(
       `    [${e.family}] ${e.queryId}  topScore=${e.signals.topScore.toFixed(3)} ` +
         `gap=${e.signals.top1Top2Gap.toFixed(3)} returned=${e.signals.returnedCount} ` +
-        `agreement=${e.signals.agreementCount} presence="${e.signals.sourcePresence}"`,
+        `agreement=${e.signals.agreementCount} presence="${e.signals.sourcePresence}"`
     );
   }
   lines.push("");
@@ -788,7 +718,7 @@ export function formatAbstentionAuditReport(
     lines.push(
       `    [${e.family}] ${e.queryId}  topScore=${e.signals.topScore.toFixed(3)} ` +
         `gap=${e.signals.top1Top2Gap.toFixed(3)} returned=${e.signals.returnedCount} ` +
-        `agreement=${e.signals.agreementCount} presence="${e.signals.sourcePresence}"`,
+        `agreement=${e.signals.agreementCount} presence="${e.signals.sourcePresence}"`
     );
   }
   lines.push("");
@@ -797,7 +727,7 @@ export function formatAbstentionAuditReport(
     lines.push(
       `    [${e.family}] ${e.queryId}  topScore=${e.signals.topScore.toFixed(3)} ` +
         `gap=${e.signals.top1Top2Gap.toFixed(3)} returned=${e.signals.returnedCount} ` +
-        `agreement=${e.signals.agreementCount} presence="${e.signals.sourcePresence}"`,
+        `agreement=${e.signals.agreementCount} presence="${e.signals.sourcePresence}"`
     );
   }
   lines.push("");
@@ -806,42 +736,20 @@ export function formatAbstentionAuditReport(
     lines.push(
       `    [${e.family}] ${e.queryId}  topScore=${e.signals.topScore.toFixed(3)} ` +
         `gap=${e.signals.top1Top2Gap.toFixed(3)} returned=${e.signals.returnedCount} ` +
-        `agreement=${e.signals.agreementCount} presence="${e.signals.sourcePresence}"`,
+        `agreement=${e.signals.agreementCount} presence="${e.signals.sourcePresence}"`
     );
   }
   lines.push("");
-  lines.push(
-    "How to interpret this report: see the README's",
-  );
-  lines.push(
-    "  'How to interpret the abstention audit' section. The brief:",
-  );
-  lines.push(
-    "  - AUROC 0.5 = uninformative (the signal does not separate",
-  );
-  lines.push(
-    "    answerable from no-answer queries).",
-  );
-  lines.push(
-    "  - AUROC 1.0 = perfect (the signal perfectly separates them).",
-  );
-  lines.push(
-    "  - A signal that works on a 'no-answer-hard' slice but not on",
-  );
-  lines.push(
-    "    the 'all' slice is a hard-negative detector, not a general",
-  );
-  lines.push(
-    "    abstention signal.",
-  );
-  lines.push(
-    "  - The 'coverage@X% risk' number is the headline trade-off:",
-  );
-  lines.push(
-    "    'at most X% confabulation rate, how much of the corpus can",
-  );
-  lines.push(
-    "    we keep?'. A low number means the signal is weak.",
-  );
+  lines.push("How to interpret this report: see the README's");
+  lines.push("  'How to interpret the abstention audit' section. The brief:");
+  lines.push("  - AUROC 0.5 = uninformative (the signal does not separate");
+  lines.push("    answerable from no-answer queries).");
+  lines.push("  - AUROC 1.0 = perfect (the signal perfectly separates them).");
+  lines.push("  - A signal that works on a 'no-answer-hard' slice but not on");
+  lines.push("    the 'all' slice is a hard-negative detector, not a general");
+  lines.push("    abstention signal.");
+  lines.push("  - The 'coverage@X% risk' number is the headline trade-off:");
+  lines.push("    'at most X% confabulation rate, how much of the corpus can");
+  lines.push("    we keep?'. A low number means the signal is weak.");
   return lines.join("\n");
 }

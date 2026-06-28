@@ -47,24 +47,37 @@
  *     caused by post-test cleanup races.
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { test } from "node:test";
 
 import Database from "better-sqlite3";
 
 import {
-  startToolBoundaryTrace,
-  TOOL_INPUT_KIND,
-  TOOL_OUTPUT_KIND,
-  RECALL_ACTIVE_MEMORY_READ_KIND,
-  RECALL_LEXICAL_RANKING_KIND,
-  RECALL_SELECTED_CANDIDATES_KIND,
-  RECALL_SUPERSEDED_DEMOTION_KIND,
-  type ToolBoundaryTracer,
-} from "../src/trace/trace-tool-boundary.ts";
+  resetListRegisteredProjectsStub,
+  setListRegisteredProjectsStub,
+} from "../src/config/registry.ts";
+import {
+  CURION_DIRNAME,
+  type StorageHandle,
+  closeStorage,
+  initStorage,
+  insertMemoryRecord,
+} from "../src/storage/storage.ts";
+import {
+  type RecallResult,
+  handleRecall,
+  resetStorageProvider as resetRecallStorageProvider,
+  setStorageProvider as setRecallStorageProvider,
+} from "../src/tools/recall.ts";
+import {
+  type RememberResult,
+  handleRemember,
+  resetStorageProvider as resetRememberStorageProvider,
+  setStorageProvider as setRememberStorageProvider,
+} from "../src/tools/remember.ts";
 import {
   closeTraceWriter,
   getOrInitTraceWriter,
@@ -74,32 +87,15 @@ import {
   resetTraceWriterForTests,
 } from "../src/trace/index.ts";
 import {
-  CURION_DIRNAME,
-  initStorage,
-  closeStorage,
-  insertMemoryRecord,
-  type StorageHandle,
-} from "../src/storage/storage.ts";
-import {
-  handleRemember,
-  setStorageProvider as setRememberStorageProvider,
-  resetStorageProvider as resetRememberStorageProvider,
-  type RememberResult,
-} from "../src/tools/remember.ts";
-import {
-  handleRecall,
-  setStorageProvider as setRecallStorageProvider,
-  resetStorageProvider as resetRecallStorageProvider,
-  type RecallResult,
-} from "../src/tools/recall.ts";
-import {
-  setListRegisteredProjectsStub,
-  resetListRegisteredProjectsStub,
-} from "../src/config/registry.ts";
-import {
-  runRecallController,
-  type RecallTraceContext,
-} from "../src/controller/recall-controller.ts";
+  RECALL_ACTIVE_MEMORY_READ_KIND,
+  RECALL_LEXICAL_RANKING_KIND,
+  RECALL_SELECTED_CANDIDATES_KIND,
+  RECALL_SUPERSEDED_DEMOTION_KIND,
+  TOOL_INPUT_KIND,
+  TOOL_OUTPUT_KIND,
+  type ToolBoundaryTracer,
+  startToolBoundaryTrace,
+} from "../src/trace/trace-tool-boundary.ts";
 
 // ---------------------------------------------------------------------------
 // Env / state helpers
@@ -191,7 +187,7 @@ function openTraceDbReadOnly(dbPath: string): Database.Database {
  */
 function readRunAndEvents(
   projectRoot: string,
-  runId: number,
+  runId: number
 ): {
   run: {
     id: number;
@@ -217,7 +213,7 @@ function readRunAndEvents(
     const run = db
       .prepare(
         `SELECT id, name, started_at, ended_at, status, metadata
-           FROM trace_runs WHERE id = ?`,
+           FROM trace_runs WHERE id = ?`
       )
       .get(runId) as {
       id: number;
@@ -232,7 +228,7 @@ function readRunAndEvents(
         `SELECT id, run_id, ts, kind, payload_json, redacted_keys, sequence
            FROM trace_events
           WHERE run_id = ?
-          ORDER BY sequence ASC`,
+          ORDER BY sequence ASC`
       )
       .all(runId) as Array<{
       id: number;
@@ -304,15 +300,15 @@ test("helper: startToolBoundaryTrace creates a run, records input + output, fini
     assert.equal(events.length, 2);
     assert.equal(events[0]?.kind, TOOL_INPUT_KIND);
     assert.equal(events[0]?.sequence, 1);
-    const inputPayload = JSON.parse(
-      events[0]?.payload_json ?? "null",
-    ) as { text: string };
+    const inputPayload = JSON.parse(events[0]?.payload_json ?? "null") as { text: string };
     assert.equal(inputPayload.text, "hello world");
     assert.equal(events[1]?.kind, TOOL_OUTPUT_KIND);
     assert.equal(events[1]?.sequence, 2);
-    const outputPayload = JSON.parse(
-      events[1]?.payload_json ?? "null",
-    ) as { status: string; summary: string; kind: string };
+    const outputPayload = JSON.parse(events[1]?.payload_json ?? "null") as {
+      status: string;
+      summary: string;
+      kind: string;
+    };
     assert.equal(outputPayload.status, "saved");
     assert.equal(outputPayload.summary, "ok");
     assert.equal(outputPayload.kind, "fact");
@@ -364,7 +360,7 @@ test("helper: when CURION_TRACE_ENABLED=0, the tracer is a safe no-op (no run id
       // No .curion/ was created.
       assert.ok(
         !fs.existsSync(path.join(tmp, ".curion")),
-        "no .curion/ must be created when tracing is disabled",
+        "no .curion/ must be created when tracing is disabled"
       );
     } finally {
       resetTraceWriterForTests();
@@ -451,7 +447,7 @@ test("remember: creates a trace run + tool.input + tool.output events without ch
         assert.equal(
           forbidden in outputPayload,
           false,
-          `trace tool.output payload must not include '${forbidden}'; got ${JSON.stringify(outputPayload)}`,
+          `trace tool.output payload must not include '${forbidden}'; got ${JSON.stringify(outputPayload)}`
         );
       }
     } finally {
@@ -536,7 +532,7 @@ test("recall: creates a trace run + tool.input + tool.output events without chan
         assert.equal(
           forbidden in outputPayload,
           false,
-          `trace tool.output payload must not include '${forbidden}'; got ${JSON.stringify(outputPayload)}`,
+          `trace tool.output payload must not include '${forbidden}'; got ${JSON.stringify(outputPayload)}`
         );
       }
     } finally {
@@ -578,12 +574,12 @@ test("remember: CURION_TRACE_ENABLED=0 prevents trace writes for tool boundary c
           const traceDir = path.join(tmp, ".curion");
           assert.ok(
             !fs.existsSync(path.join(traceDir, "trace.sqlite")),
-            "no trace.sqlite must be created when tracing is disabled",
+            "no trace.sqlite must be created when tracing is disabled"
           );
           // The memory DB is fine.
           assert.ok(
             fs.existsSync(path.join(traceDir, "curion.sqlite")),
-            "memory DB must be present (it was created before the off switch)",
+            "memory DB must be present (it was created before the off switch)"
           );
         } finally {
           resetRememberStorageProvider();
@@ -618,7 +614,7 @@ test("recall: CURION_TRACE_ENABLED=0 prevents trace writes for tool boundary cal
           const traceDir = path.join(tmp, ".curion");
           assert.ok(
             !fs.existsSync(path.join(traceDir, "trace.sqlite")),
-            "no trace.sqlite must be created when tracing is disabled",
+            "no trace.sqlite must be created when tracing is disabled"
           );
         } finally {
           resetListRegisteredProjectsStub();
@@ -767,11 +763,11 @@ test("redaction: traced tool.output with a sensitive key gets the key redacted i
     const persisted = JSON.stringify(outputEvent.payload);
     assert.ok(
       !persisted.includes("sk-aaaaaaaaaaaaaaaaaaaaaaaaaa"),
-      "raw api key must not survive in the persisted payload",
+      "raw api key must not survive in the persisted payload"
     );
     assert.ok(
       !persisted.includes("sk-nested-key"),
-      "raw nested api key must not survive in the persisted payload",
+      "raw nested api key must not survive in the persisted payload"
     );
   } finally {
     cleanup();
@@ -788,8 +784,7 @@ test("redaction: traced tool.input with a sensitive fragment in the text gets th
     // secret-shaped substring from the text. We pass an
     // input whose `text` carries an AKIA- shaped fragment
     // and verify the persisted payload's text does not.
-    const secretText =
-      "Project uses Postgres 16. Token: AKIAIOSFODNN7EXAMPLE. Tests run in 12s.";
+    const secretText = "Project uses Postgres 16. Token: AKIAIOSFODNN7EXAMPLE. Tests run in 12s.";
     const tracer = startToolBoundaryTrace({
       toolName: "remember",
       input: { text: secretText },
@@ -805,7 +800,7 @@ test("redaction: traced tool.input with a sensitive fragment in the text gets th
     const persisted = JSON.stringify(inputEvent.payload);
     assert.ok(
       !persisted.includes("AKIAIOSFODNN7EXAMPLE"),
-      "raw AKIA-shaped fragment must not survive in the persisted input payload",
+      "raw AKIA-shaped fragment must not survive in the persisted input payload"
     );
     assert.match(persisted, /<redacted>/);
   } finally {
@@ -843,11 +838,11 @@ test("redaction: traced tool.input with a reasoning-shaped object drops the reas
     const payload = outputEvent.payload as Record<string, unknown>;
     assert.ok(
       !("reasoning" in payload),
-      "reasoning key must be dropped from the persisted tool.output payload",
+      "reasoning key must be dropped from the persisted tool.output payload"
     );
     assert.ok(
       !("chainOfThought" in payload),
-      "chainOfThought key must be dropped from the persisted tool.output payload",
+      "chainOfThought key must be dropped from the persisted tool.output payload"
     );
     assert.equal(payload.summary, "ok");
     assert.ok(outputEvent.redactedKeys.includes("reasoning"));
@@ -879,47 +874,40 @@ test("trace DB is separate from the memory DB (no collisions; both present after
       const entries = fs.readdirSync(dir);
       assert.ok(
         entries.includes("curion.sqlite"),
-        "memory DB must be present after handleRemember",
+        "memory DB must be present after handleRemember"
       );
-      assert.ok(
-        entries.includes("trace.sqlite"),
-        "trace DB must be present after handleRemember",
-      );
+      assert.ok(entries.includes("trace.sqlite"), "trace DB must be present after handleRemember");
 
       // The memory DB must NOT have a `trace_runs` or
       // `trace_events` table (the trace schema is isolated).
-      const memTables = (memHandle.db
-        .prepare(
-          `SELECT name FROM sqlite_master
+      const memTables = (
+        memHandle.db
+          .prepare(
+            `SELECT name FROM sqlite_master
             WHERE type IN ('table', 'index')
-              AND name NOT LIKE 'sqlite_%'`,
-        )
-        .all() as Array<{ name: string }>).map((r) => r.name);
-      assert.ok(
-        !memTables.includes("trace_runs"),
-        "memory DB must not have a trace_runs table",
-      );
+              AND name NOT LIKE 'sqlite_%'`
+          )
+          .all() as Array<{ name: string }>
+      ).map((r) => r.name);
+      assert.ok(!memTables.includes("trace_runs"), "memory DB must not have a trace_runs table");
       assert.ok(
         !memTables.includes("trace_events"),
-        "memory DB must not have a trace_events table",
+        "memory DB must not have a trace_events table"
       );
 
       // The trace DB must NOT have a `memories` table.
-      const traceDb = openTraceDbReadOnly(
-        path.join(dir, "trace.sqlite"),
-      );
+      const traceDb = openTraceDbReadOnly(path.join(dir, "trace.sqlite"));
       try {
-        const traceTables = (traceDb
-          .prepare(
-            `SELECT name FROM sqlite_master
+        const traceTables = (
+          traceDb
+            .prepare(
+              `SELECT name FROM sqlite_master
               WHERE type IN ('table', 'index')
-                AND name NOT LIKE 'sqlite_%'`,
-          )
-          .all() as Array<{ name: string }>).map((r) => r.name);
-        assert.ok(
-          !traceTables.includes("memories"),
-          "trace DB must not have a memories table",
-        );
+                AND name NOT LIKE 'sqlite_%'`
+            )
+            .all() as Array<{ name: string }>
+        ).map((r) => r.name);
+        assert.ok(!traceTables.includes("memories"), "trace DB must not have a memories table");
         assert.ok(traceTables.includes("trace_runs"));
         assert.ok(traceTables.includes("trace_events"));
       } finally {
@@ -948,14 +936,14 @@ test("handleRemember: no additional memory writes beyond the normal controller p
       // short-circuits before the provider is called AND
       // before any DB write. The memory count must be
       // unchanged.
-      const before = (memHandle.db
-        .prepare("SELECT COUNT(*) AS c FROM memories")
-        .get() as { c: number }).c;
+      const before = (
+        memHandle.db.prepare("SELECT COUNT(*) AS c FROM memories").get() as { c: number }
+      ).c;
       const result = await handleRemember({ text: "asdf" });
       assert.equal(result.status, "rejected");
-      const after = (memHandle.db
-        .prepare("SELECT COUNT(*) AS c FROM memories")
-        .get() as { c: number }).c;
+      const after = (
+        memHandle.db.prepare("SELECT COUNT(*) AS c FROM memories").get() as { c: number }
+      ).c;
       assert.equal(after, before, "no memory should be written for a rejected input");
     } finally {
       resetRememberStorageProvider();
@@ -1041,9 +1029,7 @@ test("recall Phase 3A: empty store emits active-memory-read + lexical-ranking st
 
       // No selected-candidates event because the controller
       // returns no_memory before reaching that point.
-      const selectedEvents = events.filter(
-        (e) => e.kind === RECALL_SELECTED_CANDIDATES_KIND,
-      );
+      const selectedEvents = events.filter((e) => e.kind === RECALL_SELECTED_CANDIDATES_KIND);
       assert.equal(selectedEvents.length, 0, "no selected-candidates on no_memory path");
     } finally {
       resetListRegisteredProjectsStub();
@@ -1068,8 +1054,7 @@ test("recall Phase 3A: populated store emits all three stage events before provi
       insertMemoryRecord(memHandle, {
         kind: "fact",
         state: "active",
-        memoryContent:
-          "The project uses Postgres 16 for the primary data store.",
+        memoryContent: "The project uses Postgres 16 for the primary data store.",
         providerId: "test",
         modelId: "test-model",
         confidence: 0.9,
@@ -1079,8 +1064,7 @@ test("recall Phase 3A: populated store emits all three stage events before provi
       insertMemoryRecord(memHandle, {
         kind: "context",
         state: "active",
-        memoryContent:
-          "Office plants are watered on a biweekly rotation.",
+        memoryContent: "Office plants are watered on a biweekly rotation.",
         providerId: "test",
         modelId: "test-model",
         confidence: 0.8,
@@ -1179,8 +1163,7 @@ test("recall Phase 3A: stage event payloads are sufficient to diagnose considere
       const mem1 = insertMemoryRecord(memHandle, {
         kind: "fact",
         state: "active",
-        memoryContent:
-          "The project uses Postgres 16 for the primary data store.",
+        memoryContent: "The project uses Postgres 16 for the primary data store.",
         providerId: "test",
         modelId: "test-model",
         confidence: 0.9,
@@ -1190,8 +1173,7 @@ test("recall Phase 3A: stage event payloads are sufficient to diagnose considere
       const mem2 = insertMemoryRecord(memHandle, {
         kind: "fact",
         state: "active",
-        memoryContent:
-          "The database uses a connection pool with 20 max connections.",
+        memoryContent: "The database uses a connection pool with 20 max connections.",
         providerId: "test",
         modelId: "test-model",
         confidence: 0.85,
@@ -1201,8 +1183,7 @@ test("recall Phase 3A: stage event payloads are sufficient to diagnose considere
       insertMemoryRecord(memHandle, {
         kind: "context",
         state: "active",
-        memoryContent:
-          "Office plants are watered on a biweekly rotation.",
+        memoryContent: "Office plants are watered on a biweekly rotation.",
         providerId: "test",
         modelId: "test-model",
         confidence: 0.8,
@@ -1219,15 +1200,9 @@ test("recall Phase 3A: stage event payloads are sufficient to diagnose considere
       const events = listTraceEventsForRun(runs[0]!.id);
 
       // Extract the three stage events.
-      const amrEvent = events.find(
-        (e) => e.kind === RECALL_ACTIVE_MEMORY_READ_KIND,
-      );
-      const lrEvent = events.find(
-        (e) => e.kind === RECALL_LEXICAL_RANKING_KIND,
-      );
-      const scEvent = events.find(
-        (e) => e.kind === RECALL_SELECTED_CANDIDATES_KIND,
-      );
+      const amrEvent = events.find((e) => e.kind === RECALL_ACTIVE_MEMORY_READ_KIND);
+      const lrEvent = events.find((e) => e.kind === RECALL_LEXICAL_RANKING_KIND);
+      const scEvent = events.find((e) => e.kind === RECALL_SELECTED_CANDIDATES_KIND);
       assert.ok(amrEvent, "active-memory-read event must exist");
       assert.ok(lrEvent, "lexical-ranking event must exist");
       assert.ok(scEvent, "selected-candidates event must exist");
@@ -1244,23 +1219,23 @@ test("recall Phase 3A: stage event payloads are sufficient to diagnose considere
       const rankedIds = lr.ranked.map((r) => r.id);
       assert.ok(
         rankedIds.includes(mem1.id),
-        `ranked candidates must include mem1 (${mem1.id}), got [${rankedIds}]`,
+        `ranked candidates must include mem1 (${mem1.id}), got [${rankedIds}]`
       );
       assert.ok(
         rankedIds.includes(mem2.id),
-        `ranked candidates must include mem2 (${mem2.id}), got [${rankedIds}]`,
+        `ranked candidates must include mem2 (${mem2.id}), got [${rankedIds}]`
       );
 
       // The irrelevant plant memory must NOT be in the ranked
       // list (it has zero overlap with the database query).
       const plantMem = lr.ranked.find(
-        (r) => !r.id || (!rankedIds.includes(mem1.id) && !rankedIds.includes(mem2.id)),
+        (r) => !r.id || (!rankedIds.includes(mem1.id) && !rankedIds.includes(mem2.id))
       );
       // All ranked ids should be from the database-related memories.
       for (const r of lr.ranked) {
         assert.ok(
           r.id === mem1.id || r.id === mem2.id,
-          `unexpected ranked id ${r.id}; expected only mem1 or mem2`,
+          `unexpected ranked id ${r.id}; expected only mem1 or mem2`
         );
       }
 
@@ -1270,7 +1245,7 @@ test("recall Phase 3A: stage event payloads are sufficient to diagnose considere
       for (const id of selectedIds) {
         assert.ok(
           rankedIds.includes(id),
-          `selected candidate ${id} must appear in the ranked list`,
+          `selected candidate ${id} must appear in the ranked list`
         );
       }
       // Cross-reference: synthesisOrder should be sequential.
@@ -1318,12 +1293,12 @@ test("recall Phase 3A: CURION_TRACE_ENABLED=0 prevents all recall stage event wr
           // Result must still be correct regardless of tracing.
           assert.ok(
             result.status === "provider_error" || result.status === "no_memory",
-            `expected provider_error or no_memory, got ${result.status}`,
+            `expected provider_error or no_memory, got ${result.status}`
           );
           // No trace DB at all.
           assert.ok(
             !fs.existsSync(path.join(tmp, ".curion", "trace.sqlite")),
-            "no trace.sqlite must be created when tracing is disabled",
+            "no trace.sqlite must be created when tracing is disabled"
           );
         } finally {
           resetListRegisteredProjectsStub();
@@ -1350,8 +1325,7 @@ test("recall Phase 3A: trace writer failure does not change recall result with p
         insertMemoryRecord(memHandle, {
           kind: "fact",
           state: "active",
-          memoryContent:
-            "The project uses Postgres 16 for the primary data store.",
+          memoryContent: "The project uses Postgres 16 for the primary data store.",
           providerId: "test",
           modelId: "test-model",
           confidence: 0.9,
@@ -1430,7 +1404,7 @@ test("recall Phase 3A: recordStage on the tool-boundary tracer writes stage even
     for (let i = 1; i < events.length; i++) {
       assert.ok(
         events[i]!.sequence > events[i - 1]!.sequence,
-        `sequence must increase: ${events[i - 1]!.sequence} -> ${events[i]!.sequence}`,
+        `sequence must increase: ${events[i - 1]!.sequence} -> ${events[i]!.sequence}`
       );
     }
   } finally {

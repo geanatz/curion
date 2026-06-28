@@ -8,8 +8,8 @@
  * classifier drifting out of sync.
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
+import { test } from "node:test";
 
 import { SAFETY_FIXTURES, type SafetyClass } from "../src/safety/fixtures.ts";
 import { classifyInput } from "../src/safety/precheck.ts";
@@ -46,7 +46,7 @@ test("each fixture has a description, non-empty text, and valid expected", () =>
         f.expected === "redact" ||
         f.expected === "allow" ||
         f.expected === "clarify",
-      `expected for ${f.class}`,
+      `expected for ${f.class}`
     );
   }
 });
@@ -64,7 +64,7 @@ test("each fixture text classifies to its declared class (no drift)", () => {
     assert.equal(
       r.class,
       f.class,
-      `fixture text for class '${f.class}' classified as '${r.class}' (drift). reason: ${r.reason}`,
+      `fixture text for class '${f.class}' classified as '${r.class}' (drift). reason: ${r.reason}`
     );
   }
 });
@@ -98,7 +98,7 @@ test("classifyInput: benign project handoffs do not trip safety patterns", () =>
     assert.equal(
       r.class,
       "safe",
-      `expected safe for benign handoff: ${t.slice(0, 80)} (got ${r.class})`,
+      `expected safe for benign handoff: ${t.slice(0, 80)} (got ${r.class})`
     );
   }
 });
@@ -129,10 +129,6 @@ test("classifyInput: unsafe future-agent / policy-bypass phrases still reject", 
   ];
   for (const t of unsafe) {
     const r = classifyInput(t);
-    assert.notEqual(
-      r.class,
-      "safe",
-      `expected non-safe for: ${t.slice(0, 80)} (got ${r.class})`,
-    );
+    assert.notEqual(r.class, "safe", `expected non-safe for: ${t.slice(0, 80)} (got ${r.class})`);
   }
 });

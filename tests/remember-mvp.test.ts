@@ -24,47 +24,32 @@
  *      duplicate columns and preserves existing rows.
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { test } from "node:test";
 
+import {
+  resetListRegisteredProjectsStub,
+  setListRegisteredProjectsStub,
+} from "../src/config/registry.ts";
 import { runRememberController } from "../src/controller/remember-controller.ts";
-import {
-  initStorage,
-  insertMemoryRecord,
-  type StorageHandle,
-} from "../src/storage/storage.ts";
-import {
-  handleRemember,
-  setStorageProvider,
-  resetStorageProvider,
-} from "../src/tools/remember.ts";
-import {
-  handleRecall,
-  NO_RELEVANT_MEMORY,
-} from "../src/tools/recall.ts";
-import { buildServer, PUBLIC_TOOL_NAMES } from "../src/server.ts";
-import { classifyInput, redactSummary } from "../src/safety/precheck.ts";
 import { findRelatedMemories } from "../src/retrieval/seam.ts";
 import { SAFETY_FIXTURES } from "../src/safety/fixtures.ts";
-import {
-  setListRegisteredProjectsStub,
-  resetListRegisteredProjectsStub,
-} from "../src/config/registry.ts";
-import {
-  TEST_PRIMARY_KEY,
-  TEST_FALLBACK_KEY,
-  TEST_PRIMARY_BASE_URL,
-  TEST_PRIMARY_MODEL,
-  TEST_FALLBACK_BASE_URL,
-  TEST_FALLBACK_MODEL,
-} from "./shared-test-provider.ts";
-import {
-  scriptFetch,
-  okChatResponse,
-  safeAnalysis,
-} from "./_helpers/provider-stub.ts";
+import { classifyInput, redactSummary } from "../src/safety/precheck.ts";
+import { PUBLIC_TOOL_NAMES, buildServer } from "../src/server.ts";
+import { initStorage, insertMemoryRecord } from "../src/storage/storage.ts";
+import { NO_RELEVANT_MEMORY, handleRecall } from "../src/tools/recall.ts";
+import { handleRemember, resetStorageProvider, setStorageProvider } from "../src/tools/remember.ts";
+import { okChatResponse, safeAnalysis, scriptFetch } from "./_helpers/provider-stub.ts";
 import { mkStorage, rmStorage } from "./_helpers/test-storage.ts";
+import {
+  TEST_FALLBACK_BASE_URL,
+  TEST_FALLBACK_KEY,
+  TEST_FALLBACK_MODEL,
+  TEST_PRIMARY_BASE_URL,
+  TEST_PRIMARY_KEY,
+  TEST_PRIMARY_MODEL,
+} from "./shared-test-provider.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -77,9 +62,7 @@ import { mkStorage, rmStorage } from "./_helpers/test-storage.ts";
 test("remember: safe input is stored; raw input is not persisted", async () => {
   const { tmp, handle } = mkStorage("curion-mvp-rm-");
   try {
-    const { fetchImpl, calls } = scriptFetch(() =>
-      okChatResponse(safeAnalysis()),
-    );
+    const { fetchImpl, calls } = scriptFetch(() => okChatResponse(safeAnalysis()));
     const rawText =
       "We picked Postgres 16 for the primary data store because of better JSON support.";
     const outcome = await runRememberController(handle, rawText, {
@@ -109,21 +92,31 @@ test("remember: safe input is stored; raw input is not persisted", async () => {
     assert.equal(rec.modelId, TEST_PRIMARY_MODEL);
     assert.ok(rec.confidence !== null && rec.confidence > 0);
     assert.equal(rec.state, "active");
-    assert.ok(["fact", "decision", "preference", "context", "conflict", "reference", "policy", "constraint", "finding"].includes(rec.kind));
+    assert.ok(
+      [
+        "fact",
+        "decision",
+        "preference",
+        "context",
+        "conflict",
+        "reference",
+        "policy",
+        "constraint",
+        "finding",
+      ].includes(rec.kind)
+    );
 
     // The raw input MUST NOT be present in any persisted field.
-    const dbRows = handle.db
-      .prepare("SELECT * FROM memories WHERE id = ?")
-      .get(rec.id) as Record<string, unknown>;
+    const dbRows = handle.db.prepare("SELECT * FROM memories WHERE id = ?").get(rec.id) as Record<
+      string,
+      unknown
+    >;
     for (const [k, v] of Object.entries(dbRows)) {
       if (typeof v === "string") {
-        assert.ok(
-          !v.includes(rawText),
-          `persisted column '${k}' must not contain the raw input`,
-        );
+        assert.ok(!v.includes(rawText), `persisted column '${k}' must not contain the raw input`);
         assert.ok(
           !v.includes("Postgres 16 for the primary data store because of better JSON support"),
-          `persisted column '${k}' must not contain a raw-input fragment`,
+          `persisted column '${k}' must not contain a raw-input fragment`
         );
       }
     }
@@ -145,9 +138,7 @@ test("remember: safe input is stored; raw input is not persisted", async () => {
 test("remember: unsafe secret input is rejected before any provider call", async () => {
   const { tmp, handle } = mkStorage("curion-mvp-rm-");
   try {
-    const { fetchImpl, calls } = scriptFetch(() =>
-      okChatResponse(safeAnalysis()),
-    );
+    const { fetchImpl, calls } = scriptFetch(() => okChatResponse(safeAnalysis()));
     // Pure secret (no substantial safe content) so the classifier
     // routes to `secret` rather than `mixed-safe-sensitive`. The
     // mixed path is exercised separately below.
@@ -183,9 +174,7 @@ test("remember: unsafe secret input is rejected before any provider call", async
 test("remember: vague junk is rejected before any provider call", async () => {
   const { tmp, handle } = mkStorage("curion-mvp-rm-");
   try {
-    const { fetchImpl, calls } = scriptFetch(() =>
-      okChatResponse(safeAnalysis()),
-    );
+    const { fetchImpl, calls } = scriptFetch(() => okChatResponse(safeAnalysis()));
     const outcome = await runRememberController(handle, "asdf", {
       providerFetchImpl: fetchImpl,
       providerPrimaryApiKey: TEST_PRIMARY_KEY,
@@ -207,9 +196,7 @@ test("remember: vague junk is rejected before any provider call", async () => {
 test("remember: empty / whitespace-only input is rejected before any provider call", async () => {
   const { tmp, handle } = mkStorage("curion-mvp-rm-");
   try {
-    const { fetchImpl, calls } = scriptFetch(() =>
-      okChatResponse(safeAnalysis()),
-    );
+    const { fetchImpl, calls } = scriptFetch(() => okChatResponse(safeAnalysis()));
     const outcome = await runRememberController(handle, "   \n  \t  ", {
       providerFetchImpl: fetchImpl,
       providerPrimaryApiKey: TEST_PRIMARY_KEY,
@@ -234,7 +221,7 @@ test("remember: low provider confidence returns rejected with clarification_need
   const { tmp, handle } = mkStorage("curion-mvp-rm-");
   try {
     const { fetchImpl } = scriptFetch(() =>
-      okChatResponse(safeAnalysis({ confidence: 0.3, summary: "Vague guess." })),
+      okChatResponse(safeAnalysis({ confidence: 0.3, summary: "Vague guess." }))
     );
     const outcome = await runRememberController(handle, "Some input that confuses the model.", {
       providerFetchImpl: fetchImpl,
@@ -260,7 +247,7 @@ test("remember: confidence exactly at threshold is accepted", async () => {
   const { tmp, handle } = mkStorage("curion-mvp-rm-");
   try {
     const { fetchImpl } = scriptFetch(() =>
-      okChatResponse(safeAnalysis({ confidence: 0.5, summary: "Borderline confidence but valid." })),
+      okChatResponse(safeAnalysis({ confidence: 0.5, summary: "Borderline confidence but valid." }))
     );
     const outcome = await runRememberController(handle, "Some input.", {
       providerFetchImpl: fetchImpl,
@@ -313,9 +300,7 @@ test("remember: provider hard failure returns provider_error and stores nothing"
 test("remember: mixed safe+sensitive input is rejected; secret fragment is not stored", async () => {
   const { tmp, handle } = mkStorage("curion-mvp-rm-");
   try {
-    const { fetchImpl, calls } = scriptFetch(() =>
-      okChatResponse(safeAnalysis()),
-    );
+    const { fetchImpl, calls } = scriptFetch(() => okChatResponse(safeAnalysis()));
     const rawText =
       "Project uses Postgres 16. The CI token is glpat-abcdefghijklmnopqrst. Tests run in 12s.";
     const outcome = await runRememberController(handle, rawText, {
@@ -334,15 +319,13 @@ test("remember: mixed safe+sensitive input is rejected; secret fragment is not s
     const rows = handle.db.prepare("SELECT COUNT(*) AS c FROM memories").get() as { c: number };
     assert.equal(rows.c, 0);
     // Also assert the entire DB has no occurrence of the secret fragment.
-    const all = handle.db
-      .prepare("SELECT * FROM memories")
-      .all() as Array<Record<string, unknown>>;
+    const all = handle.db.prepare("SELECT * FROM memories").all() as Array<Record<string, unknown>>;
     for (const row of all) {
       for (const v of Object.values(row)) {
         if (typeof v === "string") {
           assert.ok(
             !v.includes("glpat-abcdefghijklmnopqrst"),
-            "secret fragment must not appear in any persisted column",
+            "secret fragment must not appear in any persisted column"
           );
         }
       }
@@ -358,9 +341,11 @@ test("remember: mixed safe+sensitive input is rejected; secret fragment is not s
 
 test("remember tool: still exposes exactly one text param", () => {
   const server = buildServer();
-  const registered = (server as unknown as {
-    _registeredTools: Record<string, { inputSchema: unknown }>;
-  })._registeredTools;
+  const registered = (
+    server as unknown as {
+      _registeredTools: Record<string, { inputSchema: unknown }>;
+    }
+  )._registeredTools;
   // The MCP SDK stores the input schema as a zod object. We can
   // probe its shape via `_def.shape()` to confirm the public params.
   const remember = registered["remember"] as {
@@ -414,10 +399,7 @@ test("storage: memories table never has a raw/original text column", () => {
       "body",
       "source",
     ]) {
-      assert.ok(
-        !names.includes(forbidden),
-        `memories must not have a '${forbidden}' column`,
-      );
+      assert.ok(!names.includes(forbidden), `memories must not have a '${forbidden}' column`);
     }
   } finally {
     rmStorage(tmp, handle);
@@ -432,7 +414,7 @@ test("persisted record: has summary, provider, model, confidence, state, kind", 
   const { tmp, handle } = mkStorage("curion-mvp-rm-");
   try {
     const { fetchImpl } = scriptFetch(() =>
-      okChatResponse(safeAnalysis({ classification: "decision" })),
+      okChatResponse(safeAnalysis({ classification: "decision" }))
     );
     const outcome = await runRememberController(handle, "We decided to use Postgres 16.", {
       providerFetchImpl: fetchImpl,
@@ -447,7 +429,7 @@ test("persisted record: has summary, provider, model, confidence, state, kind", 
     if (outcome.status !== "saved") throw new Error("unreachable");
     const row = handle.db
       .prepare(
-        "SELECT summary, provider_id, model_id, confidence, state, kind FROM memories WHERE id = ?",
+        "SELECT summary, provider_id, model_id, confidence, state, kind FROM memories WHERE id = ?"
       )
       .get(outcome.record.id) as Record<string, unknown>;
     assert.equal(typeof row.summary, "string");
@@ -467,7 +449,7 @@ test("controller: maps unknown provider classification to 'finding' fallback kin
   const { tmp, handle } = mkStorage("curion-mvp-rm-");
   try {
     const { fetchImpl } = scriptFetch(() =>
-      okChatResponse(safeAnalysis({ classification: "totally-unknown-thing" })),
+      okChatResponse(safeAnalysis({ classification: "totally-unknown-thing" }))
     );
     const outcome = await runRememberController(handle, "Some input.", {
       providerFetchImpl: fetchImpl,
@@ -490,17 +472,21 @@ test("controller: classification 'policy' persists as kind policy", async () => 
   const { tmp, handle } = mkStorage("curion-mvp-rm-");
   try {
     const { fetchImpl } = scriptFetch(() =>
-      okChatResponse(safeAnalysis({ classification: "policy" })),
+      okChatResponse(safeAnalysis({ classification: "policy" }))
     );
-    const outcome = await runRememberController(handle, "We always use Postgres for primary storage.", {
-      providerFetchImpl: fetchImpl,
-      providerPrimaryApiKey: TEST_PRIMARY_KEY,
-      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
-      providerPrimaryModel: TEST_PRIMARY_MODEL,
-      providerFallbackApiKey: TEST_FALLBACK_KEY,
-      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
-      providerFallbackModel: TEST_FALLBACK_MODEL,
-    });
+    const outcome = await runRememberController(
+      handle,
+      "We always use Postgres for primary storage.",
+      {
+        providerFetchImpl: fetchImpl,
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+        providerPrimaryModel: TEST_PRIMARY_MODEL,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
+        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+        providerFallbackModel: TEST_FALLBACK_MODEL,
+      }
+    );
     assert.equal(outcome.status, "saved");
     if (outcome.status !== "saved") throw new Error("unreachable");
     assert.equal(outcome.record.kind, "policy");
@@ -513,17 +499,21 @@ test("controller: Hermes-style 'policy' classified response maps to policy", asy
   const { tmp, handle } = mkStorage("curion-mvp-rm-");
   try {
     const { fetchImpl } = scriptFetch(() =>
-      okChatResponse(safeAnalysis({ classification: "policy" })),
+      okChatResponse(safeAnalysis({ classification: "policy" }))
     );
-    const outcome = await runRememberController(handle, "Policy: all API calls must timeout after 30s.", {
-      providerFetchImpl: fetchImpl,
-      providerPrimaryApiKey: TEST_PRIMARY_KEY,
-      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
-      providerPrimaryModel: TEST_PRIMARY_MODEL,
-      providerFallbackApiKey: TEST_FALLBACK_KEY,
-      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
-      providerFallbackModel: TEST_FALLBACK_MODEL,
-    });
+    const outcome = await runRememberController(
+      handle,
+      "Policy: all API calls must timeout after 30s.",
+      {
+        providerFetchImpl: fetchImpl,
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+        providerPrimaryModel: TEST_PRIMARY_MODEL,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
+        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+        providerFallbackModel: TEST_FALLBACK_MODEL,
+      }
+    );
     assert.equal(outcome.status, "saved");
     if (outcome.status !== "saved") throw new Error("unreachable");
     assert.equal(outcome.record.kind, "policy");
@@ -535,9 +525,15 @@ test("controller: Hermes-style 'policy' classified response maps to policy", asy
 test("controller: policy aliases (user-policy/project-policy/rule) map to policy", async () => {
   const { tmp, handle } = mkStorage("curion-mvp-rm-");
   try {
-    for (const label of ["user-policy", "project-policy", "rule", "standing-rule", "operating-rule"]) {
+    for (const label of [
+      "user-policy",
+      "project-policy",
+      "rule",
+      "standing-rule",
+      "operating-rule",
+    ]) {
       const { fetchImpl } = scriptFetch(() =>
-        okChatResponse(safeAnalysis({ classification: label })),
+        okChatResponse(safeAnalysis({ classification: label }))
       );
       const outcome = await runRememberController(handle, `Standing instruction: ${label}`, {
         providerFetchImpl: fetchImpl,
@@ -561,7 +557,7 @@ test("controller: classification 'constraint' persists as kind constraint", asyn
   const { tmp, handle } = mkStorage("curion-mvp-rm-");
   try {
     const { fetchImpl } = scriptFetch(() =>
-      okChatResponse(safeAnalysis({ classification: "constraint" })),
+      okChatResponse(safeAnalysis({ classification: "constraint" }))
     );
     const outcome = await runRememberController(handle, "Never exceed 5000 requests per minute.", {
       providerFetchImpl: fetchImpl,
@@ -583,9 +579,15 @@ test("controller: classification 'constraint' persists as kind constraint", asyn
 test("controller: constraint aliases (project-constraint/requirement/limitation/boundary/hard-limit) map to constraint", async () => {
   const { tmp, handle } = mkStorage("curion-mvp-rm-");
   try {
-    for (const label of ["project-constraint", "requirement", "limitation", "boundary", "hard-limit"]) {
+    for (const label of [
+      "project-constraint",
+      "requirement",
+      "limitation",
+      "boundary",
+      "hard-limit",
+    ]) {
       const { fetchImpl } = scriptFetch(() =>
-        okChatResponse(safeAnalysis({ classification: label })),
+        okChatResponse(safeAnalysis({ classification: label }))
       );
       const outcome = await runRememberController(handle, `Hard limit: ${label}`, {
         providerFetchImpl: fetchImpl,
@@ -617,9 +619,7 @@ test("remember: a provider summary that is entirely a secret fragment is rejecte
     // surrounding safe text. After redaction the summary is empty,
     // so the controller must reject.
     const { fetchImpl } = scriptFetch(() =>
-      okChatResponse(
-        safeAnalysis({ summary: "sk-abcdefghijklmnopqrstuv" }),
-      ),
+      okChatResponse(safeAnalysis({ summary: "sk-abcdefghijklmnopqrstuv" }))
     );
     const outcome = await runRememberController(handle, "Some input.", {
       providerFetchImpl: fetchImpl,
@@ -643,15 +643,14 @@ test("remember: a provider summary that is entirely a secret fragment is rejecte
 test("remember: a provider summary with a secret embedded in real text is redacted but still saved", async () => {
   const { tmp, handle } = mkStorage("curion-mvp-rm-");
   try {
-    const leakySummary =
-      "The CI uses a token; the project uses Postgres 16 for the primary store.";
+    const leakySummary = "The CI uses a token; the project uses Postgres 16 for the primary store.";
     const { fetchImpl } = scriptFetch(() =>
       okChatResponse(
         safeAnalysis({
           summary:
             "The project uses Postgres 16. Token: sk-abcdefghijklmnopqrstuv. Tests run in 12s.",
-        }),
-      ),
+        })
+      )
     );
     const outcome = await runRememberController(handle, "Some input.", {
       providerFetchImpl: fetchImpl,
@@ -670,7 +669,7 @@ test("remember: a provider summary with a secret embedded in real text is redact
     const stored = outcome.record.memoryContent;
     assert.ok(
       !stored.includes("sk-abcdefghijklmnopqrstuv"),
-      "secret must be redacted from the persisted memory content",
+      "secret must be redacted from the persisted memory content"
     );
     assert.ok(stored.includes("<redacted>"), "redaction marker must appear");
   } finally {
@@ -686,9 +685,7 @@ test("storage: re-running initStorage does not duplicate columns and preserves e
   const { tmp, handle } = mkStorage("curion-mvp-rm-");
   try {
     // Insert one record through the controller.
-    const { fetchImpl } = scriptFetch(() =>
-      okChatResponse(safeAnalysis()),
-    );
+    const { fetchImpl } = scriptFetch(() => okChatResponse(safeAnalysis()));
     const outcome = await runRememberController(handle, "Hello world", {
       providerFetchImpl: fetchImpl,
       providerPrimaryApiKey: TEST_PRIMARY_KEY,
@@ -706,9 +703,9 @@ test("storage: re-running initStorage does not duplicate columns and preserves e
     // Re-open the same dir; migration must be idempotent.
     const reopened = initStorage({ projectRoot: tmp });
     try {
-      const cols = reopened.db
-        .prepare("PRAGMA table_info(memories)")
-        .all() as Array<{ name: string }>;
+      const cols = reopened.db.prepare("PRAGMA table_info(memories)").all() as Array<{
+        name: string;
+      }>;
       const names = cols.map((c) => c.name);
       const unique = new Set(names);
       assert.equal(unique.size, names.length, "no duplicate columns after re-open");
@@ -777,11 +774,7 @@ test("classifyInput: secret patterns are detected across many shapes", () => {
     "api_key=AbCdEfGhIjKlMnOpQrSt",
   ]) {
     const r = classifyInput(sample);
-    assert.equal(
-      r.class,
-      "secret",
-      `expected 'secret' for: ${sample.slice(0, 40)}`,
-    );
+    assert.equal(r.class, "secret", `expected 'secret' for: ${sample.slice(0, 40)}`);
   }
 });
 
@@ -794,21 +787,19 @@ test("classifyInput: vague junk is detected", () => {
 
 test("classifyInput: mixed safe+sensitive is detected", () => {
   const r = classifyInput(
-    "Project uses Postgres 16. The CI token is glpat-AbCdEfGhIjKlMnOpQrSt. Tests run in 12s.",
+    "Project uses Postgres 16. The CI token is glpat-AbCdEfGhIjKlMnOpQrSt. Tests run in 12s."
   );
   assert.equal(r.class, "mixed-safe-sensitive");
 });
 
 test("classifyInput: safe factual text is allowed", () => {
-  const r = classifyInput(
-    "We picked Postgres 16 because the JSON support is much better than 14.",
-  );
+  const r = classifyInput("We picked Postgres 16 because the JSON support is much better than 14.");
   assert.equal(r.class, "safe");
 });
 
 test("redactSummary: redacts secret-shaped substrings and preserves safe text", () => {
   const redacted = redactSummary(
-    "The project uses Postgres 16. Token: sk-abcdefghijklmnopqrstuv. Tests run in 12s.",
+    "The project uses Postgres 16. Token: sk-abcdefghijklmnopqrstuv. Tests run in 12s."
   );
   assert.ok(!redacted.includes("sk-abcdefghijklmnopqrstuv"));
   assert.ok(redacted.includes("Postgres 16"));
@@ -842,8 +833,7 @@ test("related-memory seam: returns top lexical related memories from active reco
     insertMemoryRecord(handle, {
       kind: "fact",
       state: "active",
-      memoryContent:
-        "The project uses Postgres for primary data storage in production",
+      memoryContent: "The project uses Postgres for primary data storage in production",
       providerId: "minimax",
       modelId: "MiniMax-M3",
       confidence: 0.9,
@@ -879,10 +869,8 @@ test("related-memory seam: returns top lexical related memories from active reco
     const ids = out.memories.map((m) => m.id);
     assert.ok(ids.includes(1), "row id 1 (Postgres) must be in the result");
     assert.ok(
-      !out.memories.some((m) =>
-        m.memoryContent.toLowerCase().includes("dark mode"),
-      ),
-      "unrelated 'dark mode' memory must not be returned",
+      !out.memories.some((m) => m.memoryContent.toLowerCase().includes("dark mode")),
+      "unrelated 'dark mode' memory must not be returned"
     );
     // The top result must be the Postgres row.
     assert.equal(out.memories[0]!.id, 1);
@@ -919,11 +907,7 @@ test("related-memory seam: respects the default topK of 5", () => {
     const out = findRelatedMemories(handle, {
       text: "postgres storage decision",
     });
-    assert.equal(
-      out.memories.length,
-      5,
-      "default topK must be 5",
-    );
+    assert.equal(out.memories.length, 5, "default topK must be 5");
   } finally {
     rmStorage(tmp, handle);
   }
@@ -988,7 +972,7 @@ test("related-memory seam: ignores superseded/invalidated memories (active only)
     assert.ok(ids.includes(active.id), "active row must be returned");
     assert.ok(
       !out.memories.some((m) => m.memoryContent.includes("was the old")),
-      "superseded row must not be returned",
+      "superseded row must not be returned"
     );
   } finally {
     rmStorage(tmp, handle);

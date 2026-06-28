@@ -14,24 +14,24 @@
  * spawning a stdio subprocess.
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import path from "node:path";
 import os from "node:os";
+import path from "node:path";
+import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { buildServer, PUBLIC_TOOL_NAMES } from "../src/server.ts";
-import { handleRemember } from "../src/tools/remember.ts";
-import { handleRecall, NO_RELEVANT_MEMORY } from "../src/tools/recall.ts";
-import { logger } from "../src/logging/logger.ts";
-import { resolveCurionDir, CURION_DIRNAME, initStorage } from "../src/storage/storage.ts";
-import { SAFETY_FIXTURES } from "../src/safety/fixtures.ts";
-import { allVariants } from "../src/retrieval/variants.ts";
 import {
-  setListRegisteredProjectsStub,
   resetListRegisteredProjectsStub,
+  setListRegisteredProjectsStub,
 } from "../src/config/registry.ts";
+import { logger } from "../src/logging/logger.ts";
+import { allVariants } from "../src/retrieval/variants.ts";
+import { SAFETY_FIXTURES } from "../src/safety/fixtures.ts";
+import { PUBLIC_TOOL_NAMES, buildServer } from "../src/server.ts";
+import { CURION_DIRNAME, initStorage, resolveCurionDir } from "../src/storage/storage.ts";
+import { NO_RELEVANT_MEMORY, handleRecall } from "../src/tools/recall.ts";
+import { handleRemember } from "../src/tools/remember.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
@@ -47,9 +47,11 @@ test("McpServer registration reflects the two-tool contract", () => {
   // tool name. We probe that internal index for verification; the
   // user-facing contract is the public listTools endpoint, which is
   // exercised by the SDK itself.
-  const registered = (server as unknown as {
-    _registeredTools: Record<string, unknown>;
-  })._registeredTools;
+  const registered = (
+    server as unknown as {
+      _registeredTools: Record<string, unknown>;
+    }
+  )._registeredTools;
   assert.equal(typeof registered, "object");
   assert.ok(registered !== null);
   const keys = Object.keys(registered);
@@ -66,15 +68,17 @@ test("McpServer: both public tools expose an outputSchema (Phase clean-structure
   // `structuredContent` on the wire when the tool has an
   // `outputSchema` registered; assert both tools have one.
   const server = buildServer();
-  const registered = (server as unknown as {
-    _registeredTools: Record<string, { outputSchema: unknown }>;
-  })._registeredTools;
+  const registered = (
+    server as unknown as {
+      _registeredTools: Record<string, { outputSchema: unknown }>;
+    }
+  )._registeredTools;
   for (const name of ["remember", "recall"] as const) {
     const tool = registered[name];
     assert.ok(tool, `${name} must be registered`);
     assert.ok(
       tool.outputSchema,
-      `${name} must have an outputSchema (required for structuredContent on the wire)`,
+      `${name} must have an outputSchema (required for structuredContent on the wire)`
     );
   }
 });
@@ -83,9 +87,7 @@ test("remember handler enforces the single text parameter", async () => {
   // In the MVP slice, the default storageProvider opens a fresh
   // .curion/ under cwd for every call. We override it with a temp
   // dir so the contract test does not touch the real project DB.
-  const { setStorageProvider, resetStorageProvider } = await import(
-    "../src/tools/remember.ts"
-  );
+  const { setStorageProvider, resetStorageProvider } = await import("../src/tools/remember.ts");
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "curion-mcp-v2-rm-"));
   let handle: ReturnType<typeof initStorage> | null = null;
   try {
@@ -97,23 +99,17 @@ test("remember handler enforces the single text parameter", async () => {
     const r = await handleRemember({ text: "hello" });
     assert.ok(
       r.status === "provider_error" || r.status === "rejected" || r.status === "saved",
-      `unexpected status: ${r.status}`,
+      `unexpected status: ${r.status}`
     );
 
     // Missing text -> error
-    await assert.rejects(
-      async () => handleRemember({}),
-      /text.*required/i,
-    );
+    await assert.rejects(async () => handleRemember({}), /text.*required/i);
     // Wrong type -> error
-    await assert.rejects(
-      async () => handleRemember({ text: 42 }),
-      /text.*required/i,
-    );
+    await assert.rejects(async () => handleRemember({ text: 42 }), /text.*required/i);
     // Empty text -> error
     await assert.rejects(
       async () => handleRemember({ text: "   " }),
-      /text.*required|must be non-empty/i,
+      /text.*required|must be non-empty/i
     );
   } finally {
     resetStorageProvider();
@@ -134,10 +130,7 @@ test("recall handler returns 'No relevant memory found.' for a no-memory path", 
     assert.equal(r.status, "no_memory");
     assert.equal(r.message, NO_RELEVANT_MEMORY);
 
-    await assert.rejects(
-      async () => handleRecall({}),
-      /text.*required/i,
-    );
+    await assert.rejects(async () => handleRecall({}), /text.*required/i);
   } finally {
     resetListRegisteredProjectsStub();
   }
@@ -228,7 +221,9 @@ test("storage schema has no raw text column on memories", () => {
   try {
     const handle = initStorage({ projectRoot: tmp });
     try {
-      const cols = handle.db.prepare("PRAGMA table_info(memories)").all() as Array<{ name: string }>;
+      const cols = handle.db.prepare("PRAGMA table_info(memories)").all() as Array<{
+        name: string;
+      }>;
       const names = cols.map((c) => c.name);
       // MVP slice: persisted summary metadata is allowed. Raw text
       // columns (`raw_text`, `original_text`, `input`, `text`,
@@ -307,16 +302,19 @@ test("safety fixtures cover all required classes with text + expected", () => {
   ];
   const classes = new Set(SAFETY_FIXTURES.map((f) => f.class));
   for (const c of required) {
-    assert.ok(classes.has(c as typeof SAFETY_FIXTURES[number]["class"]), `missing fixture: ${c}`);
+    assert.ok(classes.has(c as (typeof SAFETY_FIXTURES)[number]["class"]), `missing fixture: ${c}`);
   }
   for (const f of SAFETY_FIXTURES) {
-    assert.ok(typeof f.text === "string" && f.text.length > 0, `text for ${f.class} must be non-empty`);
+    assert.ok(
+      typeof f.text === "string" && f.text.length > 0,
+      `text for ${f.class} must be non-empty`
+    );
     // The expected verdict is one of: reject, redact, allow,
     // or clarify (clarify means: no storage, return a
     // clarification_needed question).
     assert.ok(
       ["reject", "redact", "allow", "clarify"].includes(f.expected),
-      `expected for ${f.class} must be valid (got ${f.expected})`,
+      `expected for ${f.class} must be valid (got ${f.expected})`
     );
   }
 });

@@ -321,19 +321,19 @@
  *     change rollup, not the verdict.
  */
 
-import type { BenchmarkQuery } from "./queries.js";
 import type { QueryEval } from "./metrics.js";
-import { STALE_TEMPORAL_IDS } from "./temporal-truth-diagnostic.js";
-import {
-  classifyTemporalTruthFailure,
-  type TemporalTruthCategory,
-  TEMPORAL_TRUTH_CATEGORIES,
-} from "./temporal-truth-diagnostic.js";
+import type { BenchmarkQuery } from "./queries.js";
 import {
   SIMULATED_SUPERSESSION_EDGES,
-  applySupersessionRerankRule,
   type SupersessionRerankRule,
+  applySupersessionRerankRule,
 } from "./supersession-edge-simulation.js";
+import { STALE_TEMPORAL_IDS } from "./temporal-truth-diagnostic.js";
+import {
+  TEMPORAL_TRUTH_CATEGORIES,
+  type TemporalTruthCategory,
+  classifyTemporalTruthFailure,
+} from "./temporal-truth-diagnostic.js";
 
 // ---------------------------------------------------------------------------
 // Multi-anchor treatment type
@@ -445,10 +445,7 @@ export interface MultiAnchorTreatment {
  * populate them; the re-rank rules in this
  * module do NOT consult the date fields.
  */
-export const SIMULATED_MULTI_ANCHOR_TREATMENT: ReadonlyMap<
-  number,
-  MultiAnchorTreatment
-> = (() => {
+export const SIMULATED_MULTI_ANCHOR_TREATMENT: ReadonlyMap<number, MultiAnchorTreatment> = (() => {
   const out = new Map<number, MultiAnchorTreatment>();
   // Each entry: recordId -> MultiAnchorTreatment.
   // The `preferAnchorWhenQueryNeedsComparison`
@@ -655,11 +652,7 @@ export interface MultiAnchorRerankVariant {
    *     is what would happen IF the
    *     metadata existed at runtime".
    */
-  category:
-    | "production-like"
-    | "oracle"
-    | "metadata-simulation"
-    | "multi-anchor-simulation";
+  category: "production-like" | "oracle" | "metadata-simulation" | "multi-anchor-simulation";
   /**
    * The narrow re-rank rule. A `none` rule is
    * the baseline row.
@@ -688,57 +681,56 @@ export interface MultiAnchorRerankVariant {
  * experiment's primary deliverable). The
  * sixth is the oracle ceiling.
  */
-export const BUILTIN_MULTI_ANCHOR_RERANK_VARIANTS: ReadonlyArray<MultiAnchorRerankVariant> =
-  [
-    // ---- Baseline (no re-rank) ----
-    {
-      id: "baseline-no-rerank",
-      description:
-        "Baseline: no re-ranking. The lexical baseline's existing top-K order is used as-is. The reference row; production-like. This is the row a production deployment would use today.",
-      category: "production-like",
-      rule: { kind: "none" },
-    },
-    // ---- Metadata-simulation: safe demotion (Experiment 7 baseline) ----
-    {
-      id: "metadata-simulation-supersededBy-demote",
-      description:
-        "Metadata-simulation (Experiment 7 safe baseline): demote every candidate whose id is in the simulated supersededBy map to the BOTTOM of the top-K, preserving the relative order of demoted and non-demoted candidates. The edge map is SIMULATED_SUPERSESSION_EDGES (fixture-derived); the rule does NOT consult currentTruthIds and does NOT consult the multi-anchor treatment. The 'if the production schema carried a supersededBy edge and a runtime re-ranker used it, what would happen?' reading. Honest framing: this is metadata-simulation, NOT production-like; a production deployment needs the edge data on every record at remember time. This is the EXPERIMENT 8 reference row for 'what the safe metadata simulation recovered'.",
-      category: "metadata-simulation",
-      rule: { kind: "metadata-simulation-supersededBy-demote" },
-    },
-    // ---- Metadata-simulation: combined (Experiment 7 unsafe baseline) ----
-    {
-      id: "metadata-simulation-combined-unsafe",
-      description:
-        "Metadata-simulation (Experiment 7 unsafe baseline): the combined rule (demote supersededBy + promote supersedes within the same top-K). The rule introduces 1 regression on temp-current-vs-previous-release because the supersedes rule promotes record 7 (which supersedes 22) above record 118 (the current-vs-previous anchor) when BOTH are in the top-K. The rule does NOT consult currentTruthIds and does NOT consult the multi-anchor treatment. This is the EXPERIMENT 8 reference row for 'what the unsafe promotion introduced the regression on'. A reviewer reads this row to see the BEFORE state of the regression.",
-      category: "metadata-simulation",
-      rule: { kind: "metadata-simulation-combined-unsafe" },
-    },
-    // ---- Multi-anchor-simulation: protected promotion ----
-    {
-      id: "multi-anchor-protected-supersedes-promote",
-      description:
-        "Multi-anchor-simulation: the supersedes-promote rule, but a multi-anchor record at rank 1 is PROTECTED from being displaced by a promotion. A multi-anchor record NOT at rank 1 is treated like any other candidate. The rule does NOT consult currentTruthIds. The multi-anchor treatment is SIMULATED_MULTI_ANCHOR_TREATMENT (fixture-derived); the rule does NOT consult currentTruthIds. The 'if the production schema carried BOTH the supersession edge map AND the multi-anchor treatment and the runtime re-ranker protected the rank-1 anchor, what would happen?' reading. Honest framing: this is multi-anchor-simulation, NOT production-like; a production deployment needs BOTH metadata dimensions on every record at remember time.",
-      category: "multi-anchor-simulation",
-      rule: { kind: "multi-anchor-protected-supersedes-promote" },
-    },
-    // ---- Multi-anchor-simulation: aware combined (PRIMARY DELIVERABLE) ----
-    {
-      id: "multi-anchor-aware-combined",
-      description:
-        "Multi-anchor-simulation (PRIMARY DELIVERABLE): the combined rule (demote supersededBy + promote supersedes within the same top-K), but a multi-anchor record at rank 1 is PROTECTED from being displaced by a promotion. Superseded records are still demoted. The rule does NOT consult currentTruthIds. The edge map is SIMULATED_SUPERSESSION_EDGES; the multi-anchor treatment is SIMULATED_MULTI_ANCHOR_TREATMENT. The 'if the production schema carried BOTH metadata dimensions and the runtime re-ranker protected the rank-1 anchor from being demoted by a supersedes-promote, what would happen?' reading. Honest framing: this is multi-anchor-simulation, NOT production-like; a production deployment needs BOTH metadata dimensions on every record at remember time. This is the closest a non-oracle rule can come to the oracle ceiling; the experiment's PRIMARY DELIVERABLE.",
-      category: "multi-anchor-simulation",
-      rule: { kind: "multi-anchor-aware-combined" },
-    },
-    // ---- Oracle ceiling (from Experiment 6/7) ----
-    {
-      id: "oracle-current-truth-promote-all",
-      description:
-        "Oracle: promote every candidate whose id is in currentTruthIds to the TOP of the top-K, preserving the relative order of promoted and non-promoted candidates. Uses fixture truth (currentTruthIds). The 'if we knew which records are current, promote them all' ceiling. Clearly NOT production-like; research-only.",
-      category: "oracle",
-      rule: { kind: "oracle-current-truth-promote" },
-    },
-  ];
+export const BUILTIN_MULTI_ANCHOR_RERANK_VARIANTS: ReadonlyArray<MultiAnchorRerankVariant> = [
+  // ---- Baseline (no re-rank) ----
+  {
+    id: "baseline-no-rerank",
+    description:
+      "Baseline: no re-ranking. The lexical baseline's existing top-K order is used as-is. The reference row; production-like. This is the row a production deployment would use today.",
+    category: "production-like",
+    rule: { kind: "none" },
+  },
+  // ---- Metadata-simulation: safe demotion (Experiment 7 baseline) ----
+  {
+    id: "metadata-simulation-supersededBy-demote",
+    description:
+      "Metadata-simulation (Experiment 7 safe baseline): demote every candidate whose id is in the simulated supersededBy map to the BOTTOM of the top-K, preserving the relative order of demoted and non-demoted candidates. The edge map is SIMULATED_SUPERSESSION_EDGES (fixture-derived); the rule does NOT consult currentTruthIds and does NOT consult the multi-anchor treatment. The 'if the production schema carried a supersededBy edge and a runtime re-ranker used it, what would happen?' reading. Honest framing: this is metadata-simulation, NOT production-like; a production deployment needs the edge data on every record at remember time. This is the EXPERIMENT 8 reference row for 'what the safe metadata simulation recovered'.",
+    category: "metadata-simulation",
+    rule: { kind: "metadata-simulation-supersededBy-demote" },
+  },
+  // ---- Metadata-simulation: combined (Experiment 7 unsafe baseline) ----
+  {
+    id: "metadata-simulation-combined-unsafe",
+    description:
+      "Metadata-simulation (Experiment 7 unsafe baseline): the combined rule (demote supersededBy + promote supersedes within the same top-K). The rule introduces 1 regression on temp-current-vs-previous-release because the supersedes rule promotes record 7 (which supersedes 22) above record 118 (the current-vs-previous anchor) when BOTH are in the top-K. The rule does NOT consult currentTruthIds and does NOT consult the multi-anchor treatment. This is the EXPERIMENT 8 reference row for 'what the unsafe promotion introduced the regression on'. A reviewer reads this row to see the BEFORE state of the regression.",
+    category: "metadata-simulation",
+    rule: { kind: "metadata-simulation-combined-unsafe" },
+  },
+  // ---- Multi-anchor-simulation: protected promotion ----
+  {
+    id: "multi-anchor-protected-supersedes-promote",
+    description:
+      "Multi-anchor-simulation: the supersedes-promote rule, but a multi-anchor record at rank 1 is PROTECTED from being displaced by a promotion. A multi-anchor record NOT at rank 1 is treated like any other candidate. The rule does NOT consult currentTruthIds. The multi-anchor treatment is SIMULATED_MULTI_ANCHOR_TREATMENT (fixture-derived); the rule does NOT consult currentTruthIds. The 'if the production schema carried BOTH the supersession edge map AND the multi-anchor treatment and the runtime re-ranker protected the rank-1 anchor, what would happen?' reading. Honest framing: this is multi-anchor-simulation, NOT production-like; a production deployment needs BOTH metadata dimensions on every record at remember time.",
+    category: "multi-anchor-simulation",
+    rule: { kind: "multi-anchor-protected-supersedes-promote" },
+  },
+  // ---- Multi-anchor-simulation: aware combined (PRIMARY DELIVERABLE) ----
+  {
+    id: "multi-anchor-aware-combined",
+    description:
+      "Multi-anchor-simulation (PRIMARY DELIVERABLE): the combined rule (demote supersededBy + promote supersedes within the same top-K), but a multi-anchor record at rank 1 is PROTECTED from being displaced by a promotion. Superseded records are still demoted. The rule does NOT consult currentTruthIds. The edge map is SIMULATED_SUPERSESSION_EDGES; the multi-anchor treatment is SIMULATED_MULTI_ANCHOR_TREATMENT. The 'if the production schema carried BOTH metadata dimensions and the runtime re-ranker protected the rank-1 anchor from being demoted by a supersedes-promote, what would happen?' reading. Honest framing: this is multi-anchor-simulation, NOT production-like; a production deployment needs BOTH metadata dimensions on every record at remember time. This is the closest a non-oracle rule can come to the oracle ceiling; the experiment's PRIMARY DELIVERABLE.",
+    category: "multi-anchor-simulation",
+    rule: { kind: "multi-anchor-aware-combined" },
+  },
+  // ---- Oracle ceiling (from Experiment 6/7) ----
+  {
+    id: "oracle-current-truth-promote-all",
+    description:
+      "Oracle: promote every candidate whose id is in currentTruthIds to the TOP of the top-K, preserving the relative order of promoted and non-promoted candidates. Uses fixture truth (currentTruthIds). The 'if we knew which records are current, promote them all' ceiling. Clearly NOT production-like; research-only.",
+    category: "oracle",
+    rule: { kind: "oracle-current-truth-promote" },
+  },
+];
 
 // ---------------------------------------------------------------------------
 // Re-rank rule application
@@ -880,8 +872,7 @@ export function applyMultiAnchorRerankRule(args: {
     // multi-anchor record; 0 otherwise.
     const positions = ids.map((_, i) => i);
     const top0 = ids[0]!;
-    const isProtectedAnchor =
-      SIMULATED_PROTECTED_ANCHOR_IDS.has(top0);
+    const isProtectedAnchor = SIMULATED_PROTECTED_ANCHOR_IDS.has(top0);
 
     const protectedAnchorFirst: number[] = [];
     const supersedesFirst: number[] = [];
@@ -902,9 +893,7 @@ export function applyMultiAnchorRerankRule(args: {
         const id = ids[p]!;
         const edge = SIMULATED_SUPERSESSION_EDGES.get(id);
         const supersedesInTopK =
-          edge !== undefined &&
-          edge.supersedes !== null &&
-          topKSet.has(edge.supersedes);
+          edge !== undefined && edge.supersedes !== null && topKSet.has(edge.supersedes);
         if (supersedesInTopK) supersedesFirst.push(p);
         else middle.push(p);
       }
@@ -918,18 +907,12 @@ export function applyMultiAnchorRerankRule(args: {
         const id = ids[p]!;
         const edge = SIMULATED_SUPERSESSION_EDGES.get(id);
         const supersedesInTopK =
-          edge !== undefined &&
-          edge.supersedes !== null &&
-          topKSet.has(edge.supersedes);
+          edge !== undefined && edge.supersedes !== null && topKSet.has(edge.supersedes);
         if (supersedesInTopK) supersedesFirst.push(p);
         else middle.push(p);
       }
     }
-    return projected(
-      [...protectedAnchorFirst, ...supersedesFirst, ...middle],
-      ids,
-      scores,
-    );
+    return projected([...protectedAnchorFirst, ...supersedesFirst, ...middle], ids, scores);
   }
 
   if (rule.kind === "multi-anchor-aware-combined") {
@@ -963,8 +946,7 @@ export function applyMultiAnchorRerankRule(args: {
     //     a forward-looking contract.)
     const positions = ids.map((_, i) => i);
     const top0 = ids[0]!;
-    const isProtectedAnchor =
-      SIMULATED_PROTECTED_ANCHOR_IDS.has(top0);
+    const isProtectedAnchor = SIMULATED_PROTECTED_ANCHOR_IDS.has(top0);
 
     const protectedAnchorFirst: number[] = [];
     const supersedesFirst: number[] = [];
@@ -978,12 +960,9 @@ export function applyMultiAnchorRerankRule(args: {
       for (const p of restPositions) {
         const id = ids[p]!;
         const edge = SIMULATED_SUPERSESSION_EDGES.get(id);
-        const isSuperseded =
-          edge !== undefined && edge.isSuperseded;
+        const isSuperseded = edge !== undefined && edge.isSuperseded;
         const supersedesInTopK =
-          edge !== undefined &&
-          edge.supersedes !== null &&
-          topKSet.has(edge.supersedes);
+          edge !== undefined && edge.supersedes !== null && topKSet.has(edge.supersedes);
         if (isSuperseded) supersededLast.push(p);
         else if (supersedesInTopK) supersedesFirst.push(p);
         else middle.push(p);
@@ -993,26 +972,18 @@ export function applyMultiAnchorRerankRule(args: {
       for (const p of positions) {
         const id = ids[p]!;
         const edge = SIMULATED_SUPERSESSION_EDGES.get(id);
-        const isSuperseded =
-          edge !== undefined && edge.isSuperseded;
+        const isSuperseded = edge !== undefined && edge.isSuperseded;
         const supersedesInTopK =
-          edge !== undefined &&
-          edge.supersedes !== null &&
-          topKSet.has(edge.supersedes);
+          edge !== undefined && edge.supersedes !== null && topKSet.has(edge.supersedes);
         if (isSuperseded) supersededLast.push(p);
         else if (supersedesInTopK) supersedesFirst.push(p);
         else middle.push(p);
       }
     }
     return projected(
-      [
-        ...protectedAnchorFirst,
-        ...supersedesFirst,
-        ...middle,
-        ...supersededLast,
-      ],
+      [...protectedAnchorFirst, ...supersedesFirst, ...middle, ...supersededLast],
       ids,
-      scores,
+      scores
     );
   }
 
@@ -1026,7 +997,7 @@ export function applyMultiAnchorRerankRule(args: {
   throw new Error(
     `applyMultiAnchorRerankRule: unknown rule kind "${
       (rule as { kind: string }).kind
-    }" for query "${e.queryId}"`,
+    }" for query "${e.queryId}"`
   );
 }
 
@@ -1041,7 +1012,7 @@ export function applyMultiAnchorRerankRule(args: {
 function projected(
   sorted: number[],
   ids: number[],
-  scores: number[],
+  scores: number[]
 ): { topIds: number[]; topScores: number[] } {
   const newIds: number[] = [];
   const newScores: number[] = [];
@@ -1483,7 +1454,7 @@ export function evaluateMultiAnchorRerankVariant(args: {
   if (evals.length !== queries.length) {
     throw new Error(
       `evaluateMultiAnchorRerankVariant: evals.length (${evals.length}) must match ` +
-        `queries.length (${queries.length}) for variant "${variant.id}"`,
+        `queries.length (${queries.length}) for variant "${variant.id}"`
     );
   }
 
@@ -1494,13 +1465,11 @@ export function evaluateMultiAnchorRerankVariant(args: {
     if (e.queryId !== q.id) {
       throw new Error(
         `evaluateMultiAnchorRerankVariant: evals[${i}].queryId="${e.queryId}" does ` +
-          `not match queries[${i}].id="${q.id}" for variant "${variant.id}"`,
+          `not match queries[${i}].id="${q.id}" for variant "${variant.id}"`
       );
     }
     if (q.family !== "temporal") continue; // temporal slice only
-    perQuery.push(
-      evaluateMultiAnchorRerankForQuery({ variant, eval: e, query: q }),
-    );
+    perQuery.push(evaluateMultiAnchorRerankForQuery({ variant, eval: e, query: q }));
   }
 
   return aggregateMultiAnchorRerankPerQuery(perQuery);
@@ -1562,16 +1531,14 @@ export function evaluateMultiAnchorRerankForQuery(args: {
   // Regression: baseline `currentTruthAt1`,
   // after NOT `currentTruthAt1`.
   const regression =
-    baselineDiag.top1IsCurrentTruth === true &&
-    afterDiag.top1IsCurrentTruth === false;
+    baselineDiag.top1IsCurrentTruth === true && afterDiag.top1IsCurrentTruth === false;
 
   // Unchanged because current missing:
   // baseline had no current in top-K, AND
   // the re-ranker did not surface a
   // current-truth candidate either.
   const unchangedBecauseCurrentMissing =
-    baselineDiag.topKHasCurrentTruth === false &&
-    afterDiag.topKHasCurrentTruth === false;
+    baselineDiag.topKHasCurrentTruth === false && afterDiag.topKHasCurrentTruth === false;
 
   // The clean / fixture-ambiguous split is
   // on the baseline's `isDivergentLabeled`
@@ -1604,8 +1571,7 @@ export function evaluateMultiAnchorRerankForQuery(args: {
     variant.rule.kind === "multi-anchor-protected-supersedes-promote" ||
     variant.rule.kind === "multi-anchor-aware-combined";
   const top0 = e.topIds[0];
-  const rank1IsAnchor =
-    top0 !== undefined && SIMULATED_PROTECTED_ANCHOR_IDS.has(top0);
+  const rank1IsAnchor = top0 !== undefined && SIMULATED_PROTECTED_ANCHOR_IDS.has(top0);
   const anchorProtected = isProtectionRule && rank1IsAnchor;
 
   return {
@@ -1614,15 +1580,13 @@ export function evaluateMultiAnchorRerankForQuery(args: {
     baselineTop1Id: baselineDiag.top1Id,
     baselineCurrentTruthAt1: baselineDiag.top1IsCurrentTruth,
     baselineStaleTop1: baselineDiag.top1IsStale,
-    baselineStaleOverCurrent:
-      baselineDiag.top1IsStale && baselineDiag.topKHasCurrentTruth,
+    baselineStaleOverCurrent: baselineDiag.top1IsStale && baselineDiag.topKHasCurrentTruth,
     baselineCategory: baselineDiag.category,
     baselineIsDivergentLabeled: baselineDiag.isDivergentLabeled,
     afterTop1Id: afterDiag.top1Id,
     afterCurrentTruthAt1: afterDiag.top1IsCurrentTruth,
     afterStaleTop1: afterDiag.top1IsStale,
-    afterStaleOverCurrent:
-      afterDiag.top1IsStale && afterDiag.topKHasCurrentTruth,
+    afterStaleOverCurrent: afterDiag.top1IsStale && afterDiag.topKHasCurrentTruth,
     afterCategory: afterDiag.category,
     categoryChange,
     regression,
@@ -1644,7 +1608,7 @@ export function evaluateMultiAnchorRerankForQuery(args: {
  * per-query list -> same metrics block.
  */
 export function aggregateMultiAnchorRerankPerQuery(
-  perQuery: ReadonlyArray<MultiAnchorRerankPerQuery>,
+  perQuery: ReadonlyArray<MultiAnchorRerankPerQuery>
 ): MultiAnchorRerankVariantMetrics {
   const total = perQuery.length;
   let cleanTotal = 0;
@@ -1698,13 +1662,11 @@ export function aggregateMultiAnchorRerankPerQuery(
       afterCurrentMissing += 1;
     }
     if (p.regression) regressionCount += 1;
-    if (p.unchangedBecauseCurrentMissing)
-      unchangedBecauseCurrentMissing += 1;
+    if (p.unchangedBecauseCurrentMissing) unchangedBecauseCurrentMissing += 1;
 
     if (p.hasExcludedCurrentAnchor) {
       multiAnchorQueryCount += 1;
-      if (p.baselineCurrentTruthAt1)
-        multiAnchorBaselineCurrentTruthAt1 += 1;
+      if (p.baselineCurrentTruthAt1) multiAnchorBaselineCurrentTruthAt1 += 1;
       if (p.afterCurrentTruthAt1) multiAnchorAfterCurrentTruthAt1 += 1;
       if (p.regression) multiAnchorRegressionCount += 1;
       if (p.anchorProtected) multiAnchorProtectedCount += 1;
@@ -1715,32 +1677,25 @@ export function aggregateMultiAnchorRerankPerQuery(
       if (p.afterCurrentTruthAt1) cleanAfterCurrentTruthAt1 += 1;
       if (p.regression) cleanRegressionCount += 1;
     } else {
-      if (p.baselineCurrentTruthAt1)
-        fixtureAmbiguousBaselineCurrentTruthAt1 += 1;
-      if (p.afterCurrentTruthAt1)
-        fixtureAmbiguousAfterCurrentTruthAt1 += 1;
+      if (p.baselineCurrentTruthAt1) fixtureAmbiguousBaselineCurrentTruthAt1 += 1;
+      if (p.afterCurrentTruthAt1) fixtureAmbiguousAfterCurrentTruthAt1 += 1;
       if (p.regression) fixtureAmbiguousRegressionCount += 1;
     }
 
-    perCategoryChange[p.categoryChange] =
-      (perCategoryChange[p.categoryChange] ?? 0) + 1;
+    perCategoryChange[p.categoryChange] = (perCategoryChange[p.categoryChange] ?? 0) + 1;
   }
 
   const safeDiv = (n: number, d: number): number => (d > 0 ? n / d : 0);
   const currentTruthAt1Delta = afterCurrentTruthAt1 - baselineCurrentTruthAt1;
   const currentTruthAt1RateDelta =
-    safeDiv(afterCurrentTruthAt1, total) -
-    safeDiv(baselineCurrentTruthAt1, total);
+    safeDiv(afterCurrentTruthAt1, total) - safeDiv(baselineCurrentTruthAt1, total);
   const staleTop1Delta = afterStaleTop1 - baselineStaleTop1;
-  const staleOverCurrentDelta =
-    afterStaleOverCurrent - baselineStaleOverCurrent;
+  const staleOverCurrentDelta = afterStaleOverCurrent - baselineStaleOverCurrent;
   const currentMissingDelta = afterCurrentMissing - baselineCurrentMissing;
 
-  const cleanCurrentTruthAt1Delta =
-    cleanAfterCurrentTruthAt1 - cleanBaselineCurrentTruthAt1;
+  const cleanCurrentTruthAt1Delta = cleanAfterCurrentTruthAt1 - cleanBaselineCurrentTruthAt1;
   const fixtureAmbiguousCurrentTruthAt1Delta =
-    fixtureAmbiguousAfterCurrentTruthAt1 -
-    fixtureAmbiguousBaselineCurrentTruthAt1;
+    fixtureAmbiguousAfterCurrentTruthAt1 - fixtureAmbiguousBaselineCurrentTruthAt1;
 
   const multiAnchorCurrentTruthAt1Delta =
     multiAnchorAfterCurrentTruthAt1 - multiAnchorBaselineCurrentTruthAt1;
@@ -1808,9 +1763,10 @@ export function aggregateMultiAnchorRerankPerQuery(
  *     report surfaces the raw numbers so a
  *     reviewer can audit.
  */
-export function computeMultiAnchorRerankVerdict(
-  metrics: MultiAnchorRerankVariantMetrics,
-): { verdict: MultiAnchorRerankVerdict; note: string } {
+export function computeMultiAnchorRerankVerdict(metrics: MultiAnchorRerankVariantMetrics): {
+  verdict: MultiAnchorRerankVerdict;
+  note: string;
+} {
   if (metrics.regressionCount > 0) {
     return {
       verdict: "unsafe",
@@ -2050,15 +2006,13 @@ export function buildMultiAnchorRerankReport(args: {
   if (evals.length !== queries.length) {
     throw new Error(
       `buildMultiAnchorRerankReport: evals.length (${evals.length}) must match ` +
-        `queries.length (${queries.length})`,
+        `queries.length (${queries.length})`
     );
   }
   // Build the per-variant rows.
   const rows: MultiAnchorRerankVariantRow[] = [];
   for (const v of variants) {
-    rows.push(
-      buildMultiAnchorRerankVariantRow({ variant: v, evals, queries }),
-    );
+    rows.push(buildMultiAnchorRerankVariantRow({ variant: v, evals, queries }));
   }
   // Temporal slice size: count temporal
   // queries in the input. We count the
@@ -2118,10 +2072,8 @@ export function buildMultiAnchorRerankReport(args: {
   const regressionByVariant: Record<string, number> = {};
   const protectedByVariant: Record<string, number> = {};
   for (const row of rows) {
-    regressionByVariant[row.variant.id] =
-      row.metrics.multiAnchorRegressionCount;
-    protectedByVariant[row.variant.id] =
-      row.metrics.multiAnchorProtectedCount;
+    regressionByVariant[row.variant.id] = row.metrics.multiAnchorRegressionCount;
+    protectedByVariant[row.variant.id] = row.metrics.multiAnchorProtectedCount;
   }
   // Optional semantic overlay. The block
   // is computed per-variant for cross-
@@ -2162,7 +2114,7 @@ export function buildMultiAnchorRerankReport(args: {
     if (missQueries.length !== miss) {
       throw new Error(
         `buildMultiAnchorRerankReport: semantic overlay miss mismatch ` +
-          `(${missQueries.length} vs ${miss})`,
+          `(${missQueries.length} vs ${miss})`
       );
     }
   }
@@ -2190,9 +2142,7 @@ export function buildMultiAnchorRerankReport(args: {
         }
       })(),
     ].sort((a, b) => a - b),
-    simulatedMultiAnchorIds: [...SIMULATED_MULTI_ANCHOR_IDS].sort(
-      (a, b) => a - b,
-    ),
+    simulatedMultiAnchorIds: [...SIMULATED_MULTI_ANCHOR_IDS].sort((a, b) => a - b),
     variants: rows,
     multiAnchorSubset: {
       total: perQuerySubset.length,
@@ -2219,31 +2169,25 @@ export function buildMultiAnchorRerankReport(args: {
  * a reviewer can `diff` two runs. The
  * function is pure.
  */
-export function formatMultiAnchorRerankReport(
-  report: MultiAnchorRerankReport,
-): string {
+export function formatMultiAnchorRerankReport(report: MultiAnchorRerankReport): string {
   const out: string[] = [];
-  out.push(
-    `# Multi-anchor / current-vs-previous handling (source: ${report.sourceVariant})`,
-  );
+  out.push(`# Multi-anchor / current-vs-previous handling (source: ${report.sourceVariant})`);
   if (report.recordCount !== null) {
     out.push(`#   (records: ${report.recordCount})`);
   }
-  out.push(
-    `#   (temporal queries: ${report.temporalQueryCount})`,
-  );
+  out.push(`#   (temporal queries: ${report.temporalQueryCount})`);
   out.push(
     `#   (simulated supersession edge map: ${report.supersessionEdgeMapSize} entries; ` +
       `${report.simulatedSupersededIds.length} superseded ids; ` +
       `multi-anchor treatment: ${report.multiAnchorTreatmentSize} entries; ` +
-      `${report.simulatedMultiAnchorIds.length} multi-anchor ids)`,
+      `${report.simulatedMultiAnchorIds.length} multi-anchor ids)`
   );
   out.push("");
 
   out.push("## Variant table (temporal slice)");
   out.push("");
   out.push(
-    "  category | variant | n | baseline@1 | after@1 | delta | staleTop1 baseline->after | staleOverCurrent baseline->after | currentMissing baseline->after | regressions | unchanged-missing | multiAnchor n | multiAnchorReg | multiAnchorProt | verdict",
+    "  category | variant | n | baseline@1 | after@1 | delta | staleTop1 baseline->after | staleOverCurrent baseline->after | currentMissing baseline->after | regressions | unchanged-missing | multiAnchor n | multiAnchorReg | multiAnchorProt | verdict"
   );
   for (const row of report.variants) {
     const m = row.metrics;
@@ -2264,14 +2208,14 @@ export function formatMultiAnchorRerankReport(
         `${String(m.multiAnchorQueryCount).padStart(13)} | ` +
         `${String(m.multiAnchorRegressionCount).padStart(15)} | ` +
         `${String(m.multiAnchorProtectedCount).padStart(17)} | ` +
-        `${row.verdict}`,
+        `${row.verdict}`
     );
   }
   out.push("");
   out.push("## Variant table (clean / fixture-ambiguous split)");
   out.push("");
   out.push(
-    "  category | variant | cleanN | cleanBaseline@1 | cleanAfter@1 | cleanDelta | cleanRegressions | ambigN | ambigBaseline@1 | ambigAfter@1 | ambigDelta | ambigRegressions",
+    "  category | variant | cleanN | cleanBaseline@1 | cleanAfter@1 | cleanDelta | cleanRegressions | ambigN | ambigBaseline@1 | ambigAfter@1 | ambigDelta | ambigRegressions"
   );
   for (const row of report.variants) {
     const m = row.metrics;
@@ -2286,15 +2230,15 @@ export function formatMultiAnchorRerankReport(
         `${String(m.fixtureAmbiguousBaselineCurrentTruthAt1).padStart(15)} | ` +
         `${String(m.fixtureAmbiguousAfterCurrentTruthAt1).padStart(12)} | ` +
         `${signedInt(m.fixtureAmbiguousCurrentTruthAt1Delta).padStart(10)} | ` +
-        `${String(m.fixtureAmbiguousRegressionCount).padStart(17)}`,
+        `${String(m.fixtureAmbiguousRegressionCount).padStart(17)}`
     );
   }
   out.push("");
-  out.push("## Multi-anchor subset (4 queries: temp-current-vs-previous-{postgres,release,safety,oncall})");
-  out.push("");
   out.push(
-    "  category | variant | baseline@1 | after@1 | delta | regressions | protected",
+    "## Multi-anchor subset (4 queries: temp-current-vs-previous-{postgres,release,safety,oncall})"
   );
+  out.push("");
+  out.push("  category | variant | baseline@1 | after@1 | delta | regressions | protected");
   for (const row of report.variants) {
     const m = row.metrics;
     out.push(
@@ -2303,7 +2247,7 @@ export function formatMultiAnchorRerankReport(
         `${String(m.multiAnchorAfterCurrentTruthAt1).padStart(7)} | ` +
         `${signedInt(m.multiAnchorCurrentTruthAt1Delta).padStart(5)} | ` +
         `${String(m.multiAnchorRegressionCount).padStart(11)} | ` +
-        `${String(m.multiAnchorProtectedCount).padStart(10)}`,
+        `${String(m.multiAnchorProtectedCount).padStart(10)}`
     );
   }
   out.push("");
@@ -2323,7 +2267,7 @@ export function formatMultiAnchorRerankReport(
     "  The table maps (baseline-category -> after-category) -> count for each variant. " +
       "The columns are the union of all observed change keys, sorted alphabetically. " +
       "The dominant 'X -> X' diagonal is the unchanged-count; the " +
-      "off-diagonal rows are the per-variant recoveries.",
+      "off-diagonal rows are the per-variant recoveries."
   );
   out.push("");
   // For each variant, list the
@@ -2352,7 +2296,7 @@ export function formatMultiAnchorRerankReport(
   out.push("## Multi-anchor subset per-query breakdown");
   out.push("");
   out.push(
-    `  total temporal queries whose currentTruthIds intersects SIMULATED_MULTI_ANCHOR_IDS: ${report.multiAnchorSubset.total}`,
+    `  total temporal queries whose currentTruthIds intersects SIMULATED_MULTI_ANCHOR_IDS: ${report.multiAnchorSubset.total}`
   );
   out.push("");
   out.push("  per-variant (multi-anchor subset):");
@@ -2362,7 +2306,7 @@ export function formatMultiAnchorRerankReport(
         `after@1=${String(n.afterCurrentTruthAt1).padStart(2)}  ` +
         `delta=${signedInt(n.currentTruthAt1Delta).padStart(3)}  ` +
         `regressions=${String(n.regressionCount).padStart(2)}  ` +
-        `protected=${String(n.protectedCount).padStart(2)}`,
+        `protected=${String(n.protectedCount).padStart(2)}`
     );
   }
   out.push("");
@@ -2371,12 +2315,12 @@ export function formatMultiAnchorRerankReport(
     out.push("    (no multi-anchor queries on the temporal slice)");
   } else {
     const sorted = [...report.multiAnchorSubset.perQuery].sort((a, b) =>
-      a.queryId < b.queryId ? -1 : a.queryId > b.queryId ? 1 : 0,
+      a.queryId < b.queryId ? -1 : a.queryId > b.queryId ? 1 : 0
     );
     for (const p of sorted) {
       out.push(
         `    ${p.queryId.padEnd(48)}  family=${p.family.padEnd(10)}  ` +
-          `multi-anchor=${JSON.stringify(p.multiAnchorCurrentTruthIds)}`,
+          `multi-anchor=${JSON.stringify(p.multiAnchorCurrentTruthIds)}`
       );
     }
   }
@@ -2389,7 +2333,7 @@ export function formatMultiAnchorRerankReport(
       "the anchor (i.e., the rank-1 record was a multi-anchor record AND " +
       "the rule kind is a protection rule) is on the protected side; a " +
       "query where the rank-1 record was a multi-anchor record but the " +
-      "rule kind is NOT a protection rule is on the unsafe side.",
+      "rule kind is NOT a protection rule is on the unsafe side."
   );
   out.push("");
   out.push("  per-variant (regressionCount on the multi-anchor subset):");
@@ -2404,28 +2348,18 @@ export function formatMultiAnchorRerankReport(
   out.push("");
   out.push("## Simulated treatment summary");
   out.push("");
+  out.push(`  supersession edge map entries:       ${report.supersessionEdgeMapSize}`);
+  out.push(`  superseded ids (isSuperseded):      ${report.simulatedSupersededIds.length}`);
+  out.push(`  multi-anchor treatment entries:     ${report.multiAnchorTreatmentSize}`);
   out.push(
-    `  supersession edge map entries:       ${report.supersessionEdgeMapSize}`,
-  );
-  out.push(
-    `  superseded ids (isSuperseded):      ${report.simulatedSupersededIds.length}`,
-  );
-  out.push(
-    `  multi-anchor treatment entries:     ${report.multiAnchorTreatmentSize}`,
-  );
-  out.push(
-    `  multi-anchor ids (currentVsPreviousAnchor): ${report.simulatedMultiAnchorIds.length}`,
+    `  multi-anchor ids (currentVsPreviousAnchor): ${report.simulatedMultiAnchorIds.length}`
   );
   out.push("");
   out.push("  superseded ids (sorted):");
-  out.push(
-    `    [${report.simulatedSupersededIds.join(", ")}]`,
-  );
+  out.push(`    [${report.simulatedSupersededIds.join(", ")}]`);
   out.push("");
   out.push("  multi-anchor ids (sorted):");
-  out.push(
-    `    [${report.simulatedMultiAnchorIds.join(", ")}]`,
-  );
+  out.push(`    [${report.simulatedMultiAnchorIds.join(", ")}]`);
   out.push("");
   // Sanity: the simulated superseded id
   // set should be a SUBSET of the prior
@@ -2440,19 +2374,16 @@ export function formatMultiAnchorRerankReport(
     if (STALE_TEMPORAL_IDS.has(id)) staleOverlap.push(id);
   }
   for (const id of STALE_TEMPORAL_IDS) {
-    if (
-      !report.simulatedSupersededIds.includes(id) &&
-      !report.simulatedMultiAnchorIds.includes(id)
-    )
+    if (!report.simulatedSupersededIds.includes(id) && !report.simulatedMultiAnchorIds.includes(id))
       staleOnly.push(id);
   }
   out.push("## Cross-experiment sanity (vs STALE_TEMPORAL_IDS)");
   out.push("");
   out.push(
-    `  simulatedSupersededIds ∩ STALE_TEMPORAL_IDS: ${staleOverlap.length} (overlap ids: [${staleOverlap.join(", ")}])`,
+    `  simulatedSupersededIds ∩ STALE_TEMPORAL_IDS: ${staleOverlap.length} (overlap ids: [${staleOverlap.join(", ")}])`
   );
   out.push(
-    `  STALE_TEMPORAL_IDS \\ (simulatedSupersededIds ∪ simulatedMultiAnchorIds): ${staleOnly.length} (ids: [${staleOnly.join(", ")}])`,
+    `  STALE_TEMPORAL_IDS \\ (simulatedSupersededIds ∪ simulatedMultiAnchorIds): ${staleOnly.length} (ids: [${staleOnly.join(", ")}])`
   );
   out.push(
     "  The simulatedSupersededIds set is a NARROWER subset of " +
@@ -2463,7 +2394,7 @@ export function formatMultiAnchorRerankReport(
       "The simulatedMultiAnchorIds set is the multi-anchor cluster " +
       "(117..120); the multi-anchor treatment is the experiment's " +
       "primary deliverable. A reviewer who wants to audit the " +
-      "cross-experiment overlap reads this block.",
+      "cross-experiment overlap reads this block."
   );
   out.push("");
   if (report.semanticOverlay) {
@@ -2479,7 +2410,7 @@ export function formatMultiAnchorRerankReport(
         "for each variant, the count is the number of baseline-miss queries " +
         "whose after-re-rank top-1 IS a currentTruthId. A non-zero count means " +
         "'the current fact was in the top-K; the re-ranker could have recovered " +
-        "it regardless of the dense ranker's miss'.",
+        "it regardless of the dense ranker's miss'."
     );
     out.push("");
     out.push("  recovered-by-variant (baseline-miss queries, after-currentTruthAt1):");
@@ -2506,7 +2437,7 @@ export function formatMultiAnchorRerankReport(
       "carries BOTH the supersession edge map AND the multi-anchor " +
       "treatment at `remember` time would let a runtime re-ranker " +
       "reach the multi-anchor-aware ceiling WITHOUT depending on " +
-      "the fixture truth at all'.",
+      "the fixture truth at all'."
   );
   out.push("");
   return out.join("\n");

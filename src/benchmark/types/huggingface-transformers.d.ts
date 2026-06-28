@@ -61,7 +61,7 @@ declare module "@huggingface/transformers" {
     options?: {
       pooling?: "last_token" | "mean" | "cls" | "none";
       normalize?: boolean;
-    },
+    }
   ) => Promise<unknown>;
 
   /**
@@ -84,7 +84,7 @@ declare module "@huggingface/transformers" {
   export function pipeline(
     task: "feature-extraction",
     model: string,
-    options?: { dtype?: string; device?: string },
+    options?: { dtype?: string; device?: string }
   ): Promise<FeatureExtractionPipeline>;
 
   export const env: HfTransformersEnv;

@@ -52,46 +52,39 @@
  *      ceiling.
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { test } from "node:test";
 
-import {
-  BUILTIN_TEMPORAL_RERANK_VARIANTS,
-  DEFAULT_MILD_HEURISTIC_STALE_IDS,
-  applyRerankRule,
-  buildTemporalRerankReport,
-  buildTemporalRerankVariantRow,
-  computeTemporalRerankVerdict,
-  evaluateTemporalRerankForQuery,
-  evaluateTemporalRerankVariant,
-  formatTemporalRerankReport,
-  aggregateTemporalRerankPerQuery,
-  type TemporalRerankReport,
-  type TemporalRerankRule,
-  type TemporalRerankVariant,
-  type TemporalRerankVariantMetrics,
-} from "../src/benchmark/temporal-ranking-preference.js";
+import { type QueryEval, evaluateQuery } from "../src/benchmark/metrics.js";
+import type { BenchmarkQuery } from "../src/benchmark/queries.js";
 import {
   parseTemporalRerankCliArgs,
-  runTemporalRerankAnalysis,
   runTemporalRerankCli,
   writeTemporalRerankReport,
 } from "../src/benchmark/temporal-ranking-preference-runner.js";
 import {
+  BUILTIN_TEMPORAL_RERANK_VARIANTS,
+  DEFAULT_MILD_HEURISTIC_STALE_IDS,
+  type TemporalRerankReport,
+  type TemporalRerankRule,
+  type TemporalRerankVariant,
+  applyRerankRule,
+  buildTemporalRerankReport,
+  buildTemporalRerankVariantRow,
+  computeTemporalRerankVerdict,
+  evaluateTemporalRerankVariant,
+  formatTemporalRerankReport,
+} from "../src/benchmark/temporal-ranking-preference.js";
+import {
+  type BenchmarkArtifact,
+  alignQueriesToEvals,
   findMostRecentArtifact,
   readBenchmarkArtifact,
-  alignQueriesToEvals,
-  type BenchmarkArtifact,
 } from "../src/benchmark/temporal-truth-diagnostic-runner.js";
-import {
-  STALE_TEMPORAL_IDS,
-  classifyTemporalTruthFailure,
-} from "../src/benchmark/temporal-truth-diagnostic.js";
-import type { BenchmarkQuery } from "../src/benchmark/queries.js";
-import { evaluateQuery, type QueryEval } from "../src/benchmark/metrics.js";
+import { STALE_TEMPORAL_IDS } from "../src/benchmark/temporal-truth-diagnostic.js";
 import { PUBLIC_TOOL_NAMES } from "../src/server.js";
 import { walkTs } from "./_helpers/fs-walk.ts";
 
@@ -121,7 +114,7 @@ function mkQueryEval(
      * block.
      */
     abstentionSignals?: QueryEval["abstentionSignals"];
-  }>,
+  }>
 ): { evals: QueryEval[]; queries: BenchmarkQuery[] } {
   const evals: QueryEval[] = [];
   const queries: BenchmarkQuery[] = [];
@@ -134,7 +127,7 @@ function mkQueryEval(
       s.expectedIds,
       s.currentTruthIds,
       s.topIds,
-      topScores,
+      topScores
     );
     // Re-derive rank1 / currentTruthAt1 in case
     // the synthetic topIds is empty.
@@ -426,17 +419,12 @@ test("temporal-ranking-preference: built-in variant table category honesty", () 
   //     `isTemporalCurrent` signal; the
   //     embedded stale-like set is narrow and
   //     documented).
-  const byId = new Map(
-    BUILTIN_TEMPORAL_RERANK_VARIANTS.map((v) => [v.id, v.category] as const),
-  );
+  const byId = new Map(BUILTIN_TEMPORAL_RERANK_VARIANTS.map((v) => [v.id, v.category] as const));
   assert.equal(byId.get("baseline-no-rerank"), "production-like");
   assert.equal(byId.get("oracle-current-truth-promote-all"), "oracle");
   assert.equal(byId.get("oracle-current-truth-promote-first-only"), "oracle");
   assert.equal(byId.get("fixture-shaped-stale-demote"), "fixture-shaped");
-  assert.equal(
-    byId.get("fixture-shaped-stale-demote-current-promote"),
-    "fixture-shaped",
-  );
+  assert.equal(byId.get("fixture-shaped-stale-demote-current-promote"), "fixture-shaped");
   assert.equal(byId.get("mild-heuristic-temporal-current"), "production-like");
 });
 
@@ -454,7 +442,7 @@ test("temporal-ranking-preference: oracle variants reference currentTruthIds (fi
         d.includes("fixture truth") ||
         d.includes("research-only") ||
         d.includes("research"),
-      `oracle variant ${v.id} description must name fixture truth / currentTruthIds, got: ${v.description}`,
+      `oracle variant ${v.id} description must name fixture truth / currentTruthIds, got: ${v.description}`
     );
   }
 });
@@ -471,7 +459,7 @@ test("temporal-ranking-preference: fixture-shaped variants reference STALE_TEMPO
         v.description.toLowerCase().includes("stale record") ||
         v.description.toLowerCase().includes("fixture truth") ||
         v.description.toLowerCase().includes("stale"),
-      `fixture-shaped variant ${v.id} description must name stale/fixture truth`,
+      `fixture-shaped variant ${v.id} description must name stale/fixture truth`
     );
   }
 });
@@ -496,7 +484,7 @@ test("temporal-ranking-preference: production source tree does NOT import the ne
       const text = fs.readFileSync(path.join(dir, f), "utf8");
       assert.ok(
         !text.includes("temporal-ranking-preference"),
-        `production source ${f} must not import the new module`,
+        `production source ${f} must not import the new module`
       );
     }
   }
@@ -596,7 +584,7 @@ test("temporal-ranking-preference: report has the documented top-level shape", (
     assert.ok(row.metrics);
     assert.ok(
       ["safe", "unsafe", "neutral"].includes(row.verdict),
-      `verdict must be safe|unsafe|neutral, got ${row.verdict}`,
+      `verdict must be safe|unsafe|neutral, got ${row.verdict}`
     );
     assert.ok(typeof row.verdictNote === "string");
   }
@@ -618,22 +606,10 @@ test("temporal-ranking-preference: per-variant metrics include the documented be
     assert.equal(m.total, 2);
     assert.equal(typeof m.baselineCurrentTruthAt1, "number");
     assert.equal(typeof m.afterCurrentTruthAt1, "number");
-    assert.equal(
-      m.afterCurrentTruthAt1 - m.baselineCurrentTruthAt1,
-      m.currentTruthAt1Delta,
-    );
-    assert.equal(
-      m.afterStaleTop1 - m.baselineStaleTop1,
-      m.staleTop1Delta,
-    );
-    assert.equal(
-      m.afterStaleOverCurrent - m.baselineStaleOverCurrent,
-      m.staleOverCurrentDelta,
-    );
-    assert.equal(
-      m.afterCurrentMissing - m.baselineCurrentMissing,
-      m.currentMissingDelta,
-    );
+    assert.equal(m.afterCurrentTruthAt1 - m.baselineCurrentTruthAt1, m.currentTruthAt1Delta);
+    assert.equal(m.afterStaleTop1 - m.baselineStaleTop1, m.staleTop1Delta);
+    assert.equal(m.afterStaleOverCurrent - m.baselineStaleOverCurrent, m.staleOverCurrentDelta);
+    assert.equal(m.afterCurrentMissing - m.baselineCurrentMissing, m.currentMissingDelta);
     assert.equal(typeof m.regressionCount, "number");
     assert.equal(typeof m.unchangedBecauseCurrentMissing, "number");
   }
@@ -652,10 +628,7 @@ test("temporal-ranking-preference: the module imports STALE_TEMPORAL_IDS from th
   // (21..24) as a smoke check on the import
   // path.
   for (const id of [21, 22, 23, 24, 105, 106, 107, 108]) {
-    assert.ok(
-      STALE_TEMPORAL_IDS.has(id),
-      `STALE_TEMPORAL_IDS must contain ${id}`,
-    );
+    assert.ok(STALE_TEMPORAL_IDS.has(id), `STALE_TEMPORAL_IDS must contain ${id}`);
   }
 });
 
@@ -664,16 +637,13 @@ test("temporal-ranking-preference: the module imports STALE_TEMPORAL_IDS from th
 // ---------------------------------------------------------------------------
 
 test("temporal-ranking-preference: end-to-end CLI on the real lexical baseline artifact", async () => {
-  const baselinePath = findMostRecentArtifact(
-    ".curion/benchmark",
-    "retrieval-baseline-",
-  );
+  const baselinePath = findMostRecentArtifact(".curion/benchmark", "retrieval-baseline-");
   if (!baselinePath) return; // skip if no artifact on disk
   const semanticPath = path.join(
     "src",
     "benchmark",
     "data",
-    "false-abstention-damage-semantic-evidence.json",
+    "false-abstention-damage-semantic-evidence.json"
   );
   const hasSemantic = fs.existsSync(semanticPath);
   const { report } = await runTemporalRerankCli({
@@ -703,25 +673,19 @@ test("temporal-ranking-preference: end-to-end CLI on the real lexical baseline a
   // upper bound is `currentTruthInTopK` from
   // the prior diagnostic (22/26).
   const oraclePromote = report.variants.find(
-    (v) => v.variant.id === "oracle-current-truth-promote-all",
+    (v) => v.variant.id === "oracle-current-truth-promote-all"
   );
   assert.ok(oraclePromote);
   assert.ok(
-    oraclePromote.metrics.afterCurrentTruthAt1 >=
-      baseline.metrics.baselineCurrentTruthAt1,
-    "oracle-promote-all should not regress the baseline",
+    oraclePromote.metrics.afterCurrentTruthAt1 >= baseline.metrics.baselineCurrentTruthAt1,
+    "oracle-promote-all should not regress the baseline"
   );
-  assert.ok(
-    oraclePromote.metrics.afterCurrentTruthAt1 >=
-      baseline.metrics.baselineCurrentTruthAt1,
-  );
+  assert.ok(oraclePromote.metrics.afterCurrentTruthAt1 >= baseline.metrics.baselineCurrentTruthAt1);
   // The fixture-shaped-stale-demote variant
   // should produce a non-negative delta on
   // `staleTop1` (the demote rule moves stale
   // ids out of the top-1 position).
-  const staleDemote = report.variants.find(
-    (v) => v.variant.id === "fixture-shaped-stale-demote",
-  );
+  const staleDemote = report.variants.find((v) => v.variant.id === "fixture-shaped-stale-demote");
   assert.ok(staleDemote);
   // The combined
   // fixture-shaped-stale-demote-current-promote
@@ -731,13 +695,12 @@ test("temporal-ranking-preference: end-to-end CLI on the real lexical baseline a
   // top, so any query with a current id in
   // the top-K is recovered).
   const combined = report.variants.find(
-    (v) =>
-      v.variant.id === "fixture-shaped-stale-demote-current-promote",
+    (v) => v.variant.id === "fixture-shaped-stale-demote-current-promote"
   );
   assert.ok(combined);
   assert.ok(
     combined.metrics.currentTruthAt1Delta > 0,
-    "the combined fixture-shaped+oracle variant should recover at least one currentTruthAt1",
+    "the combined fixture-shaped+oracle variant should recover at least one currentTruthAt1"
   );
   // The production-like mild-heuristic
   // variant is a research probe: with no
@@ -746,9 +709,7 @@ test("temporal-ranking-preference: end-to-end CLI on the real lexical baseline a
   // no-op. The expected `currentTruthAt1Delta`
   // is 0 and the expected `regressionCount`
   // is 0.
-  const mild = report.variants.find(
-    (v) => v.variant.id === "mild-heuristic-temporal-current",
-  );
+  const mild = report.variants.find((v) => v.variant.id === "mild-heuristic-temporal-current");
   assert.ok(mild);
   assert.equal(mild.metrics.currentTruthAt1Delta, 0);
   assert.equal(mild.metrics.regressionCount, 0);
@@ -767,7 +728,7 @@ test("temporal-ranking-preference: end-to-end CLI without an artifact on disk th
         noWrite: true,
         noStdout: true,
       }),
-    /no --benchmark-artifact given/,
+    /no --benchmark-artifact given/
   );
 });
 
@@ -797,11 +758,7 @@ test("temporal-ranking-preference: CLI argument parser handles the documented fl
 });
 
 test("temporal-ranking-preference: CLI argument parser ignores unknown flags", () => {
-  const parsed = parseTemporalRerankCliArgs([
-    "--unknown-flag",
-    "value",
-    "--no-write",
-  ]);
+  const parsed = parseTemporalRerankCliArgs(["--unknown-flag", "value", "--no-write"]);
   assert.equal(parsed.noWrite, true);
 });
 
@@ -823,7 +780,7 @@ test("temporal-ranking-preference: perCategoryChange rollup is populated for at 
     { queryId: "q2", expectedIds: [1], currentTruthIds: [1], topIds: [21, 1, 5, 6, 7] },
   ]);
   const oraclePromote = BUILTIN_TEMPORAL_RERANK_VARIANTS.find(
-    (v) => v.id === "oracle-current-truth-promote-all",
+    (v) => v.id === "oracle-current-truth-promote-all"
   )!;
   const m = evaluateTemporalRerankVariant({
     variant: oraclePromote,
@@ -838,7 +795,7 @@ test("temporal-ranking-preference: perCategoryChange rollup is populated for at 
   assert.ok(change);
   assert.ok(
     change["current-truth-in-topk-stale-top1 -> current-truth-top1"] === 1,
-    "the stale-top1 -> top1 move should be reflected in the perCategoryChange block",
+    "the stale-top1 -> top1 move should be reflected in the perCategoryChange block"
   );
 });
 
@@ -914,7 +871,7 @@ test("temporal-ranking-preference: verdict is unsafe when regressions are introd
   // top-1 = 21 (not current) after.
   assert.ok(
     m.regressionCount >= 1,
-    `the re-ranker should introduce a regression (got regressionCount=${m.regressionCount})`,
+    `the re-ranker should introduce a regression (got regressionCount=${m.regressionCount})`
   );
   // The verdict is unsafe.
   const { verdict } = computeTemporalRerankVerdict(m);
@@ -926,7 +883,7 @@ test("temporal-ranking-preference: verdict is safe when at least one recovery an
     { queryId: "q1", expectedIds: [1], currentTruthIds: [1], topIds: [21, 1, 5, 6, 7] },
   ]);
   const oraclePromote = BUILTIN_TEMPORAL_RERANK_VARIANTS.find(
-    (v) => v.id === "oracle-current-truth-promote-all",
+    (v) => v.id === "oracle-current-truth-promote-all"
   )!;
   const m = evaluateTemporalRerankVariant({
     variant: oraclePromote,
@@ -949,9 +906,7 @@ test("temporal-ranking-preference: verdict is safe when no recovery and no regre
   const { evals, queries } = mkQueryEval([
     { queryId: "q1", expectedIds: [1], currentTruthIds: [1], topIds: [1, 21, 5, 6, 7] },
   ]);
-  const baseline = BUILTIN_TEMPORAL_RERANK_VARIANTS.find(
-    (v) => v.id === "baseline-no-rerank",
-  )!;
+  const baseline = BUILTIN_TEMPORAL_RERANK_VARIANTS.find((v) => v.id === "baseline-no-rerank")!;
   const m = evaluateTemporalRerankVariant({
     variant: baseline,
     evals,
@@ -980,9 +935,7 @@ test("temporal-ranking-preference: clean / fixture-ambiguous split is on the div
       labels: ["divergentTemporal"],
     },
   ]);
-  const baseline = BUILTIN_TEMPORAL_RERANK_VARIANTS.find(
-    (v) => v.id === "baseline-no-rerank",
-  )!;
+  const baseline = BUILTIN_TEMPORAL_RERANK_VARIANTS.find((v) => v.id === "baseline-no-rerank")!;
   const m = evaluateTemporalRerankVariant({
     variant: baseline,
     evals,
@@ -1010,9 +963,7 @@ test("temporal-ranking-preference: regressionCount is 0 on a no-rerank baseline"
   const { evals, queries } = mkQueryEval([
     { queryId: "q1", expectedIds: [1], currentTruthIds: [1], topIds: [1, 21, 5, 6, 7] },
   ]);
-  const baseline = BUILTIN_TEMPORAL_RERANK_VARIANTS.find(
-    (v) => v.id === "baseline-no-rerank",
-  )!;
+  const baseline = BUILTIN_TEMPORAL_RERANK_VARIANTS.find((v) => v.id === "baseline-no-rerank")!;
   const m = evaluateTemporalRerankVariant({
     variant: baseline,
     evals,
@@ -1035,7 +986,7 @@ test("temporal-ranking-preference: unchangedBecauseCurrentMissing is the re-rank
     { queryId: "q1", expectedIds: [1], currentTruthIds: [1], topIds: [2, 3, 4, 5, 6] },
   ]);
   const oraclePromote = BUILTIN_TEMPORAL_RERANK_VARIANTS.find(
-    (v) => v.id === "oracle-current-truth-promote-all",
+    (v) => v.id === "oracle-current-truth-promote-all"
   )!;
   const m = evaluateTemporalRerankVariant({
     variant: oraclePromote,
@@ -1097,14 +1048,9 @@ test("temporal-ranking-preference: artifact reader + writer round-trip is byte-s
     // the report by its `description` and
     // `id`; the embedded set is internal
     // state, not an artifact contract).
-    const mildRow = parsed.variants.find(
-      (r) => r.variant.id === "mild-heuristic-temporal-current",
-    );
+    const mildRow = parsed.variants.find((r) => r.variant.id === "mild-heuristic-temporal-current");
     assert.ok(mildRow);
-    assert.equal(
-      mildRow!.variant.rule.kind,
-      "mild-heuristic-temporal-current",
-    );
+    assert.equal(mildRow!.variant.rule.kind, "mild-heuristic-temporal-current");
     if (mildRow!.variant.rule.kind === "mild-heuristic-temporal-current") {
       // The JSON-parsed set is `{}`; the
       // empty object literal is the
@@ -1129,7 +1075,7 @@ test("temporal-ranking-preference: buildTemporalRerankVariantRow is consistent w
     { queryId: "q1", expectedIds: [1], currentTruthIds: [1], topIds: [21, 1, 5, 6, 7] },
   ]);
   const oraclePromote = BUILTIN_TEMPORAL_RERANK_VARIANTS.find(
-    (v) => v.id === "oracle-current-truth-promote-all",
+    (v) => v.id === "oracle-current-truth-promote-all"
   )!;
   const row = buildTemporalRerankVariantRow({
     variant: oraclePromote,
@@ -1165,9 +1111,7 @@ test("temporal-ranking-preference: aggregateTemporalRerankPerQuery is consistent
       labels: ["divergentTemporal"],
     },
   ]);
-  const baseline = BUILTIN_TEMPORAL_RERANK_VARIANTS.find(
-    (v) => v.id === "baseline-no-rerank",
-  )!;
+  const baseline = BUILTIN_TEMPORAL_RERANK_VARIANTS.find((v) => v.id === "baseline-no-rerank")!;
   const m = evaluateTemporalRerankVariant({
     variant: baseline,
     evals,
@@ -1184,9 +1128,7 @@ test("temporal-ranking-preference: evals/queries length mismatch throws", () => 
   const { evals, queries } = mkQueryEval([
     { queryId: "q1", expectedIds: [1], currentTruthIds: [1], topIds: [1] },
   ]);
-  const baseline = BUILTIN_TEMPORAL_RERANK_VARIANTS.find(
-    (v) => v.id === "baseline-no-rerank",
-  )!;
+  const baseline = BUILTIN_TEMPORAL_RERANK_VARIANTS.find((v) => v.id === "baseline-no-rerank")!;
   assert.throws(
     () =>
       evaluateTemporalRerankVariant({
@@ -1194,7 +1136,7 @@ test("temporal-ranking-preference: evals/queries length mismatch throws", () => 
         evals,
         queries: [...queries, ...queries],
       }),
-    /evals\.length/,
+    /evals\.length/
   );
 });
 
@@ -1202,9 +1144,7 @@ test("temporal-ranking-preference: evals/queries id mismatch throws", () => {
   const { evals, queries } = mkQueryEval([
     { queryId: "q1", expectedIds: [1], currentTruthIds: [1], topIds: [1] },
   ]);
-  const baseline = BUILTIN_TEMPORAL_RERANK_VARIANTS.find(
-    (v) => v.id === "baseline-no-rerank",
-  )!;
+  const baseline = BUILTIN_TEMPORAL_RERANK_VARIANTS.find((v) => v.id === "baseline-no-rerank")!;
   const corrupted = [{ ...queries[0]!, id: "different" }];
   assert.throws(
     () =>
@@ -1213,7 +1153,7 @@ test("temporal-ranking-preference: evals/queries id mismatch throws", () => {
         evals,
         queries: corrupted,
       }),
-    /does not match/,
+    /does not match/
   );
 });
 
@@ -1226,16 +1166,11 @@ test("temporal-ranking-preference: per-query alignment with prior diagnostic on 
   // lexical baseline artifact must agree with
   // the prior diagnostic's `currentTruthAt1`
   // count (12) and the per-category counts.
-  const baselinePath = findMostRecentArtifact(
-    ".curion/benchmark",
-    "retrieval-baseline-",
-  );
+  const baselinePath = findMostRecentArtifact(".curion/benchmark", "retrieval-baseline-");
   if (!baselinePath) return;
   const artifact = readBenchmarkArtifact(baselinePath);
   const queries = alignQueriesToEvals(artifact.evals);
-  const baseline = BUILTIN_TEMPORAL_RERANK_VARIANTS.find(
-    (v) => v.id === "baseline-no-rerank",
-  )!;
+  const baseline = BUILTIN_TEMPORAL_RERANK_VARIANTS.find((v) => v.id === "baseline-no-rerank")!;
   const m = evaluateTemporalRerankVariant({
     variant: baseline,
     evals: artifact.evals,
@@ -1253,8 +1188,7 @@ test("temporal-ranking-preference: per-query alignment with prior diagnostic on 
   // variant must produce a strictly positive
   // `currentTruthAt1Delta`.
   const combined = BUILTIN_TEMPORAL_RERANK_VARIANTS.find(
-    (v) =>
-      v.id === "fixture-shaped-stale-demote-current-promote",
+    (v) => v.id === "fixture-shaped-stale-demote-current-promote"
   )!;
   const combinedM = evaluateTemporalRerankVariant({
     variant: combined,
@@ -1263,7 +1197,7 @@ test("temporal-ranking-preference: per-query alignment with prior diagnostic on 
   });
   assert.ok(
     combinedM.currentTruthAt1Delta > 0,
-    "the combined fixture-shaped+oracle variant should recover at least one currentTruthAt1 on the real artifact",
+    "the combined fixture-shaped+oracle variant should recover at least one currentTruthAt1 on the real artifact"
   );
   // The combined variant's `regressionCount`
   // is 0: a well-formed re-ranker that
@@ -1311,18 +1245,10 @@ test("temporal-ranking-preference: semantic overlay cross-reference is well-form
   // because the current truth (1) is at
   // position 1 in the top-K; the re-ranker
   // promotes it to position 0.
-  assert.equal(
-    report.semanticOverlay!.recoveredByVariant[
-      "oracle-current-truth-promote-all"
-    ],
-    1,
-  );
+  assert.equal(report.semanticOverlay!.recoveredByVariant["oracle-current-truth-promote-all"], 1);
   // The baseline variant recovers 0
   // (the baseline is a no-op).
-  assert.equal(
-    report.semanticOverlay!.recoveredByVariant["baseline-no-rerank"],
-    0,
-  );
+  assert.equal(report.semanticOverlay!.recoveredByVariant["baseline-no-rerank"], 0);
 });
 
 test("temporal-ranking-preference: buildTemporalRerankReport with no semantic overlay omits the field", () => {

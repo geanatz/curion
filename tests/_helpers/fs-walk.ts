@@ -12,7 +12,7 @@ import { join, relative } from "node:path";
 export function walkTs(
   dir: string,
   opts: { excludeDts?: boolean } = {},
-  root: string = dir,
+  root: string = dir
 ): string[] {
   const { excludeDts = true } = opts;
   const results: string[] = [];
@@ -21,10 +21,7 @@ export function walkTs(
     const stat = statSync(full);
     if (stat.isDirectory()) {
       results.push(...walkTs(full, opts, root));
-    } else if (
-      entry.endsWith(".ts") &&
-      (!excludeDts || !entry.endsWith(".d.ts"))
-    ) {
+    } else if (entry.endsWith(".ts") && (!excludeDts || !entry.endsWith(".d.ts"))) {
       results.push(relative(root, full));
     }
   }

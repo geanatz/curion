@@ -73,17 +73,17 @@ import path from "node:path";
 import { BENCHMARK_QUERIES } from "./queries.js";
 import type { BenchmarkQuery } from "./queries.js";
 import {
+  type GuardedRerankReport,
   buildGuardedRerankReport,
   formatGuardedRerankReport,
-  type GuardedRerankReport,
 } from "./supersedes-promote-guard.js";
 import {
-  alignQueriesToEvals,
-  readBenchmarkArtifact,
-  readSemanticEvidenceFile,
-  findMostRecentArtifact,
   type BenchmarkArtifact,
   type SemanticEvidenceMap,
+  alignQueriesToEvals,
+  findMostRecentArtifact,
+  readBenchmarkArtifact,
+  readSemanticEvidenceFile,
 } from "./temporal-truth-diagnostic-runner.js";
 
 // ---------------------------------------------------------------------------
@@ -139,10 +139,7 @@ const ARTIFACT_FILE_PREFIX = "retrieval-supersedes-promote-guard";
  * artifacts next to the regular reports
  * without confusing them.
  */
-export function writeGuardedRerankReport(
-  report: GuardedRerankReport,
-  dir: string,
-): string {
+export function writeGuardedRerankReport(report: GuardedRerankReport, dir: string): string {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   }
@@ -172,20 +169,17 @@ export interface GuardedRerankCliArgs {
 /**
  * Run the CLI.
  */
-export async function runGuardedRerankCli(
-  args: GuardedRerankCliArgs,
-): Promise<{
+export async function runGuardedRerankCli(args: GuardedRerankCliArgs): Promise<{
   report: GuardedRerankReport;
   written?: string;
 }> {
   const outDir = args.outDir ?? ".curion/benchmark";
   const defaultBenchmark =
-    args.benchmarkArtifact ??
-    findMostRecentArtifact(outDir, "retrieval-baseline-");
+    args.benchmarkArtifact ?? findMostRecentArtifact(outDir, "retrieval-baseline-");
   if (!defaultBenchmark) {
     throw new Error(
       `runGuardedRerankCli: no --benchmark-artifact given and no ` +
-        `retrieval-baseline-*.json found under ${outDir}`,
+        `retrieval-baseline-*.json found under ${outDir}`
     );
   }
   const benchmarkArtifact = readBenchmarkArtifact(defaultBenchmark);
@@ -203,22 +197,16 @@ export async function runGuardedRerankCli(
     written = writeGuardedRerankReport(report, outDir);
   }
   if (!args.noStdout) {
-    process.stderr.write(
-      `[supersedes-promote-guard] benchmark artifact: ${defaultBenchmark}\n`,
-    );
+    process.stderr.write(`[supersedes-promote-guard] benchmark artifact: ${defaultBenchmark}\n`);
     if (semantic) {
       process.stderr.write(
-        `[supersedes-promote-guard] semantic evidence:  ${args.semanticEvidence}\n`,
+        `[supersedes-promote-guard] semantic evidence:  ${args.semanticEvidence}\n`
       );
     }
     if (written) {
-      process.stderr.write(
-        `[supersedes-promote-guard] wrote:              ${written}\n`,
-      );
+      process.stderr.write(`[supersedes-promote-guard] wrote:              ${written}\n`);
     }
-    process.stdout.write(
-      formatGuardedRerankReport(report) + "\n",
-    );
+    process.stdout.write(formatGuardedRerankReport(report) + "\n");
   }
   return { report, ...(written ? { written } : {}) };
 }
@@ -230,9 +218,7 @@ export async function runGuardedRerankCli(
 /**
  * Minimal argument parser.
  */
-export function parseGuardedRerankCliArgs(
-  argv: ReadonlyArray<string>,
-): GuardedRerankCliArgs {
+export function parseGuardedRerankCliArgs(argv: ReadonlyArray<string>): GuardedRerankCliArgs {
   const out: GuardedRerankCliArgs = {};
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -261,7 +247,7 @@ export function parseGuardedRerankCliArgs(
  * Process argv-based main entry point.
  */
 export async function main(
-  argv: ReadonlyArray<string> = process.argv.slice(2),
+  argv: ReadonlyArray<string> = process.argv.slice(2)
 ): Promise<GuardedRerankReport> {
   const args = parseGuardedRerankCliArgs(argv);
   const { report } = await runGuardedRerankCli(args);
@@ -280,10 +266,7 @@ const isMainEntry = (() => {
   if (!Array.isArray(process.argv)) return false;
   const entry = process.argv[1];
   if (!entry) return false;
-  if (
-    !/supersedes-promote-guard-runner\.(ts|js)$/.test(entry)
-  )
-    return false;
+  if (!/supersedes-promote-guard-runner\.(ts|js)$/.test(entry)) return false;
   try {
     const url = new URL(import.meta.url);
     return url.pathname === entry || url.pathname.endsWith(entry);
@@ -295,7 +278,7 @@ const isMainEntry = (() => {
 if (isMainEntry) {
   main().catch((err) => {
     process.stderr.write(
-      `[supersedes-promote-guard] error: ${err instanceof Error ? err.message : String(err)}\n`,
+      `[supersedes-promote-guard] error: ${err instanceof Error ? err.message : String(err)}\n`
     );
     process.exit(1);
   });

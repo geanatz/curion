@@ -25,11 +25,8 @@
  */
 
 import { logger } from "../logging/logger.js";
-import {
-  getOrInitTraceWriter,
-  closeTraceWriter,
-} from "./trace-writer.js";
 import type { StorageConfig } from "./trace-storage.js";
+import { closeTraceWriter, getOrInitTraceWriter } from "./trace-writer.js";
 
 /** Default retention: 30 days, in milliseconds. */
 export const DEFAULT_TRACE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
@@ -65,7 +62,7 @@ export interface PurgeOptions {
  */
 export function purgeTraceRunsOlderThan(
   options: PurgeOptions = {},
-  config: StorageConfig = {},
+  config: StorageConfig = {}
 ): PurgeResult {
   const empty: PurgeResult = { runsDeleted: 0, eventsDeleted: 0 };
   const maxAgeMs = options.maxAgeMs ?? DEFAULT_TRACE_MAX_AGE_MS;
@@ -79,9 +76,7 @@ export function purgeTraceRunsOlderThan(
   try {
     handle = getOrInitTraceWriter(config);
   } catch (err) {
-    logWarn(
-      `trace retention: failed to open writer: ${(err as Error).message}`,
-    );
+    logWarn(`trace retention: failed to open writer: ${(err as Error).message}`);
     return empty;
   }
   if (!handle) {
@@ -96,9 +91,7 @@ export function purgeTraceRunsOlderThan(
     // by us; we only see the count of runs we are about to
     // delete and the count of their events at that instant).
     const runsToDelete = handle.db
-      .prepare(
-        `SELECT id FROM trace_runs WHERE started_at < ?`,
-      )
+      .prepare(`SELECT id FROM trace_runs WHERE started_at < ?`)
       .all(cutoff) as Array<{ id: number }>;
     if (runsToDelete.length === 0) {
       return empty;
@@ -109,24 +102,18 @@ export function purgeTraceRunsOlderThan(
     // so SQLite never sees a single enormous IN list.
     const placeholders = ids.map(() => "?").join(",");
     const eventCountRow = handle.db
-      .prepare(
-        `SELECT COUNT(*) AS c FROM trace_events WHERE run_id IN (${placeholders})`,
-      )
+      .prepare(`SELECT COUNT(*) AS c FROM trace_events WHERE run_id IN (${placeholders})`)
       .get(...ids) as { c: number };
     const eventsDeleted = Number(eventCountRow.c) || 0;
     const info = handle.db
-      .prepare(
-        `DELETE FROM trace_runs WHERE id IN (${placeholders})`,
-      )
+      .prepare(`DELETE FROM trace_runs WHERE id IN (${placeholders})`)
       .run(...ids);
     return {
       runsDeleted: info.changes,
       eventsDeleted,
     };
   } catch (err) {
-    logWarn(
-      `trace retention: purge failed: ${(err as Error).message}`,
-    );
+    logWarn(`trace retention: purge failed: ${(err as Error).message}`);
     return empty;
   } finally {
     if (options.closeAfter) {
@@ -147,35 +134,29 @@ export function purgeTraceRunsOlderThan(
  */
 export function purgeAllTraceRuns(
   options: Omit<PurgeOptions, "maxAgeMs"> = {},
-  config: StorageConfig = {},
+  config: StorageConfig = {}
 ): PurgeResult {
   const empty: PurgeResult = { runsDeleted: 0, eventsDeleted: 0 };
   let handle: ReturnType<typeof getOrInitTraceWriter> = null;
   try {
     handle = getOrInitTraceWriter(config);
   } catch (err) {
-    logWarn(
-      `trace retention: failed to open writer: ${(err as Error).message}`,
-    );
+    logWarn(`trace retention: failed to open writer: ${(err as Error).message}`);
     return empty;
   }
   if (!handle) return empty;
   try {
-    const eventCountRow = handle.db
-      .prepare(`SELECT COUNT(*) AS c FROM trace_events`)
-      .get() as { c: number };
+    const eventCountRow = handle.db.prepare(`SELECT COUNT(*) AS c FROM trace_events`).get() as {
+      c: number;
+    };
     const eventsDeleted = Number(eventCountRow.c) || 0;
-    const info = handle.db
-      .prepare(`DELETE FROM trace_runs`)
-      .run();
+    const info = handle.db.prepare(`DELETE FROM trace_runs`).run();
     return {
       runsDeleted: info.changes,
       eventsDeleted,
     };
   } catch (err) {
-    logWarn(
-      `trace retention: purgeAll failed: ${(err as Error).message}`,
-    );
+    logWarn(`trace retention: purgeAll failed: ${(err as Error).message}`);
     return empty;
   } finally {
     if (options.closeAfter) {

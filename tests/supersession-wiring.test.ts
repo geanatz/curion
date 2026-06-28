@@ -12,29 +12,22 @@
  * No live provider calls. Uses scripted fetch and seam overrides.
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
+import { test } from "node:test";
 
-import { runRememberController } from "../src/controller/remember-controller.ts";
 import { runRecallController } from "../src/controller/recall-controller.ts";
-import {
-  setRelatedMemoriesImpl,
-  resetRelatedMemoriesImpl,
-} from "../src/retrieval/seam.ts";
-import {
-  TEST_PRIMARY_KEY,
-  TEST_FALLBACK_KEY,
-  TEST_PRIMARY_BASE_URL,
-  TEST_PRIMARY_MODEL,
-  TEST_FALLBACK_BASE_URL,
-  TEST_FALLBACK_MODEL,
-} from "./shared-test-provider.ts";
-import {
-  scriptFetch,
-  okChatResponse,
-  safeAnalysis,
-} from "./_helpers/provider-stub.ts";
+import { runRememberController } from "../src/controller/remember-controller.ts";
+import { resetRelatedMemoriesImpl, setRelatedMemoriesImpl } from "../src/retrieval/seam.ts";
+import { okChatResponse, safeAnalysis, scriptFetch } from "./_helpers/provider-stub.ts";
 import { mkStorage, rmStorage } from "./_helpers/test-storage.ts";
+import {
+  TEST_FALLBACK_BASE_URL,
+  TEST_FALLBACK_KEY,
+  TEST_FALLBACK_MODEL,
+  TEST_PRIMARY_BASE_URL,
+  TEST_PRIMARY_KEY,
+  TEST_PRIMARY_MODEL,
+} from "./shared-test-provider.ts";
 
 function pinnedNow(t: number): () => number {
   return () => t;
@@ -53,26 +46,21 @@ test("controller supersession: new row carries supersedes, old row carries super
       const { fetchImpl } = scriptFetch(() =>
         okChatResponse(
           safeAnalysis({
-            summary:
-              "We use MiniMax for text embeddings in the recall pipeline.",
+            summary: "We use MiniMax for text embeddings in the recall pipeline.",
             tags: ["minimax", "embeddings"],
-          }),
-        ),
+          })
+        )
       );
-      const r = await runRememberController(
-        handle,
-        "MiniMax embedding decision.",
-        {
-          providerFetchImpl: fetchImpl,
-          providerPrimaryApiKey: TEST_PRIMARY_KEY,
-          providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
-          providerPrimaryModel: TEST_PRIMARY_MODEL,
-          providerFallbackApiKey: TEST_FALLBACK_KEY,
-          providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
-          providerFallbackModel: TEST_FALLBACK_MODEL,
-          now: pinnedNow(1_700_000_000_000),
-        },
-      );
+      const r = await runRememberController(handle, "MiniMax embedding decision.", {
+        providerFetchImpl: fetchImpl,
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+        providerPrimaryModel: TEST_PRIMARY_MODEL,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
+        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+        providerFallbackModel: TEST_FALLBACK_MODEL,
+        now: pinnedNow(1_700_000_000_000),
+      });
       assert.equal(r.status, "saved");
       if (r.status !== "saved") throw new Error("unreachable");
       assert.equal(r.record.id, 1, "old memory should have id 1");
@@ -97,23 +85,19 @@ test("controller supersession: new row carries supersedes, old row carries super
           summary:
             "We no longer use MiniMax for text embeddings in the recall pipeline; use NVIDIA NIM instead.",
           tags: ["nvidia", "embeddings"],
-        }),
-      ),
+        })
+      )
     );
-    const outcome = await runRememberController(
-      handle,
-      "Update embedding provider.",
-      {
-        providerFetchImpl: fetchImpl,
-        providerPrimaryApiKey: TEST_PRIMARY_KEY,
-        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
-        providerPrimaryModel: TEST_PRIMARY_MODEL,
-        providerFallbackApiKey: TEST_FALLBACK_KEY,
-        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
-        providerFallbackModel: TEST_FALLBACK_MODEL,
-        now: pinnedNow(pinnedTime),
-      },
-    );
+    const outcome = await runRememberController(handle, "Update embedding provider.", {
+      providerFetchImpl: fetchImpl,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
+      now: pinnedNow(pinnedTime),
+    });
 
     assert.equal(outcome.status, "saved");
     if (outcome.status !== "saved") throw new Error("unreachable");
@@ -125,18 +109,10 @@ test("controller supersession: new row carries supersedes, old row carries super
       .get(2) as { metadata: string; state: string };
     const newParsed = JSON.parse(newRow.metadata) as Record<string, unknown>;
     assert.equal(newRow.state, "active");
-    assert.equal(
-      typeof newParsed.relationship,
-      "object",
-      "new row must have relationship block",
-    );
+    assert.equal(typeof newParsed.relationship, "object", "new row must have relationship block");
 
     const newRel = newParsed.relationship as Record<string, unknown>;
-    assert.deepEqual(
-      newRel.supersedes,
-      [1],
-      "new row must supersede the old memory's id",
-    );
+    assert.deepEqual(newRel.supersedes, [1], "new row must supersede the old memory's id");
 
     // Verify old row has supersededBy.
     const oldRow = handle.db
@@ -148,13 +124,13 @@ test("controller supersession: new row carries supersedes, old row carries super
     assert.equal(
       typeof oldParsed.relationship,
       "object",
-      "old row must have a relationship block from the back-patch",
+      "old row must have a relationship block from the back-patch"
     );
     const oldRel = oldParsed.relationship as Record<string, unknown>;
     assert.deepEqual(
       oldRel.supersededBy,
       [2],
-      "old row must have supersededBy pointing to the new memory",
+      "old row must have supersededBy pointing to the new memory"
     );
   } finally {
     resetRelatedMemoriesImpl();
@@ -177,8 +153,8 @@ test("controller supersession: superseded old row stays active", async () => {
           safeAnalysis({
             summary: "We use SQLite for local development.",
             tags: ["sqlite", "local", "dev"],
-          }),
-        ),
+          })
+        )
       );
       await runRememberController(handle, "Local dev database decision.", {
         providerFetchImpl: fetchImpl,
@@ -208,8 +184,8 @@ test("controller supersession: superseded old row stays active", async () => {
           summary:
             "We no longer use SQLite for local development; use Docker Compose with PostgreSQL instead.",
           tags: ["docker", "postgres", "local"],
-        }),
-      ),
+        })
+      )
     );
     await runRememberController(handle, "Local dev stack update.", {
       providerFetchImpl: fetchImpl,
@@ -222,18 +198,14 @@ test("controller supersession: superseded old row stays active", async () => {
       now: pinnedNow(2),
     });
 
-    const oldRow = handle.db
-      .prepare("SELECT state FROM memories WHERE id = ?")
-      .get(1) as { state: string };
-    assert.equal(
-      oldRow.state,
-      "active",
-      "superseded memory must stay active",
-    );
+    const oldRow = handle.db.prepare("SELECT state FROM memories WHERE id = ?").get(1) as {
+      state: string;
+    };
+    assert.equal(oldRow.state, "active", "superseded memory must stay active");
 
-    const newRow = handle.db
-      .prepare("SELECT state FROM memories WHERE id = ?")
-      .get(2) as { state: string };
+    const newRow = handle.db.prepare("SELECT state FROM memories WHERE id = ?").get(2) as {
+      state: string;
+    };
     assert.equal(newRow.state, "active");
   } finally {
     resetRelatedMemoriesImpl();
@@ -256,8 +228,8 @@ test("controller supersession: recall demotion ranks current above superseded st
           safeAnalysis({
             summary: "We use MiniMax for text embeddings in the recall pipeline.",
             tags: ["minimax", "embeddings"],
-          }),
-        ),
+          })
+        )
       );
       await runRememberController(handle, "Embedding provider decision.", {
         providerFetchImpl: fetchImpl,
@@ -287,8 +259,8 @@ test("controller supersession: recall demotion ranks current above superseded st
           summary:
             "We no longer use MiniMax for text embeddings in the recall pipeline; use NVIDIA NIM instead.",
           tags: ["nvidia", "embeddings"],
-        }),
-      ),
+        })
+      )
     );
     await runRememberController(handle, "Switch embedding provider.", {
       providerFetchImpl: fetchImpl,
@@ -318,36 +290,29 @@ test("controller supersession: recall demotion ranks current above superseded st
             },
           ],
         }),
-        { status: 200, headers: { "content-type": "application/json" } },
+        { status: 200, headers: { "content-type": "application/json" } }
       );
 
-    const recallOut = await runRecallController(
-      handle,
-      "minimax embeddings",
-      {
-        providerFetchImpl: recallFetch,
-        providerPrimaryApiKey: TEST_PRIMARY_KEY,
-        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
-        providerPrimaryModel: TEST_PRIMARY_MODEL,
-        providerFallbackApiKey: TEST_FALLBACK_KEY,
-        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
-        providerFallbackModel: TEST_FALLBACK_MODEL,
-        relevanceThreshold: 0.05,
-        topK: 10,
-      },
-    );
+    const recallOut = await runRecallController(handle, "minimax embeddings", {
+      providerFetchImpl: recallFetch,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
+      relevanceThreshold: 0.05,
+      topK: 10,
+    });
 
     assert.equal(recallOut.status, "answered");
     if (recallOut.status === "answered") {
       const currentIdx = recallOut.sourceIds.indexOf(2);
       const staleIdx = recallOut.sourceIds.indexOf(1);
-      assert.ok(
-        currentIdx >= 0 && staleIdx >= 0,
-        "both memories must be in sourceIds",
-      );
+      assert.ok(currentIdx >= 0 && staleIdx >= 0, "both memories must be in sourceIds");
       assert.ok(
         currentIdx < staleIdx,
-        "current superseding memory must rank above superseded stale memory",
+        "current superseding memory must rank above superseded stale memory"
       );
     }
   } finally {
@@ -371,8 +336,8 @@ test("controller supersession: supersession-only block is persisted (no conflict
           safeAnalysis({
             summary: "We use Redis for caching in the web tier.",
             tags: ["redis", "caching"],
-          }),
-        ),
+          })
+        )
       );
       await runRememberController(handle, "Cache decision.", {
         providerFetchImpl: fetchImpl,
@@ -399,11 +364,10 @@ test("controller supersession: supersession-only block is persisted (no conflict
     const { fetchImpl } = scriptFetch(() =>
       okChatResponse(
         safeAnalysis({
-          summary:
-            "We no longer use Redis for caching in the web tier; use Memcached instead.",
+          summary: "We no longer use Redis for caching in the web tier; use Memcached instead.",
           tags: ["memcached", "caching"],
-        }),
-      ),
+        })
+      )
     );
     const outcome = await runRememberController(handle, "Update cache approach.", {
       providerFetchImpl: fetchImpl,
@@ -449,9 +413,7 @@ test("controller supersession: new memory can supersede multiple related memorie
     ] as const) {
       setRelatedMemoriesImpl(() => ({ memories: [], reason: "empty" }));
       const { fetchImpl } = scriptFetch(() =>
-        okChatResponse(
-          safeAnalysis({ summary, tags: ["minimax", "embeddings"] }),
-        ),
+        okChatResponse(safeAnalysis({ summary, tags: ["minimax", "embeddings"] }))
       );
       const r = await runRememberController(handle, `Memory ${id}.`, {
         providerFetchImpl: fetchImpl,
@@ -488,8 +450,8 @@ test("controller supersession: new memory can supersede multiple related memorie
           summary:
             "We no longer use MiniMax for text embeddings in the recall pipeline; use NVIDIA NIM instead.",
           tags: ["nvidia", "embeddings"],
-        }),
-      ),
+        })
+      )
     );
     const outcome = await runRememberController(handle, "Switch embeddings.", {
       providerFetchImpl: fetchImpl,
@@ -509,22 +471,20 @@ test("controller supersession: new memory can supersede multiple related memorie
     const newRow = handle.db
       .prepare("SELECT metadata FROM memories WHERE id = ?")
       .get(outcome.record.id) as { metadata: string };
-    const newRel = (JSON.parse(newRow.metadata) as Record<string, unknown>)
-      .relationship as Record<string, unknown>;
+    const newRel = (JSON.parse(newRow.metadata) as Record<string, unknown>).relationship as Record<
+      string,
+      unknown
+    >;
     assert.deepEqual(newRel.supersedes, [1, 2], "must supersede both old memories");
 
     // Each old row gets supersededBy: [3].
     for (const oldId of [1, 2] as const) {
-      const oldRow = handle.db
-        .prepare("SELECT metadata FROM memories WHERE id = ?")
-        .get(oldId) as { metadata: string };
+      const oldRow = handle.db.prepare("SELECT metadata FROM memories WHERE id = ?").get(oldId) as {
+        metadata: string;
+      };
       const oldRel = (JSON.parse(oldRow.metadata) as Record<string, unknown>)
         .relationship as Record<string, unknown>;
-      assert.deepEqual(
-        oldRel.supersededBy,
-        [3],
-        `old memory ${oldId} must have supersededBy: [3]`,
-      );
+      assert.deepEqual(oldRel.supersededBy, [3], `old memory ${oldId} must have supersededBy: [3]`);
     }
   } finally {
     resetRelatedMemoriesImpl();
@@ -553,11 +513,10 @@ test("controller supersession: missing old row is safe no-op (no crash)", async 
     const { fetchImpl } = scriptFetch(() =>
       okChatResponse(
         safeAnalysis({
-          summary:
-            "We no longer use MiniMax; use NVIDIA NIM instead.",
+          summary: "We no longer use MiniMax; use NVIDIA NIM instead.",
           tags: ["nvidia"],
-        }),
-      ),
+        })
+      )
     );
     const outcome = await runRememberController(handle, "Switch.", {
       providerFetchImpl: fetchImpl,
@@ -583,10 +542,7 @@ test("controller supersession: missing old row is safe no-op (no crash)", async 
     // If no signal (because the seam id 9999 doesn't exist in storage for the
     // detector), then no relationship block is written.
     // Either way: no crash.
-    assert.ok(
-      outcome.record.id === 1,
-      "memory should be inserted with id 1",
-    );
+    assert.ok(outcome.record.id === 1, "memory should be inserted with id 1");
   } finally {
     resetRelatedMemoriesImpl();
     rmStorage(tmp, handle);
@@ -608,8 +564,8 @@ test("controller supersession: no supersession language → no supersedes on new
           safeAnalysis({
             summary: "The project uses Postgres 16.",
             tags: ["postgres"],
-          }),
-        ),
+          })
+        )
       );
       await runRememberController(handle, "DB decision.", {
         providerFetchImpl: fetchImpl,
@@ -637,11 +593,10 @@ test("controller supersession: no supersession language → no supersedes on new
     const { fetchImpl } = scriptFetch(() =>
       okChatResponse(
         safeAnalysis({
-          summary:
-            "After evaluation we decided to use Postgres 17 for better performance.",
+          summary: "After evaluation we decided to use Postgres 17 for better performance.",
           tags: ["postgres"],
-        }),
-      ),
+        })
+      )
     );
     const outcome = await runRememberController(handle, "Upgrade Postgres.", {
       providerFetchImpl: fetchImpl,
@@ -668,7 +623,7 @@ test("controller supersession: no supersession language → no supersedes on new
       assert.ok(
         !("supersedes" in newRel) ||
           (Array.isArray(newRel.supersedes) && newRel.supersedes.length === 0),
-        "no supersedes when no supersession language",
+        "no supersedes when no supersession language"
       );
     }
   } finally {
@@ -692,8 +647,8 @@ test("controller supersession: supersedes and conflictsWith can coexist on new r
           safeAnalysis({
             summary: "We use MiniMax for embeddings.",
             tags: ["minimax"],
-          }),
-        ),
+          })
+        )
       );
       await runRememberController(handle, "MiniMax embedding decision.", {
         providerFetchImpl: fetchImpl,
@@ -715,8 +670,7 @@ test("controller supersession: supersedes and conflictsWith can coexist on new r
       memories: [
         {
           id: 1,
-          memoryContent:
-            "We use MiniMax for embeddings in the recall pipeline.",
+          memoryContent: "We use MiniMax for embeddings in the recall pipeline.",
         },
       ],
       reason: "test",
@@ -730,8 +684,8 @@ test("controller supersession: supersedes and conflictsWith can coexist on new r
           summary:
             "We no longer use MiniMax for embeddings in the recall pipeline; use NVIDIA NIM instead.",
           tags: ["nvidia", "minimax"],
-        }),
-      ),
+        })
+      )
     );
     const outcome = await runRememberController(handle, "Switch embeddings.", {
       providerFetchImpl: fetchImpl,
@@ -750,13 +704,15 @@ test("controller supersession: supersedes and conflictsWith can coexist on new r
     const newRow = handle.db
       .prepare("SELECT metadata FROM memories WHERE id = ?")
       .get(outcome.record.id) as { metadata: string };
-    const newRel = (JSON.parse(newRow.metadata) as Record<string, unknown>)
-      .relationship as Record<string, unknown>;
+    const newRel = (JSON.parse(newRow.metadata) as Record<string, unknown>).relationship as Record<
+      string,
+      unknown
+    >;
 
     assert.deepEqual(newRel.supersedes, [1], "supersedes must be set");
     assert.ok(
       newRel.conflictsWith !== undefined,
-      "conflictsWith should also be set (asymmetric negation)",
+      "conflictsWith should also be set (asymmetric negation)"
     );
   } finally {
     resetRelatedMemoriesImpl();
@@ -779,8 +735,8 @@ test("controller supersession: back-patch appends to existing supersededBy array
           safeAnalysis({
             summary: "We use MiniMax for embeddings.",
             tags: ["minimax"],
-          }),
-        ),
+          })
+        )
       );
       await runRememberController(handle, "MiniMax decision.", {
         providerFetchImpl: fetchImpl,
@@ -795,9 +751,7 @@ test("controller supersession: back-patch appends to existing supersededBy array
     }
 
     // Manually patch the old row to have an existing supersededBy: [99].
-    const { updateMemoryMetadata } = await import(
-      "../src/storage/storage.ts"
-    );
+    const { updateMemoryMetadata } = await import("../src/storage/storage.ts");
     updateMemoryMetadata(handle, 1, {
       tags: ["minimax"],
       classification: null,
@@ -829,8 +783,8 @@ test("controller supersession: back-patch appends to existing supersededBy array
           summary:
             "We no longer use MiniMax for embeddings in the recall pipeline; use NVIDIA NIM instead.",
           tags: ["nvidia"],
-        }),
-      ),
+        })
+      )
     );
     await runRememberController(handle, "Switch.", {
       providerFetchImpl: fetchImpl,
@@ -843,21 +797,17 @@ test("controller supersession: back-patch appends to existing supersededBy array
       now: pinnedNow(2),
     });
 
-    const oldRow = handle.db
-      .prepare("SELECT metadata FROM memories WHERE id = ?")
-      .get(1) as { metadata: string };
-    const oldRel = (JSON.parse(oldRow.metadata) as Record<string, unknown>)
-      .relationship as Record<string, unknown>;
+    const oldRow = handle.db.prepare("SELECT metadata FROM memories WHERE id = ?").get(1) as {
+      metadata: string;
+    };
+    const oldRel = (JSON.parse(oldRow.metadata) as Record<string, unknown>).relationship as Record<
+      string,
+      unknown
+    >;
 
     const supersededBy = oldRel.supersededBy as number[];
-    assert.ok(
-      supersededBy.includes(99),
-      "existing supersededBy entry must be preserved",
-    );
-    assert.ok(
-      supersededBy.includes(2),
-      "new supersededBy entry must be appended",
-    );
+    assert.ok(supersededBy.includes(99), "existing supersededBy entry must be preserved");
+    assert.ok(supersededBy.includes(2), "new supersededBy entry must be appended");
   } finally {
     resetRelatedMemoriesImpl();
     rmStorage(tmp, handle);
@@ -878,8 +828,8 @@ test("controller supersession: public message does not reveal supersession metad
           safeAnalysis({
             summary: "We use Postgres 16.",
             tags: ["postgres"],
-          }),
-        ),
+          })
+        )
       );
       await runRememberController(handle, "DB fact.", {
         providerFetchImpl: fetchImpl,
@@ -908,8 +858,8 @@ test("controller supersession: public message does not reveal supersession metad
         safeAnalysis({
           summary: "We no longer use Postgres 16; use Aurora instead.",
           tags: ["aurora"],
-        }),
-      ),
+        })
+      )
     );
     const outcome = await runRememberController(handle, "Switch DB.", {
       providerFetchImpl: fetchImpl,
@@ -927,16 +877,13 @@ test("controller supersession: public message does not reveal supersession metad
 
     assert.ok(
       !outcome.message.includes("supersedes"),
-      "public message must not include 'supersedes'",
+      "public message must not include 'supersedes'"
     );
     assert.ok(
       !outcome.message.includes("supersededBy"),
-      "public message must not include 'supersededBy'",
+      "public message must not include 'supersededBy'"
     );
-    assert.ok(
-      !/#\d+/.test(outcome.message),
-      "public message must not include memory id",
-    );
+    assert.ok(!/#\d+/.test(outcome.message), "public message must not include memory id");
   } finally {
     resetRelatedMemoriesImpl();
     rmStorage(tmp, handle);
@@ -976,7 +923,7 @@ test("controller supersession: fresh same-topic old policy is superseded even wh
           summary: "NVIDIA NIM provides embeddings for production workloads.",
           tags: ["nvidia", "nim", "embeddings"],
           classification: "fact",
-        }),
+        })
       );
     for (let i = 0; i < 3; i++) {
       setRelatedMemoriesImpl(() => ({ memories: [], reason: "empty" }));
@@ -1010,8 +957,8 @@ test("controller supersession: fresh same-topic old policy is superseded even wh
               "The Curion system policy designates MiniMax as the default provider for both remember and recall operations.",
             tags: ["minimax", "provider", "default"],
             classification: "policy",
-          }),
-        ),
+          })
+        )
       );
       const r = await runRememberController(
         handle,
@@ -1025,7 +972,7 @@ test("controller supersession: fresh same-topic old policy is superseded even wh
           providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
           providerFallbackModel: TEST_FALLBACK_MODEL,
           now: pinnedNow(1_700_000_000_010),
-        },
+        }
       );
       assert.equal(r.status, "saved");
       if (r.status !== "saved") throw new Error("unreachable");
@@ -1056,8 +1003,8 @@ test("controller supersession: fresh same-topic old policy is superseded even wh
               "The Curion provider policy was changed to make NVIDIA NIM (openai/gpt-oss-120b) the sole default provider for both remember and recall operations, replacing MiniMax as the default.",
             tags: ["nvidia", "nim", "provider", "default"],
             classification: "policy",
-          }),
-        ),
+          })
+        )
       );
       const outcome = await runRememberController(
         handle,
@@ -1071,34 +1018,34 @@ test("controller supersession: fresh same-topic old policy is superseded even wh
           providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
           providerFallbackModel: TEST_FALLBACK_MODEL,
           now: pinnedNow(1_700_000_000_011),
-        },
+        }
       );
       assert.equal(outcome.status, "saved");
       if (outcome.status !== "saved") throw new Error("unreachable");
       assert.equal(outcome.record.id, 5, "NVIDIA policy should have id 5");
 
       // Verify new row (id 5) has supersedes: [4]
-      const newRow = handle.db
-        .prepare("SELECT metadata FROM memories WHERE id = ?")
-        .get(5) as { metadata: string };
+      const newRow = handle.db.prepare("SELECT metadata FROM memories WHERE id = ?").get(5) as {
+        metadata: string;
+      };
       const newParsed = JSON.parse(newRow.metadata) as Record<string, unknown>;
       const newRel = newParsed.relationship as Record<string, unknown>;
       assert.deepEqual(
         newRel.supersedes,
         [4],
-        "new NVIDIA policy must supersede the immediate old MiniMax policy (id 4)",
+        "new NVIDIA policy must supersede the immediate old MiniMax policy (id 4)"
       );
 
       // Verify old row (id 4) has supersededBy: [5]
-      const oldRow = handle.db
-        .prepare("SELECT metadata FROM memories WHERE id = ?")
-        .get(4) as { metadata: string };
+      const oldRow = handle.db.prepare("SELECT metadata FROM memories WHERE id = ?").get(4) as {
+        metadata: string;
+      };
       const oldParsed = JSON.parse(oldRow.metadata) as Record<string, unknown>;
       const oldRel = oldParsed.relationship as Record<string, unknown>;
       assert.deepEqual(
         oldRel.supersededBy,
         [5],
-        "old MiniMax policy must have supersededBy pointing to new NVIDIA policy",
+        "old MiniMax policy must have supersededBy pointing to new NVIDIA policy"
       );
     }
   } finally {
@@ -1123,8 +1070,8 @@ test("controller supersession: no false positive supersession for unrelated old 
             summary: "The project uses PostgreSQL 16 for the primary database.",
             tags: ["postgresql", "database"],
             classification: "fact",
-          }),
-        ),
+          })
+        )
       );
       await runRememberController(handle, "Database decision.", {
         providerFetchImpl: fetchImpl,
@@ -1149,8 +1096,8 @@ test("controller supersession: no false positive supersession for unrelated old 
               "The Curion provider policy was changed to make NVIDIA NIM the sole default provider.",
             tags: ["nvidia", "provider"],
             classification: "policy",
-          }),
-        ),
+          })
+        )
       );
       const outcome = await runRememberController(
         handle,
@@ -1164,20 +1111,22 @@ test("controller supersession: no false positive supersession for unrelated old 
           providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
           providerFallbackModel: TEST_FALLBACK_MODEL,
           now: pinnedNow(2),
-        },
+        }
       );
       assert.equal(outcome.status, "saved");
       if (outcome.status !== "saved") throw new Error("unreachable");
 
       // Verify new row does NOT have supersedes (unrelated topic)
-      const newRow = handle.db
-        .prepare("SELECT metadata FROM memories WHERE id = ?")
-        .get(2) as { metadata: string };
+      const newRow = handle.db.prepare("SELECT metadata FROM memories WHERE id = ?").get(2) as {
+        metadata: string;
+      };
       const newParsed = JSON.parse(newRow.metadata) as Record<string, unknown>;
       const newRel = newParsed.relationship as Record<string, unknown> | undefined;
       assert.ok(
-        !newRel || !("supersedes" in newRel) || (Array.isArray(newRel.supersedes) && newRel.supersedes.length === 0),
-        "unrelated old memory must not be superseded",
+        !newRel ||
+          !("supersedes" in newRel) ||
+          (Array.isArray(newRel.supersedes) && newRel.supersedes.length === 0),
+        "unrelated old memory must not be superseded"
       );
     }
   } finally {

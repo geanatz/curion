@@ -38,13 +38,13 @@
 
 import type { Database, Statement } from "better-sqlite3";
 import { logger } from "../logging/logger.js";
-import { redactPayload } from "./trace-redaction.js";
 import { isTraceEnabled } from "./trace-enabled.js";
+import { redactPayload } from "./trace-redaction.js";
 import {
-  initTraceStorage,
-  closeTraceStorage,
-  type TraceStorageHandle,
   type StorageConfig,
+  type TraceStorageHandle,
+  closeTraceStorage,
+  initTraceStorage,
 } from "./trace-storage.js";
 
 // ---------------------------------------------------------------------------
@@ -135,9 +135,7 @@ export interface TraceEventRow {
  * Returns `null` when tracing is disabled or when the DB cannot
  * be opened. The function never throws.
  */
-export function getOrInitTraceWriter(
-  config: StorageConfig = {},
-): TraceStorageHandle | null {
+export function getOrInitTraceWriter(config: StorageConfig = {}): TraceStorageHandle | null {
   if (!isTraceEnabled()) return null;
   if (writerState) return writerState.handle;
   if (closed) return null;
@@ -189,7 +187,7 @@ function prepareStatements(db: Database): WriterStatements {
     `),
     nextSequence: db.prepare(
       `SELECT COALESCE(MAX(sequence), 0) + 1 AS next
-         FROM trace_events WHERE run_id = ?`,
+         FROM trace_events WHERE run_id = ?`
     ),
   };
 }
@@ -247,9 +245,7 @@ export function writeTraceEvent(input: TraceEventInput): boolean {
   try {
     payloadJson = safeStringify(redacted);
   } catch (err) {
-    logWarn(
-      `trace writer: writeTraceEvent: payload not serializable: ${(err as Error).message}`,
-    );
+    logWarn(`trace writer: writeTraceEvent: payload not serializable: ${(err as Error).message}`);
     return false;
   }
   // Sequence: look up max+1 for this run. The whole insert is
@@ -291,8 +287,7 @@ export function updateTraceRun(id: number, patch: TraceRunPatch): boolean {
       id,
       ended_at: typeof patch.endedAt === "number" ? patch.endedAt : null,
       status: typeof patch.status === "string" ? patch.status : null,
-      metadata:
-        patch.metadata === undefined ? null : safeStringify(patch.metadata),
+      metadata: patch.metadata === undefined ? null : safeStringify(patch.metadata),
     });
     return info.changes > 0;
   } catch (err) {
@@ -315,16 +310,16 @@ export function listTraceRuns(options: { limit?: number } = {}): readonly TraceR
         `SELECT id, name, started_at, ended_at, status, metadata
            FROM trace_runs
           ORDER BY id ASC
-          LIMIT ?`,
+          LIMIT ?`
       )
       .all(limit) as Array<{
-        id: number;
-        name: string;
-        started_at: number;
-        ended_at: number | null;
-        status: string;
-        metadata: string | null;
-      }>;
+      id: number;
+      name: string;
+      started_at: number;
+      ended_at: number | null;
+      status: string;
+      metadata: string | null;
+    }>;
     return rows.map((r) => ({
       id: r.id,
       name: r.name,
@@ -344,9 +339,7 @@ export function listTraceRuns(options: { limit?: number } = {}): readonly TraceR
  * list when tracing is disabled or the DB is unavailable. Never
  * throws.
  */
-export function listTraceEventsForRun(
-  runId: number,
-): readonly TraceEventRow[] {
+export function listTraceEventsForRun(runId: number): readonly TraceEventRow[] {
   const state = requireState();
   if (!state) return [];
   if (!Number.isInteger(runId) || runId <= 0) return [];
@@ -356,17 +349,17 @@ export function listTraceEventsForRun(
         `SELECT id, run_id, ts, kind, payload_json, redacted_keys, sequence
            FROM trace_events
           WHERE run_id = ?
-          ORDER BY sequence ASC`,
+          ORDER BY sequence ASC`
       )
       .all(runId) as Array<{
-        id: number;
-        run_id: number;
-        ts: number;
-        kind: string;
-        payload_json: string | null;
-        redacted_keys: string | null;
-        sequence: number;
-      }>;
+      id: number;
+      run_id: number;
+      ts: number;
+      kind: string;
+      payload_json: string | null;
+      redacted_keys: string | null;
+      sequence: number;
+    }>;
     return rows.map((r) => ({
       id: r.id,
       runId: r.run_id,
@@ -377,9 +370,7 @@ export function listTraceEventsForRun(
       sequence: r.sequence,
     }));
   } catch (err) {
-    logWarn(
-      `trace writer: listTraceEventsForRun failed: ${(err as Error).message}`,
-    );
+    logWarn(`trace writer: listTraceEventsForRun failed: ${(err as Error).message}`);
     return [];
   }
 }
@@ -432,10 +423,7 @@ function safeRepr(value: unknown, seen: WeakSet<object> = new WeakSet()): unknow
   return `<unserializable:${t}>`;
 }
 
-function captureRedactedKeys(
-  original: unknown,
-  redacted: unknown,
-): string[] {
+function captureRedactedKeys(original: unknown, redacted: unknown): string[] {
   if (!isPlainObject(original) || !isPlainObject(redacted)) return [];
   const out: string[] = [];
   for (const key of Object.keys(original)) {

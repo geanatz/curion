@@ -38,24 +38,17 @@
  *      `current-truth-in-topk-no-stale-top1`.
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { test } from "node:test";
 
+import { type QueryEval, evaluateQuery } from "../src/benchmark/metrics.js";
+import { BENCHMARK_QUERIES } from "../src/benchmark/queries.js";
+import type { BenchmarkQuery } from "../src/benchmark/queries.js";
 import {
-  STALE_TEMPORAL_IDS,
-  TEMPORAL_TRUTH_CATEGORIES,
-  TEMPORAL_TRUTH_CATEGORY_EXPLANATION,
-  buildTemporalTruthDiagnosticReport,
-  classifyTemporalTruthFailure,
-  formatTemporalTruthDiagnosticReport,
-  type TemporalTruthCategory,
-  type TemporalTruthDiagnostic,
-  type TemporalTruthDiagnosticReport,
-} from "../src/benchmark/temporal-truth-diagnostic.js";
-import {
+  type BenchmarkArtifact,
   alignQueriesToEvals,
   findMostRecentArtifact,
   parseTemporalTruthDiagnosticCliArgs,
@@ -64,12 +57,16 @@ import {
   runTemporalTruthDiagnosticAnalysis,
   runTemporalTruthDiagnosticCli,
   writeTemporalTruthDiagnosticReport,
-  type BenchmarkArtifact,
-  type SemanticEvidenceMap,
 } from "../src/benchmark/temporal-truth-diagnostic-runner.js";
-import { BENCHMARK_QUERIES } from "../src/benchmark/queries.js";
-import type { BenchmarkQuery } from "../src/benchmark/queries.js";
-import { evaluateQuery, type QueryEval } from "../src/benchmark/metrics.js";
+import {
+  STALE_TEMPORAL_IDS,
+  TEMPORAL_TRUTH_CATEGORIES,
+  TEMPORAL_TRUTH_CATEGORY_EXPLANATION,
+  type TemporalTruthDiagnosticReport,
+  buildTemporalTruthDiagnosticReport,
+  classifyTemporalTruthFailure,
+  formatTemporalTruthDiagnosticReport,
+} from "../src/benchmark/temporal-truth-diagnostic.js";
 import { PUBLIC_TOOL_NAMES } from "../src/server.js";
 import { walkTs } from "./_helpers/fs-walk.ts";
 
@@ -90,7 +87,7 @@ function mkTemporalQueryEval(
     currentTruthIds: number[];
     topIds: number[];
     labels?: string[];
-  }>,
+  }>
 ): { evals: QueryEval[]; queries: BenchmarkQuery[] } {
   const evals: QueryEval[] = [];
   const queries: BenchmarkQuery[] = [];
@@ -103,7 +100,7 @@ function mkTemporalQueryEval(
       s.expectedIds,
       s.currentTruthIds,
       s.topIds,
-      topScores,
+      topScores
     );
     // Re-derive rank1 / currentTruthAt1 in case the
     // synthetic topIds is empty.
@@ -137,9 +134,7 @@ function mkTemporalQueryEval(
  * input list. Used by the synthetic end-to-end tests so
  * the runner has a real in-memory artifact to consume.
  */
-function mkArtifact(
-  evals: ReadonlyArray<QueryEval>,
-): BenchmarkArtifact {
+function mkArtifact(evals: ReadonlyArray<QueryEval>): BenchmarkArtifact {
   return {
     generatedAt: "1970-01-01T00:00:00.000Z",
     variant: "synthetic-lexical",
@@ -183,7 +178,7 @@ test("temporal-truth-diagnostic: divergentTemporal label takes priority over top
   assert.equal(diag.top1IsCurrentTruth, true);
   assert.equal(
     diag.recommendedAction,
-    "fixture audit (expectedIds deliberately includes both old and new; currentTruthAt1 is uninterpretable here)",
+    "fixture audit (expectedIds deliberately includes both old and new; currentTruthAt1 is uninterpretable here)"
   );
 });
 
@@ -298,7 +293,7 @@ test("temporal-truth-diagnostic: every category has a non-empty explanation", ()
     const exp = TEMPORAL_TRUTH_CATEGORY_EXPLANATION[cat];
     assert.ok(
       typeof exp === "string" && exp.length > 0,
-      `category ${cat} must have a non-empty explanation, got ${JSON.stringify(exp)}`,
+      `category ${cat} must have a non-empty explanation, got ${JSON.stringify(exp)}`
     );
   }
 });
@@ -307,28 +302,27 @@ test("temporal-truth-diagnostic: STALE_TEMPORAL_IDS is non-empty and includes do
   assert.ok(STALE_TEMPORAL_IDS.size > 0);
   // The legacy cluster is in the set.
   for (const id of [21, 22, 23, 24]) {
-    assert.ok(
-      STALE_TEMPORAL_IDS.has(id),
-      `STALE_TEMPORAL_IDS must contain legacy id ${id}`,
-    );
+    assert.ok(STALE_TEMPORAL_IDS.has(id), `STALE_TEMPORAL_IDS must contain legacy id ${id}`);
   }
   // The superseded cluster is in the set.
   for (const id of [105, 106, 107, 108]) {
-    assert.ok(
-      STALE_TEMPORAL_IDS.has(id),
-      `STALE_TEMPORAL_IDS must contain superseded id ${id}`,
-    );
+    assert.ok(STALE_TEMPORAL_IDS.has(id), `STALE_TEMPORAL_IDS must contain superseded id ${id}`);
   }
   // The conflict cluster is in the set.
   for (const id of [101, 102, 103, 104]) {
-    assert.ok(
-      STALE_TEMPORAL_IDS.has(id),
-      `STALE_TEMPORAL_IDS must contain conflict id ${id}`,
-    );
+    assert.ok(STALE_TEMPORAL_IDS.has(id), `STALE_TEMPORAL_IDS must contain conflict id ${id}`);
   }
   // An obviously-non-stale id is NOT in the set.
-  assert.equal(STALE_TEMPORAL_IDS.has(1), false, "current Postgres 16 record must not be in the stale set");
-  assert.equal(STALE_TEMPORAL_IDS.has(2), false, "current Node 22 record must not be in the stale set");
+  assert.equal(
+    STALE_TEMPORAL_IDS.has(1),
+    false,
+    "current Postgres 16 record must not be in the stale set"
+  );
+  assert.equal(
+    STALE_TEMPORAL_IDS.has(2),
+    false,
+    "current Node 22 record must not be in the stale set"
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -454,7 +448,7 @@ test("temporal-truth-diagnostic: evals/queries length mismatch throws", () => {
         evals,
         queries: [...queries, ...queries], // double
       }),
-    /evals\.length/,
+    /evals\.length/
   );
 });
 
@@ -473,7 +467,7 @@ test("temporal-truth-diagnostic: evals/queries id mismatch throws", () => {
         evals,
         queries: corrupted,
       }),
-    /does not match/,
+    /does not match/
   );
 });
 
@@ -583,10 +577,7 @@ test("temporal-truth-diagnostic: semantic overlay is correctly attached per diag
   assert.equal(report.semanticOverlay!.miss, 1);
   // The miss rolls up by category; q2 is in
   // `current-truth-in-topk-stale-top1`.
-  assert.equal(
-    report.semanticOverlay!.byCategory["current-truth-in-topk-stale-top1"],
-    1,
-  );
+  assert.equal(report.semanticOverlay!.byCategory["current-truth-in-topk-stale-top1"], 1);
   // The per-diagnostic semantic block is populated.
   const d1 = report.diagnostics.find((d) => d.queryId === "q1")!;
   const d2 = report.diagnostics.find((d) => d.queryId === "q2")!;
@@ -673,7 +664,14 @@ test("temporal-truth-diagnostic: production source tree does NOT import the diag
   // source tree must not import it. The test searches
   // the `src/` tree (excluding `src/benchmark/`) for
   // any import of the diagnostic module.
-  const productionDirs = ["src/controller", "src/storage", "src/retrieval", "src/tools", "src/providers", "src/safety"];
+  const productionDirs = [
+    "src/controller",
+    "src/storage",
+    "src/retrieval",
+    "src/tools",
+    "src/providers",
+    "src/safety",
+  ];
   for (const dir of productionDirs) {
     if (!fs.existsSync(dir)) continue;
     const files = walkTs(dir);
@@ -681,7 +679,7 @@ test("temporal-truth-diagnostic: production source tree does NOT import the diag
       const text = fs.readFileSync(path.join(dir, f), "utf8");
       assert.ok(
         !text.includes("temporal-truth-diagnostic"),
-        `production source ${f} must not import the diagnostic module`,
+        `production source ${f} must not import the diagnostic module`
       );
     }
   }
@@ -747,11 +745,7 @@ test("temporal-truth-diagnostic: CLI argument parser handles the documented flag
 });
 
 test("temporal-truth-diagnostic: CLI argument parser ignores unknown flags", () => {
-  const parsed = parseTemporalTruthDiagnosticCliArgs([
-    "--unknown-flag",
-    "value",
-    "--no-write",
-  ]);
+  const parsed = parseTemporalTruthDiagnosticCliArgs(["--unknown-flag", "value", "--no-write"]);
   assert.equal(parsed.noWrite, true);
 });
 
@@ -784,10 +778,7 @@ test("temporal-truth-diagnostic: readBenchmarkArtifact validates the evals array
   try {
     const filePath = path.join(tmpDir, "bad.json");
     fs.writeFileSync(filePath, JSON.stringify({ evals: "not an array" }), "utf8");
-    assert.throws(
-      () => readBenchmarkArtifact(filePath),
-      /must have an 'evals' array/,
-    );
+    assert.throws(() => readBenchmarkArtifact(filePath), /must have an 'evals' array/);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -797,15 +788,8 @@ test("temporal-truth-diagnostic: readSemanticEvidenceFile validates the byQueryI
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ttd-"));
   try {
     const filePath = path.join(tmpDir, "bad-sem.json");
-    fs.writeFileSync(
-      filePath,
-      JSON.stringify({ source: "x", byQueryId: { q1: "weird" } }),
-      "utf8",
-    );
-    assert.throws(
-      () => readSemanticEvidenceFile(filePath),
-      /must be "hit" or "miss"/,
-    );
+    fs.writeFileSync(filePath, JSON.stringify({ source: "x", byQueryId: { q1: "weird" } }), "utf8");
+    assert.throws(() => readSemanticEvidenceFile(filePath), /must be "hit" or "miss"/);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -814,7 +798,7 @@ test("temporal-truth-diagnostic: readSemanticEvidenceFile validates the byQueryI
 test("temporal-truth-diagnostic: alignQueriesToEvals throws on a query not in the corpus", () => {
   assert.throws(
     () => alignQueriesToEvals([{ queryId: "nonexistent" }]),
-    /not found in BENCHMARK_QUERIES/,
+    /not found in BENCHMARK_QUERIES/
   );
 });
 
@@ -823,16 +807,13 @@ test("temporal-truth-diagnostic: alignQueriesToEvals throws on a query not in th
 // ---------------------------------------------------------------------------
 
 test("temporal-truth-diagnostic: end-to-end CLI on the real lexical baseline artifact", async () => {
-  const baselinePath = findMostRecentArtifact(
-    ".curion/benchmark",
-    "retrieval-baseline-",
-  );
+  const baselinePath = findMostRecentArtifact(".curion/benchmark", "retrieval-baseline-");
   if (!baselinePath) return; // skip if no artifact on disk
   const semanticPath = path.join(
     "src",
     "benchmark",
     "data",
-    "false-abstention-damage-semantic-evidence.json",
+    "false-abstention-damage-semantic-evidence.json"
   );
   const hasSemantic = fs.existsSync(semanticPath);
   const { report } = await runTemporalTruthDiagnosticCli({
@@ -864,7 +845,7 @@ test("temporal-truth-diagnostic: end-to-end CLI without an artifact on disk thro
         noWrite: true,
         noStdout: true,
       }),
-    /no --benchmark-artifact given/,
+    /no --benchmark-artifact given/
   );
 });
 
@@ -876,10 +857,7 @@ test("temporal-truth-diagnostic: divergentTemporal queries surface in the per-ca
   // The corpus has 7 divergentTemporal queries. A
   // smoke test that pins the per-category count on
   // the real corpus.
-  const baselinePath = findMostRecentArtifact(
-    ".curion/benchmark",
-    "retrieval-baseline-",
-  );
+  const baselinePath = findMostRecentArtifact(".curion/benchmark", "retrieval-baseline-");
   if (!baselinePath) return;
   const artifact = readBenchmarkArtifact(baselinePath);
   const queries = alignQueriesToEvals(artifact.evals);
@@ -894,7 +872,7 @@ test("temporal-truth-diagnostic: divergentTemporal queries surface in the per-ca
   // temporal queries that carry the divergentTemporal
   // label.
   const divergent = BENCHMARK_QUERIES.filter(
-    (q) => q.family === "temporal" && q.labels?.includes("divergentTemporal"),
+    (q) => q.family === "temporal" && q.labels?.includes("divergentTemporal")
   );
   assert.equal(report.metrics.divergentLabeled, divergent.length);
   // The fixture-ambiguous category count is at
@@ -926,7 +904,7 @@ test("temporal-truth-diagnostic: known stale id at top-1 correctly drives stale-
     assert.equal(
       diag.category,
       "current-truth-in-topk-stale-top1",
-      `stale id ${staleId} at top-1 should drive current-truth-in-topk-stale-top1, got ${diag.category}`,
+      `stale id ${staleId} at top-1 should drive current-truth-in-topk-stale-top1, got ${diag.category}`
     );
     assert.equal(diag.top1IsStale, true);
   }
@@ -951,7 +929,7 @@ test("temporal-truth-diagnostic: unrelated id at top-1 correctly drives no-stale
     assert.equal(
       diag.category,
       "current-truth-in-topk-no-stale-top1",
-      `unrelated id ${id} at top-1 should drive current-truth-in-topk-no-stale-top1, got ${diag.category}`,
+      `unrelated id ${id} at top-1 should drive current-truth-in-topk-no-stale-top1, got ${diag.category}`
     );
     assert.equal(diag.top1IsStale, false);
   }
@@ -971,11 +949,11 @@ test("temporal-truth-diagnostic: every temporal query in BENCHMARK_QUERIES has a
     if (q.family !== "temporal") continue;
     assert.ok(
       q.expectedIds.length > 0,
-      `temporal query ${q.id} must have at least one expected id`,
+      `temporal query ${q.id} must have at least one expected id`
     );
     assert.ok(
       q.currentTruthIds.length > 0,
-      `temporal query ${q.id} must have at least one currentTruthId`,
+      `temporal query ${q.id} must have at least one currentTruthId`
     );
   }
 });

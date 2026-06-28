@@ -32,8 +32,8 @@
  *     caller.
  */
 
-import path from "node:path";
 import fs from "node:fs";
+import path from "node:path";
 import Database from "better-sqlite3";
 import { logger } from "../logging/logger.js";
 import { CURION_DIRNAME, type StorageConfig } from "../storage/storage.js";
@@ -155,9 +155,7 @@ export function initTraceStorage(config: StorageConfig = {}): TraceStorageHandle
       ON trace_events(run_id, sequence);
   `);
 
-  const insertMeta = db.prepare(
-    "INSERT OR REPLACE INTO _meta (key, value) VALUES (?, ?)",
-  );
+  const insertMeta = db.prepare("INSERT OR REPLACE INTO _meta (key, value) VALUES (?, ?)");
   insertMeta.run("schema_version", TRACE_SCHEMA_VERSION);
   insertMeta.run("created_at", String(Date.now()));
   insertMeta.run("dirname", CURION_DIRNAME);

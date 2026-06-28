@@ -70,21 +70,19 @@
 
 import fs from "node:fs";
 import path from "node:path";
-
-import { BENCHMARK_QUERIES } from "./queries.js";
 import type { BenchmarkQuery } from "./queries.js";
 import {
+  type TemporalRerankReport,
   buildTemporalRerankReport,
   formatTemporalRerankReport,
-  type TemporalRerankReport,
 } from "./temporal-ranking-preference.js";
 import {
-  alignQueriesToEvals,
-  readBenchmarkArtifact,
-  readSemanticEvidenceFile,
-  findMostRecentArtifact,
   type BenchmarkArtifact,
   type SemanticEvidenceMap,
+  alignQueriesToEvals,
+  findMostRecentArtifact,
+  readBenchmarkArtifact,
+  readSemanticEvidenceFile,
 } from "./temporal-truth-diagnostic-runner.js";
 
 // ---------------------------------------------------------------------------
@@ -139,10 +137,7 @@ const ARTIFACT_FILE_PREFIX = "retrieval-temporal-ranking-preference";
  * artifacts next to the regular reports without
  * confusing them.
  */
-export function writeTemporalRerankReport(
-  report: TemporalRerankReport,
-  dir: string,
-): string {
+export function writeTemporalRerankReport(report: TemporalRerankReport, dir: string): string {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   }
@@ -178,20 +173,17 @@ export interface TemporalRerankCliArgs {
  * TypeScript surface (the function does its own
  * argument parsing).
  */
-export async function runTemporalRerankCli(
-  args: TemporalRerankCliArgs,
-): Promise<{
+export async function runTemporalRerankCli(args: TemporalRerankCliArgs): Promise<{
   report: TemporalRerankReport;
   written?: string;
 }> {
   const outDir = args.outDir ?? ".curion/benchmark";
   const defaultBenchmark =
-    args.benchmarkArtifact ??
-    findMostRecentArtifact(outDir, "retrieval-baseline-");
+    args.benchmarkArtifact ?? findMostRecentArtifact(outDir, "retrieval-baseline-");
   if (!defaultBenchmark) {
     throw new Error(
       `runTemporalRerankCli: no --benchmark-artifact given and no ` +
-        `retrieval-baseline-*.json found under ${outDir}`,
+        `retrieval-baseline-*.json found under ${outDir}`
     );
   }
   const benchmarkArtifact = readBenchmarkArtifact(defaultBenchmark);
@@ -209,22 +201,16 @@ export async function runTemporalRerankCli(
     written = writeTemporalRerankReport(report, outDir);
   }
   if (!args.noStdout) {
-    process.stderr.write(
-      `[temporal-ranking-preference] benchmark artifact: ${defaultBenchmark}\n`,
-    );
+    process.stderr.write(`[temporal-ranking-preference] benchmark artifact: ${defaultBenchmark}\n`);
     if (semantic) {
       process.stderr.write(
-        `[temporal-ranking-preference] semantic evidence:  ${args.semanticEvidence}\n`,
+        `[temporal-ranking-preference] semantic evidence:  ${args.semanticEvidence}\n`
       );
     }
     if (written) {
-      process.stderr.write(
-        `[temporal-ranking-preference] wrote:              ${written}\n`,
-      );
+      process.stderr.write(`[temporal-ranking-preference] wrote:              ${written}\n`);
     }
-    process.stdout.write(
-      formatTemporalRerankReport(report) + "\n",
-    );
+    process.stdout.write(formatTemporalRerankReport(report) + "\n");
   }
   return { report, ...(written ? { written } : {}) };
 }
@@ -241,9 +227,7 @@ export async function runTemporalRerankCli(
  * runner silently accepts them. The order of
  * arguments does not matter.
  */
-export function parseTemporalRerankCliArgs(
-  argv: ReadonlyArray<string>,
-): TemporalRerankCliArgs {
+export function parseTemporalRerankCliArgs(argv: ReadonlyArray<string>): TemporalRerankCliArgs {
   const out: TemporalRerankCliArgs = {};
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -275,7 +259,7 @@ export function parseTemporalRerankCliArgs(
  * the process exits normally.
  */
 export async function main(
-  argv: ReadonlyArray<string> = process.argv.slice(2),
+  argv: ReadonlyArray<string> = process.argv.slice(2)
 ): Promise<TemporalRerankReport> {
   const args = parseTemporalRerankCliArgs(argv);
   const { report } = await runTemporalRerankCli(args);
@@ -305,7 +289,7 @@ const isMainEntry = (() => {
 if (isMainEntry) {
   main().catch((err) => {
     process.stderr.write(
-      `[temporal-ranking-preference] error: ${err instanceof Error ? err.message : String(err)}\n`,
+      `[temporal-ranking-preference] error: ${err instanceof Error ? err.message : String(err)}\n`
     );
     process.exit(1);
   });

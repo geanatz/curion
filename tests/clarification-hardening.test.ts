@@ -46,67 +46,70 @@
  *     network is touched.
  */
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { test } from "node:test";
 
 import Database from "better-sqlite3";
 
 import {
-  startToolBoundaryTrace,
-  TOOL_OUTPUT_KIND,
-  listTraceEventsForRun,
-  listTraceRuns,
-  getOrInitTraceWriter,
-  closeTraceWriter,
-  resetTraceWriterForTests,
-} from "../src/trace/index.ts";
-import {
-  CURION_DIRNAME,
-  initStorage,
-  closeStorage,
-  type StorageHandle,
-} from "../src/storage/storage.ts";
-import {
-  handleRemember,
-  setStorageProvider as setRememberStorageProvider,
-  resetStorageProvider as resetRememberStorageProvider,
-  type RememberResult,
-} from "../src/tools/remember.ts";
-import {
-  handleRecall,
-  setStorageProvider as setRecallStorageProvider,
-  resetStorageProvider as resetRecallStorageProvider,
-  type RecallResult,
-} from "../src/tools/recall.ts";
-import {
-  setListRegisteredProjectsStub,
   resetListRegisteredProjectsStub,
+  setListRegisteredProjectsStub,
 } from "../src/config/registry.ts";
 import { runRememberController } from "../src/controller/remember-controller.ts";
 import { classifyInput } from "../src/safety/precheck.ts";
 import {
-  TEST_PRIMARY_KEY,
-  TEST_FALLBACK_KEY,
-  TEST_PRIMARY_BASE_URL,
-  TEST_PRIMARY_MODEL,
-  TEST_FALLBACK_BASE_URL,
-  TEST_FALLBACK_MODEL,
-} from "./shared-test-provider.ts";
-import { scriptFetch, okChatResponse, safeAnalysis } from "./_helpers/provider-stub.ts";
+  CURION_DIRNAME,
+  type StorageHandle,
+  closeStorage,
+  initStorage,
+} from "../src/storage/storage.ts";
+import {
+  type RecallResult,
+  handleRecall,
+  resetStorageProvider as resetRecallStorageProvider,
+  setStorageProvider as setRecallStorageProvider,
+} from "../src/tools/recall.ts";
+import {
+  type RememberResult,
+  handleRemember,
+  resetStorageProvider as resetRememberStorageProvider,
+  setStorageProvider as setRememberStorageProvider,
+} from "../src/tools/remember.ts";
+import {
+  TOOL_OUTPUT_KIND,
+  closeTraceWriter,
+  getOrInitTraceWriter,
+  listTraceEventsForRun,
+  listTraceRuns,
+  resetTraceWriterForTests,
+  startToolBoundaryTrace,
+} from "../src/trace/index.ts";
+import { okChatResponse, safeAnalysis, scriptFetch } from "./_helpers/provider-stub.ts";
 import { mkStorage, rmStorage } from "./_helpers/test-storage.ts";
+import {
+  TEST_FALLBACK_BASE_URL,
+  TEST_FALLBACK_KEY,
+  TEST_FALLBACK_MODEL,
+  TEST_PRIMARY_BASE_URL,
+  TEST_PRIMARY_KEY,
+  TEST_PRIMARY_MODEL,
+} from "./shared-test-provider.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-async function runController(handle: StorageHandle, opts: {
-  fetchImpl: typeof fetch;
-  text: string;
-  confidenceThreshold?: number;
-}) {
+async function runController(
+  handle: StorageHandle,
+  opts: {
+    fetchImpl: typeof fetch;
+    text: string;
+    confidenceThreshold?: number;
+  }
+) {
   return runRememberController(handle, opts.text, {
     providerFetchImpl: opts.fetchImpl,
     providerPrimaryApiKey: TEST_PRIMARY_KEY,
@@ -156,11 +159,7 @@ test("remember: vague memory text is rejected with clarification_needed (no prov
       assert.equal(result.status, "rejected");
       if (result.status !== "rejected") throw new Error("unreachable");
       assert.equal(result.safetyClass, "vague-memory");
-      assert.equal(
-        calls.length,
-        0,
-        "provider must NOT be called for vague-memory input",
-      );
+      assert.equal(calls.length, 0, "provider must NOT be called for vague-memory input");
       // The rejection carries clarification_needed with a
       // user-facing question (no raw input echo).
       assert.ok(result.clarification_needed, "rejection must carry clarification_needed");
@@ -168,12 +167,10 @@ test("remember: vague memory text is rejected with clarification_needed (no prov
       assert.ok(result.clarification_needed!.question.length > 0);
       assert.ok(
         !result.clarification_needed!.question.includes(text),
-        "clarification_needed.question must not echo raw input",
+        "clarification_needed.question must not echo raw input"
       );
       // Nothing persisted.
-      const rows = handle.db
-        .prepare("SELECT COUNT(*) AS c FROM memories")
-        .get() as { c: number };
+      const rows = handle.db.prepare("SELECT COUNT(*) AS c FROM memories").get() as { c: number };
       assert.equal(rows.c, 0, "no rows should be persisted for vague input");
     } finally {
       resetRememberStorageProvider();
@@ -195,14 +192,8 @@ test("remember (controller): vague-memory classification returns rejected with c
     if (outcome.status !== "rejected") throw new Error("unreachable");
     assert.equal(outcome.safetyClass, "vague-memory");
     assert.ok(outcome.clarification_needed);
-    assert.equal(
-      calls.length,
-      0,
-      "provider must NOT be called for vague-memory input",
-    );
-    const rows = handle.db
-      .prepare("SELECT COUNT(*) AS c FROM memories")
-      .get() as { c: number };
+    assert.equal(calls.length, 0, "provider must NOT be called for vague-memory input");
+    const rows = handle.db.prepare("SELECT COUNT(*) AS c FROM memories").get() as { c: number };
     assert.equal(rows.c, 0);
   } finally {
     rmStorage(tmp, handle);
@@ -224,7 +215,7 @@ test("classifyInput: vague-memory patterns are detected", () => {
     assert.equal(
       r.class,
       "vague-memory",
-      `expected vague-memory for: ${s.slice(0, 60)} (got ${r.class}: ${r.reason})`,
+      `expected vague-memory for: ${s.slice(0, 60)} (got ${r.class}: ${r.reason})`
     );
   }
 });
@@ -245,7 +236,7 @@ test("classifyInput: concrete content does not trip vague-memory patterns", () =
     assert.notEqual(
       r.class,
       "vague-memory",
-      `vague-memory must NOT fire on: ${s.slice(0, 80)} (got ${r.class})`,
+      `vague-memory must NOT fire on: ${s.slice(0, 80)} (got ${r.class})`
     );
   }
 });
@@ -265,21 +256,15 @@ test("remember: 'Curion uses Postgres, not SQLite.' is rejected with clarificati
       assert.equal(result.status, "rejected");
       if (result.status !== "rejected") throw new Error("unreachable");
       assert.equal(result.safetyClass, "replacement-correction");
-      assert.equal(
-        calls.length,
-        0,
-        "provider must NOT be called for replacement-correction input",
-      );
+      assert.equal(calls.length, 0, "provider must NOT be called for replacement-correction input");
       assert.ok(result.clarification_needed, "rejection must carry clarification_needed");
       assert.equal(typeof result.clarification_needed!.question, "string");
       assert.ok(result.clarification_needed!.question.length > 0);
       assert.ok(
         !result.clarification_needed!.question.includes(text),
-        "clarification_needed.question must not echo raw input",
+        "clarification_needed.question must not echo raw input"
       );
-      const rows = handle.db
-        .prepare("SELECT COUNT(*) AS c FROM memories")
-        .get() as { c: number };
+      const rows = handle.db.prepare("SELECT COUNT(*) AS c FROM memories").get() as { c: number };
       assert.equal(rows.c, 0, "no rows should be persisted for replacement input");
     } finally {
       resetRememberStorageProvider();
@@ -301,14 +286,8 @@ test("remember (controller): replacement-correction classification returns rejec
     if (outcome.status !== "rejected") throw new Error("unreachable");
     assert.equal(outcome.safetyClass, "replacement-correction");
     assert.ok(outcome.clarification_needed);
-    assert.equal(
-      calls.length,
-      0,
-      "provider must NOT be called for replacement-correction input",
-    );
-    const rows = handle.db
-      .prepare("SELECT COUNT(*) AS c FROM memories")
-      .get() as { c: number };
+    assert.equal(calls.length, 0, "provider must NOT be called for replacement-correction input");
+    const rows = handle.db.prepare("SELECT COUNT(*) AS c FROM memories").get() as { c: number };
     assert.equal(rows.c, 0);
   } finally {
     rmStorage(tmp, handle);
@@ -330,7 +309,7 @@ test("classifyInput: replacement-correction patterns are detected", () => {
     assert.equal(
       r.class,
       "replacement-correction",
-      `expected replacement-correction for: ${s.slice(0, 80)} (got ${r.class}: ${r.reason})`,
+      `expected replacement-correction for: ${s.slice(0, 80)} (got ${r.class}: ${r.reason})`
     );
   }
 });
@@ -354,7 +333,7 @@ test("remember: temporal valid text is NOT rejected by replacement-correction; f
       assert.equal(
         outcome.safetyClass,
         undefined,
-        `temporal fact must NOT carry a rejection safetyClass; got ${outcome.safetyClass}`,
+        `temporal fact must NOT carry a rejection safetyClass; got ${outcome.safetyClass}`
       );
       // Either saved OR provider_error (both are acceptable;
       // the assertion is that the input was not rejected).
@@ -363,7 +342,7 @@ test("remember: temporal valid text is NOT rejected by replacement-correction; f
       assert.equal(
         calls.length,
         1,
-        "provider should be called exactly once for a safe (temporal) input",
+        "provider should be called exactly once for a safe (temporal) input"
       );
     } finally {
       resetRememberStorageProvider();
@@ -385,7 +364,7 @@ test("classifyInput: valid temporal facts do NOT trip replacement-correction", (
     assert.notEqual(
       r.class,
       "replacement-correction",
-      `replacement-correction must NOT fire on temporal fact: ${s.slice(0, 80)} (got ${r.class})`,
+      `replacement-correction must NOT fire on temporal fact: ${s.slice(0, 80)} (got ${r.class})`
     );
     // The temporal fact may still be classified as
     // `self-conflict` (the temporal-change pattern is
@@ -405,7 +384,7 @@ test("classifyInput: comparatives without replacement do NOT trip replacement-co
     assert.notEqual(
       r.class,
       "replacement-correction",
-      `replacement-correction must NOT fire on comparative: ${s.slice(0, 80)} (got ${r.class})`,
+      `replacement-correction must NOT fire on comparative: ${s.slice(0, 80)} (got ${r.class})`
     );
   }
 });
@@ -440,7 +419,7 @@ test("trace: remember saved tool.output uses `kind` (not `memoryKind`) and carri
           providerFallbackApiKey: TEST_FALLBACK_KEY,
           providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
           providerFallbackModel: TEST_FALLBACK_MODEL,
-        },
+        }
       );
       assert.equal(controllerOut.status, "saved");
       if (controllerOut.status !== "saved") throw new Error("unreachable");
@@ -483,9 +462,7 @@ test("trace: remember saved tool.output uses `kind` (not `memoryKind`) and carri
       const db = new Database(dbPath, { readonly: true, fileMustExist: true });
       try {
         const row = db
-          .prepare(
-            "SELECT payload_json FROM trace_events WHERE run_id = ? AND kind = ?",
-          )
+          .prepare("SELECT payload_json FROM trace_events WHERE run_id = ? AND kind = ?")
           .get(tracer.runId, TOOL_OUTPUT_KIND) as { payload_json: string } | undefined;
         assert.ok(row, "tool.output event must exist");
         const payload = JSON.parse(row.payload_json) as Record<string, unknown>;
@@ -507,7 +484,7 @@ test("trace: remember saved tool.output uses `kind` (not `memoryKind`) and carri
           assert.equal(
             forbidden in payload,
             false,
-            `saved trace tool.output payload must not include '${forbidden}'; got ${JSON.stringify(payload)}`,
+            `saved trace tool.output payload must not include '${forbidden}'; got ${JSON.stringify(payload)}`
           );
         }
         // The trace payload byte-equals the public
@@ -584,7 +561,7 @@ test("trace: remember rejected self-conflict / replacement-correction carries cl
         assert.equal(
           forbidden in payload,
           false,
-          `rejected trace tool.output payload must not include '${forbidden}'; got ${JSON.stringify(payload)}`,
+          `rejected trace tool.output payload must not include '${forbidden}'; got ${JSON.stringify(payload)}`
         );
       }
     } finally {
@@ -639,7 +616,7 @@ test("trace: recall tool.output contains NO sourceIds / safetyClass / internal I
         assert.equal(
           forbidden in payload,
           false,
-          `recall trace tool.output payload must not include '${forbidden}'; got ${JSON.stringify(payload)}`,
+          `recall trace tool.output payload must not include '${forbidden}'; got ${JSON.stringify(payload)}`
         );
       }
     } finally {
@@ -675,7 +652,7 @@ test("trace: provider_error tool.output has NO clarification_needed (hardening i
       assert.equal(
         "clarification_needed" in result,
         false,
-        "provider_error result must not carry clarification_needed",
+        "provider_error result must not carry clarification_needed"
       );
 
       // Read the persisted trace payload.
@@ -693,7 +670,7 @@ test("trace: provider_error tool.output has NO clarification_needed (hardening i
       assert.equal(
         "clarification_needed" in payload,
         false,
-        `provider_error trace tool.output payload must not include clarification_needed; got ${JSON.stringify(payload)}`,
+        `provider_error trace tool.output payload must not include clarification_needed; got ${JSON.stringify(payload)}`
       );
       // No internal fields on the trace payload.
       for (const forbidden of [
@@ -710,7 +687,7 @@ test("trace: provider_error tool.output has NO clarification_needed (hardening i
         assert.equal(
           forbidden in payload,
           false,
-          `provider_error trace tool.output payload must not include '${forbidden}'; got ${JSON.stringify(payload)}`,
+          `provider_error trace tool.output payload must not include '${forbidden}'; got ${JSON.stringify(payload)}`
         );
       }
     } finally {
