@@ -83,15 +83,15 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  HELD_OUT_QUERIES,
+  type HeldOutVariant,
   buildHeldOutReport,
   formatHeldOutReport,
   runHeldOutEvals,
-  type HeldOutVariant,
   writeHeldOutReport,
-  HELD_OUT_QUERIES,
 } from "./held-out-validation.js";
 import { createDenseEmbedder } from "./variants/dense-embedder.js";
-import { type DenseEmbedder } from "./variants/dense-embedder.js";
+import type { DenseEmbedder } from "./variants/dense-embedder.js";
 
 // ---------------------------------------------------------------------------
 // CLI config
@@ -127,9 +127,7 @@ export function parseHeldOutCli(argv: ReadonlyArray<string>): HeldOutCliOptions 
     if (a === "--variant" && argv[i + 1] !== undefined) {
       const v = argv[++i]!;
       if (v !== "lexical" && v !== "hybrid" && v !== "hybrid-dense") {
-        throw new Error(
-          `--variant must be one of lexical|hybrid|hybrid-dense (got "${v}")`,
-        );
+        throw new Error(`--variant must be one of lexical|hybrid|hybrid-dense (got "${v}")`);
       }
       opts.variant = v;
     } else if (a === "--embedder" && argv[i + 1] !== undefined) {
@@ -137,17 +135,13 @@ export function parseHeldOutCli(argv: ReadonlyArray<string>): HeldOutCliOptions 
     } else if (a === "--hybrid-k" && argv[i + 1] !== undefined) {
       const n = Number(argv[++i]);
       if (!Number.isFinite(n) || n <= 0) {
-        throw new Error(
-          `--hybrid-k requires a positive finite number (got "${argv[i]}")`,
-        );
+        throw new Error(`--hybrid-k requires a positive finite number (got "${argv[i]}")`);
       }
       opts.hybridK = n;
     } else if (a === "--top-k" && argv[i + 1] !== undefined) {
       const n = Number(argv[++i]);
       if (!Number.isFinite(n) || n <= 0) {
-        throw new Error(
-          `--top-k requires a positive finite number (got "${argv[i]}")`,
-        );
+        throw new Error(`--top-k requires a positive finite number (got "${argv[i]}")`);
       }
       opts.topK = n;
     } else if (a === "--artifacts" && argv[i + 1] !== undefined) {
@@ -218,12 +212,8 @@ async function main(): Promise<void> {
   const report = buildHeldOutReport({
     variant: opts.variant,
     topK: evalResult.topK,
-    ...(evalResult.hybridK !== undefined
-      ? { hybridK: evalResult.hybridK }
-      : {}),
-    ...(evalResult.embedderMetadata
-      ? { embedderMetadata: evalResult.embedderMetadata }
-      : {}),
+    ...(evalResult.hybridK !== undefined ? { hybridK: evalResult.hybridK } : {}),
+    ...(evalResult.embedderMetadata ? { embedderMetadata: evalResult.embedderMetadata } : {}),
     evals: evalResult.evals,
   });
   // Write the JSON artifact. The file

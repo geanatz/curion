@@ -936,6 +936,18 @@ const DEFAULT_BOOTSTRAP_RESAMPLES = 1000;
 const DEFAULT_BOOTSTRAP_SEED = 0xc07ec0;
 
 /**
+ * MMIX LCG constants, expressed as their low 32 bits.
+ * The full 64-bit MMIX multiplier (`6364136223846793005`) and
+ * increment (`1442695040888963407`) exceed `Number.MAX_SAFE_INTEGER`
+ * and lose precision as JS Number literals, so we pre-truncate to
+ * the low 32 bits that `Math.imul` actually operates on. This keeps
+ * the LCG deterministic and avoids the implicit precision loss the
+ * full-width literals would incur.
+ */
+const PCG_MULT = 0x4c957f2d;
+const PCG_INCR = 0xf767814f;
+
+/**
  * Deterministic 32-bit PRNG. We avoid `Math.random` so the
  * bootstrap is reproducible across machines and Node
  * versions. The implementation is a tiny LCG with a fixed
@@ -951,7 +963,7 @@ function makeLcg(seed: number): () => number {
   // resampling thousands of binary outcomes.
   let s = seed >>> 0;
   return () => {
-    s = (Math.imul(s, 6364136223846793005) + 1442695040888963407) >>> 0;
+    s = (Math.imul(s, PCG_MULT) + PCG_INCR) >>> 0;
     return s / 0x100000000;
   };
 }

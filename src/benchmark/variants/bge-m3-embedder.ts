@@ -372,7 +372,7 @@ type FeatureExtractionPipeline = (
   options?: {
     pooling?: "last_token" | "mean" | "cls" | "none";
     normalize?: boolean;
-  },
+  }
 ) => Promise<unknown>;
 
 /**
@@ -386,7 +386,7 @@ interface HfTransformersModule {
   pipeline: (
     task: "feature-extraction",
     model: string,
-    options?: { dtype?: string; device?: string },
+    options?: { dtype?: string; device?: string }
   ) => Promise<FeatureExtractionPipeline>;
   env: {
     cacheDir?: string;
@@ -438,8 +438,7 @@ async function loadLibrary(): Promise<HfTransformersModule> {
   const mod = (await import(/* @vite-ignore */ "@huggingface/transformers")) as
     | HfTransformersModule
     | { default: HfTransformersModule };
-  const resolved: HfTransformersModule =
-    "default" in mod ? mod.default : mod;
+  const resolved: HfTransformersModule = "default" in mod ? mod.default : mod;
   cachedLibrary = resolved;
   return resolved;
 }
@@ -513,8 +512,7 @@ export class BgeM3Embedder {
     this.dtype = options.dtype ?? "q8";
     this.pooling = options.pooling ?? "cls";
     this.normalize = options.normalize ?? true;
-    this.cacheDir =
-      options.cacheDir ?? `${process.cwd()}/.curion/transformers-cache`;
+    this.cacheDir = options.cacheDir ?? `${process.cwd()}/.curion/transformers-cache`;
     this.probedDim = options.dim ?? 1024;
     // Placeholder metadata. The real status /
     // dim / runtimeVersion are populated in
@@ -558,18 +556,13 @@ export class BgeM3Embedder {
       // top-level export for older shims; the
       // resulting string is what the live
       // test asserts on.
-      this.runtimeVersion =
-        lib.env?.version ?? lib.version ?? undefined;
+      this.runtimeVersion = lib.env?.version ?? lib.version ?? undefined;
       if (lib.env) {
         lib.env.cacheDir = this.cacheDir;
         lib.env.allowLocalModels = true;
         lib.env.allowRemoteModels = true;
       }
-      this.pipeline = await lib.pipeline(
-        "feature-extraction",
-        this.modelId,
-        { dtype: this.dtype },
-      );
+      this.pipeline = await lib.pipeline("feature-extraction", this.modelId, { dtype: this.dtype });
       // Probe the dim with a 1-token string.
       // The output is a 1D vector
       // (CLS-pooled, normalized). We throw
@@ -592,8 +585,7 @@ export class BgeM3Embedder {
       };
     } catch (err: unknown) {
       this.failed = true;
-      this.errorMessage =
-        err instanceof Error ? err.message : String(err);
+      this.errorMessage = err instanceof Error ? err.message : String(err);
       this.loadMs = Date.now() - t0;
       this.metadata = {
         ...this.metadata,
@@ -654,9 +646,7 @@ export class BgeM3Embedder {
    * document-only to keep the contract
    * simple and unit-testable.
    */
-  async embedDocumentsBatch(
-    texts: ReadonlyArray<string>,
-  ): Promise<number[][]> {
+  async embedDocumentsBatch(texts: ReadonlyArray<string>): Promise<number[][]> {
     if (!this.pipeline || this.failed) {
       return this.fallbackEmbedBatch(texts);
     }
@@ -704,9 +694,7 @@ export class BgeM3Embedder {
       // to return a 1D vector.
       const arr = Array.isArray(out[0]) ? null : (out as number[]);
       if (!arr) {
-        throw new Error(
-          "BgeM3Embedder.timedSingle: expected a 1D vector, got a 2D array",
-        );
+        throw new Error("BgeM3Embedder.timedSingle: expected a 1D vector, got a 2D array");
       }
       return arr;
     } finally {
@@ -744,7 +732,7 @@ export class BgeM3Embedder {
       const dim = this.metadata.dim;
       if (flat.length !== texts.length * dim) {
         throw new Error(
-          `BgeM3Embedder.timedBatch: flat output length ${flat.length} does not match ${texts.length} * dim(${dim})`,
+          `BgeM3Embedder.timedBatch: flat output length ${flat.length} does not match ${texts.length} * dim(${dim})`
         );
       }
       const result: number[][] = new Array(texts.length);
@@ -790,12 +778,10 @@ export class BgeM3Embedder {
    */
   private async callPipeline(
     input: string | string[],
-    options: { pooling?: "last_token" | "mean" | "cls" | "none"; normalize?: boolean },
+    options: { pooling?: "last_token" | "mean" | "cls" | "none"; normalize?: boolean }
   ): Promise<number[] | number[][]> {
     if (!this.pipeline) {
-      throw new Error(
-        "BgeM3Embedder.callPipeline: pipeline is not initialized",
-      );
+      throw new Error("BgeM3Embedder.callPipeline: pipeline is not initialized");
     }
     const raw = await this.pipeline(input, options);
     return coerceToArray(raw);
@@ -813,20 +799,14 @@ export class BgeM3Embedder {
    * well-formed report shape.
    */
   private async fallbackEmbed(text: string): Promise<number[]> {
-    const { StubDeterministicDenseEmbedder } = await import(
-      "./dense-embedder.js"
-    );
+    const { StubDeterministicDenseEmbedder } = await import("./dense-embedder.js");
     return new StubDeterministicDenseEmbedder({
       dim: this.metadata.dim,
     }).embed(text);
   }
 
-  private async fallbackEmbedBatch(
-    texts: ReadonlyArray<string>,
-  ): Promise<number[][]> {
-    const { StubDeterministicDenseEmbedder } = await import(
-      "./dense-embedder.js"
-    );
+  private async fallbackEmbedBatch(texts: ReadonlyArray<string>): Promise<number[][]> {
+    const { StubDeterministicDenseEmbedder } = await import("./dense-embedder.js");
     return new StubDeterministicDenseEmbedder({
       dim: this.metadata.dim,
     }).embedBatch(texts);
@@ -894,7 +874,5 @@ function coerceToArray(raw: unknown): number[] | number[][] {
       return Array.from(data);
     }
   }
-  throw new Error(
-    `coerceToArray: cannot coerce pipeline output of type ${typeof raw}`,
-  );
+  throw new Error(`coerceToArray: cannot coerce pipeline output of type ${typeof raw}`);
 }

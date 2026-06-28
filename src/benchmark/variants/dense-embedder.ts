@@ -77,7 +77,7 @@
  *   higher) "higher is better" contract the existing
  *   variants use. Callers that want the no-answer TNR to be
  *   meaningful can pass a positive threshold.
-  */
+ */
 
 // ---------------------------------------------------------------------------
 // Static imports
@@ -174,13 +174,7 @@ export type EmbedderStatus = "ready" | "skipped" | "error";
 
 export interface EmbedderMetadata {
   /** Stable id used in reports and CLI flags. */
-  backend:
-    | "stub-dense"
-    | "transformersjs"
-    | "hashed-bow"
-    | "qwen3"
-    | "embeddinggemma"
-    | "bge-m3";
+  backend: "stub-dense" | "transformersjs" | "hashed-bow" | "qwen3" | "embeddinggemma" | "bge-m3";
   /** Human description. */
   description: string;
   /** Pinned model id (HF repo, ONNX file, or stub label). */
@@ -280,16 +274,88 @@ function fnv1a32(s: string): number {
  * the dense stub module remains self-contained.
  */
 const STOP_WORDS: ReadonlySet<string> = new Set([
-  "the", "and", "for", "are", "but", "not", "you", "all", "any",
-  "can", "had", "her", "was", "one", "our", "out", "day", "get",
-  "has", "him", "his", "how", "man", "new", "now", "old", "see",
-  "two", "way", "who", "boy", "did", "its", "let", "put", "say",
-  "she", "too", "use", "this", "that", "with", "from", "have",
-  "they", "their", "there", "what", "when", "your", "were", "been",
-  "will", "would", "could", "should", "about", "into", "than",
-  "then", "them", "these", "those", "because", "where", "which",
-  "while", "whom", "ever", "very", "just", "also", "into", "over",
-  "such", "some", "only", "more", "most", "other", "than", "each",
+  "the",
+  "and",
+  "for",
+  "are",
+  "but",
+  "not",
+  "you",
+  "all",
+  "any",
+  "can",
+  "had",
+  "her",
+  "was",
+  "one",
+  "our",
+  "out",
+  "day",
+  "get",
+  "has",
+  "him",
+  "his",
+  "how",
+  "man",
+  "new",
+  "now",
+  "old",
+  "see",
+  "two",
+  "way",
+  "who",
+  "boy",
+  "did",
+  "its",
+  "let",
+  "put",
+  "say",
+  "she",
+  "too",
+  "use",
+  "this",
+  "that",
+  "with",
+  "from",
+  "have",
+  "they",
+  "their",
+  "there",
+  "what",
+  "when",
+  "your",
+  "were",
+  "been",
+  "will",
+  "would",
+  "could",
+  "should",
+  "about",
+  "into",
+  "than",
+  "then",
+  "them",
+  "these",
+  "those",
+  "because",
+  "where",
+  "which",
+  "while",
+  "whom",
+  "ever",
+  "very",
+  "just",
+  "also",
+  "into",
+  "over",
+  "such",
+  "some",
+  "only",
+  "more",
+  "most",
+  "other",
+  "than",
+  "each",
 ]);
 
 /**
@@ -319,7 +385,7 @@ export class StubDeterministicDenseEmbedder implements DenseEmbedder {
     if (options.dim !== undefined) {
       if (!Number.isInteger(options.dim) || options.dim <= 0) {
         throw new Error(
-          `StubDeterministicDenseEmbedder: dim must be a positive integer (got ${options.dim})`,
+          `StubDeterministicDenseEmbedder: dim must be a positive integer (got ${options.dim})`
         );
       }
       // The metadata dim is the contract; we keep it in
@@ -408,9 +474,7 @@ let cachedTransformers: TransformersJsModule | null = null;
 
 async function loadTransformers(): Promise<TransformersJsModule> {
   if (cachedTransformers) return cachedTransformers;
-  const mod = (await import(
-    /* @vite-ignore */ "@xenova/transformers"
-  )) as TransformersJsModule;
+  const mod = (await import(/* @vite-ignore */ "@xenova/transformers")) as TransformersJsModule;
   cachedTransformers = mod;
   return mod;
 }
@@ -447,7 +511,7 @@ export interface TransformersJsEmbedderOptions {
  */
 type FeatureExtractionPipeline = (
   input: string | string[],
-  options?: { pooling?: "mean" | "cls" | "none"; normalize?: boolean },
+  options?: { pooling?: "mean" | "cls" | "none"; normalize?: boolean }
 ) => Promise<{ data: Float32Array | number[]; dims?: number[] }>;
 
 /**
@@ -473,9 +537,7 @@ export class TransformersJsEmbedder implements DenseEmbedder {
   constructor(options: TransformersJsEmbedderOptions = {}) {
     this.modelId = options.modelId ?? "Xenova/all-MiniLM-L6-v2";
     this.quantized = options.quantized ?? true;
-    this.cacheDir =
-      options.cacheDir ??
-      `${process.cwd()}/.curion/transformers-cache`;
+    this.cacheDir = options.cacheDir ?? `${process.cwd()}/.curion/transformers-cache`;
     // Placeholder metadata; the real status / dim are
     // populated in `init()` after the pipeline is built
     // (we cannot know the dim until the model loads).
@@ -506,23 +568,23 @@ export class TransformersJsEmbedder implements DenseEmbedder {
     try {
       const tr = await loadTransformers();
       this.runtimeVersion = (tr as unknown as { VERSION?: string }).VERSION;
-      const env = (tr as unknown as {
-        env: {
-  cacheDir?: string | undefined;
-          allowLocalModels?: boolean;
-          allowRemoteModels?: boolean;
-        };
-      }).env;
+      const env = (
+        tr as unknown as {
+          env: {
+            cacheDir?: string | undefined;
+            allowLocalModels?: boolean;
+            allowRemoteModels?: boolean;
+          };
+        }
+      ).env;
       if (env) {
         env.cacheDir = this.cacheDir;
         env.allowLocalModels = true;
         env.allowRemoteModels = true;
       }
-      const built = await tr.pipeline(
-        "feature-extraction",
-        this.modelId,
-        { quantized: this.quantized },
-      );
+      const built = await tr.pipeline("feature-extraction", this.modelId, {
+        quantized: this.quantized,
+      });
       this.pipeline = built as unknown as FeatureExtractionPipeline;
       // Probe the dim with a 1-token string. The output is
       // a Float32Array of length `dim` (mean-pooled,
@@ -545,8 +607,7 @@ export class TransformersJsEmbedder implements DenseEmbedder {
       };
     } catch (err: unknown) {
       this.failed = true;
-      this.errorMessage =
-        err instanceof Error ? err.message : String(err);
+      this.errorMessage = err instanceof Error ? err.message : String(err);
       this.loadMs = Date.now() - t0;
       this.metadata = {
         ...this.metadata,
@@ -680,12 +741,7 @@ export interface DenseEmbedderSpecOptions {
    * `"embeddinggemma"`. The BGE-M3 benchmark uses
    * `"bge-m3"`.
    */
-  backend?:
-    | "transformersjs"
-    | "qwen3"
-    | "embeddinggemma"
-    | "bge-m3"
-    | "stub-dense";
+  backend?: "transformersjs" | "qwen3" | "embeddinggemma" | "bge-m3" | "stub-dense";
   /**
    * Pinned model id (forwarded to the embedder
    * constructor). Default is per-backend (Xenova
@@ -707,9 +763,7 @@ export interface DenseEmbedderSpecOptions {
   quantized?: boolean;
 }
 
-export type DenseEmbedderSpec =
-  | string
-  | DenseEmbedderSpecOptions;
+export type DenseEmbedderSpec = string | DenseEmbedderSpecOptions;
 
 export interface DenseEmbedderFactoryResult {
   embedder: DenseEmbedder;
@@ -718,9 +772,11 @@ export interface DenseEmbedderFactoryResult {
 }
 
 export async function createDenseEmbedder(
-  spec: DenseEmbedderSpec = "stub-dense",
-  options: DenseEmbedderSpecOptions = {},
+  initialSpec: DenseEmbedderSpec = "stub-dense",
+  initialOptions: DenseEmbedderSpecOptions = {}
 ): Promise<DenseEmbedderFactoryResult> {
+  let spec = initialSpec;
+  let options = initialOptions;
   if (typeof spec === "object") {
     // The object form carries per-call overrides
     // (cacheDir / skip / backend). The CLI parser
@@ -776,7 +832,13 @@ export async function createDenseEmbedder(
   // `skip: true` is still routed to the Qwen3
   // dispatcher (which constructs a
   // `Qwen3Embedder` without calling `init()`).
-  if (typeof spec === "string" && (spec === "qwen3" || spec.startsWith("qwen3:") || spec === "qwen3-hf" || spec.startsWith("qwen3-hf:"))) {
+  if (
+    typeof spec === "string" &&
+    (spec === "qwen3" ||
+      spec.startsWith("qwen3:") ||
+      spec === "qwen3-hf" ||
+      spec.startsWith("qwen3-hf:"))
+  ) {
     return await dispatchQwen3FromStringSpec(spec, options);
   }
   if (
@@ -807,12 +869,15 @@ export async function createDenseEmbedder(
   // does NOT silently downgrade a real-backend
   // spec to the stub on `skip: true`; the
   // dispatcher is selected by the spec.
-  if (typeof spec === "string" && (spec === "stub-dense" || spec.startsWith("stub-dense:") || skip)) {
+  if (
+    typeof spec === "string" &&
+    (spec === "stub-dense" || spec.startsWith("stub-dense:") || skip)
+  ) {
     void skip;
     return dispatchStubDenseFromString(spec, options);
   }
   throw new Error(
-    `createDenseEmbedder: unknown spec "${typeof spec === "string" ? spec : JSON.stringify(spec)}". Expected "stub-dense", "transformersjs[:model=...,quantized=...]", "qwen3[:key=value,...]", "embeddinggemma[:key=value,...]", or "bge-m3[:key=value,...]".`,
+    `createDenseEmbedder: unknown spec "${typeof spec === "string" ? spec : JSON.stringify(spec)}". Expected "stub-dense", "transformersjs[:model=...,quantized=...]", "qwen3[:key=value,...]", "embeddinggemma[:key=value,...]", or "bge-m3[:key=value,...]".`
   );
 }
 
@@ -824,7 +889,7 @@ export async function createDenseEmbedder(
  */
 function dispatchStubDenseFromString(
   spec: string,
-  options: DenseEmbedderSpecOptions,
+  options: DenseEmbedderSpecOptions
 ): DenseEmbedderFactoryResult {
   const skip = options.skip ?? false;
   let dim = 64;
@@ -854,7 +919,7 @@ function dispatchStubDenseFromString(
  * `dim` field on the spec object is honored.
  */
 function dispatchStubDenseFromOptions(
-  options: DenseEmbedderSpecOptions,
+  options: DenseEmbedderSpecOptions
 ): DenseEmbedderFactoryResult {
   const skip = options.skip ?? false;
   const dim = 64;
@@ -872,7 +937,7 @@ function dispatchStubDenseFromOptions(
  */
 async function dispatchTransformersJsFromString(
   spec: string,
-  options: DenseEmbedderSpecOptions,
+  options: DenseEmbedderSpecOptions
 ): Promise<DenseEmbedderFactoryResult> {
   const skip = options.skip ?? false;
   const tail = spec.slice("transformersjs".length);
@@ -894,9 +959,7 @@ async function dispatchTransformersJsFromString(
   const embedder = new TransformersJsEmbedder({
     ...(modelId !== undefined ? { modelId } : {}),
     ...(quantized !== undefined ? { quantized } : {}),
-    ...(options.cacheDir !== undefined
-      ? { cacheDir: options.cacheDir }
-      : {}),
+    ...(options.cacheDir !== undefined ? { cacheDir: options.cacheDir } : {}),
   });
   if (!skip) {
     await embedder.init();
@@ -933,7 +996,7 @@ async function dispatchTransformersJsFromString(
  */
 async function dispatchQwen3FromStringSpec(
   spec: string,
-  options: DenseEmbedderSpecOptions,
+  options: DenseEmbedderSpecOptions
 ): Promise<DenseEmbedderFactoryResult> {
   const skip = options.skip ?? false;
   // Strip the optional `qwen3-hf` alias to a
@@ -954,12 +1017,7 @@ async function dispatchQwen3FromStringSpec(
       else if (key === "dtype") dtype = val;
       else if (key === "task") task = val;
       else if (key === "pooling") {
-        if (
-          val === "last_token" ||
-          val === "mean" ||
-          val === "cls" ||
-          val === "none"
-        ) {
+        if (val === "last_token" || val === "mean" || val === "cls" || val === "none") {
           pooling = val;
         }
       }
@@ -971,12 +1029,10 @@ async function dispatchQwen3FromStringSpec(
       ...(dtype !== undefined ? { dtype } : {}),
       ...(task !== undefined ? { task } : {}),
       ...(pooling !== undefined ? { pooling } : {}),
-      ...(options.cacheDir !== undefined
-        ? { cacheDir: options.cacheDir }
-        : {}),
+      ...(options.cacheDir !== undefined ? { cacheDir: options.cacheDir } : {}),
     },
     skip,
-    spec,
+    spec
   );
 }
 
@@ -987,21 +1043,17 @@ async function dispatchQwen3FromStringSpec(
  * on the object spec are honored.
  */
 async function dispatchQwen3FromObjectSpec(
-  options: DenseEmbedderSpecOptions,
+  options: DenseEmbedderSpecOptions
 ): Promise<DenseEmbedderFactoryResult> {
   const skip = options.skip ?? false;
   return dispatchQwen3Common(
     {
-      ...(options.modelId !== undefined
-        ? { modelId: options.modelId }
-        : {}),
+      ...(options.modelId !== undefined ? { modelId: options.modelId } : {}),
       ...(options.dtype !== undefined ? { dtype: options.dtype } : {}),
-      ...(options.cacheDir !== undefined
-        ? { cacheDir: options.cacheDir }
-        : {}),
+      ...(options.cacheDir !== undefined ? { cacheDir: options.cacheDir } : {}),
     },
     skip,
-    "qwen3",
+    "qwen3"
   );
 }
 
@@ -1033,7 +1085,7 @@ async function dispatchQwen3Common(
     cacheDir?: string;
   },
   skip: boolean,
-  spec: string,
+  spec: string
 ): Promise<DenseEmbedderFactoryResult> {
   const embedder = new Qwen3Embedder(options);
   if (!skip) {
@@ -1081,7 +1133,7 @@ async function dispatchQwen3Common(
  */
 async function dispatchEmbeddingGemmaFromStringSpec(
   spec: string,
-  options: DenseEmbedderSpecOptions,
+  options: DenseEmbedderSpecOptions
 ): Promise<DenseEmbedderFactoryResult> {
   const skip = options.skip ?? false;
   // Strip the optional `embedding-gemma` alias
@@ -1104,12 +1156,7 @@ async function dispatchEmbeddingGemmaFromStringSpec(
       else if (key === "dtype") dtype = val;
       else if (key === "queryTask") queryTask = val;
       else if (key === "pooling") {
-        if (
-          val === "last_token" ||
-          val === "mean" ||
-          val === "cls" ||
-          val === "none"
-        ) {
+        if (val === "last_token" || val === "mean" || val === "cls" || val === "none") {
           pooling = val;
         }
       }
@@ -1121,12 +1168,10 @@ async function dispatchEmbeddingGemmaFromStringSpec(
       ...(dtype !== undefined ? { dtype } : {}),
       ...(queryTask !== undefined ? { queryTask } : {}),
       ...(pooling !== undefined ? { pooling } : {}),
-      ...(options.cacheDir !== undefined
-        ? { cacheDir: options.cacheDir }
-        : {}),
+      ...(options.cacheDir !== undefined ? { cacheDir: options.cacheDir } : {}),
     },
     skip,
-    spec,
+    spec
   );
 }
 
@@ -1138,21 +1183,17 @@ async function dispatchEmbeddingGemmaFromStringSpec(
  * fields on the object spec are honored.
  */
 async function dispatchEmbeddingGemmaFromObjectSpec(
-  options: DenseEmbedderSpecOptions,
+  options: DenseEmbedderSpecOptions
 ): Promise<DenseEmbedderFactoryResult> {
   const skip = options.skip ?? false;
   return dispatchEmbeddingGemmaCommon(
     {
-      ...(options.modelId !== undefined
-        ? { modelId: options.modelId }
-        : {}),
+      ...(options.modelId !== undefined ? { modelId: options.modelId } : {}),
       ...(options.dtype !== undefined ? { dtype: options.dtype } : {}),
-      ...(options.cacheDir !== undefined
-        ? { cacheDir: options.cacheDir }
-        : {}),
+      ...(options.cacheDir !== undefined ? { cacheDir: options.cacheDir } : {}),
     },
     skip,
-    "embeddinggemma",
+    "embeddinggemma"
   );
 }
 
@@ -1186,7 +1227,7 @@ async function dispatchEmbeddingGemmaCommon(
     cacheDir?: string;
   },
   skip: boolean,
-  spec: string,
+  spec: string
 ): Promise<DenseEmbedderFactoryResult> {
   const embedder = new EmbeddingGemmaEmbedder(options);
   if (!skip) {
@@ -1234,7 +1275,7 @@ async function dispatchEmbeddingGemmaCommon(
  */
 async function dispatchBgeM3FromStringSpec(
   spec: string,
-  options: DenseEmbedderSpecOptions,
+  options: DenseEmbedderSpecOptions
 ): Promise<DenseEmbedderFactoryResult> {
   const skip = options.skip ?? false;
   // Strip the optional `bgem3` alias to a
@@ -1243,9 +1284,7 @@ async function dispatchBgeM3FromStringSpec(
   // (the canonical model id on Hugging Face is
   // `BAAI/bge-m3`, but the `bge-m3` and `bgem3`
   // CLI forms are both accepted by the factory).
-  const headLen = spec.startsWith("bgem3")
-    ? "bgem3".length
-    : "bge-m3".length;
+  const headLen = spec.startsWith("bgem3") ? "bgem3".length : "bge-m3".length;
   const tail = spec.slice(headLen);
   let modelId: string | undefined;
   let dtype: string | undefined;
@@ -1259,12 +1298,7 @@ async function dispatchBgeM3FromStringSpec(
       if (key === "model") modelId = val;
       else if (key === "dtype") dtype = val;
       else if (key === "pooling") {
-        if (
-          val === "last_token" ||
-          val === "mean" ||
-          val === "cls" ||
-          val === "none"
-        ) {
+        if (val === "last_token" || val === "mean" || val === "cls" || val === "none") {
           pooling = val;
         }
       }
@@ -1275,12 +1309,10 @@ async function dispatchBgeM3FromStringSpec(
       ...(modelId !== undefined ? { modelId } : {}),
       ...(dtype !== undefined ? { dtype } : {}),
       ...(pooling !== undefined ? { pooling } : {}),
-      ...(options.cacheDir !== undefined
-        ? { cacheDir: options.cacheDir }
-        : {}),
+      ...(options.cacheDir !== undefined ? { cacheDir: options.cacheDir } : {}),
     },
     skip,
-    spec,
+    spec
   );
 }
 
@@ -1292,21 +1324,17 @@ async function dispatchBgeM3FromStringSpec(
  * spec are honored.
  */
 async function dispatchBgeM3FromObjectSpec(
-  options: DenseEmbedderSpecOptions,
+  options: DenseEmbedderSpecOptions
 ): Promise<DenseEmbedderFactoryResult> {
   const skip = options.skip ?? false;
   return dispatchBgeM3Common(
     {
-      ...(options.modelId !== undefined
-        ? { modelId: options.modelId }
-        : {}),
+      ...(options.modelId !== undefined ? { modelId: options.modelId } : {}),
       ...(options.dtype !== undefined ? { dtype: options.dtype } : {}),
-      ...(options.cacheDir !== undefined
-        ? { cacheDir: options.cacheDir }
-        : {}),
+      ...(options.cacheDir !== undefined ? { cacheDir: options.cacheDir } : {}),
     },
     skip,
-    "bge-m3",
+    "bge-m3"
   );
 }
 
@@ -1338,7 +1366,7 @@ async function dispatchBgeM3Common(
     cacheDir?: string;
   },
   skip: boolean,
-  spec: string,
+  spec: string
 ): Promise<DenseEmbedderFactoryResult> {
   const embedder = new BgeM3Embedder(options);
   if (!skip) {

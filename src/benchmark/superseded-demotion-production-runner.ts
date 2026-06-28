@@ -37,22 +37,20 @@ import fs from "node:fs";
 import path from "node:path";
 
 import {
-  demoteSupersededMemories,
   DEMOTION_FACTOR,
   type ScoredCandidateWithRelationship,
+  demoteSupersededMemories,
 } from "../retrieval/superseded-demotion.js";
+import type { QueryEval } from "./metrics.js";
+import type { BenchmarkQuery } from "./queries.js";
 import { SIMULATED_SUPERSESSION_EDGES } from "./supersession-edge-simulation.js";
 import {
-  classifyTemporalTruthFailure,
-} from "./temporal-truth-diagnostic.js";
-import {
-  alignQueriesToEvals,
-  readBenchmarkArtifact,
-  findMostRecentArtifact,
   type BenchmarkArtifact,
+  alignQueriesToEvals,
+  findMostRecentArtifact,
+  readBenchmarkArtifact,
 } from "./temporal-truth-diagnostic-runner.js";
-import type { BenchmarkQuery } from "./queries.js";
-import type { QueryEval } from "./metrics.js";
+import { classifyTemporalTruthFailure } from "./temporal-truth-diagnostic.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -188,11 +186,9 @@ function evaluateForQuery(args: {
 
   const categoryChange = `${baselineDiag.category} -> ${afterDiag.category}`;
   const regression =
-    baselineDiag.top1IsCurrentTruth === true &&
-    afterDiag.top1IsCurrentTruth === false;
+    baselineDiag.top1IsCurrentTruth === true && afterDiag.top1IsCurrentTruth === false;
   const unchangedBecauseCurrentMissing =
-    baselineDiag.topKHasCurrentTruth === false &&
-    afterDiag.topKHasCurrentTruth === false;
+    baselineDiag.topKHasCurrentTruth === false && afterDiag.topKHasCurrentTruth === false;
   const isFixtureAmbiguous = baselineDiag.isDivergentLabeled;
   const isClean = !isFixtureAmbiguous;
 
@@ -216,7 +212,7 @@ function evaluateForQuery(args: {
 // ---------------------------------------------------------------------------
 
 function aggregateMetrics(
-  perQuery: ReadonlyArray<ProductionDemotionPerQuery>,
+  perQuery: ReadonlyArray<ProductionDemotionPerQuery>
 ): ProductionDemotionMetrics {
   let total = 0;
   let cleanTotal = 0;
@@ -248,15 +244,12 @@ function aggregateMetrics(
       if (p.afterCurrentTruthAt1) cleanAfterCurrentTruthAt1 += 1;
       if (p.regression) cleanRegressionCount += 1;
     } else {
-      if (p.baselineCurrentTruthAt1)
-        fixtureAmbiguousBaselineCurrentTruthAt1 += 1;
-      if (p.afterCurrentTruthAt1)
-        fixtureAmbiguousAfterCurrentTruthAt1 += 1;
+      if (p.baselineCurrentTruthAt1) fixtureAmbiguousBaselineCurrentTruthAt1 += 1;
+      if (p.afterCurrentTruthAt1) fixtureAmbiguousAfterCurrentTruthAt1 += 1;
       if (p.regression) fixtureAmbiguousRegressionCount += 1;
     }
 
-    perCategoryChange[p.categoryChange] =
-      (perCategoryChange[p.categoryChange] ?? 0) + 1;
+    perCategoryChange[p.categoryChange] = (perCategoryChange[p.categoryChange] ?? 0) + 1;
   }
 
   return {
@@ -334,20 +327,20 @@ function formatReport(report: ProductionDemotionReport): string {
   lines.push("--- Headline ---");
   lines.push(
     `currentTruthAt1: ${metrics.baselineCurrentTruthAt1} -> ${metrics.afterCurrentTruthAt1} ` +
-      `(delta=${metrics.currentTruthAt1Delta >= 0 ? "+" : ""}${metrics.currentTruthAt1Delta})`,
+      `(delta=${metrics.currentTruthAt1Delta >= 0 ? "+" : ""}${metrics.currentTruthAt1Delta})`
   );
   lines.push(
-    `regressions: ${metrics.regressionCount} ${metrics.regressionCount > 0 ? "FAIL" : "PASS"}`,
+    `regressions: ${metrics.regressionCount} ${metrics.regressionCount > 0 ? "FAIL" : "PASS"}`
   );
   lines.push("");
   lines.push("--- Slice breakdown ---");
   lines.push(
     `clean:         ${metrics.cleanBaselineCurrentTruthAt1} -> ${metrics.cleanAfterCurrentTruthAt1} ` +
-      `(delta=${metrics.cleanAfterCurrentTruthAt1 - metrics.cleanBaselineCurrentTruthAt1})`,
+      `(delta=${metrics.cleanAfterCurrentTruthAt1 - metrics.cleanBaselineCurrentTruthAt1})`
   );
   lines.push(
     `fixture-ambig: ${metrics.fixtureAmbiguousBaselineCurrentTruthAt1} -> ${metrics.fixtureAmbiguousAfterCurrentTruthAt1} ` +
-      `(delta=${metrics.fixtureAmbiguousAfterCurrentTruthAt1 - metrics.fixtureAmbiguousBaselineCurrentTruthAt1})`,
+      `(delta=${metrics.fixtureAmbiguousAfterCurrentTruthAt1 - metrics.fixtureAmbiguousBaselineCurrentTruthAt1})`
   );
   lines.push("");
   lines.push("--- Counts ---");
@@ -380,7 +373,7 @@ export async function runProductionDemotionAnalysis(args: {
 
 export function writeProductionDemotionReport(
   report: ProductionDemotionReport,
-  dir: string,
+  dir: string
 ): string {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -393,16 +386,15 @@ export function writeProductionDemotionReport(
 }
 
 export async function runProductionDemotionCli(
-  args: ProductionDemotionCliArgs,
+  args: ProductionDemotionCliArgs
 ): Promise<{ report: ProductionDemotionReport; written?: string }> {
   const outDir = args.outDir ?? ".curion/benchmark";
   const defaultBenchmark =
-    args.benchmarkArtifact ??
-    findMostRecentArtifact(outDir, "retrieval-baseline-");
+    args.benchmarkArtifact ?? findMostRecentArtifact(outDir, "retrieval-baseline-");
   if (!defaultBenchmark) {
     throw new Error(
       `runProductionDemotionCli: no --benchmark-artifact given and no ` +
-        `retrieval-baseline-*.json found under ${outDir}`,
+        `retrieval-baseline-*.json found under ${outDir}`
     );
   }
   const benchmarkArtifact = readBenchmarkArtifact(defaultBenchmark);
@@ -415,9 +407,7 @@ export async function runProductionDemotionCli(
     written = writeProductionDemotionReport(report, outDir);
   }
   if (!args.noStdout) {
-    process.stderr.write(
-      `[production-demotion] benchmark artifact: ${defaultBenchmark}\n`,
-    );
+    process.stderr.write(`[production-demotion] benchmark artifact: ${defaultBenchmark}\n`);
     if (written) {
       process.stderr.write(`[production-demotion] wrote:              ${written}\n`);
     }
@@ -431,7 +421,7 @@ export async function runProductionDemotionCli(
 // ---------------------------------------------------------------------------
 
 export function parseProductionDemotionCliArgs(
-  argv: ReadonlyArray<string>,
+  argv: ReadonlyArray<string>
 ): ProductionDemotionCliArgs {
   const out: ProductionDemotionCliArgs = {};
   for (let i = 0; i < argv.length; i++) {
@@ -456,7 +446,7 @@ export function parseProductionDemotionCliArgs(
 // ---------------------------------------------------------------------------
 
 export async function main(
-  argv: ReadonlyArray<string> = process.argv.slice(2),
+  argv: ReadonlyArray<string> = process.argv.slice(2)
 ): Promise<ProductionDemotionReport> {
   const args = parseProductionDemotionCliArgs(argv);
   const { report } = await runProductionDemotionCli(args);
@@ -468,8 +458,7 @@ const isMainEntry = (() => {
   if (!Array.isArray(process.argv)) return false;
   const entry = process.argv[1];
   if (!entry) return false;
-  if (!/superseded-demotion-production-runner\.(ts|js)$/.test(entry))
-    return false;
+  if (!/superseded-demotion-production-runner\.(ts|js)$/.test(entry)) return false;
   try {
     const url = new URL(import.meta.url);
     return url.pathname === entry || url.pathname.endsWith(entry);
@@ -481,7 +470,7 @@ const isMainEntry = (() => {
 if (isMainEntry) {
   main().catch((err) => {
     process.stderr.write(
-      `[production-demotion] error: ${err instanceof Error ? err.message : String(err)}\n`,
+      `[production-demotion] error: ${err instanceof Error ? err.message : String(err)}\n`
     );
     process.exit(1);
   });

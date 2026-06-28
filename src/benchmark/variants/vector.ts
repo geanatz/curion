@@ -64,8 +64,8 @@
 import { tokenize } from "../../retrieval/lexical.js";
 import type {
   LexicalCandidate,
-  LexicalScoredCandidate,
   LexicalRankingOptions,
+  LexicalScoredCandidate,
 } from "../../retrieval/lexical.js";
 
 // ---------------------------------------------------------------------------
@@ -283,7 +283,7 @@ export class HashedBagOfWordsEmbedder implements VectorEmbedder {
 export function embedHashedBagOfWords(
   text: string,
   dim: number,
-  idf: Map<string, number> | null = null,
+  idf: Map<string, number> | null = null
 ): VectorEmbedding {
   const values = new Float64Array(dim);
   const safeText = typeof text === "string" ? text : "";
@@ -326,10 +326,7 @@ export function embedHashedBagOfWords(
  * the result is 0 (cosine is undefined; we define it to 0 for
  * ranker purposes, matching the "no overlap" semantics).
  */
-export function cosineSimilarity(
-  a: ReadonlyArray<number>,
-  b: ReadonlyArray<number>,
-): number {
+export function cosineSimilarity(a: ReadonlyArray<number>, b: ReadonlyArray<number>): number {
   if (a.length !== b.length) {
     // We do not throw; the ranker uses 0 for malformed inputs.
     // Length mismatch on dense vectors is a real bug, but the
@@ -394,7 +391,7 @@ export const DEFAULT_VECTOR_TOP_K = 5;
 export function rankVector(
   query: string,
   candidates: ReadonlyArray<LexicalCandidate>,
-  options: VectorRankingOptions = {},
+  options: VectorRankingOptions = {}
 ): LexicalScoredCandidate[] {
   const threshold = options.threshold ?? DEFAULT_VECTOR_THRESHOLD;
   const topK = options.topK ?? DEFAULT_VECTOR_TOP_K;
@@ -419,10 +416,7 @@ export function rankVector(
   // the "match text".
   const candidateTexts = candidates.map((c) => {
     const text = typeof c.text === "string" ? c.text : "";
-    const tagPart =
-      Array.isArray(c.tags) && c.tags.length > 0
-        ? ` ${c.tags.join(" ")}`
-        : "";
+    const tagPart = Array.isArray(c.tags) && c.tags.length > 0 ? ` ${c.tags.join(" ")}` : "";
     return `${text}${tagPart}`;
   });
   const candidateVectors = embedder.embedBatch(candidateTexts);

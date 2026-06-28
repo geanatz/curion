@@ -629,13 +629,13 @@ export interface ParaphraseRecoveryReport {
  *     `nearMissCurrentCluster` label.
  */
 function evaluateEscape(
-  escape: ParaphraseRecoveryEscape,
+  escapeDecision: ParaphraseRecoveryEscape,
   p: NoAnswerPolicyPerQuery
 ): { fires: boolean; reason: string } {
-  if (escape.active === false) {
+  if (escapeDecision.active === false) {
     return { fires: false, reason: "escape-inactive" };
   }
-  switch (escape.kind) {
+  switch (escapeDecision.kind) {
     case "none":
       return { fires: false, reason: "escape-none" };
     case "paraphrase-detector-rank1-or-hit5": {
@@ -662,10 +662,10 @@ function evaluateEscape(
     case "paraphrase-detector-loose-threshold": {
       const isParaphrase =
         p.signals.isParaphraseTrap === true || p.signals.isAdversarialParaphrase === true;
-      const inBand = p.signals.topScore >= escape.lowerBound;
+      const inBand = p.signals.topScore >= escapeDecision.lowerBound;
       return {
         fires: isParaphrase && inBand,
-        reason: `escape-detector-loose-threshold-${escape.lowerBound}(${
+        reason: `escape-detector-loose-threshold-${escapeDecision.lowerBound}(${
           isParaphrase ? "para" : "no-para"
         },${inBand ? "in-band" : "out-of-band"})`,
       };

@@ -86,41 +86,25 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import {
-  type AbstentionSignals,
-  type QueryEval,
-  evaluateQuery,
-} from "./metrics.js";
-import {
-  type PolicyDecision,
-  type PolicyMetrics,
-} from "./abstention-policy.js";
-import { runAbstentionPolicy } from "./abstention-policy-runner.js";
+import { DEFAULT_TOP_K, type LexicalScoredCandidate, rankLexical } from "../retrieval/lexical.js";
 import { buildAbstentionAuditPerQuery } from "./abstention-audit-runner.js";
+import { runAbstentionPolicy } from "./abstention-policy-runner.js";
+import type { PolicyDecision, PolicyMetrics } from "./abstention-policy.js";
 import { BENCHMARK_RECORDS } from "./corpus.js";
-import { type BenchmarkQuery } from "./queries.js";
+import { HELD_OUT_QUERIES } from "./held-out-queries.js";
+import { type AbstentionSignals, type QueryEval, evaluateQuery } from "./metrics.js";
+import type { BenchmarkQuery } from "./queries.js";
 import { buildCandidates } from "./retrieval-runner.js";
-import { rankLexical, DEFAULT_TOP_K, type LexicalScoredCandidate } from "../retrieval/lexical.js";
+import type { DenseEmbedder, EmbedderMetadata } from "./variants/dense-embedder.js";
 import {
+  DEFAULT_HYBRID_THRESHOLD,
+  DEFAULT_RRF_K,
+  type HybridAsyncRankResult,
+  type HybridScoredCandidate,
+  type RrfContributor,
   rankHybrid,
   rankHybridAsync,
-  DEFAULT_RRF_K,
-  DEFAULT_HYBRID_THRESHOLD,
-  type HybridAsyncRankResult,
-  type RrfContributor,
-  type HybridScoredCandidate,
 } from "./variants/hybrid.js";
-import {
-  type DenseEmbedder,
-  type EmbedderMetadata,
-} from "./variants/dense-embedder.js";
-import {
-  HELD_OUT_QUERIES,
-  HELD_OUT_QUERY_IDS,
-  HELD_OUT_TOTAL_COUNT,
-  HELD_OUT_MIN_FAMILY_COUNTS,
-  HELD_OUT_MIN_NO_ANSWER_COUNT,
-} from "./held-out-queries.js";
 
 // ---------------------------------------------------------------------------
 // Frozen transfer baselines
@@ -250,10 +234,7 @@ export const PRIMARY_POLICY_ID = "moderate-score-0.40";
  * async-real-MiniLM path (or the deterministic
  * stub if `--embedder stub-dense` is passed).
  */
-export type HeldOutVariant =
-  | "lexical"
-  | "hybrid"
-  | "hybrid-dense";
+export type HeldOutVariant = "lexical" | "hybrid" | "hybrid-dense";
 
 // ---------------------------------------------------------------------------
 // Held-out evaluation shapes
@@ -403,22 +384,21 @@ export interface HeldOutValidationReport {
    *  surfaced on the artifact so a reviewer
    *  can read per-family damage on the
    *  held-out set without re-running. */
-  perFamilyByPolicy: Readonly<Record<
-    string,
-    ReadonlyArray<HeldOutPerFamilyRow>
-  >>;
+  perFamilyByPolicy: Readonly<Record<string, ReadonlyArray<HeldOutPerFamilyRow>>>;
   /** Per-query FP / FN lists, keyed by
    *  policy id. The block is on the artifact
    *  for the four primary policies so a
    *  reviewer can read per-query damage on
    *  the held-out set without re-running. */
-  perQueryFpFnByPolicy: Readonly<Record<
-    string,
-    {
-      falsePositives: ReadonlyArray<HeldOutFailingQuery>;
-      falseNegatives: ReadonlyArray<HeldOutFailingQuery>;
-    }
-  >>;
+  perQueryFpFnByPolicy: Readonly<
+    Record<
+      string,
+      {
+        falsePositives: ReadonlyArray<HeldOutFailingQuery>;
+        falseNegatives: ReadonlyArray<HeldOutFailingQuery>;
+      }
+    >
+  >;
   /** Per-query input the policy evaluator
    *  consumed. The block is on the artifact
    *  so a reviewer can re-derive any policy
@@ -517,11 +497,7 @@ export async function runHeldOutEvals(args: {
           weight: c.weight,
         }));
       } else {
-        const labels: Array<"lexical" | "fts5" | "vector"> = [
-          "lexical",
-          "fts5",
-          "vector",
-        ];
+        const labels: Array<"lexical" | "fts5" | "vector"> = ["lexical", "fts5", "vector"];
         contributors = labels.map((src) => ({
           source: src,
           rank: null,
@@ -534,9 +510,7 @@ export async function runHeldOutEvals(args: {
       // hybrid-dense (async). The function
       // throws if `embedder` is undefined.
       if (!embedder) {
-        throw new Error(
-          "runHeldOutEvals: hybrid-dense requires a `embedder` argument",
-        );
+        throw new Error("runHeldOutEvals: hybrid-dense requires a `embedder` argument");
       }
       // The held-out path uses the same
       // `rankHybridAsync` the dev-set runner
@@ -548,27 +522,23 @@ export async function runHeldOutEvals(args: {
       // populate the dense contributor), so we
       // do not need a separate dense
       // forward-pass call.
-      const hybridRes: HybridAsyncRankResult = await rankHybridAsync(
-        q.query,
-        candidates,
-        {
-          k: hybridK,
-          threshold,
-          topK,
-          useDenseVector: true,
-          denseVectorEmbedder: embedder,
-          // The held-out runner embeds the user
-          // query string. The `kind: "query"`
-          // flag tells the Qwen3 embedder to
-          // apply the
-          // `Instruct: <task>\nQuery:<query>`
-          // instruction prefix on the query side
-          // (and unprefixed text on the document
-          // side). The fallback embedders
-          // (stub, MiniLM) ignore the flag.
-          denseKind: "query",
-        },
-      );
+      const hybridRes: HybridAsyncRankResult = await rankHybridAsync(q.query, candidates, {
+        k: hybridK,
+        threshold,
+        topK,
+        useDenseVector: true,
+        denseVectorEmbedder: embedder,
+        // The held-out runner embeds the user
+        // query string. The `kind: "query"`
+        // flag tells the Qwen3 embedder to
+        // apply the
+        // `Instruct: <task>\nQuery:<query>`
+        // instruction prefix on the query side
+        // (and unprefixed text on the document
+        // side). The fallback embedders
+        // (stub, MiniLM) ignore the flag.
+        denseKind: "query",
+      });
       ranked = hybridRes.hits.map((c) => ({ id: c.id, score: c.score }));
       topHybridScore = ranked.length > 0 ? ranked[0]!.score : null;
       if (hybridRes.hits.length > 0) {
@@ -604,7 +574,7 @@ export async function runHeldOutEvals(args: {
       q.expectedIds,
       q.currentTruthIds,
       topIds,
-      topScores,
+      topScores
     );
     if (variant === "hybrid" || variant === "hybrid-dense") {
       if (contributors) eval_.hybridContributors = contributors;
@@ -699,32 +669,25 @@ export function buildHeldOutReport(args: {
   // table stays readable; the ablation grid
   // is reported on the artifact for
   // completeness without a transfer block.
-  const heldOutPolicies: HeldOutPolicyMetrics[] = policyReport.policies.map(
-    (row) => {
-      const transfer = computeTransferDelta(row);
-      const out: HeldOutPolicyMetrics = {
-        ...row,
-        description: row.description,
-        category: row.category,
-        ...(transfer ? { transfer } : {}),
-      };
-      return out;
-    },
-  );
+  const heldOutPolicies: HeldOutPolicyMetrics[] = policyReport.policies.map((row) => {
+    const transfer = computeTransferDelta(row);
+    const out: HeldOutPolicyMetrics = {
+      ...row,
+      description: row.description,
+      category: row.category,
+      ...(transfer ? { transfer } : {}),
+    };
+    return out;
+  });
   // Build the per-family positive abstention
   // breakdown for each policy. The block is
   // surfaced on the artifact for the four
   // primary policies so a reviewer can read
   // per-family damage on the held-out set
   // without re-running.
-  const perFamilyByPolicy: Record<
-    string,
-    HeldOutPerFamilyRow[]
-  > = {};
+  const perFamilyByPolicy: Record<string, HeldOutPerFamilyRow[]> = {};
   for (const row of policyReport.policies) {
-    const familyRows: HeldOutPerFamilyRow[] = Object.entries(
-      row.positiveAbstainedByFamily,
-    )
+    const familyRows: HeldOutPerFamilyRow[] = Object.entries(row.positiveAbstainedByFamily)
       .map(([family, slot]) => ({
         family,
         total: slot.total,
@@ -751,12 +714,10 @@ export function buildHeldOutReport(args: {
   // artifact's `decisions` array mirrors the
   // dev-set policy report's `decisions`
   // block.
-  const decisions: HeldOutPolicyDecisions[] = policyReport.decisions.map(
-    (d) => ({
-      policyId: d.policyId,
-      decisions: d.decisions,
-    }),
-  );
+  const decisions: HeldOutPolicyDecisions[] = policyReport.decisions.map((d) => ({
+    policyId: d.policyId,
+    decisions: d.decisions,
+  }));
   // Per-query input block. The held-out
   // artifact's `perQuery` array mirrors the
   // dev-set policy report's `perQuery` block.
@@ -795,9 +756,7 @@ export function buildHeldOutReport(args: {
  * transfer block is restricted to the four
  * primary policies).
  */
-function computeTransferDelta(
-  row: PolicyMetrics,
-): HeldOutPolicyMetrics["transfer"] | null {
+function computeTransferDelta(row: PolicyMetrics): HeldOutPolicyMetrics["transfer"] | null {
   const baseline = FROZEN_TRANSFER_BASELINES[row.policyId];
   if (!baseline) return null;
   // The deltas are held-out metric minus
@@ -807,18 +766,11 @@ function computeTransferDelta(
   // raw difference for P / R / F1).
   return {
     tnrDelta: round2(row.noAnswerAbstainedRate * 100 - baseline.tnrPct),
-    posAbstDelta: round2(
-      row.positiveAbstainedRate * 100 - baseline.posAbstPct,
-    ),
-    hit5RetainedDelta: round2(
-      row.hitAt5RetainedRate * 100 - baseline.hit5RetainedPct,
-    ),
-    rank1RetainedDelta: round2(
-      row.rank1RetainedRate * 100 - baseline.rank1RetainedPct,
-    ),
+    posAbstDelta: round2(row.positiveAbstainedRate * 100 - baseline.posAbstPct),
+    hit5RetainedDelta: round2(row.hitAt5RetainedRate * 100 - baseline.hit5RetainedPct),
+    rank1RetainedDelta: round2(row.rank1RetainedRate * 100 - baseline.rank1RetainedPct),
     currentTruthAt1RetainedDelta: round2(
-      row.currentTruthAt1RetainedRate * 100 -
-        baseline.currentTruthAt1RetainedPct,
+      row.currentTruthAt1RetainedRate * 100 - baseline.currentTruthAt1RetainedPct
     ),
     precisionDelta: round2(row.precision - baseline.precision),
     recallDelta: round2(row.recall - baseline.recall),
@@ -881,10 +833,7 @@ const ARTIFACT_FILE_PREFIX = "retrieval-held-out-validation";
  * replaced by `-` so the filename is safe
  * across shells.
  */
-export function writeHeldOutReport(
-  report: HeldOutValidationReport,
-  dir: string,
-): string {
+export function writeHeldOutReport(report: HeldOutValidationReport, dir: string): string {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   }
@@ -914,9 +863,7 @@ export function writeHeldOutReport(
  * string. The CLI entry point writes the
  * string to stdout.
  */
-export function formatHeldOutReport(
-  report: HeldOutValidationReport,
-): string {
+export function formatHeldOutReport(report: HeldOutValidationReport): string {
   const lines: string[] = [];
   lines.push("=== curion retrieval held-out validation ===");
   lines.push(`generated at: ${report.generatedAt}`);
@@ -931,7 +878,7 @@ export function formatHeldOutReport(
   if (report.meta.embedder) {
     const m = report.meta.embedder;
     lines.push(
-      `  embedder:          ${m.backend} / ${m.modelId ?? "(no model)"} / dim=${m.dim} / status=${m.status}`,
+      `  embedder:          ${m.backend} / ${m.modelId ?? "(no model)"} / dim=${m.dim} / status=${m.status}`
     );
   }
   lines.push(`  corpus count:      ${report.meta.corpusCount}`);
@@ -941,46 +888,26 @@ export function formatHeldOutReport(
   lines.push("");
   // ---- READ THIS FIRST block ----
   lines.push("READ THIS FIRST: this is a BENCHMARK-ONLY prospective probe.");
-  lines.push(
-    "  The held-out validation evaluates the FROZEN multi-signal",
-  );
-  lines.push(
-    "  abstention policies on a NEWLY authored query slice that",
-  );
-  lines.push(
-    "  targets the SAME 132-record corpus the dev set targets.",
-  );
-  lines.push(
-    "  The policies are NOT re-tuned on the held-out results.",
-  );
-  lines.push(
-    "  The held-out set is a 28-query prospective probe; a 1-query",
-  );
-  lines.push(
-    "  swing on a small family is a 3-4 pp swing on the rate.",
-  );
-  lines.push(
-    "  A positive transfer delta does NOT mean 'the policy",
-  );
-  lines.push(
-    "  generalises to a new corpus'; it means 'the policy does",
-  );
-  lines.push(
-    "  not over-fit to the dev set's specific query phrasing'.",
-  );
+  lines.push("  The held-out validation evaluates the FROZEN multi-signal");
+  lines.push("  abstention policies on a NEWLY authored query slice that");
+  lines.push("  targets the SAME 132-record corpus the dev set targets.");
+  lines.push("  The policies are NOT re-tuned on the held-out results.");
+  lines.push("  The held-out set is a 28-query prospective probe; a 1-query");
+  lines.push("  swing on a small family is a 3-4 pp swing on the rate.");
+  lines.push("  A positive transfer delta does NOT mean 'the policy");
+  lines.push("  generalises to a new corpus'; it means 'the policy does");
+  lines.push("  not over-fit to the dev set's specific query phrasing'.");
   lines.push("");
   // ---- Headline transfer table (four primary policies) ----
   lines.push("--- headline transfer (primary policies) ---");
   lines.push(
-    "  policy                       held-out TNR%  posAbst%  hit5Ret%  rank1Ret%  curT1Ret%  P     R     F1   |  TNRΔ  posAbstΔ  hit5Δ  rank1Δ  curT1Δ  PΔ   RΔ   F1Δ",
+    "  policy                       held-out TNR%  posAbst%  hit5Ret%  rank1Ret%  curT1Ret%  P     R     F1   |  TNRΔ  posAbstΔ  hit5Δ  rank1Δ  curT1Δ  PΔ   RΔ   F1Δ"
   );
   for (const policyId of PRIMARY_POLICY_IDS) {
     const row = report.policies.find((p) => p.policyId === policyId);
     if (!row) continue;
     const transfer = row.transfer;
-    const policyLabel = row.policyId.length > 28
-      ? row.policyId.slice(0, 25) + "..."
-      : row.policyId;
+    const policyLabel = row.policyId.length > 28 ? row.policyId.slice(0, 25) + "..." : row.policyId;
     lines.push(
       `  ${policyLabel.padEnd(28)}` +
         ` ${(row.noAnswerAbstainedRate * 100).toFixed(1).padStart(6)}` +
@@ -992,39 +919,25 @@ export function formatHeldOutReport(
         `   |  ` +
         (transfer
           ? `${signedPp(transfer.tnrDelta).padStart(5)}  ${signedPp(transfer.posAbstDelta).padStart(5)}     ${signedPp(transfer.hit5RetainedDelta).padStart(4)}  ${signedPp(transfer.rank1RetainedDelta).padStart(4)}  ${signedPp(transfer.currentTruthAt1RetainedDelta).padStart(4)}   ${signedPp(transfer.precisionDelta).padStart(4)} ${signedPp(transfer.recallDelta).padStart(4)} ${signedPp(transfer.f1Delta).padStart(4)}`
-          : "    -       -        -      -       -       -    -    -"),
+          : "    -       -        -      -       -       -    -    -")
     );
   }
   lines.push("");
-  lines.push(
-    "  Transfer deltas (held-out minus frozen baseline) are in",
-  );
-  lines.push(
-    "    percentage points (rates) or raw difference (P / R / F1).",
-  );
-  lines.push(
-    "    Positive TNR / hit5 / rank1 / currentTruth / P / R / F1",
-  );
-  lines.push(
-    "    deltas are improvements. Negative posAbst delta is an",
-  );
-  lines.push(
-    "    improvement (less damage on answerable queries).",
-  );
+  lines.push("  Transfer deltas (held-out minus frozen baseline) are in");
+  lines.push("    percentage points (rates) or raw difference (P / R / F1).");
+  lines.push("    Positive TNR / hit5 / rank1 / currentTruth / P / R / F1");
+  lines.push("    deltas are improvements. Negative posAbst delta is an");
+  lines.push("    improvement (less damage on answerable queries).");
   lines.push("");
   // ---- Per-family positive abstention for the primary policy ----
-  const primary = report.policies.find(
-    (p) => p.policyId === PRIMARY_POLICY_ID,
-  );
+  const primary = report.policies.find((p) => p.policyId === PRIMARY_POLICY_ID);
   if (primary) {
-    lines.push(
-      `--- per-family positive abstention (primary: ${PRIMARY_POLICY_ID}) ---`,
-    );
+    lines.push(`--- per-family positive abstention (primary: ${PRIMARY_POLICY_ID}) ---`);
     lines.push("  family           total  abstained  rate");
     const rows = report.perFamilyByPolicy[PRIMARY_POLICY_ID] ?? [];
     for (const r of rows) {
       lines.push(
-        `  ${r.family.padEnd(16)} ${String(r.total).padStart(4)}    ${String(r.abstained).padStart(4)}     ${(r.rate * 100).toFixed(1).padStart(4)}%`,
+        `  ${r.family.padEnd(16)} ${String(r.total).padStart(4)}    ${String(r.abstained).padStart(4)}     ${(r.rate * 100).toFixed(1).padStart(4)}%`
       );
     }
     lines.push("");
@@ -1034,7 +947,7 @@ export function formatHeldOutReport(
     const fpFn = report.perQueryFpFnByPolicy[PRIMARY_POLICY_ID];
     if (fpFn) {
       lines.push(
-        `--- recommended policy: false positives (positive queries wrongly abstained) ---`,
+        `--- recommended policy: false positives (positive queries wrongly abstained) ---`
       );
       if (fpFn.falsePositives.length === 0) {
         lines.push("  (none)");
@@ -1045,7 +958,7 @@ export function formatHeldOutReport(
       }
       lines.push("");
       lines.push(
-        `--- recommended policy: false negatives (no-answer queries wrongly retained) ---`,
+        `--- recommended policy: false negatives (no-answer queries wrongly retained) ---`
       );
       if (fpFn.falseNegatives.length === 0) {
         lines.push("  (none)");
@@ -1059,42 +972,18 @@ export function formatHeldOutReport(
   }
   // ---- Honest reading block ----
   lines.push("--- honest reading ---");
-  lines.push(
-    "  The held-out set is a 28-query prospective probe. The",
-  );
-  lines.push(
-    "  headline numbers carry 1-query granularity; a 1-query",
-  );
-  lines.push(
-    "  swing on a small family is a 3-4 pp swing on the rate.",
-  );
-  lines.push(
-    "  A reviewer who wants to read the headline transfer",
-  );
-  lines.push(
-    "  table should keep the sample size in mind: the",
-  );
-  lines.push(
-    "  held-out set is small enough that a 1-query swing",
-  );
-  lines.push(
-    "  in either direction can move the per-policy TNR /",
-  );
-  lines.push(
-    "  hit@5 retained number by several percentage points.",
-  );
-  lines.push(
-    "  The right reading of a +X pp transfer delta is",
-  );
-  lines.push(
-    "  'the policy does not catastrophically over-fit to the",
-  );
-  lines.push(
-    "  dev set's specific query phrasing', not 'the policy",
-  );
-  lines.push(
-    "  generalises to a new corpus' (see limitations).",
-  );
+  lines.push("  The held-out set is a 28-query prospective probe. The");
+  lines.push("  headline numbers carry 1-query granularity; a 1-query");
+  lines.push("  swing on a small family is a 3-4 pp swing on the rate.");
+  lines.push("  A reviewer who wants to read the headline transfer");
+  lines.push("  table should keep the sample size in mind: the");
+  lines.push("  held-out set is small enough that a 1-query swing");
+  lines.push("  in either direction can move the per-policy TNR /");
+  lines.push("  hit@5 retained number by several percentage points.");
+  lines.push("  The right reading of a +X pp transfer delta is");
+  lines.push("  'the policy does not catastrophically over-fit to the");
+  lines.push("  dev set's specific query phrasing', not 'the policy");
+  lines.push("  generalises to a new corpus' (see limitations).");
   lines.push("");
   // ---- Limitations block ----
   lines.push("--- limitations (research-only) ---");

@@ -106,8 +106,7 @@ export function extractRank1MissesFromLog(logText: string): ExtractedMiss[] {
   // spaces and the `[family]` block is
   // surrounded by `[` and `]`.
   const re = /^\s{2,}\[([a-z\-]+)\]\s+([a-z0-9\-]+)\s*$/gm;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(logText)) !== null) {
+  for (const m of logText.matchAll(re)) {
     const family = m[1]!;
     const queryId = m[2]!;
     if (family === "no-answer") continue;

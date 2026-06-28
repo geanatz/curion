@@ -53,91 +53,74 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  rankLexical,
   DEFAULT_RELEVANCE_THRESHOLD,
   DEFAULT_TOP_K,
   type LexicalCandidate,
   type LexicalScoredCandidate,
+  rankLexical,
 } from "../retrieval/lexical.js";
-import { BENCHMARK_RECORDS, type BenchmarkMemoryRecord } from "./corpus.js";
 import {
-  BENCHMARK_QUERIES,
-  type BenchmarkQuery,
-  type BenchmarkQueryFamily,
-} from "./queries.js";
+  buildAbstentionAuditPerQuery,
+  formatAbstentionAuditReport,
+  runAbstentionAudit,
+  writeAbstentionAuditReport,
+} from "./abstention-audit-runner.js";
+import type { AbstentionAuditConfig, AbstentionAuditReport } from "./abstention-audit.js";
 import {
-  aggregateMetrics,
-  aggregateOrientationMetrics,
-  evaluateQuery,
-  type BenchmarkMetrics,
-  type QueryEval,
-  type OrientationMetrics,
-} from "./metrics.js";
+  type AbstentionPolicyConfig,
+  type AbstentionPolicyReport,
+  formatAbstentionPolicyReport,
+  runAbstentionPolicy,
+  writeAbstentionPolicyReport,
+} from "./abstention-policy-runner.js";
+import { ANSWER_QUALITY_DISABLED_LABEL, buildAnswerQualityScaffold } from "./answer-quality.js";
 import {
-  buildAnswerQualityScaffold,
-  ANSWER_QUALITY_DISABLED_LABEL,
-  type AnswerQualityScaffold,
-} from "./answer-quality.js";
-import {
-  rankFts5,
-  DEFAULT_FTS5_THRESHOLD,
-  type Fts5RankingOptions,
-} from "./variants/fts5.js";
-import {
-  rankVector,
-  DEFAULT_VECTOR_THRESHOLD,
-  type VectorRankingOptions,
-} from "./variants/vector.js";
-import {
-  rankHybrid,
-  rankHybridAsync,
-  DEFAULT_RRF_K,
-  DEFAULT_HYBRID_THRESHOLD,
-  DEFAULT_HYBRID_TOP_K,
-  type HybridRankingOptions,
-  type HybridScoredCandidate,
-  type RrfContributor,
-  type HybridAsyncRankResult,
-} from "./variants/hybrid.js";
-import {
-  rankDenseVectorWithMetadataAsync,
-  DEFAULT_DENSE_VECTOR_THRESHOLD,
-  type DenseVectorRankingOptions,
-} from "./variants/dense-vector.js";
-import {
-  createDenseEmbedder,
-  type DenseEmbedder,
-  type EmbedderMetadata,
-} from "./variants/dense-embedder.js";
-import {
+  type CalibrationConfig,
+  type CalibrationReport,
+  type CalibrationVariantResult,
   DEFAULT_CALIBRATION_SWEEP,
   DEFAULT_DENSE_CALIBRATION_SWEEP,
   DEFAULT_HYBRID_DENSE_CALIBRATION_SWEEP,
   buildSweepForVariant,
-  pickBestRow,
   computeContributorSupport,
-  type CalibrationConfig,
-  type CalibrationReport,
-  type CalibrationVariantResult,
+  pickBestRow,
 } from "./calibration.js";
-import { buildHybridPerFamilyDelta, type HybridPerFamilyDeltaRow } from "./metrics.js";
+import { BENCHMARK_RECORDS, type BenchmarkMemoryRecord } from "./corpus.js";
 import {
-  runAbstentionAudit,
-  writeAbstentionAuditReport,
-  formatAbstentionAuditReport,
-  buildAbstentionAuditPerQuery,
-} from "./abstention-audit-runner.js";
-import type {
-  AbstentionAuditConfig,
-  AbstentionAuditReport,
-} from "./abstention-audit.js";
+  type BenchmarkMetrics,
+  type QueryEval,
+  aggregateMetrics,
+  aggregateOrientationMetrics,
+  evaluateQuery,
+} from "./metrics.js";
+import { type HybridPerFamilyDeltaRow, buildHybridPerFamilyDelta } from "./metrics.js";
+import { BENCHMARK_QUERIES, type BenchmarkQuery, type BenchmarkQueryFamily } from "./queries.js";
 import {
-  runAbstentionPolicy,
-  writeAbstentionPolicyReport,
-  formatAbstentionPolicyReport,
-  type AbstentionPolicyConfig,
-  type AbstentionPolicyReport,
-} from "./abstention-policy-runner.js";
+  type DenseEmbedder,
+  type EmbedderMetadata,
+  createDenseEmbedder,
+} from "./variants/dense-embedder.js";
+import {
+  DEFAULT_DENSE_VECTOR_THRESHOLD,
+  type DenseVectorRankingOptions,
+  rankDenseVectorWithMetadataAsync,
+} from "./variants/dense-vector.js";
+import { DEFAULT_FTS5_THRESHOLD, type Fts5RankingOptions, rankFts5 } from "./variants/fts5.js";
+import {
+  DEFAULT_HYBRID_THRESHOLD,
+  DEFAULT_RRF_K,
+  type HybridAsyncRankResult,
+  type HybridRankingOptions,
+  type HybridScoredCandidate,
+  type RrfContributor,
+  rankHybrid,
+  rankHybridAsync,
+} from "./variants/hybrid.js";
+import {
+  DEFAULT_VECTOR_THRESHOLD,
+  type VectorRankingOptions,
+  rankVector,
+} from "./variants/vector.js";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -394,11 +377,7 @@ export interface FailureEntry {
  */
 export interface RetrievalBenchmarkReport {
   generatedAt: string;
-  variant:
-    | "lexical-baseline"
-    | "fts5-benchmark"
-    | "vector-benchmark"
-    | "hybrid-benchmark";
+  variant: "lexical-baseline" | "fts5-benchmark" | "vector-benchmark" | "hybrid-benchmark";
   config: {
     threshold: number;
     topK: number;
@@ -453,9 +432,7 @@ export interface RetrievalBenchmarkReport {
  */
 export interface DenseRetrievalBenchmarkReport {
   generatedAt: string;
-  variant:
-    | "vector-dense-benchmark"
-    | "hybrid-dense-benchmark";
+  variant: "vector-dense-benchmark" | "hybrid-dense-benchmark";
   config: {
     threshold: number;
     topK: number;
@@ -615,8 +592,7 @@ export function parseRetrievalCli(argv: string[]): RetrievalBenchmarkOptions {
     } else if (a === "--artifacts" && argv[i + 1]) {
       opts.artifactsDir = argv[++i]!;
     } else if (a === "--only-family" && argv[i + 1]) {
-      opts.onlyFamilies = argv[++i]!
-        .split(",")
+      opts.onlyFamilies = argv[++i]!.split(",")
         .map((s) => s.trim())
         .filter(Boolean);
     } else if (a === "--variant" && argv[i + 1]) {
@@ -632,7 +608,7 @@ export function parseRetrievalCli(argv: string[]): RetrievalBenchmarkOptions {
         v !== "all-dense"
       ) {
         throw new Error(
-          `--variant must be one of lexical|fts5|vector|hybrid|all|vector-dense|hybrid-dense|all-dense (got "${v}")`,
+          `--variant must be one of lexical|fts5|vector|hybrid|all|vector-dense|hybrid-dense|all-dense (got "${v}")`
         );
       }
       opts.variant = v;
@@ -668,11 +644,14 @@ export function parseRetrievalCli(argv: string[]): RetrievalBenchmarkOptions {
       const cacheDir = argv[++i];
       const prev = opts.denseEmbedderSpec;
       const baseObj: Record<string, unknown> =
-        typeof prev === "object" && prev !== null
-          ? { ...(prev as Record<string, unknown>) }
-          : {};
+        typeof prev === "object" && prev !== null ? { ...(prev as Record<string, unknown>) } : {};
       if (typeof prev === "string") {
-        if (prev === "qwen3" || prev.startsWith("qwen3:") || prev === "qwen3-hf" || prev.startsWith("qwen3-hf:")) {
+        if (
+          prev === "qwen3" ||
+          prev.startsWith("qwen3:") ||
+          prev === "qwen3-hf" ||
+          prev.startsWith("qwen3-hf:")
+        ) {
           baseObj.backend = "qwen3";
         } else if (
           prev === "embeddinggemma" ||
@@ -705,11 +684,14 @@ export function parseRetrievalCli(argv: string[]): RetrievalBenchmarkOptions {
     } else if (a === "--dense-skip") {
       const prev = opts.denseEmbedderSpec;
       const baseObj: Record<string, unknown> =
-        typeof prev === "object" && prev !== null
-          ? { ...(prev as Record<string, unknown>) }
-          : {};
+        typeof prev === "object" && prev !== null ? { ...(prev as Record<string, unknown>) } : {};
       if (typeof prev === "string") {
-        if (prev === "qwen3" || prev.startsWith("qwen3:") || prev === "qwen3-hf" || prev.startsWith("qwen3-hf:")) {
+        if (
+          prev === "qwen3" ||
+          prev.startsWith("qwen3:") ||
+          prev === "qwen3-hf" ||
+          prev.startsWith("qwen3-hf:")
+        ) {
           baseObj.backend = "qwen3";
         } else if (
           prev === "embeddinggemma" ||
@@ -739,9 +721,7 @@ export function parseRetrievalCli(argv: string[]): RetrievalBenchmarkOptions {
     } else if (a === "--hybrid-k" && argv[i + 1]) {
       const n = Number.parseFloat(argv[++i]!);
       if (!Number.isFinite(n) || n <= 0) {
-        throw new Error(
-          `--hybrid-k requires a positive finite number (got "${argv[i]}")`,
-        );
+        throw new Error(`--hybrid-k requires a positive finite number (got "${argv[i]}")`);
       }
       opts.hybridK = n;
     } else if (a === "--calibrate") {
@@ -771,7 +751,7 @@ export function parseRetrievalCli(argv: string[]): RetrievalBenchmarkOptions {
       const d = argv[++i];
       if (d !== "higher-is-better" && d !== "lower-is-better") {
         throw new Error(
-          `--calibrate-direction must be higher-is-better|lower-is-better (got "${d}")`,
+          `--calibrate-direction must be higher-is-better|lower-is-better (got "${d}")`
         );
       }
       // Build a calibration config with the requested
@@ -815,7 +795,7 @@ export function parseRetrievalCli(argv: string[]): RetrievalBenchmarkOptions {
     opts.variant !== "all-dense"
   ) {
     process.stderr.write(
-      `[curion-benchmark] note: --hybrid-k ${opts.hybridK} is ignored for --variant ${opts.variant} (RRF k is only used by hybrid / all runs)\n`,
+      `[curion-benchmark] note: --hybrid-k ${opts.hybridK} is ignored for --variant ${opts.variant} (RRF k is only used by hybrid / all runs)\n`
     );
   }
   // The dense variants (vector-dense / hybrid-dense /
@@ -834,7 +814,7 @@ export function parseRetrievalCli(argv: string[]): RetrievalBenchmarkOptions {
     opts.variant !== "all-dense"
   ) {
     process.stderr.write(
-      `[curion-benchmark] note: --hybrid-k ${opts.hybridK} is ignored for --variant ${opts.variant} (RRF k is only used by hybrid / all runs)\n`,
+      `[curion-benchmark] note: --hybrid-k ${opts.hybridK} is ignored for --variant ${opts.variant} (RRF k is only used by hybrid / all runs)\n`
     );
   }
   return opts;
@@ -891,7 +871,7 @@ function printRetrievalHelp(): void {
       "                         'bge-m3' routes to BgeM3Embedder);",
       "                         --dense-skip only short-circuits init(). The embedder",
       "                         falls back to the deterministic stub at embed time and",
-      "                         reports status: \"skipped\" on the metadata. Useful for CI",
+      '                         reports status: "skipped" on the metadata. Useful for CI',
       "                         without network access.",
       "  --artifacts <path>     Override the JSON report directory.",
       "  --calibrate            Run the abstention / calibration experiment after the regular",
@@ -908,7 +888,7 @@ function printRetrievalHelp(): void {
       "  -h, --help             Show this help.",
       "",
       "Default artifacts directory: <cwd>/.curion/benchmark/",
-    ].join("\n") + "\n",
+    ].join("\n") + "\n"
   );
 }
 
@@ -927,9 +907,7 @@ const ARTIFACT_FILE_PREFIX_COMPARE = "retrieval-compare";
 const ARTIFACT_FILE_PREFIX_COMPARE_DENSE = "retrieval-compare-dense";
 const ARTIFACT_FILE_PREFIX_CALIBRATION = "retrieval-calibration";
 
-export function resolveBenchmarkArtifactsDir(
-  options: RetrievalBenchmarkOptions,
-): string {
+export function resolveBenchmarkArtifactsDir(options: RetrievalBenchmarkOptions): string {
   const root = options.artifactsDir
     ? path.resolve(options.artifactsDir)
     : path.join(process.cwd(), ".curion", ARTIFACT_DIRNAME);
@@ -939,10 +917,7 @@ export function resolveBenchmarkArtifactsDir(
   return root;
 }
 
-export function writeBenchmarkReport(
-  report: RetrievalBenchmarkReport,
-  dir: string,
-): string {
+export function writeBenchmarkReport(report: RetrievalBenchmarkReport, dir: string): string {
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const prefix =
     report.variant === "fts5-benchmark"
@@ -962,10 +937,7 @@ export function writeBenchmarkReport(
  * Write a comparison report (one file, both variants side by
  * side). Used by `--variant all`.
  */
-export function writeComparisonReport(
-  report: ComparisonBenchmarkReport,
-  dir: string,
-): string {
+export function writeComparisonReport(report: ComparisonBenchmarkReport, dir: string): string {
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const filename = `${ARTIFACT_FILE_PREFIX_COMPARE}-${stamp}.json`;
   const full = path.join(dir, filename);
@@ -983,10 +955,7 @@ export function writeComparisonReport(
  * single-variant / comparison report consumers do not pick
  * it up accidentally.
  */
-export function writeCalibrationReport(
-  report: CalibrationReport,
-  dir: string,
-): string {
+export function writeCalibrationReport(report: CalibrationReport, dir: string): string {
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const filename = `${ARTIFACT_FILE_PREFIX_CALIBRATION}-${stamp}.json`;
   const full = path.join(dir, filename);
@@ -1004,7 +973,7 @@ export function writeCalibrationReport(
  */
 export function writeDenseBenchmarkReport(
   report: DenseRetrievalBenchmarkReport,
-  dir: string,
+  dir: string
 ): string {
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const prefix =
@@ -1024,7 +993,7 @@ export function writeDenseBenchmarkReport(
  */
 export function writeDenseComparisonReport(
   report: DenseComparisonBenchmarkReport,
-  dir: string,
+  dir: string
 ): string {
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const filename = `${ARTIFACT_FILE_PREFIX_COMPARE_DENSE}-${stamp}.json`;
@@ -1055,9 +1024,7 @@ function selectQueries(opts: RetrievalBenchmarkOptions): BenchmarkQuery[] {
  * The function is exported so tests can assert on the
  * `LexicalCandidate` shape. It never mutates the input.
  */
-export function buildCandidates(
-  records: ReadonlyArray<BenchmarkMemoryRecord>,
-): LexicalCandidate[] {
+export function buildCandidates(records: ReadonlyArray<BenchmarkMemoryRecord>): LexicalCandidate[] {
   return records.map((r) => {
     const c: LexicalCandidate = { id: r.id, text: r.summary };
     if (r.tags && r.tags.length > 0) c.tags = r.tags;
@@ -1076,7 +1043,7 @@ export function buildCandidates(
  * `ComparisonBenchmarkReport`.
  */
 export function isSingleVariantReport(
-  report: RetrievalBenchmarkReport | ComparisonBenchmarkReport,
+  report: RetrievalBenchmarkReport | ComparisonBenchmarkReport
 ): report is RetrievalBenchmarkReport {
   return Array.isArray((report as RetrievalBenchmarkReport).evals);
 }
@@ -1087,11 +1054,9 @@ export function isSingleVariantReport(
  * report.
  */
 export function isComparisonReport(
-  report: RetrievalBenchmarkReport | ComparisonBenchmarkReport,
+  report: RetrievalBenchmarkReport | ComparisonBenchmarkReport
 ): report is ComparisonBenchmarkReport {
-  return Array.isArray(
-    (report as ComparisonBenchmarkReport).comparison,
-  );
+  return Array.isArray((report as ComparisonBenchmarkReport).comparison);
 }
 
 /**
@@ -1113,12 +1078,12 @@ export function isComparisonReport(
  * project `.curion/curion.sqlite` is NOT touched.
  */
 export function runRetrievalBenchmark(
-  options: RetrievalBenchmarkOptions = {},
+  options: RetrievalBenchmarkOptions = {}
 ): RetrievalBenchmarkReport | ComparisonBenchmarkReport {
   const variant: BenchmarkVariant = options.variant ?? "lexical";
   if (variant === "vector-dense" || variant === "hybrid-dense" || variant === "all-dense") {
     throw new Error(
-      `runRetrievalBenchmark: variant "${variant}" is async-only; use runDenseRetrievalBenchmark`,
+      `runRetrievalBenchmark: variant "${variant}" is async-only; use runDenseRetrievalBenchmark`
     );
   }
   if (variant === "all") {
@@ -1149,7 +1114,7 @@ export function runRetrievalBenchmark(
  * embedder lifecycle in the dense runner.
  */
 async function resolveDenseEmbedder(
-  options: RetrievalBenchmarkOptions,
+  options: RetrievalBenchmarkOptions
 ): Promise<{ embedder: DenseEmbedder; spec: string }> {
   if (options.denseEmbedder) {
     return { embedder: options.denseEmbedder, spec: "caller-supplied" };
@@ -1177,7 +1142,7 @@ async function resolveDenseEmbedder(
 async function runSingleDenseVariant(
   variant: "vector-dense" | "hybrid-dense",
   options: RetrievalBenchmarkOptions,
-  embedder: DenseEmbedder,
+  embedder: DenseEmbedder
 ): Promise<DenseRetrievalBenchmarkReport> {
   const queries = selectQueries(options);
   const candidates = buildCandidates(BENCHMARK_RECORDS);
@@ -1189,9 +1154,7 @@ async function runSingleDenseVariant(
   // is 0 to mirror the FTS5 / vector-hash convention.
   const threshold =
     options.threshold ??
-    (variant === "vector-dense"
-      ? DEFAULT_DENSE_VECTOR_THRESHOLD
-      : DEFAULT_HYBRID_THRESHOLD);
+    (variant === "vector-dense" ? DEFAULT_DENSE_VECTOR_THRESHOLD : DEFAULT_HYBRID_THRESHOLD);
   const evals: QueryEval[] = [];
   for (const q of queries) {
     let ranked: LexicalScoredCandidate[];
@@ -1216,17 +1179,13 @@ async function runSingleDenseVariant(
       ranked = dense.hits;
     } else {
       // hybrid-dense
-      const hybridRes: HybridAsyncRankResult = await rankHybridAsync(
-        q.query,
-        candidates,
-        {
-          k: options.hybridK ?? DEFAULT_RRF_K,
-          threshold,
-          topK,
-          useDenseVector: true,
-          denseVectorEmbedder: embedder,
-        } satisfies HybridRankingOptions,
-      );
+      const hybridRes: HybridAsyncRankResult = await rankHybridAsync(q.query, candidates, {
+        k: options.hybridK ?? DEFAULT_RRF_K,
+        threshold,
+        topK,
+        useDenseVector: true,
+        denseVectorEmbedder: embedder,
+      } satisfies HybridRankingOptions);
       ranked = hybridRes.hits.map((c) => ({ id: c.id, score: c.score }));
       topHybridScore = ranked.length > 0 ? ranked[0]!.score : null;
       if (hybridRes.hits.length > 0) {
@@ -1265,7 +1224,7 @@ async function runSingleDenseVariant(
       q.expectedIds,
       q.currentTruthIds,
       topIds,
-      topScores,
+      topScores
     );
     if (variant === "hybrid-dense") {
       if (contributors) eval_.hybridContributors = contributors;
@@ -1290,9 +1249,7 @@ async function runSingleDenseVariant(
       reason: e.reason,
     }));
   const variantLabel: DenseRetrievalBenchmarkReport["variant"] =
-    variant === "vector-dense"
-      ? "vector-dense-benchmark"
-      : "hybrid-dense-benchmark";
+    variant === "vector-dense" ? "vector-dense-benchmark" : "hybrid-dense-benchmark";
   const config: DenseRetrievalBenchmarkReport["config"] = {
     threshold,
     topK,
@@ -1326,7 +1283,7 @@ async function runSingleDenseVariant(
       metrics,
       baselines.lexical,
       baselines.fts5,
-      baselines.vector,
+      baselines.vector
     );
   }
   return report;
@@ -1360,20 +1317,12 @@ async function runSingleDenseVariant(
  *     shape is byte-stable.
  */
 export async function runDenseRetrievalBenchmark(
-  options: RetrievalBenchmarkOptions = {},
-): Promise<
-  | DenseRetrievalBenchmarkReport
-  | DenseComparisonBenchmarkReport
-  | CalibrationReport
-> {
+  options: RetrievalBenchmarkOptions = {}
+): Promise<DenseRetrievalBenchmarkReport | DenseComparisonBenchmarkReport | CalibrationReport> {
   const variant: BenchmarkVariant = options.variant ?? "vector-dense";
-  if (
-    variant !== "vector-dense" &&
-    variant !== "hybrid-dense" &&
-    variant !== "all-dense"
-  ) {
+  if (variant !== "vector-dense" && variant !== "hybrid-dense" && variant !== "all-dense") {
     throw new Error(
-      `runDenseRetrievalBenchmark: variant must be one of vector-dense|hybrid-dense|all-dense (got "${variant}")`,
+      `runDenseRetrievalBenchmark: variant must be one of vector-dense|hybrid-dense|all-dense (got "${variant}")`
     );
   }
   // The dense calibration experiment is supported for
@@ -1389,23 +1338,11 @@ export async function runDenseRetrievalBenchmark(
   }
   const { embedder } = await resolveDenseEmbedder(options);
   if (variant === "all-dense") {
-    const vectorDense = await runSingleDenseVariant(
-      "vector-dense",
-      options,
-      embedder,
-    );
-    const hybridDense = await runSingleDenseVariant(
-      "hybrid-dense",
-      options,
-      embedder,
-    );
+    const vectorDense = await runSingleDenseVariant("vector-dense", options, embedder);
+    const hybridDense = await runSingleDenseVariant("hybrid-dense", options, embedder);
     return buildDenseComparisonReport(vectorDense, hybridDense, options);
   }
-  return runSingleDenseVariant(
-    variant,
-    options,
-    embedder,
-  );
+  return runSingleDenseVariant(variant, options, embedder);
 }
 
 // ---------------------------------------------------------------------------
@@ -1483,16 +1420,12 @@ export interface DenseCalibrationReport extends CalibrationReport {
  *      `.curion/benchmark/` directory.
  */
 export async function runDenseCalibration(
-  options: RetrievalBenchmarkOptions = {},
+  options: RetrievalBenchmarkOptions = {}
 ): Promise<DenseCalibrationReport> {
   const variant: BenchmarkVariant = options.variant ?? "all-dense";
-  if (
-    variant !== "vector-dense" &&
-    variant !== "hybrid-dense" &&
-    variant !== "all-dense"
-  ) {
+  if (variant !== "vector-dense" && variant !== "hybrid-dense" && variant !== "all-dense") {
     throw new Error(
-      `runDenseCalibration: variant must be one of vector-dense|hybrid-dense|all-dense (got "${variant}")`,
+      `runDenseCalibration: variant must be one of vector-dense|hybrid-dense|all-dense (got "${variant}")`
     );
   }
   // The default sweep grid is per-variant on the dense
@@ -1514,14 +1447,9 @@ export async function runDenseCalibration(
   // we honor the caller's grid (they explicitly chose
   // a custom sweep).
   const callerSweep = options.calibrationConfig?.sweep;
-  const useCustomSweep =
-    callerSweep !== undefined && callerSweep !== DEFAULT_CALIBRATION_SWEEP;
-  const denseSweep = useCustomSweep
-    ? callerSweep!
-    : DEFAULT_DENSE_CALIBRATION_SWEEP;
-  const hybridDenseSweep = useCustomSweep
-    ? callerSweep!
-    : DEFAULT_HYBRID_DENSE_CALIBRATION_SWEEP;
+  const useCustomSweep = callerSweep !== undefined && callerSweep !== DEFAULT_CALIBRATION_SWEEP;
+  const denseSweep = useCustomSweep ? callerSweep! : DEFAULT_DENSE_CALIBRATION_SWEEP;
+  const hybridDenseSweep = useCustomSweep ? callerSweep! : DEFAULT_HYBRID_DENSE_CALIBRATION_SWEEP;
   // Build the effective config the calibration layer
   // sees. The `direction` and `gatesByVariant` come from
   // the caller's config (or the default); the `sweep`
@@ -1671,15 +1599,17 @@ async function buildDenseSingleVariantSweep(args: {
   // the full result through `evaluateQuery`).
   for (const q of queries) {
     let ranked: LexicalScoredCandidate[];
-    let hybridSupport: {
-      contributors: ReadonlyArray<{
-        source: "lexical" | "fts5" | "vector-dense";
-        rank: number | null;
-        score: number | null;
-        contribution: number;
-      }>;
-      agreementCount: number;
-    } | undefined;
+    let hybridSupport:
+      | {
+          contributors: ReadonlyArray<{
+            source: "lexical" | "fts5" | "vector-dense";
+            rank: number | null;
+            score: number | null;
+            contribution: number;
+          }>;
+          agreementCount: number;
+        }
+      | undefined;
     if (variant === "vector-dense") {
       const dense = await rankDenseVectorWithMetadataAsync(q.query, candidates, {
         threshold: 0,
@@ -1696,22 +1626,18 @@ async function buildDenseSingleVariantSweep(args: {
       ranked = dense.hits;
     } else {
       // hybrid-dense
-      const hybridRes: HybridAsyncRankResult = await rankHybridAsync(
-        q.query,
-        candidates,
-        {
-          k: options.hybridK ?? DEFAULT_RRF_K,
-          threshold: 0,
-          topK,
-          useDenseVector: true,
-          denseVectorEmbedder: embedder,
-          // Same kind-`"query"` flag the
-          // single-variant path uses. The hybrid
-          // ranker threads the flag to the dense
-          // vector contributor.
-          denseKind: "query",
-        } satisfies HybridRankingOptions,
-      );
+      const hybridRes: HybridAsyncRankResult = await rankHybridAsync(q.query, candidates, {
+        k: options.hybridK ?? DEFAULT_RRF_K,
+        threshold: 0,
+        topK,
+        useDenseVector: true,
+        denseVectorEmbedder: embedder,
+        // Same kind-`"query"` flag the
+        // single-variant path uses. The hybrid
+        // ranker threads the flag to the dense
+        // vector contributor.
+        denseKind: "query",
+      } satisfies HybridRankingOptions);
       ranked = hybridRes.hits.map((c) => ({ id: c.id, score: c.score }));
       // The contributor trace for the top-1 candidate. If
       // the fusion returned no hits, build a "all absent"
@@ -1727,7 +1653,7 @@ async function buildDenseSingleVariantSweep(args: {
             rank: c.rank,
             score: c.score,
             contribution: c.contribution,
-          })),
+          }))
         );
       } else {
         hybridSupport = computeContributorSupport([
@@ -1752,15 +1678,7 @@ async function buildDenseSingleVariantSweep(args: {
     const topIds = ranked.map((r) => r.id);
     const topScores = ranked.map((r) => r.score);
     evals.push(
-      evaluateQuery(
-        q.id,
-        q.family,
-        q.query,
-        q.expectedIds,
-        q.currentTruthIds,
-        topIds,
-        topScores,
-      ),
+      evaluateQuery(q.id, q.family, q.query, q.expectedIds, q.currentTruthIds, topIds, topScores)
     );
   }
   // The shadow report's metrics give us the
@@ -1777,7 +1695,7 @@ async function buildDenseSingleVariantSweep(args: {
     evals,
     perQueryScores,
     config.sweep,
-    direction,
+    direction
   );
 }
 
@@ -1788,10 +1706,7 @@ async function buildDenseSingleVariantSweep(args: {
  * existing sync calibration report consumers do not pick
  * up the dense artifact.
  */
-export function writeDenseCalibrationReport(
-  report: DenseCalibrationReport,
-  dir: string,
-): string {
+export function writeDenseCalibrationReport(report: DenseCalibrationReport, dir: string): string {
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const filename = `retrieval-calibration-dense-${stamp}.json`;
   const full = path.join(dir, filename);
@@ -1811,17 +1726,13 @@ export function writeDenseCalibrationReport(
 function buildDenseComparisonReport(
   vectorDense: DenseRetrievalBenchmarkReport,
   hybridDense: DenseRetrievalBenchmarkReport,
-  options: RetrievalBenchmarkOptions,
+  options: RetrievalBenchmarkOptions
 ): DenseComparisonBenchmarkReport {
   const V = vectorDense.metrics;
   const H = hybridDense.metrics;
   const Vd = V.derived;
   const Hd = H.derived;
-  const countRow = (
-    metric: string,
-    v: number,
-    h: number,
-  ): DenseComparisonRow => ({
+  const countRow = (metric: string, v: number, h: number): DenseComparisonRow => ({
     metric,
     vectorDense: v,
     hybridDense: h,
@@ -1829,82 +1740,52 @@ function buildDenseComparisonReport(
   });
   const rows: DenseComparisonRow[] = [
     countRow("rank1 (positive)", V.rank1, H.rank1),
-    countRow(
-      "currentTruth@1 (positive)",
-      V.currentTruthAt1,
-      H.currentTruthAt1,
-    ),
+    countRow("currentTruth@1 (positive)", V.currentTruthAt1, H.currentTruthAt1),
     countRow("hit@1 (positive)", V.hitAt1, H.hitAt1),
     countRow("hit@3 (positive)", V.hitAt3, H.hitAt3),
     countRow("hit@5 (positive)", V.hitAt5, H.hitAt5),
     countRow("no-answer TNR", V.noAnswerCorrect, H.noAnswerCorrect),
-    countRow(
-      "precision@5 (%)",
-      Vd.precisionAtK * 100,
-      Hd.precisionAtK * 100,
-    ),
-    countRow(
-      "recall@5 (%)",
-      Vd.recallAtK * 100,
-      Hd.recallAtK * 100,
-    ),
+    countRow("precision@5 (%)", Vd.precisionAtK * 100, Hd.precisionAtK * 100),
+    countRow("recall@5 (%)", Vd.recallAtK * 100, Hd.recallAtK * 100),
     countRow("F1@5 (%)", Vd.f1At5 * 100, Hd.f1At5 * 100),
     countRow("MRR@5 (%)", Vd.mrrAtK * 100, Hd.mrrAtK * 100),
-    countRow(
-      "currentTruth@5 (%)",
-      Vd.currentTruthRecallAt5 * 100,
-      Hd.currentTruthRecallAt5 * 100,
-    ),
-    countRow(
-      "answer coverage (%)",
-      Vd.answerCoverage * 100,
-      Hd.answerCoverage * 100,
-    ),
+    countRow("currentTruth@5 (%)", Vd.currentTruthRecallAt5 * 100, Hd.currentTruthRecallAt5 * 100),
+    countRow("answer coverage (%)", Vd.answerCoverage * 100, Hd.answerCoverage * 100),
     countRow(
       "abstention precision (%)",
       Vd.abstentionPrecision * 100,
-      Hd.abstentionPrecision * 100,
+      Hd.abstentionPrecision * 100
     ),
     countRow(
       "specificity (no-answer, %)",
       Vd.noAnswerSpecificity * 100,
-      Hd.noAnswerSpecificity * 100,
+      Hd.noAnswerSpecificity * 100
     ),
-    countRow(
-      "confabulation FPR (%)",
-      Vd.noAnswerFpr * 100,
-      Hd.noAnswerFpr * 100,
-    ),
-    countRow(
-      "multi-hop partial (%)",
-      Vd.multiHopAnyRate * 100,
-      Hd.multiHopAnyRate * 100,
-    ),
+    countRow("confabulation FPR (%)", Vd.noAnswerFpr * 100, Hd.noAnswerFpr * 100),
+    countRow("multi-hop partial (%)", Vd.multiHopAnyRate * 100, Hd.multiHopAnyRate * 100),
     countRow(
       "multi-hop complete (%)",
       Vd.multiHopCompleteRate * 100,
-      Hd.multiHopCompleteRate * 100,
+      Hd.multiHopCompleteRate * 100
     ),
     countRow(
       "orientation recall@5 (%)",
       vectorDense.orientation.total > 0
-        ? (vectorDense.orientation.recallAt5 * 100) /
-          vectorDense.orientation.total
+        ? (vectorDense.orientation.recallAt5 * 100) / vectorDense.orientation.total
         : 0,
       hybridDense.orientation.total > 0
-        ? (hybridDense.orientation.recallAt5 * 100) /
-          hybridDense.orientation.total
-        : 0,
+        ? (hybridDense.orientation.recallAt5 * 100) / hybridDense.orientation.total
+        : 0
     ),
     countRow(
       "orientation slotCoverage@5 (%)",
       vectorDense.orientation.slotCoverageAt5 * 100,
-      hybridDense.orientation.slotCoverageAt5 * 100,
+      hybridDense.orientation.slotCoverageAt5 * 100
     ),
     countRow(
       "orientation noisyReturnRate (%)",
       vectorDense.orientation.noisyReturnRate * 100,
-      hybridDense.orientation.noisyReturnRate * 100,
+      hybridDense.orientation.noisyReturnRate * 100
     ),
   ];
   // The per-family "hybrid-dense vs best baseline" delta
@@ -1914,15 +1795,12 @@ function buildDenseComparisonReport(
   // report) and re-call `buildHybridPerFamilyDelta` so
   // the comparison report carries the same table the
   // single-variant hybrid-dense report does.
-  const baselines = runBaselineMetricsForHybridDelta(
-    selectQueries(options),
-    options,
-  );
+  const baselines = runBaselineMetricsForHybridDelta(selectQueries(options), options);
   const hybridPerFamilyDelta = buildHybridPerFamilyDelta(
     H,
     baselines.lexical,
     baselines.fts5,
-    baselines.vector,
+    baselines.vector
   );
   // Attach the table to the single-variant hybrid-dense
   // report so the JSON file is self-describing.
@@ -1985,9 +1863,7 @@ function buildDenseComparisonReport(
  * The function is pure: no I/O, no provider calls, no
  * network. It is safe to call from tests.
  */
-export function runCalibration(
-  options: RetrievalBenchmarkOptions = {},
-): CalibrationReport {
+export function runCalibration(options: RetrievalBenchmarkOptions = {}): CalibrationReport {
   const config: CalibrationConfig = options.calibrationConfig ?? {
     gatesByVariant: {},
     sweep: DEFAULT_CALIBRATION_SWEEP,
@@ -2040,10 +1916,7 @@ export function runCalibration(
     vector: [],
   };
   for (const v of variants) {
-    const rankFn: (
-      q: string,
-      c: ReadonlyArray<LexicalCandidate>,
-    ) => LexicalScoredCandidate[] =
+    const rankFn: (q: string, c: ReadonlyArray<LexicalCandidate>) => LexicalScoredCandidate[] =
       v === "fts5"
         ? (q, c) =>
             rankFts5(q, c, {
@@ -2095,7 +1968,7 @@ export function runCalibration(
       evals,
       perVariantTrace[v],
       config.sweep,
-      direction,
+      direction
     );
     baselineRows.push(baseline);
     for (const r of sweep) sweepRows.push(r);
@@ -2134,7 +2007,7 @@ export function runCalibration(
  */
 function runSingleVariant(
   variant: "lexical" | "fts5" | "vector" | "hybrid",
-  options: RetrievalBenchmarkOptions,
+  options: RetrievalBenchmarkOptions
 ): RetrievalBenchmarkReport {
   const queries = selectQueries(options);
   const candidates = buildCandidates(BENCHMARK_RECORDS);
@@ -2162,11 +2035,9 @@ function runSingleVariant(
           : DEFAULT_RELEVANCE_THRESHOLD);
   const rankFn: (q: string, c: ReadonlyArray<LexicalCandidate>) => LexicalScoredCandidate[] =
     variant === "fts5"
-      ? (q, c) =>
-          rankFts5(q, c, { threshold, topK } satisfies Fts5RankingOptions)
+      ? (q, c) => rankFts5(q, c, { threshold, topK } satisfies Fts5RankingOptions)
       : variant === "vector"
-        ? (q, c) =>
-            rankVector(q, c, { threshold, topK } satisfies VectorRankingOptions)
+        ? (q, c) => rankVector(q, c, { threshold, topK } satisfies VectorRankingOptions)
         : variant === "hybrid"
           ? (q, c) =>
               rankHybridAsLexicalShim(q, c, {
@@ -2185,15 +2056,11 @@ function runSingleVariant(
       // We call `rankHybrid` (not the lexical-shape
       // shim) so we keep the per-contributor
       // diagnostics for the richer-diagnostics block.
-      const hybrid: HybridScoredCandidate[] = rankHybrid(
-        q.query,
-        candidates,
-        {
-          k: options.hybridK ?? DEFAULT_RRF_K,
-          threshold,
-          topK,
-        } satisfies HybridRankingOptions,
-      );
+      const hybrid: HybridScoredCandidate[] = rankHybrid(q.query, candidates, {
+        k: options.hybridK ?? DEFAULT_RRF_K,
+        threshold,
+        topK,
+      } satisfies HybridRankingOptions);
       ranked = hybrid.map((c) => ({ id: c.id, score: c.score }));
       topHybridScore = ranked.length > 0 ? ranked[0]!.score : null;
       // The contributors for the TOP-1 candidate carry
@@ -2234,7 +2101,7 @@ function runSingleVariant(
       q.expectedIds,
       q.currentTruthIds,
       topIds,
-      topScores,
+      topScores
     );
     if (variant === "hybrid") {
       if (contributors) eval_.hybridContributors = contributors;
@@ -2308,7 +2175,7 @@ function runSingleVariant(
       metrics,
       baselines.lexical,
       baselines.fts5,
-      baselines.vector,
+      baselines.vector
     );
   }
   return report;
@@ -2335,7 +2202,7 @@ function runSingleVariant(
  */
 function runBaselineMetricsForHybridDelta(
   queries: ReadonlyArray<BenchmarkQuery>,
-  options: RetrievalBenchmarkOptions,
+  options: RetrievalBenchmarkOptions
 ): {
   lexical: BenchmarkMetrics;
   fts5: BenchmarkMetrics;
@@ -2365,9 +2232,7 @@ function runBaselineMetricsForHybridDelta(
       threshold: vectorThreshold,
       topK,
     } satisfies VectorRankingOptions);
-  const buildEvals = (
-    rankFn: (q: string) => LexicalScoredCandidate[],
-  ): QueryEval[] =>
+  const buildEvals = (rankFn: (q: string) => LexicalScoredCandidate[]): QueryEval[] =>
     queries.map((q) => {
       const ranked = rankFn(q.query);
       return evaluateQuery(
@@ -2377,7 +2242,7 @@ function runBaselineMetricsForHybridDelta(
         q.expectedIds,
         q.currentTruthIds,
         ranked.map((r) => r.id),
-        ranked.map((r) => r.score),
+        ranked.map((r) => r.score)
       );
     });
   return {
@@ -2402,7 +2267,7 @@ function runBaselineMetricsForHybridDelta(
 function rankHybridAsLexicalShim(
   query: string,
   candidates: ReadonlyArray<LexicalCandidate>,
-  options: HybridRankingOptions,
+  options: HybridRankingOptions
 ): LexicalScoredCandidate[] {
   return rankHybrid(query, candidates, options).map((c) => ({
     id: c.id,
@@ -2433,7 +2298,7 @@ function buildComparisonReport(
   fts5: RetrievalBenchmarkReport,
   vector: RetrievalBenchmarkReport,
   hybrid: RetrievalBenchmarkReport,
-  options: RetrievalBenchmarkOptions,
+  options: RetrievalBenchmarkOptions
 ): ComparisonBenchmarkReport {
   const L = lexical.metrics;
   const F = fts5.metrics;
@@ -2454,13 +2319,7 @@ function buildComparisonReport(
   // percentages render as one-decimal points). The
   // contract `r.delta === r.fts5 - r.lexical` holds
   // because we don't round the JSON values.
-  const countRow = (
-    metric: string,
-    l: number,
-    f: number,
-    v: number,
-    h: number,
-  ): ComparisonRow => ({
+  const countRow = (metric: string, l: number, f: number, v: number, h: number): ComparisonRow => ({
     metric,
     lexical: l,
     fts5: f,
@@ -2470,39 +2329,114 @@ function buildComparisonReport(
   });
   const rows: ComparisonRow[] = [
     countRow("rank1 (positive)", L.rank1, F.rank1, V.rank1, H.rank1),
-    countRow("currentTruth@1 (positive)", L.currentTruthAt1, F.currentTruthAt1, V.currentTruthAt1, H.currentTruthAt1),
+    countRow(
+      "currentTruth@1 (positive)",
+      L.currentTruthAt1,
+      F.currentTruthAt1,
+      V.currentTruthAt1,
+      H.currentTruthAt1
+    ),
     countRow("hit@1 (positive)", L.hitAt1, F.hitAt1, V.hitAt1, H.hitAt1),
     countRow("hit@3 (positive)", L.hitAt3, F.hitAt3, V.hitAt3, H.hitAt3),
     countRow("hit@5 (positive)", L.hitAt5, F.hitAt5, V.hitAt5, H.hitAt5),
-    countRow("no-answer TNR", L.noAnswerCorrect, F.noAnswerCorrect, V.noAnswerCorrect, H.noAnswerCorrect),
-    countRow("precision@5 (%)", Ld.precisionAtK * 100, Fd.precisionAtK * 100, Vd.precisionAtK * 100, Hd.precisionAtK * 100),
-    countRow("recall@5 (%)", Ld.recallAtK * 100, Fd.recallAtK * 100, Vd.recallAtK * 100, Hd.recallAtK * 100),
+    countRow(
+      "no-answer TNR",
+      L.noAnswerCorrect,
+      F.noAnswerCorrect,
+      V.noAnswerCorrect,
+      H.noAnswerCorrect
+    ),
+    countRow(
+      "precision@5 (%)",
+      Ld.precisionAtK * 100,
+      Fd.precisionAtK * 100,
+      Vd.precisionAtK * 100,
+      Hd.precisionAtK * 100
+    ),
+    countRow(
+      "recall@5 (%)",
+      Ld.recallAtK * 100,
+      Fd.recallAtK * 100,
+      Vd.recallAtK * 100,
+      Hd.recallAtK * 100
+    ),
     countRow("F1@5 (%)", Ld.f1At5 * 100, Fd.f1At5 * 100, Vd.f1At5 * 100, Hd.f1At5 * 100),
     countRow("MRR@5 (%)", Ld.mrrAtK * 100, Fd.mrrAtK * 100, Vd.mrrAtK * 100, Hd.mrrAtK * 100),
-    countRow("currentTruth@5 (%)", Ld.currentTruthRecallAt5 * 100, Fd.currentTruthRecallAt5 * 100, Vd.currentTruthRecallAt5 * 100, Hd.currentTruthRecallAt5 * 100),
-    countRow("answer coverage (%)", Ld.answerCoverage * 100, Fd.answerCoverage * 100, Vd.answerCoverage * 100, Hd.answerCoverage * 100),
-    countRow("abstention precision (%)", Ld.abstentionPrecision * 100, Fd.abstentionPrecision * 100, Vd.abstentionPrecision * 100, Hd.abstentionPrecision * 100),
-    countRow("specificity (no-answer, %)", Ld.noAnswerSpecificity * 100, Fd.noAnswerSpecificity * 100, Vd.noAnswerSpecificity * 100, Hd.noAnswerSpecificity * 100),
-    countRow("confabulation FPR (%)", Ld.noAnswerFpr * 100, Fd.noAnswerFpr * 100, Vd.noAnswerFpr * 100, Hd.noAnswerFpr * 100),
-    countRow("multi-hop partial (%)", Ld.multiHopAnyRate * 100, Fd.multiHopAnyRate * 100, Vd.multiHopAnyRate * 100, Hd.multiHopAnyRate * 100),
-    countRow("multi-hop complete (%)", Ld.multiHopCompleteRate * 100, Fd.multiHopCompleteRate * 100, Vd.multiHopCompleteRate * 100, Hd.multiHopCompleteRate * 100),
-    countRow("orientation recall@5 (%)",
-      lexical.orientation.total > 0 ? (lexical.orientation.recallAt5 * 100) / lexical.orientation.total : 0,
-      fts5.orientation.total > 0 ? (fts5.orientation.recallAt5 * 100) / fts5.orientation.total : 0,
-      vector.orientation.total > 0 ? (vector.orientation.recallAt5 * 100) / vector.orientation.total : 0,
-      hybrid.orientation.total > 0 ? (hybrid.orientation.recallAt5 * 100) / hybrid.orientation.total : 0,
+    countRow(
+      "currentTruth@5 (%)",
+      Ld.currentTruthRecallAt5 * 100,
+      Fd.currentTruthRecallAt5 * 100,
+      Vd.currentTruthRecallAt5 * 100,
+      Hd.currentTruthRecallAt5 * 100
     ),
-    countRow("orientation slotCoverage@5 (%)",
+    countRow(
+      "answer coverage (%)",
+      Ld.answerCoverage * 100,
+      Fd.answerCoverage * 100,
+      Vd.answerCoverage * 100,
+      Hd.answerCoverage * 100
+    ),
+    countRow(
+      "abstention precision (%)",
+      Ld.abstentionPrecision * 100,
+      Fd.abstentionPrecision * 100,
+      Vd.abstentionPrecision * 100,
+      Hd.abstentionPrecision * 100
+    ),
+    countRow(
+      "specificity (no-answer, %)",
+      Ld.noAnswerSpecificity * 100,
+      Fd.noAnswerSpecificity * 100,
+      Vd.noAnswerSpecificity * 100,
+      Hd.noAnswerSpecificity * 100
+    ),
+    countRow(
+      "confabulation FPR (%)",
+      Ld.noAnswerFpr * 100,
+      Fd.noAnswerFpr * 100,
+      Vd.noAnswerFpr * 100,
+      Hd.noAnswerFpr * 100
+    ),
+    countRow(
+      "multi-hop partial (%)",
+      Ld.multiHopAnyRate * 100,
+      Fd.multiHopAnyRate * 100,
+      Vd.multiHopAnyRate * 100,
+      Hd.multiHopAnyRate * 100
+    ),
+    countRow(
+      "multi-hop complete (%)",
+      Ld.multiHopCompleteRate * 100,
+      Fd.multiHopCompleteRate * 100,
+      Vd.multiHopCompleteRate * 100,
+      Hd.multiHopCompleteRate * 100
+    ),
+    countRow(
+      "orientation recall@5 (%)",
+      lexical.orientation.total > 0
+        ? (lexical.orientation.recallAt5 * 100) / lexical.orientation.total
+        : 0,
+      fts5.orientation.total > 0 ? (fts5.orientation.recallAt5 * 100) / fts5.orientation.total : 0,
+      vector.orientation.total > 0
+        ? (vector.orientation.recallAt5 * 100) / vector.orientation.total
+        : 0,
+      hybrid.orientation.total > 0
+        ? (hybrid.orientation.recallAt5 * 100) / hybrid.orientation.total
+        : 0
+    ),
+    countRow(
+      "orientation slotCoverage@5 (%)",
       lexical.orientation.slotCoverageAt5 * 100,
       fts5.orientation.slotCoverageAt5 * 100,
       vector.orientation.slotCoverageAt5 * 100,
-      hybrid.orientation.slotCoverageAt5 * 100,
+      hybrid.orientation.slotCoverageAt5 * 100
     ),
-    countRow("orientation noisyReturnRate (%)",
+    countRow(
+      "orientation noisyReturnRate (%)",
       lexical.orientation.noisyReturnRate * 100,
       fts5.orientation.noisyReturnRate * 100,
       vector.orientation.noisyReturnRate * 100,
-      hybrid.orientation.noisyReturnRate * 100,
+      hybrid.orientation.noisyReturnRate * 100
     ),
   ];
   // The per-family "hybrid vs best baseline" delta table.
@@ -2511,7 +2445,7 @@ function buildComparisonReport(
     hybrid.metrics,
     lexical.metrics,
     fts5.metrics,
-    vector.metrics,
+    vector.metrics
   );
   // The per-family delta is also attached to the hybrid
   // single-variant report so a `--variant hybrid` run
@@ -2567,96 +2501,70 @@ export function formatHumanReport(report: RetrievalBenchmarkReport): string {
   const d = m.derived;
   lines.push(`  total queries:        ${m.totalQueries}`);
   lines.push(
-    `  rank1 (top-hit, positive):      ${m.rank1} / ${m.positiveTotal} = ${pct(m.rank1, m.positiveTotal)}`,
+    `  rank1 (top-hit, positive):      ${m.rank1} / ${m.positiveTotal} = ${pct(m.rank1, m.positiveTotal)}`
   );
   lines.push(
-    `  current-truth@1 (positive):     ${m.currentTruthAt1} / ${m.positiveTotal} = ${pct(m.currentTruthAt1, m.positiveTotal)}`,
+    `  current-truth@1 (positive):     ${m.currentTruthAt1} / ${m.positiveTotal} = ${pct(m.currentTruthAt1, m.positiveTotal)}`
   );
   lines.push(
-    `  hit@1 (positive):               ${m.hitAt1} / ${m.positiveTotal} = ${pct(m.hitAt1, m.positiveTotal)}`,
+    `  hit@1 (positive):               ${m.hitAt1} / ${m.positiveTotal} = ${pct(m.hitAt1, m.positiveTotal)}`
   );
   lines.push(
-    `  hit@3 (positive):               ${m.hitAt3} / ${m.positiveTotal} = ${pct(m.hitAt3, m.positiveTotal)}`,
+    `  hit@3 (positive):               ${m.hitAt3} / ${m.positiveTotal} = ${pct(m.hitAt3, m.positiveTotal)}`
   );
   lines.push(
-    `  hit@5 (positive):               ${m.hitAt5} / ${m.positiveTotal} = ${pct(m.hitAt5, m.positiveTotal)}`,
+    `  hit@5 (positive):               ${m.hitAt5} / ${m.positiveTotal} = ${pct(m.hitAt5, m.positiveTotal)}`
   );
   lines.push(
-    `  no-answer TNR:                  ${m.noAnswerCorrect} / ${m.noAnswerTotal} = ${pct(m.noAnswerCorrect, m.noAnswerTotal)}`,
+    `  no-answer TNR:                  ${m.noAnswerCorrect} / ${m.noAnswerTotal} = ${pct(m.noAnswerCorrect, m.noAnswerTotal)}`
   );
   lines.push("");
   lines.push("--- IR (precision/recall/F1/MRR) ---");
-  lines.push(
-    `  precision@5  ${pct(d.precisionAtK, 1)}   (tp=${d.tp} fp=${d.fp} fn=${d.fn})`,
-  );
-  lines.push(
-    `  recall@5     ${pct(d.recallAtK, 1)}`,
-  );
-  lines.push(
-    `  F1@5         ${pct(d.f1At5, 1)}`,
-  );
-  lines.push(
-    `  MRR@5        ${pct(d.mrrAtK, 1)}`,
-  );
+  lines.push(`  precision@5  ${pct(d.precisionAtK, 1)}   (tp=${d.tp} fp=${d.fp} fn=${d.fn})`);
+  lines.push(`  recall@5     ${pct(d.recallAtK, 1)}`);
+  lines.push(`  F1@5         ${pct(d.f1At5, 1)}`);
+  lines.push(`  MRR@5        ${pct(d.mrrAtK, 1)}`);
   lines.push("");
   lines.push("--- currentTruth (positive queries) ---");
   lines.push(
-    `  currentTruth@1: ${d.currentTruthAt1} / ${d.positiveTotalForCurrentTruth} = ${pct(d.currentTruthAt1, d.positiveTotalForCurrentTruth)}`,
+    `  currentTruth@1: ${d.currentTruthAt1} / ${d.positiveTotalForCurrentTruth} = ${pct(d.currentTruthAt1, d.positiveTotalForCurrentTruth)}`
   );
   lines.push(
-    `  currentTruth@3: ${d.currentTruthAt3} / ${d.positiveTotalForCurrentTruth} = ${pct(d.currentTruthAt3, d.positiveTotalForCurrentTruth)}`,
+    `  currentTruth@3: ${d.currentTruthAt3} / ${d.positiveTotalForCurrentTruth} = ${pct(d.currentTruthAt3, d.positiveTotalForCurrentTruth)}`
   );
   lines.push(
-    `  currentTruth@5: ${d.currentTruthAt5} / ${d.positiveTotalForCurrentTruth} = ${pct(d.currentTruthAt5, d.positiveTotalForCurrentTruth)}`,
+    `  currentTruth@5: ${d.currentTruthAt5} / ${d.positiveTotalForCurrentTruth} = ${pct(d.currentTruthAt5, d.positiveTotalForCurrentTruth)}`
   );
-  lines.push(
-    `  currentTruthRecall@5 = ${pct(d.currentTruthRecallAt5, 1)}`,
-  );
+  lines.push(`  currentTruthRecall@5 = ${pct(d.currentTruthRecallAt5, 1)}`);
   lines.push("");
   lines.push("--- no-answer confusion matrix ---");
-  lines.push(
-    `  TP=${d.noAnswerTp}  FP=${d.noAnswerFp}  TN=${d.noAnswerTn}  FN=${d.noAnswerFn}`,
-  );
-  lines.push(
-    `  specificity (TNR)   = ${pct(d.noAnswerSpecificity, 1)}`,
-  );
-  lines.push(
-    `  confabulation (FPR) = ${pct(d.noAnswerFpr, 1)}`,
-  );
-  lines.push(
-    `  answer coverage     = ${pct(d.answerCoverage, 1)}`,
-  );
-  lines.push(
-    `  abstention precision= ${pct(d.abstentionPrecision, 1)}`,
-  );
+  lines.push(`  TP=${d.noAnswerTp}  FP=${d.noAnswerFp}  TN=${d.noAnswerTn}  FN=${d.noAnswerFn}`);
+  lines.push(`  specificity (TNR)   = ${pct(d.noAnswerSpecificity, 1)}`);
+  lines.push(`  confabulation (FPR) = ${pct(d.noAnswerFpr, 1)}`);
+  lines.push(`  answer coverage     = ${pct(d.answerCoverage, 1)}`);
+  lines.push(`  abstention precision= ${pct(d.abstentionPrecision, 1)}`);
   lines.push("");
   lines.push("--- multi-hop coverage ---");
   lines.push(
-    `  partial (>=1 expected in top-K): ${d.multiHopAny} / ${d.multiHopTotal} = ${pct(d.multiHopAnyRate, 1)}`,
+    `  partial (>=1 expected in top-K): ${d.multiHopAny} / ${d.multiHopTotal} = ${pct(d.multiHopAnyRate, 1)}`
   );
   lines.push(
-    `  complete (all expected in top-K): ${d.multiHopComplete} / ${d.multiHopTotal} = ${pct(d.multiHopCompleteRate, 1)}`,
+    `  complete (all expected in top-K): ${d.multiHopComplete} / ${d.multiHopTotal} = ${pct(d.multiHopCompleteRate, 1)}`
   );
   lines.push("");
   lines.push("--- score diagnostics ---");
+  lines.push(`  meanTopScore (all)    = ${d.meanTopScore.toFixed(3)} (n=${d.scoreSampleCountAll})`);
   lines.push(
-    `  meanTopScore (all)    = ${d.meanTopScore.toFixed(3)} (n=${d.scoreSampleCountAll})`,
+    `  meanTopScore (pass)   = ${d.meanTopScorePass.toFixed(3)} (n=${d.scoreSampleCountPass})`
   );
   lines.push(
-    `  meanTopScore (pass)   = ${d.meanTopScorePass.toFixed(3)} (n=${d.scoreSampleCountPass})`,
+    `  meanTopScore (fail)   = ${d.meanTopScoreFail.toFixed(3)} (n=${d.scoreSampleCountFail})`
   );
   lines.push(
-    `  meanTopScore (fail)   = ${d.meanTopScoreFail.toFixed(3)} (n=${d.scoreSampleCountFail})`,
+    `  meanTopScore (no-ans) = ${d.meanTopScoreNoAnswer.toFixed(3)} (n=${d.scoreSampleCountNoAnswer})`
   );
-  lines.push(
-    `  meanTopScore (no-ans) = ${d.meanTopScoreNoAnswer.toFixed(3)} (n=${d.scoreSampleCountNoAnswer})`,
-  );
-  lines.push(
-    `  meanScoreGap1To2      = ${d.meanScoreGap1To2.toFixed(3)}`,
-  );
-  lines.push(
-    `  meanReturnedCount     = ${d.meanReturnedCount.toFixed(2)}`,
-  );
+  lines.push(`  meanScoreGap1To2      = ${d.meanScoreGap1To2.toFixed(3)}`);
+  lines.push(`  meanReturnedCount     = ${d.meanReturnedCount.toFixed(2)}`);
   lines.push("");
   lines.push("--- orientation (project-status queries) ---");
   if (report.orientation.total === 0) {
@@ -2664,26 +2572,18 @@ export function formatHumanReport(report: RetrievalBenchmarkReport): string {
   } else {
     const o = report.orientation;
     lines.push(`  queries:           ${o.total}`);
+    lines.push(`  recall@1:          ${o.recallAt1} / ${o.total} = ${pct(o.recallAt1, o.total)}`);
+    lines.push(`  recall@3:          ${o.recallAt3} / ${o.total} = ${pct(o.recallAt3, o.total)}`);
+    lines.push(`  recall@5:          ${o.recallAt5} / ${o.total} = ${pct(o.recallAt5, o.total)}`);
     lines.push(
-      `  recall@1:          ${o.recallAt1} / ${o.total} = ${pct(o.recallAt1, o.total)}`,
+      `  slotCoverage@5:    ${o.slotsHit} / ${o.slotsExpected} = ${pct(o.slotCoverageAt5, 1)}`
     );
     lines.push(
-      `  recall@3:          ${o.recallAt3} / ${o.total} = ${pct(o.recallAt3, o.total)}`,
+      `  noisyReturnRate:   ${o.noisyReturnQueries} / ${o.total} = ${pct(o.noisyReturnRate, 1)}`
     );
+    lines.push(`  meanNoisePerQuery: ${o.meanNoisePerQuery.toFixed(2)}`);
     lines.push(
-      `  recall@5:          ${o.recallAt5} / ${o.total} = ${pct(o.recallAt5, o.total)}`,
-    );
-    lines.push(
-      `  slotCoverage@5:    ${o.slotsHit} / ${o.slotsExpected} = ${pct(o.slotCoverageAt5, 1)}`,
-    );
-    lines.push(
-      `  noisyReturnRate:   ${o.noisyReturnQueries} / ${o.total} = ${pct(o.noisyReturnRate, 1)}`,
-    );
-    lines.push(
-      `  meanNoisePerQuery: ${o.meanNoisePerQuery.toFixed(2)}`,
-    );
-    lines.push(
-      `  currentTruthCov@5: ${o.currentTruthCoverageAt5} / ${o.total} = ${pct(o.currentTruthCoverageAt5Rate, 1)}`,
+      `  currentTruthCov@5: ${o.currentTruthCoverageAt5} / ${o.total} = ${pct(o.currentTruthCoverageAt5Rate, 1)}`
     );
   }
   lines.push("");
@@ -2701,7 +2601,7 @@ export function formatHumanReport(report: RetrievalBenchmarkReport): string {
     const isNoAnswer = f === "no-answer";
     if (isNoAnswer) {
       lines.push(
-        `  ${f.padEnd(12)} total=${s.total} passed=${s.passed} (no-answer TNR=${pct(s.noAnswerCorrect, s.total)})`,
+        `  ${f.padEnd(12)} total=${s.total} passed=${s.passed} (no-answer TNR=${pct(s.noAnswerCorrect, s.total)})`
       );
     } else {
       lines.push(
@@ -2714,7 +2614,7 @@ export function formatHumanReport(report: RetrievalBenchmarkReport): string {
           `mrr@5=${pct(s.mrrAt5, 1)} ` +
           `hit@1=${pct(s.hitAt1, s.total)} ` +
           `hit@3=${pct(s.hitAt3, s.total)} ` +
-          `hit@5=${pct(s.hitAt5, s.total)}`,
+          `hit@5=${pct(s.hitAt5, s.total)}`
       );
     }
   }
@@ -2741,24 +2641,20 @@ export function formatHumanReport(report: RetrievalBenchmarkReport): string {
   // new fact is somewhere in the top-K). This is the gap the
   // reviewer flagged; making it visible in the headline summary
   // is the whole point of the stricter rank1 metric.
-  const rank1Misses = report.evals.filter(
-    (e) => e.expectedIds.length > 0 && !e.rank1,
-  );
+  const rank1Misses = report.evals.filter((e) => e.expectedIds.length > 0 && !e.rank1);
   lines.push("--- rank-1 misses (top-hit wrong, hit@K may still pass) ---");
   if (rank1Misses.length === 0) {
     lines.push("  (none)");
   } else {
     for (const e of rank1Misses) {
-      const expected =
-        e.expectedIds.length === 0 ? "(none)" : e.expectedIds.join(", ");
-      const top0 =
-        e.topIds.length === 0 ? "(empty)" : String(e.topIds[0]);
+      const expected = e.expectedIds.length === 0 ? "(none)" : e.expectedIds.join(", ");
+      const top0 = e.topIds.length === 0 ? "(empty)" : String(e.topIds[0]);
       lines.push(`  [${e.family}] ${e.queryId}`);
       lines.push(`     expected top-hit: ${expected}`);
       lines.push(`     actual top-hit:   ${top0}`);
       lines.push(
         `     current-truth@1:  ${e.currentTruthAt1 ? "yes" : "no"} ` +
-          `(hit@K=${e.passed ? "pass" : "fail"})`,
+          `(hit@K=${e.passed ? "pass" : "fail"})`
       );
     }
   }
@@ -2768,12 +2664,8 @@ export function formatHumanReport(report: RetrievalBenchmarkReport): string {
     lines.push("  (none)");
   } else {
     for (const f of report.failures) {
-      const expected =
-        f.expectedIds.length === 0
-          ? "(none)"
-          : f.expectedIds.join(", ");
-      const actual =
-        f.topIds.length === 0 ? "(empty)" : f.topIds.join(", ");
+      const expected = f.expectedIds.length === 0 ? "(none)" : f.expectedIds.join(", ");
+      const actual = f.topIds.length === 0 ? "(empty)" : f.topIds.join(", ");
       lines.push(`  [${f.family}] ${f.queryId}`);
       lines.push(`     expected: ${expected}`);
       lines.push(`     actual:   ${actual}`);
@@ -2791,13 +2683,11 @@ export function formatHumanReport(report: RetrievalBenchmarkReport): string {
     lines.push("--- hybrid per-family (vs best baseline) ---");
     lines.push(
       "  family         total  hybrid(rank1)  best(rank1)  Δhybrid  " +
-        "hybrid(hit5)  ΔvsLexical  bestSources",
+        "hybrid(hit5)  ΔvsLexical  bestSources"
     );
     for (const row of report.hybridPerFamilyDelta) {
       const sources =
-        row.bestBaselineSources.length === 0
-          ? "-"
-          : row.bestBaselineSources.join("/");
+        row.bestBaselineSources.length === 0 ? "-" : row.bestBaselineSources.join("/");
       const delta = row.deltaHybridVsBest;
       const sign = delta > 0 ? "+" : delta < 0 ? "" : "=";
       lines.push(
@@ -2807,7 +2697,7 @@ export function formatHumanReport(report: RetrievalBenchmarkReport): string {
           `${(sign + String(delta)).padStart(7)}  ` +
           `${String(row.hybridHit5).padStart(12)}  ` +
           `${String(row.deltaHybridVsLexical).padStart(11)}  ` +
-          `${sources}`,
+          `${sources}`
       );
     }
   }
@@ -2831,7 +2721,7 @@ export function formatHumanReport(report: RetrievalBenchmarkReport): string {
         .join(" ");
       lines.push(
         `  [${e.family}] ${e.queryId}` +
-          `  topId=${top0}  rrf=${total.toFixed(4)}  contributors: ${contributors}`,
+          `  topId=${top0}  rrf=${total.toFixed(4)}  contributors: ${contributors}`
       );
       contribLines += 1;
     }
@@ -2839,7 +2729,7 @@ export function formatHumanReport(report: RetrievalBenchmarkReport): string {
       lines.push("  (no contributor diagnostics — empty result set)");
     } else {
       lines.push(
-        `  ... (${report.evals.length - contribLines} more queries; full trace in the JSON artifact)`,
+        `  ... (${report.evals.length - contribLines} more queries; full trace in the JSON artifact)`
       );
     }
   }
@@ -2856,15 +2746,11 @@ export function formatHumanReport(report: RetrievalBenchmarkReport): string {
  * helper so the on-disk JSON + the stdout view are
  * structurally consistent.
  */
-export function formatComparisonReport(
-  report: ComparisonBenchmarkReport,
-): string {
+export function formatComparisonReport(report: ComparisonBenchmarkReport): string {
   const lines: string[] = [];
   lines.push("=== curion retrieval benchmark (variant=all) ===");
   lines.push(`generated at: ${report.generatedAt}`);
-  lines.push(
-    `  records:     ${report.config.recordCount}`,
-  );
+  lines.push(`  records:     ${report.config.recordCount}`);
   lines.push(`  queries:     ${report.config.queryCount}`);
   if (report.config.hybridK !== undefined) {
     lines.push(`  hybrid-k:    ${report.config.hybridK}`);
@@ -2887,7 +2773,7 @@ export function formatComparisonReport(
     const arrow = r.delta > 0 ? "+" : r.delta < 0 ? "" : "=";
     const deltaStr = isPct ? r.delta.toFixed(1) : r.delta.toString();
     lines.push(
-      `  ${r.metric.padEnd(30)}  lexical=${fmt(r.lexical)}  fts5=${fmt(r.fts5)}  vector=${fmt(r.vector)}  hybrid=${fmt(r.hybrid)}  delta(fts5-lex)=${arrow}${deltaStr}`,
+      `  ${r.metric.padEnd(30)}  lexical=${fmt(r.lexical)}  fts5=${fmt(r.fts5)}  vector=${fmt(r.vector)}  hybrid=${fmt(r.hybrid)}  delta(fts5-lex)=${arrow}${deltaStr}`
     );
   }
   // Hybrid per-family "vs best baseline" table. The
@@ -2899,13 +2785,11 @@ export function formatComparisonReport(
     lines.push("--- hybrid per-family (vs best baseline) ---");
     lines.push(
       "  family         total  hybrid(rank1)  best(rank1)  Δhybrid  " +
-        "hybrid(hit5)  ΔvsLexical  bestSources",
+        "hybrid(hit5)  ΔvsLexical  bestSources"
     );
     for (const row of report.hybridPerFamilyDelta) {
       const sources =
-        row.bestBaselineSources.length === 0
-          ? "-"
-          : row.bestBaselineSources.join("/");
+        row.bestBaselineSources.length === 0 ? "-" : row.bestBaselineSources.join("/");
       const delta = row.deltaHybridVsBest;
       const sign = delta > 0 ? "+" : delta < 0 ? "" : "=";
       lines.push(
@@ -2915,7 +2799,7 @@ export function formatComparisonReport(
           `${(sign + String(delta)).padStart(7)}  ` +
           `${String(row.hybridHit5).padStart(12)}  ` +
           `${String(row.deltaHybridVsLexical).padStart(11)}  ` +
-          `${sources}`,
+          `${sources}`
       );
     }
   }
@@ -2956,7 +2840,7 @@ export function formatComparisonReport(
  */
 export function formatCalibrationReport(
   report: CalibrationReport,
-  options: { perQueryLimit?: number } = {},
+  options: { perQueryLimit?: number } = {}
 ): string {
   const perQueryLimit = options.perQueryLimit ?? 20;
   const lines: string[] = [];
@@ -2975,9 +2859,8 @@ export function formatCalibrationReport(
       continue;
     }
     const baseTnr = baselineTnrForVariant(report, v);
-    const tnr = b.metrics.noAnswerTotal > 0
-      ? (b.metrics.noAnswerCorrect / b.metrics.noAnswerTotal) * 100
-      : 0;
+    const tnr =
+      b.metrics.noAnswerTotal > 0 ? (b.metrics.noAnswerCorrect / b.metrics.noAnswerTotal) * 100 : 0;
     const deltaTnr = tnr - baseTnr;
     lines.push(
       `  ${v.padEnd(8)} gate=${b.gateLabel.padEnd(20)} ` +
@@ -2986,7 +2869,7 @@ export function formatCalibrationReport(
         `hit@5=${b.metrics.hitAt5} ` +
         `rank1=${b.metrics.rank1} ` +
         `noAnsFixed=${b.noAnswerFixed} ` +
-        `noAnsRemaining=${b.noAnswerRemainingFp}`,
+        `noAnsRemaining=${b.noAnswerRemainingFp}`
     );
   }
   // Dense best rows. Rendered only when the report
@@ -3009,11 +2892,10 @@ export function formatCalibrationReport(
     // helper.
     const baseTnr = baselineTnrForVariant(
       report,
-      v === "vectorDense" ? "vector-dense" : "hybrid-dense",
+      v === "vectorDense" ? "vector-dense" : "hybrid-dense"
     );
-    const tnr = b.metrics.noAnswerTotal > 0
-      ? (b.metrics.noAnswerCorrect / b.metrics.noAnswerTotal) * 100
-      : 0;
+    const tnr =
+      b.metrics.noAnswerTotal > 0 ? (b.metrics.noAnswerCorrect / b.metrics.noAnswerTotal) * 100 : 0;
     const deltaTnr = tnr - baseTnr;
     lines.push(
       `  ${displayLabel(v).padEnd(14)} gate=${b.gateLabel.padEnd(20)} ` +
@@ -3022,7 +2904,7 @@ export function formatCalibrationReport(
         `hit@5=${b.metrics.hitAt5} ` +
         `rank1=${b.metrics.rank1} ` +
         `noAnsFixed=${b.noAnswerFixed} ` +
-        `noAnsRemaining=${b.noAnswerRemainingFp}`,
+        `noAnsRemaining=${b.noAnswerRemainingFp}`
     );
   }
   lines.push("");
@@ -3037,22 +2919,22 @@ export function formatCalibrationReport(
   // carries dense rows; the dense calibration report's
   // `sweep` does). We use a defensive `??` so the
   // sync report's sweep is unaffected.
-  const denseByVariant: Partial<Record<"vector-dense" | "hybrid-dense", CalibrationVariantResult[]>> = {
+  const denseByVariant: Partial<
+    Record<"vector-dense" | "hybrid-dense", CalibrationVariantResult[]>
+  > = {
     "vector-dense": [],
     "hybrid-dense": [],
   };
   for (const r of report.sweep) {
     if (r.variant === "vector-dense" || r.variant === "hybrid-dense") {
-      (denseByVariant[r.variant] ??= []).push(r);
+      const bucket = denseByVariant[r.variant] ?? [];
+      denseByVariant[r.variant] = bucket;
+      bucket.push(r);
     } else {
       byVariant[r.variant].push(r);
     }
   }
-  const kinds: CalibrationVariantResult["gateKind"][] = [
-    "threshold",
-    "margin",
-    "ratio",
-  ];
+  const kinds: CalibrationVariantResult["gateKind"][] = ["threshold", "margin", "ratio"];
   for (const v of ["lexical", "fts5", "vector"] as const) {
     const rows = byVariant[v];
     if (rows.length === 0) continue;
@@ -3067,7 +2949,7 @@ export function formatCalibrationReport(
           `rank1=${base.metrics.rank1} ` +
           `regressions=${base.positiveRegressions} ` +
           `noAnsFixed=${base.noAnswerFixed} ` +
-          `noAnsRemain=${base.noAnswerRemainingFp}`,
+          `noAnsRemain=${base.noAnswerRemainingFp}`
       );
     }
     for (const k of kinds) {
@@ -3082,7 +2964,7 @@ export function formatCalibrationReport(
             `rank1=${r.metrics.rank1} ` +
             `regressions=${r.positiveRegressions} ` +
             `noAnsFixed=${r.noAnswerFixed} ` +
-            `noAnsRemain=${r.noAnswerRemainingFp}`,
+            `noAnsRemain=${r.noAnswerRemainingFp}`
         );
       }
     }
@@ -3107,7 +2989,7 @@ export function formatCalibrationReport(
           `rank1=${base.metrics.rank1} ` +
           `regressions=${base.positiveRegressions} ` +
           `noAnsFixed=${base.noAnswerFixed} ` +
-          `noAnsRemain=${base.noAnswerRemainingFp}`,
+          `noAnsRemain=${base.noAnswerRemainingFp}`
       );
     }
     for (const k of kinds) {
@@ -3122,7 +3004,7 @@ export function formatCalibrationReport(
             `rank1=${r.metrics.rank1} ` +
             `regressions=${r.positiveRegressions} ` +
             `noAnsFixed=${r.noAnswerFixed} ` +
-            `noAnsRemain=${r.noAnswerRemainingFp}`,
+            `noAnsRemain=${r.noAnswerRemainingFp}`
         );
       }
     }
@@ -3148,57 +3030,47 @@ export function formatCalibrationReport(
     if (!b) continue;
     lines.push(`  variant=${v} gate=${b.gateLabel}`);
     // Positive queries forced to abstain.
-    const regressionsAll = b.diagnostics.filter(
-      (d) => d.isPositive && d.abstained,
-    );
+    const regressionsAll = b.diagnostics.filter((d) => d.isPositive && d.abstained);
     const regressions = regressionsAll.slice(0, perQueryLimit);
     lines.push(
       `    positive queries forced to abstain: ${regressionsAll.length}` +
-        (regressionsAll.length > perQueryLimit
-          ? ` (showing first ${perQueryLimit})`
-          : ""),
+        (regressionsAll.length > perQueryLimit ? ` (showing first ${perQueryLimit})` : "")
     );
     for (const d of regressions) {
       lines.push(
         `      [${d.family}] ${d.queryId}  topScore=${d.topScore.toFixed(3)} ` +
           `gap=${d.scoreGap.toFixed(3)} ratio=${formatRatio(d.scoreRatio)} ` +
-          `gate=${d.abstainedByGate.join("|") || "(none)"}`,
+          `gate=${d.abstainedByGate.join("|") || "(none)"}`
       );
     }
     // No-answer queries fixed by abstention.
     const fixedAll = b.diagnostics.filter(
-      (d) => !d.isPositive && d.abstained && !d.naturallyAbstained,
+      (d) => !d.isPositive && d.abstained && !d.naturallyAbstained
     );
     const fixed = fixedAll.slice(0, perQueryLimit);
     lines.push(
       `    no-answer queries fixed by abstention: ${fixedAll.length}` +
-        (fixedAll.length > perQueryLimit
-          ? ` (showing first ${perQueryLimit})`
-          : ""),
+        (fixedAll.length > perQueryLimit ? ` (showing first ${perQueryLimit})` : "")
     );
     for (const d of fixed) {
       lines.push(
         `      [${d.family}] ${d.queryId}  topScore=${d.topScore.toFixed(3)} ` +
           `gap=${d.scoreGap.toFixed(3)} ratio=${formatRatio(d.scoreRatio)} ` +
-          `gate=${d.abstainedByGate.join("|") || "(none)"}`,
+          `gate=${d.abstainedByGate.join("|") || "(none)"}`
       );
     }
     // No-answer queries still confabulating.
-    const remainAll = b.diagnostics.filter(
-      (d) => !d.isPositive && !d.abstained,
-    );
+    const remainAll = b.diagnostics.filter((d) => !d.isPositive && !d.abstained);
     const remain = remainAll.slice(0, perQueryLimit);
     lines.push(
       `    no-answer queries still confabulating: ${remainAll.length}` +
-        (remainAll.length > perQueryLimit
-          ? ` (showing first ${perQueryLimit})`
-          : ""),
+        (remainAll.length > perQueryLimit ? ` (showing first ${perQueryLimit})` : "")
     );
     for (const d of remain) {
       lines.push(
         `      [${d.family}] ${d.queryId}  topScore=${d.topScore.toFixed(3)} ` +
           `gap=${d.scoreGap.toFixed(3)} ratio=${formatRatio(d.scoreRatio)} ` +
-          `before=${d.originalTopIds.join(",") || "(empty)"}`,
+          `before=${d.originalTopIds.join(",") || "(empty)"}`
       );
     }
   }
@@ -3215,49 +3087,39 @@ export function formatCalibrationReport(
     if (b === undefined) continue;
     if (b === null) continue;
     lines.push(`  variant=${displayLabel(v)} gate=${b.gateLabel}`);
-    const regressionsAll = b.diagnostics.filter(
-      (d) => d.isPositive && d.abstained,
-    );
+    const regressionsAll = b.diagnostics.filter((d) => d.isPositive && d.abstained);
     const regressions = regressionsAll.slice(0, perQueryLimit);
     lines.push(
       `    positive queries forced to abstain: ${regressionsAll.length}` +
-        (regressionsAll.length > perQueryLimit
-          ? ` (showing first ${perQueryLimit})`
-          : ""),
+        (regressionsAll.length > perQueryLimit ? ` (showing first ${perQueryLimit})` : "")
     );
     for (const d of regressions) {
       lines.push(
         `      [${d.family}] ${d.queryId}  topScore=${d.topScore.toFixed(3)} ` +
           `gap=${d.scoreGap.toFixed(3)} ratio=${formatRatio(d.scoreRatio)} ` +
-          `gate=${d.abstainedByGate.join("|") || "(none)"}`,
+          `gate=${d.abstainedByGate.join("|") || "(none)"}`
       );
     }
     const fixedAll = b.diagnostics.filter(
-      (d) => !d.isPositive && d.abstained && !d.naturallyAbstained,
+      (d) => !d.isPositive && d.abstained && !d.naturallyAbstained
     );
     const fixed = fixedAll.slice(0, perQueryLimit);
     lines.push(
       `    no-answer queries fixed by abstention: ${fixedAll.length}` +
-        (fixedAll.length > perQueryLimit
-          ? ` (showing first ${perQueryLimit})`
-          : ""),
+        (fixedAll.length > perQueryLimit ? ` (showing first ${perQueryLimit})` : "")
     );
     for (const d of fixed) {
       lines.push(
         `      [${d.family}] ${d.queryId}  topScore=${d.topScore.toFixed(3)} ` +
           `gap=${d.scoreGap.toFixed(3)} ratio=${formatRatio(d.scoreRatio)} ` +
-          `gate=${d.abstainedByGate.join("|") || "(none)"}`,
+          `gate=${d.abstainedByGate.join("|") || "(none)"}`
       );
     }
-    const remainAll = b.diagnostics.filter(
-      (d) => !d.isPositive && !d.abstained,
-    );
+    const remainAll = b.diagnostics.filter((d) => !d.isPositive && !d.abstained);
     const remain = remainAll.slice(0, perQueryLimit);
     lines.push(
       `    no-answer queries still confabulating: ${remainAll.length}` +
-        (remainAll.length > perQueryLimit
-          ? ` (showing first ${perQueryLimit})`
-          : ""),
+        (remainAll.length > perQueryLimit ? ` (showing first ${perQueryLimit})` : "")
     );
     for (const d of remain) {
       const support =
@@ -3268,7 +3130,7 @@ export function formatCalibrationReport(
               .map((c) =>
                 c.rank === null
                   ? `${c.source}=absent`
-                  : `${c.source}=rank${c.rank}(${c.contribution.toFixed(3)})`,
+                  : `${c.source}=rank${c.rank}(${c.contribution.toFixed(3)})`
               )
               .join(" ")}]`
           : "";
@@ -3276,7 +3138,7 @@ export function formatCalibrationReport(
         `      [${d.family}] ${d.queryId}  topScore=${d.topScore.toFixed(3)} ` +
           `gap=${d.scoreGap.toFixed(3)} ratio=${formatRatio(d.scoreRatio)} ` +
           `before=${d.originalTopIds.join(",") || "(empty)"}` +
-          support,
+          support
       );
     }
   }
@@ -3291,7 +3153,7 @@ function tnrPct(r: CalibrationVariantResult): string {
 
 function baselineTnrForVariant(
   report: CalibrationReport,
-  v: "lexical" | "fts5" | "vector" | "vector-dense" | "hybrid-dense",
+  v: "lexical" | "fts5" | "vector" | "vector-dense" | "hybrid-dense"
 ): number {
   const b = report.baseline.find((x) => x.variant === v);
   if (!b || b.metrics.noAnswerTotal === 0) return 0;
@@ -3341,7 +3203,7 @@ function displayLabel(v: "vectorDense" | "hybridDense"): string {
  */
 export function formatDenseCalibrationReport(
   report: DenseCalibrationReport,
-  options: { perQueryLimit?: number } = {},
+  options: { perQueryLimit?: number } = {}
 ): string {
   // The dense calibration report is structurally a
   // `CalibrationReport`; we render it via the existing
@@ -3438,9 +3300,7 @@ export function formatDenseCalibrationReport(
  * reviewer can audit the embedder before reading the
  * metrics.
  */
-export function formatDenseHumanReport(
-  report: DenseRetrievalBenchmarkReport,
-): string {
+export function formatDenseHumanReport(report: DenseRetrievalBenchmarkReport): string {
   const lines: string[] = [];
   lines.push("=== curion retrieval benchmark (dense) ===");
   lines.push(`variant:      ${report.variant}`);
@@ -3499,25 +3359,19 @@ export function formatDenseHumanReport(
       topK: report.config.topK,
       recordCount: report.config.recordCount,
       queryCount: report.config.queryCount,
-      ...(report.config.hybridK !== undefined
-        ? { hybridK: report.config.hybridK }
-        : {}),
+      ...(report.config.hybridK !== undefined ? { hybridK: report.config.hybridK } : {}),
     },
     evals: report.evals,
     metrics: report.metrics,
     orientation: report.orientation,
     answerQuality: report.answerQuality,
     failures: report.failures,
-    ...(report.hybridPerFamilyDelta
-      ? { hybridPerFamilyDelta: report.hybridPerFamilyDelta }
-      : {}),
+    ...(report.hybridPerFamilyDelta ? { hybridPerFamilyDelta: report.hybridPerFamilyDelta } : {}),
   };
   // `formatHumanReport` reads many fields; we cast and
   // call. The dense report fields are structurally
   // identical so the cast is safe.
-  lines.push(
-    formatHumanReport(syncShape as unknown as RetrievalBenchmarkReport),
-  );
+  lines.push(formatHumanReport(syncShape as unknown as RetrievalBenchmarkReport));
   return lines.join("\n");
 }
 
@@ -3527,9 +3381,7 @@ export function formatDenseHumanReport(
  * but prints `vector-dense` / `hybrid-dense` columns
  * and a leading "embedding backend" block.
  */
-export function formatDenseComparisonReport(
-  report: DenseComparisonBenchmarkReport,
-): string {
+export function formatDenseComparisonReport(report: DenseComparisonBenchmarkReport): string {
   const lines: string[] = [];
   lines.push("=== curion retrieval benchmark (dense all) ===");
   lines.push(`generated at: ${report.generatedAt}`);
@@ -3578,24 +3430,19 @@ export function formatDenseComparisonReport(
     const arrow = r.delta > 0 ? "+" : r.delta < 0 ? "" : "=";
     const deltaStr = isPct ? r.delta.toFixed(1) : r.delta.toString();
     lines.push(
-      `  ${r.metric.padEnd(30)}  vectorDense=${fmt(r.vectorDense)}  hybridDense=${fmt(r.hybridDense)}  delta(hybridDense-vectorDense)=${arrow}${deltaStr}`,
+      `  ${r.metric.padEnd(30)}  vectorDense=${fmt(r.vectorDense)}  hybridDense=${fmt(r.hybridDense)}  delta(hybridDense-vectorDense)=${arrow}${deltaStr}`
     );
   }
-  if (
-    report.hybridPerFamilyDelta &&
-    report.hybridPerFamilyDelta.length > 0
-  ) {
+  if (report.hybridPerFamilyDelta && report.hybridPerFamilyDelta.length > 0) {
     lines.push("");
     lines.push("--- hybrid-dense per-family (vs best baseline) ---");
     lines.push(
       "  family         total  hybridDense(rank1)  best(rank1)  Δhybrid  " +
-        "hybridDense(hit5)  ΔvsLexical  bestSources",
+        "hybridDense(hit5)  ΔvsLexical  bestSources"
     );
     for (const row of report.hybridPerFamilyDelta) {
       const sources =
-        row.bestBaselineSources.length === 0
-          ? "-"
-          : row.bestBaselineSources.join("/");
+        row.bestBaselineSources.length === 0 ? "-" : row.bestBaselineSources.join("/");
       const delta = row.deltaHybridVsBest;
       const sign = delta > 0 ? "+" : delta < 0 ? "" : "=";
       lines.push(
@@ -3605,7 +3452,7 @@ export function formatDenseComparisonReport(
           `${(sign + String(delta)).padStart(7)}  ` +
           `${String(row.hybridHit5).padStart(17)}  ` +
           `${String(row.deltaHybridVsLexical).padStart(11)}  ` +
-          `${sources}`,
+          `${sources}`
       );
     }
   }
@@ -3630,11 +3477,7 @@ async function main(): Promise<void> {
   // Dense variants dispatch to the async path. The
   // sync `runRetrievalBenchmark` would throw on these
   // variants, so we route them before the sync call.
-  if (
-    variant === "vector-dense" ||
-    variant === "hybrid-dense" ||
-    variant === "all-dense"
-  ) {
+  if (variant === "vector-dense" || variant === "hybrid-dense" || variant === "all-dense") {
     // `--calibrate` short-circuits the dense benchmark
     // and runs the dense calibration experiment instead.
     // The dispatch happens here (CLI only) so callers of
@@ -3646,9 +3489,7 @@ async function main(): Promise<void> {
       const calReport = await runDenseCalibration(opts);
       const calFile = writeDenseCalibrationReport(calReport, dir);
       written.push(calFile);
-      process.stdout.write(
-        "\n" + formatDenseCalibrationReport(calReport) + "\n",
-      );
+      process.stdout.write("\n" + formatDenseCalibrationReport(calReport) + "\n");
       process.stdout.write(`\nartifact written: ${calFile}\n`);
       return;
     }
@@ -3670,34 +3511,20 @@ async function main(): Promise<void> {
       // contributor signals).
       if (opts.abstentionAudit) {
         const auditCfg: AbstentionAuditConfig =
-          typeof opts.abstentionAudit === "object"
-            ? opts.abstentionAudit
-            : {};
-        const auditReport = runAbstentionAuditFromDenseReport(
-          r.hybridDense,
-          auditCfg,
-        );
+          typeof opts.abstentionAudit === "object" ? opts.abstentionAudit : {};
+        const auditReport = runAbstentionAuditFromDenseReport(r.hybridDense, auditCfg);
         const auditFile = writeAbstentionAuditReport(auditReport, dir);
         written.push(auditFile);
-        process.stdout.write(
-          "\n" + formatAbstentionAuditReport(auditReport) + "\n",
-        );
+        process.stdout.write("\n" + formatAbstentionAuditReport(auditReport) + "\n");
         process.stdout.write(`\nartifact written: ${auditFile}\n`);
       }
       if (opts.abstentionPolicy) {
         const policyCfg: AbstentionPolicyConfig =
-          typeof opts.abstentionPolicy === "object"
-            ? opts.abstentionPolicy
-            : {};
-        const policyReport = runAbstentionPolicyFromDenseReport(
-          r.hybridDense,
-          policyCfg,
-        );
+          typeof opts.abstentionPolicy === "object" ? opts.abstentionPolicy : {};
+        const policyReport = runAbstentionPolicyFromDenseReport(r.hybridDense, policyCfg);
         const policyFile = writeAbstentionPolicyReport(policyReport, dir);
         written.push(policyFile);
-        process.stdout.write(
-          "\n" + formatAbstentionPolicyReport(policyReport) + "\n",
-        );
+        process.stdout.write("\n" + formatAbstentionPolicyReport(policyReport) + "\n");
         process.stdout.write(`\nartifact written: ${policyFile}\n`);
       }
     } else {
@@ -3707,28 +3534,20 @@ async function main(): Promise<void> {
       process.stdout.write(formatDenseHumanReport(r) + "\n");
       if (opts.abstentionAudit) {
         const auditCfg: AbstentionAuditConfig =
-          typeof opts.abstentionAudit === "object"
-            ? opts.abstentionAudit
-            : {};
+          typeof opts.abstentionAudit === "object" ? opts.abstentionAudit : {};
         const auditReport = runAbstentionAuditFromDenseReport(r, auditCfg);
         const auditFile = writeAbstentionAuditReport(auditReport, dir);
         written.push(auditFile);
-        process.stdout.write(
-          "\n" + formatAbstentionAuditReport(auditReport) + "\n",
-        );
+        process.stdout.write("\n" + formatAbstentionAuditReport(auditReport) + "\n");
         process.stdout.write(`\nartifact written: ${auditFile}\n`);
       }
       if (opts.abstentionPolicy) {
         const policyCfg: AbstentionPolicyConfig =
-          typeof opts.abstentionPolicy === "object"
-            ? opts.abstentionPolicy
-            : {};
+          typeof opts.abstentionPolicy === "object" ? opts.abstentionPolicy : {};
         const policyReport = runAbstentionPolicyFromDenseReport(r, policyCfg);
         const policyFile = writeAbstentionPolicyReport(policyReport, dir);
         written.push(policyFile);
-        process.stdout.write(
-          "\n" + formatAbstentionPolicyReport(policyReport) + "\n",
-        );
+        process.stdout.write("\n" + formatAbstentionPolicyReport(policyReport) + "\n");
         process.stdout.write(`\nartifact written: ${policyFile}\n`);
       }
     }
@@ -3808,18 +3627,14 @@ async function main(): Promise<void> {
   // controller.
   if (opts.abstentionAudit) {
     const auditCfg: AbstentionAuditConfig =
-      typeof opts.abstentionAudit === "object"
-        ? opts.abstentionAudit
-        : {};
+      typeof opts.abstentionAudit === "object" ? opts.abstentionAudit : {};
     const auditReport = runAbstentionAuditFromBenchmarkReport(report, {
       variant,
       config: auditCfg,
     });
     const auditFile = writeAbstentionAuditReport(auditReport, dir);
     written.push(auditFile);
-    process.stdout.write(
-      "\n" + formatAbstentionAuditReport(auditReport) + "\n",
-    );
+    process.stdout.write("\n" + formatAbstentionAuditReport(auditReport) + "\n");
     process.stdout.write(`\nartifact written: ${auditFile}\n`);
   }
   // Multi-signal abstention policy evaluator.
@@ -3831,18 +3646,14 @@ async function main(): Promise<void> {
   // (`retrieval-abstention-policy-*.json`).
   if (opts.abstentionPolicy) {
     const policyCfg: AbstentionPolicyConfig =
-      typeof opts.abstentionPolicy === "object"
-        ? opts.abstentionPolicy
-        : {};
+      typeof opts.abstentionPolicy === "object" ? opts.abstentionPolicy : {};
     const policyReport = runAbstentionPolicyFromBenchmarkReport(report, {
       variant,
       config: policyCfg,
     });
     const policyFile = writeAbstentionPolicyReport(policyReport, dir);
     written.push(policyFile);
-    process.stdout.write(
-      "\n" + formatAbstentionPolicyReport(policyReport) + "\n",
-    );
+    process.stdout.write("\n" + formatAbstentionPolicyReport(policyReport) + "\n");
     process.stdout.write(`\nartifact written: ${policyFile}\n`);
   }
 }
@@ -3865,19 +3676,20 @@ export function runAbstentionAuditFromBenchmarkReport(
   args: {
     variant: BenchmarkVariant;
     config?: AbstentionAuditConfig;
-  },
+  }
 ): AbstentionAuditReport {
   // The single-variant path is the easy one: the
   // report's `evals` is the audit's per-query input.
   if (isSingleVariantReport(report)) {
     return runAbstentionAudit({
-      variant: report.variant === "lexical-baseline"
-        ? "lexical"
-        : report.variant === "fts5-benchmark"
-          ? "fts5"
-          : report.variant === "vector-benchmark"
-            ? "vector"
-            : "hybrid-dense", // hybrid-benchmark
+      variant:
+        report.variant === "lexical-baseline"
+          ? "lexical"
+          : report.variant === "fts5-benchmark"
+            ? "fts5"
+            : report.variant === "vector-benchmark"
+              ? "vector"
+              : "hybrid-dense", // hybrid-benchmark
       evals: report.evals,
       queries: selectQueries({ variant: args.variant }),
       records: BENCHMARK_RECORDS,
@@ -3910,12 +3722,10 @@ export function runAbstentionAuditFromBenchmarkReport(
  */
 export function runAbstentionAuditFromDenseReport(
   report: DenseRetrievalBenchmarkReport,
-  config: AbstentionAuditConfig = {},
+  config: AbstentionAuditConfig = {}
 ): AbstentionAuditReport {
   return runAbstentionAudit({
-    variant: report.variant === "vector-dense-benchmark"
-      ? "vector-dense"
-      : "hybrid-dense",
+    variant: report.variant === "vector-dense-benchmark" ? "vector-dense" : "hybrid-dense",
     evals: report.evals,
     queries: BENCHMARK_QUERIES,
     records: BENCHMARK_RECORDS,
@@ -3949,7 +3759,7 @@ export function runAbstentionPolicyFromBenchmarkReport(
   args: {
     variant: BenchmarkVariant;
     config?: AbstentionPolicyConfig;
-  },
+  }
 ): AbstentionPolicyReport {
   // Pick the most informative evals to feed the
   // policy evaluator. The single-variant path uses
@@ -3958,7 +3768,7 @@ export function runAbstentionPolicyFromBenchmarkReport(
   // signals are populated there).
   let variantLabel: string;
   let evals: ReadonlyArray<QueryEval>;
-  let queries = selectQueries({ variant: args.variant });
+  const queries = selectQueries({ variant: args.variant });
   if (isSingleVariantReport(report)) {
     evals = report.evals;
     variantLabel = report.variant;
@@ -4020,7 +3830,7 @@ export function runAbstentionPolicyFromBenchmarkReport(
  */
 export function runAbstentionPolicyFromDenseReport(
   report: DenseRetrievalBenchmarkReport,
-  config: AbstentionPolicyConfig = {},
+  config: AbstentionPolicyConfig = {}
 ): AbstentionPolicyReport {
   const evals = report.evals;
   const perQuerySignals = buildAbstentionAuditPerQuery({

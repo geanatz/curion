@@ -326,7 +326,7 @@ type FeatureExtractionPipeline = (
   options?: {
     pooling?: "last_token" | "mean" | "cls" | "none";
     normalize?: boolean;
-  },
+  }
 ) => Promise<unknown>;
 
 /**
@@ -340,7 +340,7 @@ interface HfTransformersModule {
   pipeline: (
     task: "feature-extraction",
     model: string,
-    options?: { dtype?: string; device?: string },
+    options?: { dtype?: string; device?: string }
   ) => Promise<FeatureExtractionPipeline>;
   env: {
     cacheDir?: string;
@@ -390,8 +390,7 @@ async function loadLibrary(): Promise<HfTransformersModule> {
   const mod = (await import(/* @vite-ignore */ "@huggingface/transformers")) as
     | HfTransformersModule
     | { default: HfTransformersModule };
-  const resolved: HfTransformersModule =
-    "default" in mod ? mod.default : mod;
+  const resolved: HfTransformersModule = "default" in mod ? mod.default : mod;
   cachedLibrary = resolved;
   return resolved;
 }
@@ -453,13 +452,11 @@ export class EmbeddingGemmaEmbedder {
   private errorMessage: string | undefined;
 
   constructor(options: EmbeddingGemmaEmbedderOptions = {}) {
-    this.modelId =
-      options.modelId ?? "onnx-community/embeddinggemma-300m-ONNX";
+    this.modelId = options.modelId ?? "onnx-community/embeddinggemma-300m-ONNX";
     this.dtype = options.dtype ?? "q8";
     this.pooling = options.pooling ?? "mean";
     this.normalize = options.normalize ?? true;
-    this.cacheDir =
-      options.cacheDir ?? `${process.cwd()}/.curion/transformers-cache`;
+    this.cacheDir = options.cacheDir ?? `${process.cwd()}/.curion/transformers-cache`;
     this.queryTask = options.queryTask ?? "search result";
     this.probedDim = options.dim ?? 768;
     // Placeholder metadata. The real status /
@@ -504,18 +501,13 @@ export class EmbeddingGemmaEmbedder {
       // top-level export for older shims; the
       // resulting string is what the live test
       // asserts on.
-      this.runtimeVersion =
-        lib.env?.version ?? lib.version ?? undefined;
+      this.runtimeVersion = lib.env?.version ?? lib.version ?? undefined;
       if (lib.env) {
         lib.env.cacheDir = this.cacheDir;
         lib.env.allowLocalModels = true;
         lib.env.allowRemoteModels = true;
       }
-      this.pipeline = await lib.pipeline(
-        "feature-extraction",
-        this.modelId,
-        { dtype: this.dtype },
-      );
+      this.pipeline = await lib.pipeline("feature-extraction", this.modelId, { dtype: this.dtype });
       // Probe the dim with a 1-token string. The
       // output is a 1D vector (mean-pooled,
       // normalized). We throw away the values; we
@@ -537,8 +529,7 @@ export class EmbeddingGemmaEmbedder {
       };
     } catch (err: unknown) {
       this.failed = true;
-      this.errorMessage =
-        err instanceof Error ? err.message : String(err);
+      this.errorMessage = err instanceof Error ? err.message : String(err);
       this.loadMs = Date.now() - t0;
       this.metadata = {
         ...this.metadata,
@@ -611,10 +602,7 @@ export class EmbeddingGemmaEmbedder {
     if (!this.pipeline || this.failed) {
       return this.fallbackEmbed(text);
     }
-    const prefixed = EmbeddingGemmaEmbedder.buildQueryPrefix(
-      this.queryTask,
-      text,
-    );
+    const prefixed = EmbeddingGemmaEmbedder.buildQueryPrefix(this.queryTask, text);
     return this.timedSingle(prefixed);
   }
 
@@ -654,15 +642,11 @@ export class EmbeddingGemmaEmbedder {
    * prefixing contract simple and
    * unit-testable.
    */
-  async embedDocumentsBatch(
-    texts: ReadonlyArray<string>,
-  ): Promise<number[][]> {
+  async embedDocumentsBatch(texts: ReadonlyArray<string>): Promise<number[][]> {
     if (!this.pipeline || this.failed) {
       return this.fallbackEmbedBatch(texts);
     }
-    const prefixed = texts.map((t) =>
-      EmbeddingGemmaEmbedder.buildDocumentPrefix(t),
-    );
+    const prefixed = texts.map((t) => EmbeddingGemmaEmbedder.buildDocumentPrefix(t));
     return this.timedBatch(prefixed);
   }
 
@@ -709,9 +693,7 @@ export class EmbeddingGemmaEmbedder {
       // return a 1D vector.
       const arr = Array.isArray(out[0]) ? null : (out as number[]);
       if (!arr) {
-        throw new Error(
-          "EmbeddingGemmaEmbedder.timedSingle: expected a 1D vector, got a 2D array",
-        );
+        throw new Error("EmbeddingGemmaEmbedder.timedSingle: expected a 1D vector, got a 2D array");
       }
       return arr;
     } finally {
@@ -749,7 +731,7 @@ export class EmbeddingGemmaEmbedder {
       const dim = this.metadata.dim;
       if (flat.length !== texts.length * dim) {
         throw new Error(
-          `EmbeddingGemmaEmbedder.timedBatch: flat output length ${flat.length} does not match ${texts.length} * dim(${dim})`,
+          `EmbeddingGemmaEmbedder.timedBatch: flat output length ${flat.length} does not match ${texts.length} * dim(${dim})`
         );
       }
       const result: number[][] = new Array(texts.length);
@@ -795,12 +777,10 @@ export class EmbeddingGemmaEmbedder {
    */
   private async callPipeline(
     input: string | string[],
-    options: { pooling?: "last_token" | "mean" | "cls" | "none"; normalize?: boolean },
+    options: { pooling?: "last_token" | "mean" | "cls" | "none"; normalize?: boolean }
   ): Promise<number[] | number[][]> {
     if (!this.pipeline) {
-      throw new Error(
-        "EmbeddingGemmaEmbedder.callPipeline: pipeline is not initialized",
-      );
+      throw new Error("EmbeddingGemmaEmbedder.callPipeline: pipeline is not initialized");
     }
     const raw = await this.pipeline(input, options);
     return coerceToArray(raw);
@@ -818,20 +798,14 @@ export class EmbeddingGemmaEmbedder {
    * report shape.
    */
   private async fallbackEmbed(text: string): Promise<number[]> {
-    const { StubDeterministicDenseEmbedder } = await import(
-      "./dense-embedder.js"
-    );
+    const { StubDeterministicDenseEmbedder } = await import("./dense-embedder.js");
     return new StubDeterministicDenseEmbedder({
       dim: this.metadata.dim,
     }).embed(text);
   }
 
-  private async fallbackEmbedBatch(
-    texts: ReadonlyArray<string>,
-  ): Promise<number[][]> {
-    const { StubDeterministicDenseEmbedder } = await import(
-      "./dense-embedder.js"
-    );
+  private async fallbackEmbedBatch(texts: ReadonlyArray<string>): Promise<number[][]> {
+    const { StubDeterministicDenseEmbedder } = await import("./dense-embedder.js");
     return new StubDeterministicDenseEmbedder({
       dim: this.metadata.dim,
     }).embedBatch(texts);
@@ -898,7 +872,5 @@ function coerceToArray(raw: unknown): number[] | number[][] {
       return Array.from(data);
     }
   }
-  throw new Error(
-    `coerceToArray: cannot coerce pipeline output of type ${typeof raw}`,
-  );
+  throw new Error(`coerceToArray: cannot coerce pipeline output of type ${typeof raw}`);
 }
