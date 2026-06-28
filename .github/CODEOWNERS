@@ -1,0 +1,6 @@
+# Default owners for everything
+*       @geanatz
+
+# Code files: maintainer review
+/src/   @geanatz
+/tests/ @geanatz
