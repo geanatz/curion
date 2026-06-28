@@ -8,6 +8,11 @@
     "type": "git",
     "url": "https://github.com/geanatz/curion"
   },
+  "homepage": "https://github.com/geanatz/curion#readme",
+  "bugs": {
+    "url": "https://github.com/geanatz/curion/issues",
+    "email": "geanatz@users.noreply.github.com"
+  },
   "keywords": [
     "mcp",
     "memory",
@@ -28,8 +33,13 @@
   "bin": {
     "curion": "dist/index.js"
   },
+  "publishConfig": {
+    "provenance": true,
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "prepublishOnly": "npm run build && npm test",
     "test": "node --import tsx --test tests/*.test.ts",
     "test:contracts": "node --import tsx --test tests/contracts.test.ts",
     "test:e2e": "node --import tsx --test tests/mcp-stdio-e2e.test.ts",
@@ -138,7 +148,7 @@
     "probe:remember-cap": "tsx scripts/remember-summary-cap-probe.ts"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",

@@ -1,7 +1,7 @@
 # Curion
 
 Project-local memory layer for AI agents, exposed as a Model Context Protocol
-(MCP) stdio server. `v0.1.0` is tagged. The public MCP API (the two tools,
+(MCP) stdio server. `v0.2.0` is tagged. The public MCP API (the two tools,
 their strict input schemas, and the public `text` / `structuredContent`
 surfaces) is stable and frozen.
 
@@ -80,7 +80,6 @@ Optional: `CURION_PRIMARY_PROVIDER_LABEL` (auto-detected from base URL), `CURION
 | Variable | Default | Description |
 |---|---|---|
 | `CURION_LOG_LEVEL` | `info` | Minimum log level: `debug`, `info`, `warn`, `error`. |
-| `CURION_PROJECT_ROOT` | `process.cwd()` | Project root override. |
 
 #### Fallback provider (opt-in)
 

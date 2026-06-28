@@ -98,7 +98,7 @@ export function buildServer(options: BuildServerOptions = {}): McpServer {
   const server = new McpServer(
     {
       name: options.name ?? "curion",
-      version: options.version ?? "0.1.0",
+      version: options.version ?? "0.2.0",
     },
     {
       capabilities: {
