@@ -936,9 +936,9 @@ export async function handleRecall(input: unknown): Promise<RecallResult> {
       try {
         const embedder = await createSemanticEmbedder({
           enabled: true,
-          allowRemote: env.semanticAllowRemote,
-          cacheDir: env.semanticCacheDir,
-          modelId: env.semanticModelId,
+          ...(env.semanticAllowRemote !== undefined && { allowRemote: env.semanticAllowRemote }),
+          ...(env.semanticCacheDir !== undefined && { cacheDir: env.semanticCacheDir }),
+          ...(env.semanticModelId !== undefined && { modelId: env.semanticModelId }),
         });
         semanticEmbedder = embedder;
 
@@ -1196,7 +1196,9 @@ function formatOutcome(outcome: RecallOutcome): RecallResult {
       return {
         status: "no_memory",
         message: NO_RELEVANT_MEMORY,
-        clarification_needed: outcome.clarification_needed,
+        ...(outcome.clarification_needed !== undefined && {
+          clarification_needed: outcome.clarification_needed,
+        }),
       };
     case "weak_match":
       // Refusal-with-thin-match: the synthesis LLM declined
@@ -1215,14 +1217,18 @@ function formatOutcome(outcome: RecallOutcome): RecallResult {
         message: WEAK_MATCH_PUBLIC_MESSAGE,
         summaries: [...outcome.summaries],
         coverage: { ...outcome.coverage },
-        clarification_needed: outcome.clarification_needed,
+        ...(outcome.clarification_needed !== undefined && {
+          clarification_needed: outcome.clarification_needed,
+        }),
       };
     case "rejected":
       return {
         status: "rejected",
         message: `Rejected: ${outcome.reason}`,
         safetyClass: outcome.safetyClass,
-        clarification_needed: outcome.clarification_needed,
+        ...(outcome.clarification_needed !== undefined && {
+          clarification_needed: outcome.clarification_needed,
+        }),
       };
     case "provider_error":
       return {

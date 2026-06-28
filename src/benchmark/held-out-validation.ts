@@ -614,7 +614,7 @@ export async function runHeldOutEvals(args: {
   }
   return {
     evals,
-    embedderMetadata: embedder?.metadata,
+    ...(embedder?.metadata !== undefined && { embedderMetadata: embedder.metadata }),
     topK,
     ...(variant === "hybrid" || variant === "hybrid-dense" ? { hybridK } : {}),
   };

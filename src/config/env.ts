@@ -22,20 +22,20 @@ export interface CurionEnv {
    * API key for the primary provider slot.
    * Env: CURION_PRIMARY_API_KEY.
    */
-  primaryKey?: string;
+  primaryKey?: string | undefined;
   /**
    * API key for the fallback provider slot (opt-in).
    * Env: CURION_FALLBACK_API_KEY.
    */
-  fallbackKey?: string;
+  fallbackKey?: string | undefined;
   /** Enable semantic retrieval. Default: false (lexical only). */
-  semanticEnabled?: boolean;
+  semanticEnabled?: boolean | undefined;
   /** Allow remote model download for semantic embedder. Default: true. */
-  semanticAllowRemote?: boolean;
+  semanticAllowRemote?: boolean | undefined;
   /** Local cache directory for semantic embedder model files. */
-  semanticCacheDir?: string;
+  semanticCacheDir?: string | undefined;
   /** Hugging Face model id for semantic embedder. Default: Xenova/bge-small-en-v1.5. */
-  semanticModelId?: string;
+  semanticModelId?: string | undefined;
 }
 
 function readLevel(): CurionEnv["logLevel"] {

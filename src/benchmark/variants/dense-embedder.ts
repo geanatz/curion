@@ -190,7 +190,7 @@ export interface EmbedderMetadata {
   /** Whether the model is quantized (only meaningful for ONNX). */
   quantized?: boolean;
   /** Library / runtime version, when available. */
-  runtimeVersion?: string;
+  runtimeVersion?: string | undefined;
   /**
    * Execution status. `ready` means the embedder actually
    * ran on the query / corpus during the benchmark; `skipped`
@@ -371,7 +371,7 @@ export class StubDeterministicDenseEmbedder implements DenseEmbedder {
       // with a different prefix so the two embeddings
       // decorrelate.
       const sign = (fnv1a32("\u0001" + tok) & 0x80000000) !== 0 ? -1 : 1;
-      values[bucket] += sign;
+      values[bucket] = (values[bucket] ?? 0) + sign;
     }
     // L2 normalize.
     let norm = 0;
@@ -508,7 +508,7 @@ export class TransformersJsEmbedder implements DenseEmbedder {
       this.runtimeVersion = (tr as unknown as { VERSION?: string }).VERSION;
       const env = (tr as unknown as {
         env: {
-          cacheDir?: string;
+  cacheDir?: string | undefined;
           allowLocalModels?: boolean;
           allowRemoteModels?: boolean;
         };

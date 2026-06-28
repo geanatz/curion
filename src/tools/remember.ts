@@ -236,9 +236,9 @@ export async function handleRemember(input: unknown): Promise<RememberResult> {
         try {
           const embedder = await createSemanticEmbedder({
             enabled: true,
-            allowRemote: env.semanticAllowRemote,
-            cacheDir: env.semanticCacheDir,
-            modelId: env.semanticModelId,
+            ...(env.semanticAllowRemote !== undefined && { allowRemote: env.semanticAllowRemote }),
+            ...(env.semanticCacheDir !== undefined && { cacheDir: env.semanticCacheDir }),
+            ...(env.semanticModelId !== undefined && { modelId: env.semanticModelId }),
           });
           const embedResult = await embedOnRemember(
             storage,
@@ -353,7 +353,9 @@ function formatOutcome(outcome: RememberOutcome): RememberResult {
         status: "rejected",
         message: `Rejected: ${outcome.reason}`,
         safetyClass: outcome.safetyClass,
-        clarification_needed: outcome.clarification_needed,
+        ...(outcome.clarification_needed !== undefined && {
+          clarification_needed: outcome.clarification_needed,
+        }),
       };
     case "provider_error":
       return {

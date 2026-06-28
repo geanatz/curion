@@ -253,7 +253,7 @@ export interface RetrievalBenchmarkOptions {
    * in which case the runner throws because those
    * variants are async-only.
    */
-  denseEmbedderSpec?: import("./variants/dense-embedder.js").DenseEmbedderSpec;
+  denseEmbedderSpec?: import("./variants/dense-embedder.js").DenseEmbedderSpec | undefined;
   /**
    * Pre-built dense embedder to use for the
    * `vector-dense` and `hybrid-dense` variants. Mutually
@@ -601,21 +601,21 @@ export function parseRetrievalCli(argv: string[]): RetrievalBenchmarkOptions {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--threshold" && argv[i + 1]) {
-      const n = Number.parseFloat(argv[++i]);
+      const n = Number.parseFloat(argv[++i]!);
       if (!Number.isFinite(n) || n < 0 || n > 1) {
         throw new Error(`--threshold requires a number in [0, 1] (got "${argv[i]}")`);
       }
       opts.threshold = n;
     } else if (a === "--top-k" && argv[i + 1]) {
-      const n = Number.parseInt(argv[++i], 10);
+      const n = Number.parseInt(argv[++i]!, 10);
       if (!Number.isFinite(n) || n <= 0) {
         throw new Error(`--top-k requires a positive integer (got "${argv[i]}")`);
       }
       opts.topK = n;
     } else if (a === "--artifacts" && argv[i + 1]) {
-      opts.artifactsDir = argv[++i];
+      opts.artifactsDir = argv[++i]!;
     } else if (a === "--only-family" && argv[i + 1]) {
-      opts.onlyFamilies = argv[++i]
+      opts.onlyFamilies = argv[++i]!
         .split(",")
         .map((s) => s.trim())
         .filter(Boolean);
@@ -640,7 +640,7 @@ export function parseRetrievalCli(argv: string[]): RetrievalBenchmarkOptions {
       // Accept a string spec OR a comma-separated
       // key=value list (e.g. `stub-dense:dim=128`).
       // The dense runner normalizes both shapes.
-      opts.denseEmbedderSpec = argv[++i];
+      opts.denseEmbedderSpec = argv[++i]!;
     } else if (a === "--dense-cache-dir" && argv[i + 1]) {
       // The cache dir is composed into the spec as an
       // object so `createDenseEmbedder` can read it. We
@@ -698,7 +698,10 @@ export function parseRetrievalCli(argv: string[]): RetrievalBenchmarkOptions {
         // can re-parse the `key=value` tail.
         baseObj.spec = prev;
       }
-      opts.denseEmbedderSpec = { ...baseObj, cacheDir };
+      opts.denseEmbedderSpec = {
+        ...baseObj,
+        ...(cacheDir !== undefined && { cacheDir }),
+      };
     } else if (a === "--dense-skip") {
       const prev = opts.denseEmbedderSpec;
       const baseObj: Record<string, unknown> =
@@ -734,7 +737,7 @@ export function parseRetrievalCli(argv: string[]): RetrievalBenchmarkOptions {
       }
       opts.denseEmbedderSpec = { ...baseObj, skip: true };
     } else if (a === "--hybrid-k" && argv[i + 1]) {
-      const n = Number.parseFloat(argv[++i]);
+      const n = Number.parseFloat(argv[++i]!);
       if (!Number.isFinite(n) || n <= 0) {
         throw new Error(
           `--hybrid-k requires a positive finite number (got "${argv[i]}")`,
@@ -3996,8 +3999,8 @@ export function runAbstentionPolicyFromBenchmarkReport(
     variant: variantLabel,
     evals,
     signalsByQueryId,
-    config: args.config,
-    labelsByQueryId,
+    ...(args.config !== undefined && { config: args.config }),
+    ...(labelsByQueryId.size > 0 && { labelsByQueryId }),
   });
   // Backfill the recordCount so the artifact is
   // self-describing without re-loading the corpus.

@@ -487,15 +487,15 @@ export function parseFalseAbstentionDamageCliArgs(
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--no-answer-artifact" && i + 1 < argv.length) {
-      out.noAnswerArtifact = argv[++i];
+      out.noAnswerArtifact = argv[++i]!;
     } else if (a === "--audit-artifact" && i + 1 < argv.length) {
-      out.auditArtifact = argv[++i];
+      out.auditArtifact = argv[++i]!;
     } else if (a === "--semantic-evidence" && i + 1 < argv.length) {
-      out.semanticEvidence = argv[++i];
+      out.semanticEvidence = argv[++i]!;
     } else if (a === "--out-dir" && i + 1 < argv.length) {
-      out.outDir = argv[++i];
+      out.outDir = argv[++i]!;
     } else if (a === "--policy-id" && i + 1 < argv.length) {
-      out.policyId = argv[++i];
+      out.policyId = argv[++i]!;
     } else if (a === "--no-write") {
       out.noWrite = true;
     } else if (a === "--no-stdout") {

@@ -413,17 +413,17 @@ export function parseParaphraseRecoveryCliArgs(
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--no-answer-artifact" && i + 1 < argv.length) {
-      out.noAnswerArtifact = argv[++i];
+      out.noAnswerArtifact = argv[++i]!;
     } else if (a === "--semantic-evidence" && i + 1 < argv.length) {
-      out.semanticEvidence = argv[++i];
+      out.semanticEvidence = argv[++i]!;
     } else if (a === "--out-dir" && i + 1 < argv.length) {
-      out.outDir = argv[++i];
+      out.outDir = argv[++i]!;
     } else if (a === "--baseline-policy" && i + 1 < argv.length) {
-      out.baselinePolicy = argv[++i];
+      out.baselinePolicy = argv[++i]!;
     } else if (a === "--custom-variants" && i + 1 < argv.length) {
-      out.customVariants = argv[++i];
+      out.customVariants = argv[++i]!;
     } else if (a === "--only-variant-ids" && i + 1 < argv.length) {
-      out.onlyVariantIds = argv[++i];
+      out.onlyVariantIds = argv[++i]!;
     } else if (a === "--no-write") {
       out.noWrite = true;
     } else if (a === "--no-stdout") {

@@ -79,15 +79,17 @@ export interface AnthropicChatOptions {
 /** Result shape from the Anthropic path, matching the OpenAI-compatible contract. */
 export interface AnthropicChatResult {
   response: {
-    id?: string;
+    id?: string | undefined;
     model: string;
     content: string;
-    finishReason?: string;
-    usage?: {
-      promptTokens?: number;
-      completionTokens?: number;
-      totalTokens?: number;
-    };
+    finishReason?: string | undefined;
+    usage?:
+      | {
+          promptTokens?: number | undefined;
+          completionTokens?: number | undefined;
+          totalTokens?: number | undefined;
+        }
+      | undefined;
     latencyMs: number;
   };
 }
@@ -362,13 +364,18 @@ export async function anthropicChatCompletion(
           id: message.id,
           model: message.model,
           content,
-          finishReason: message.stop_reason ?? undefined,
-          usage: {
-            promptTokens: message.usage.input_tokens,
-            completionTokens: message.usage.output_tokens,
-            totalTokens:
-              (message.usage.input_tokens ?? 0) + (message.usage.output_tokens ?? 0),
-          },
+          ...(message.stop_reason !== undefined && {
+            finishReason: message.stop_reason ?? undefined,
+          }),
+          ...(message.usage && {
+            usage: {
+              promptTokens: message.usage.input_tokens,
+              completionTokens: message.usage.output_tokens,
+              totalTokens:
+                (message.usage.input_tokens ?? 0) +
+                (message.usage.output_tokens ?? 0),
+            },
+          }),
           latencyMs,
         },
       },

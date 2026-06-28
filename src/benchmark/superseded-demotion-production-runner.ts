@@ -408,7 +408,7 @@ export async function runProductionDemotionCli(
   const benchmarkArtifact = readBenchmarkArtifact(defaultBenchmark);
   const report = await runProductionDemotionAnalysis({
     benchmarkArtifact,
-    sourceVariant: args.variant,
+    ...(args.variant !== undefined && { sourceVariant: args.variant }),
   });
   let written: string | undefined;
   if (!args.noWrite) {
@@ -437,11 +437,11 @@ export function parseProductionDemotionCliArgs(
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--benchmark-artifact" && i + 1 < argv.length) {
-      out.benchmarkArtifact = argv[++i];
+      out.benchmarkArtifact = argv[++i]!;
     } else if (a === "--out-dir" && i + 1 < argv.length) {
-      out.outDir = argv[++i];
+      out.outDir = argv[++i]!;
     } else if (a === "--variant" && i + 1 < argv.length) {
-      out.variant = argv[++i];
+      out.variant = argv[++i]!;
     } else if (a === "--no-write") {
       out.noWrite = true;
     } else if (a === "--no-stdout") {

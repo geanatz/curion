@@ -186,7 +186,7 @@ export interface RecallSynthesisFailure {
   ok: false;
   kind: "all-providers-failed" | "missing-config" | "invalid-input";
   message: string;
-  lastError?: ProviderError;
+  lastError?: ProviderError | undefined;
   httpCalls: number;
 }
 
@@ -601,7 +601,7 @@ async function runSynthesisCall(
         model: args.model,
         messages,
         maxTokens: args.maxTokens,
-        fetchImpl: args.fetchImpl,
+        ...(args.fetchImpl !== undefined && { fetchImpl: args.fetchImpl }),
         baseUrl: args.baseUrl,
         apiKey: args.apiKey,
         timeoutMs: args.timeoutMs,

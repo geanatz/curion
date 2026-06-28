@@ -303,7 +303,7 @@ export function embedHashedBagOfWords(
     const sign = signTrick(tok);
     const subLinearTf = Math.log(1 + count);
     const idfWeight = idf ? (idf.get(tok) ?? 1) : 1;
-    values[bucket] += sign * subLinearTf * idfWeight;
+    values[bucket] = (values[bucket] ?? 0) + sign * subLinearTf * idfWeight;
   }
   // L2 normalize.
   let norm = 0;

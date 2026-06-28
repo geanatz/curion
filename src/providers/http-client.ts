@@ -41,7 +41,7 @@ export type ProviderErrorKind =
 export interface ProviderError {
   kind: ProviderErrorKind;
   /** HTTP status code, if the failure came from a response. */
-  status?: number;
+  status?: number | undefined;
   /** Human-readable, redacted message. Never includes the API key. */
   message: string;
   /** True if the request reached a server (vs. failed in transport). */
@@ -106,18 +106,20 @@ export interface ChatCompletionRequest {
 }
 
 export interface ChatCompletionResponse {
-  id?: string;
+  id?: string | undefined;
   model: string;
   /** Combined text content from the first choice. */
   content: string;
   /** Raw finish_reason from the provider. */
-  finishReason?: string;
+  finishReason?: string | undefined;
   /** Provider-reported token usage, if present. */
-  usage?: {
-    promptTokens?: number;
-    completionTokens?: number;
-    totalTokens?: number;
-  };
+  usage?:
+    | {
+        promptTokens?: number | undefined;
+        completionTokens?: number | undefined;
+        totalTokens?: number | undefined;
+      }
+    | undefined;
   /** Latency measured by the client (ms). */
   latencyMs: number;
 }

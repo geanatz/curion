@@ -54,13 +54,13 @@ export type MemoryAnalysis = z.infer<typeof MemoryAnalysisSchema>;
 
 export interface ParseResult {
   ok: boolean;
-  value?: MemoryAnalysis;
+  value?: MemoryAnalysis | undefined;
   /** Parser-level errors (could not extract JSON, schema mismatch). */
   errors: string[];
   /** True if a repair pass was needed and succeeded. */
   repaired: boolean;
   /** Strategy that succeeded, if any. */
-  strategy?: "raw" | "fenced" | "balanced" | "repaired";
+  strategy?: "raw" | "fenced" | "balanced" | "repaired" | undefined;
 }
 
 const FENCE_RE = /```(?:json|JSON)?\s*([\s\S]*?)```/;

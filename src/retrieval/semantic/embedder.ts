@@ -170,7 +170,7 @@ export class StubSemanticEmbedder implements SemanticEmbedder {
     for (const tok of tokens) {
       const bucket = fnv1a32(tok) % this.dim;
       const sign = (fnv1a32("\u0001" + tok) & 0x80000000) !== 0 ? -1 : 1;
-      values[bucket] += sign;
+      values[bucket] = (values[bucket] ?? 0) + sign;
     }
     // L2 normalize.
     let norm = 0;
@@ -423,9 +423,9 @@ export async function createSemanticEmbedder(
     return stub;
   }
   const embedder = new BgeSmallEmbedder({
-    modelId: options.modelId,
-    cacheDir: options.cacheDir,
-    allowRemote: options.allowRemote,
+    ...(options.modelId !== undefined && { modelId: options.modelId }),
+    ...(options.cacheDir !== undefined && { cacheDir: options.cacheDir }),
+    ...(options.allowRemote !== undefined && { allowRemote: options.allowRemote }),
   });
   await embedder.init();
   return embedder;

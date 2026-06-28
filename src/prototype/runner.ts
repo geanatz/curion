@@ -122,19 +122,19 @@ export interface ProviderAttempt {
   fixture: string;
   ok: boolean;
   parse: ParseResult;
-  error?: ProviderError;
-  latencyMs?: number;
+  error?: ProviderError | undefined;
+  latencyMs?: number | undefined;
   /** First 200 chars of the model's raw content, truncated. */
-  rawSnippet?: string;
+  rawSnippet?: string | undefined;
   /** Number of repair attempts applied. */
   repairsApplied: number;
   /** max_tokens used for the request, if live. */
-  maxTokens?: number;
+  maxTokens?: number | undefined;
   /**
    * Reasoning effort sent to the provider for this attempt, if any.
    * Only set for providers that advertise the parameter (Groq).
    */
-  reasoningEffort?: string;
+  reasoningEffort?: string | undefined;
   /**
    * Response_format type used for this attempt. Reported for
    * transparency: "json_object", "text", or "json_schema".
@@ -187,23 +187,23 @@ export function parseCli(argv: string[]): RunnerOptions {
     if (a === "--live") opts.live = true;
     else if (a === "--dry-run") opts.live = false;
     else if (a === "--only-provider" && argv[i + 1]) {
-      const ids = argv[++i].split(",").map((s) => s.trim()).filter(isProviderId);
+      const ids = argv[++i]!.split(",").map((s) => s.trim()).filter(isProviderId);
       opts.onlyProviders = ids;
     } else if (a === "--only-fixture" && argv[i + 1]) {
-      opts.onlyFixtures = argv[++i].split(",").map((s) => s.trim()).filter(Boolean);
+      opts.onlyFixtures = argv[++i]!.split(",").map((s) => s.trim()).filter(Boolean);
     } else if (a === "--only-nim-model" && argv[i + 1]) {
-      opts.onlyNimModels = argv[++i].split(",").map((s) => s.trim()).filter(Boolean);
+      opts.onlyNimModels = argv[++i]!.split(",").map((s) => s.trim()).filter(Boolean);
     } else if (a === "--artifacts" && argv[i + 1]) {
-      opts.artifactsDir = argv[++i];
+      opts.artifactsDir = argv[++i]!;
     } else if (a === "--max-tokens" && argv[i + 1]) {
-      const n = Number.parseInt(argv[++i], 10);
+      const n = Number.parseInt(argv[++i]!, 10);
       if (!Number.isFinite(n) || n <= 0) {
         throw new Error(`--max-tokens requires a positive integer (got "${argv[i]}")`);
       }
       opts.maxTokens = n;
     } else if (a === "--groq-reasoning-effort" && argv[i + 1]) {
       // Allow empty string to clear the value for a single run.
-      opts.groqReasoningEffortOverride = argv[++i];
+      opts.groqReasoningEffortOverride = argv[++i]!;
     } else if (a === "--no-groq-strict-schema") {
       opts.groqDisableStrictJsonSchema = true;
     } else if (a === "--help" || a === "-h") {
@@ -385,7 +385,7 @@ async function runOneAttempt(
       baseUrl: providerBaseUrl(provider, cfg),
       apiKey,
       timeoutMs: cfg.timeoutMs,
-      fetchImpl: options.fetchImpl,
+      ...(options.fetchImpl !== undefined && { fetchImpl: options.fetchImpl }),
       providerLabel: `${provider}/${model}`,
     },
   );

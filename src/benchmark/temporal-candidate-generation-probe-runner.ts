@@ -238,13 +238,13 @@ export function parseCandidateGenerationCliArgs(
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--benchmark-artifact" && i + 1 < argv.length) {
-      out.benchmarkArtifact = argv[++i];
+      out.benchmarkArtifact = argv[++i]!;
     } else if (a === "--semantic-evidence" && i + 1 < argv.length) {
-      out.semanticEvidence = argv[++i];
+      out.semanticEvidence = argv[++i]!;
     } else if (a === "--out-dir" && i + 1 < argv.length) {
-      out.outDir = argv[++i];
+      out.outDir = argv[++i]!;
     } else if (a === "--variant" && i + 1 < argv.length) {
-      out.variant = argv[++i];
+      out.variant = argv[++i]!;
     } else if (a === "--no-write") {
       out.noWrite = true;
     } else if (a === "--no-stdout") {

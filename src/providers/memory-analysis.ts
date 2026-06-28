@@ -348,9 +348,9 @@ export interface AdapterFailure {
    */
   message: string;
   /** Last hard error observed, if any (already redacted by the HTTP client). */
-  lastError?: ProviderError;
+  lastError?: ProviderError | undefined;
   /** Last structured-output failure observed, if any. */
-  lastParseErrors?: string[];
+  lastParseErrors?: string[] | undefined;
   /**
    * Number of HTTP round trips actually made before giving up.
    * Always <= 4 (primary + repair + fallback + fallback-repair) when
@@ -867,7 +867,7 @@ async function runProviderWithRepair(
         model: args.model,
         messages,
         maxTokens: args.maxTokens,
-        fetchImpl: args.fetchImpl,
+        ...(args.fetchImpl !== undefined && { fetchImpl: args.fetchImpl }),
         baseUrl: args.baseUrl,
         apiKey: args.apiKey,
         timeoutMs: args.timeoutMs,
@@ -877,7 +877,7 @@ async function runProviderWithRepair(
         model: args.model,
         messages,
         maxTokens: args.maxTokens,
-        fetchImpl: args.fetchImpl,
+        ...(args.fetchImpl !== undefined && { fetchImpl: args.fetchImpl }),
         baseUrl: args.baseUrl,
         apiKey: args.apiKey,
         timeoutMs: args.timeoutMs,
@@ -936,7 +936,7 @@ async function runProviderWithRepair(
         model: args.model,
         messages: repairMessages,
         maxTokens: args.maxTokens,
-        fetchImpl: args.fetchImpl,
+        ...(args.fetchImpl !== undefined && { fetchImpl: args.fetchImpl }),
         baseUrl: args.baseUrl,
         apiKey: args.apiKey,
         timeoutMs: args.timeoutMs,
@@ -946,7 +946,7 @@ async function runProviderWithRepair(
         model: args.model,
         messages: repairMessages,
         maxTokens: args.maxTokens,
-        fetchImpl: args.fetchImpl,
+        ...(args.fetchImpl !== undefined && { fetchImpl: args.fetchImpl }),
         baseUrl: args.baseUrl,
         apiKey: args.apiKey,
         timeoutMs: args.timeoutMs,
@@ -1039,7 +1039,7 @@ async function runAnthropicCall(opts: {
       model: opts.model,
       messages: opts.messages,
       maxTokens: opts.maxTokens,
-      fetchImpl: opts.fetchImpl,
+      ...(opts.fetchImpl !== undefined && { fetchImpl: opts.fetchImpl }),
       baseUrl: opts.baseUrl,
       apiKey: opts.apiKey,
       timeoutMs: opts.timeoutMs,

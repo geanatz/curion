@@ -208,7 +208,7 @@ async function main(): Promise<void> {
   const evalResult = await runHeldOutEvals({
     variant: opts.variant,
     queries: HELD_OUT_QUERIES,
-    embedder: opts.embedder,
+    ...(opts.embedder !== undefined && { embedder: opts.embedder }),
     topK: opts.topK,
     hybridK: opts.hybridK,
   });

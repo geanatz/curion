@@ -949,7 +949,7 @@ function isScopedToTestOrDocs(text: string): boolean {
 function stripSecretHits(text: string, hits: SecretHit[]): string {
   let out = text;
   for (let i = hits.length - 1; i >= 0; i--) {
-    const h = hits[i];
+    const h = hits[i]!;
     out = out.slice(0, h.start) + " " + out.slice(h.end);
   }
   return out;
@@ -1025,7 +1025,7 @@ function looksLikeJunk(trimmed: string): boolean {
   const tokens = trimmed.split(/\s+/);
   if (tokens.length >= 3) {
     const set = new Set(tokens.map((t) => t.toLowerCase()));
-    if (set.size === 1 && tokens[0].length <= 6) return true;
+    if (set.size === 1 && tokens[0]!.length <= 6) return true;
   }
   // Heuristic: a 3-or-fewer-letter "word salad" with no spaces (e.g. "asdf")
   if (/^[a-z]{1,5}$/i.test(trimmed) && trimmed.length <= 5) return true;
