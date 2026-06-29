@@ -24,9 +24,15 @@
  *      `supersedes` / `supersededBy` / `resolvedAt` when
  *      the caller supplies them (pass-through). The
  *      detector does NOT derive them.
- *   3. Existing metadata keys are preserved verbatim. A
- *      pre-existing `relationship` block is NOT
- *      overwritten.
+ *   3. Existing metadata keys are preserved verbatim. The
+ *      Phase I merge-on-existing rule: a pre-existing
+ *      `relationship` block has its Phase I pass-through
+ *      fields (`supersedes`, `supersededBy`,
+ *      `resolvedAt`) MERGED with the new derived block;
+ *      the detector-derived fields (`conflictsWith`,
+ *      `olderVariantsOf`, `detectionConfidence`,
+ *      `derivedAt`, `derivedSchemaVersion`) are NOT
+ *      re-derived and stay verbatim.
  *   4. The read-side projection in
  *      `listActiveMemoryRelationshipBlocks` round-trips
  *      the new fields. A legacy `"ccm-draft-1"` row
@@ -60,6 +66,7 @@ import { runRememberController } from "../src/controller/remember-controller.ts"
 import {
   DERIVED_SCHEMA_VERSION,
   LEGACY_DERIVED_SCHEMA_VERSION,
+  MAX_RELATED_IDS,
   type RelationshipMetadataFields,
   buildPersistedMetadata,
   deriveRelationshipMetadata,
@@ -274,16 +281,137 @@ test("buildPersistedMetadata: supersedes array is bounded to 16 entries", () => 
   assert.deepEqual(arr, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
 });
 
+test("buildPersistedMetadata: initial write of supersedes dedupes + sorts deterministically", () => {
+  // Regression: the initial write path (no pre-existing
+  // `relationship` key) must apply the SAME normalization
+  // as the merge path: filter finite positive integers,
+  // dedupe, deterministic ascending sort, cap at
+  // `MAX_RELATED_IDS`. A regression here would leave the
+  // array in insertion order with duplicates intact,
+  // while the merge path expected ascending-sorted,
+  // deduplicated ids, so the two paths could disagree on
+  // the shape of a row written from a fresh write vs. one
+  // written through a merge. This is a parity pin: the
+  // initial write must produce the same shape as a merge
+  // that started from `[]`.
+  const derived: RelationshipMetadataFields = {
+    conflictsWith: [1],
+    olderVariantsOf: [],
+    detectionConfidence: 0.9,
+    derivedSchemaVersion: DERIVED_SCHEMA_VERSION,
+    derivedAt: 1,
+    // Unsorted, with duplicates: 5, 3, 1, 3, 5, 2.
+    // Expected output: [1, 2, 3, 5] (sorted ascending,
+    // deduplicated).
+    supersedes: [5, 3, 1, 3, 5, 2],
+  };
+  const out = buildPersistedMetadata({ tags: ["x"] }, derived);
+  const rel = out.relationship as Record<string, unknown>;
+  const arr = rel.supersedes as number[];
+  assert.deepEqual(
+    arr,
+    [1, 2, 3, 5],
+    "expected initial write to dedupe and sort ascending"
+  );
+  // Determinism: a second call with the same input must
+  // produce the same output. Pin byte-equal output so any
+  // future reliance on insertion order surfaces here.
+  const out2 = buildPersistedMetadata({ tags: ["x"] }, derived);
+  const arr2 = (out2.relationship as Record<string, unknown>).supersedes as number[];
+  assert.deepEqual(arr2, arr);
+});
+
+test("buildPersistedMetadata: initial write of supersededBy dedupes + sorts deterministically", () => {
+  // Symmetric regression for `supersededBy`: the same
+  // normalization must apply to the inverted id list on
+  // the initial write path.
+  const derived: RelationshipMetadataFields = {
+    conflictsWith: [1],
+    olderVariantsOf: [],
+    detectionConfidence: 0.9,
+    derivedSchemaVersion: DERIVED_SCHEMA_VERSION,
+    derivedAt: 1,
+    // Unsorted, with duplicates.
+    supersededBy: [9, 1, 5, 1, 9, 3],
+    // Expected output: [1, 3, 5, 9].
+  };
+  const out = buildPersistedMetadata({ tags: ["x"] }, derived);
+  const rel = out.relationship as Record<string, unknown>;
+  const arr = rel.supersededBy as number[];
+  assert.deepEqual(arr, [1, 3, 5, 9]);
+});
+
+test("buildPersistedMetadata: initial write of supersedes filters non-finite / non-positive / non-integer ids before cap", () => {
+  // Regression: the initial write path must apply the
+  // SAME filter (`Number.isFinite`, `Number.isInteger`,
+  // `x > 0`) as the merge path's `filterPositiveIds`
+  // helper, and the filter must run BEFORE the cap. A
+  // regression here would either keep invalid values
+  // (NaN, negative, fractional) on the persisted block,
+  // or apply the cap on the unfiltered list, letting
+  // valid ids get dropped in favour of invalid ones.
+  const derived: RelationshipMetadataFields = {
+    conflictsWith: [1],
+    olderVariantsOf: [],
+    detectionConfidence: 0.9,
+    derivedSchemaVersion: DERIVED_SCHEMA_VERSION,
+    derivedAt: 1,
+    // 25 raw entries: the first 16 are valid positive
+    // integers in unsorted order with duplicates; entries
+    // 17-25 are various invalid values that must be
+    // filtered out before the cap is applied.
+    supersedes: [
+      // 16 valid ids, mixed order, with duplicates.
+      20, 5, 10, 1, 15, 8, 3, 12, 6, 1, 18, 9, 14, 7, 11, 5,
+      // 9 invalid entries that must NOT appear in the
+      // persisted block (and must NOT consume cap slots).
+      Number.NaN,
+      -1,
+      0,
+      2.5,
+      -7,
+      Number.POSITIVE_INFINITY,
+      Number.NEGATIVE_INFINITY,
+      1.0, // integer-valued but the filter is on `Number.isInteger`; 1.0 is integer
+    ] as unknown as number[],
+  };
+  const out = buildPersistedMetadata({ tags: ["x"] }, derived);
+  const rel = out.relationship as Record<string, unknown>;
+  const arr = rel.supersedes as number[];
+  // All invalid entries were filtered out.
+  for (const invalid of [Number.NaN, -1, 0, 2.5, -7]) {
+    assert.ok(!arr.includes(invalid), `expected invalid id ${invalid} to be filtered out`);
+  }
+  // Cap was applied on the filtered list (16 valid
+  // unique ids). Valid unique ids from the input: 1, 3,
+  // 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 18, 20 — that's
+  // 14. The output must contain all of them, sorted
+  // ascending, with no duplicates, and length 14 (NOT
+  // 16 — the cap is the ceiling, not a target).
+  assert.deepEqual(
+    arr,
+    [1, 3, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 18, 20],
+    "expected filtered, deduped, ascending-sorted output"
+  );
+  assert.ok(arr.length <= MAX_RELATED_IDS);
+});
+
 // ---------------------------------------------------------------------------
-// 3. Append-only invariant
+// 3. Append-only invariant (Phase I merge-on-existing)
 // ---------------------------------------------------------------------------
 
-test("Phase I: existing relationship block is NOT overwritten by a new pass-through write", () => {
-  // The append-only rule from Phase B is preserved: a
-  // pre-existing `relationship` key is left in place. The
-  // new pass-through fields do NOT change this rule. The
-  // pre-existing block is the canonical "legacy" shape
-  // here.
+test("Phase I: existing relationship block merges Phase I pass-through fields, leaves detector fields unchanged", () => {
+  // Phase I merge-on-existing rule: when a pre-existing
+  // `relationship` key is present, the detector-derived
+  // fields are left untouched (a re-derivation policy is
+  // explicit future work, spec §6.1), and the Phase I
+  // pass-through fields (`supersedes`, `supersededBy`,
+  // `resolvedAt`) are MERGED into the existing block.
+  // The pre-existing block here uses the legacy
+  // `ccm-draft-1` literal to model a row written under
+  // the previous schema version; the helper must keep
+  // that literal and the conservative detector fields
+  // verbatim while merging the new Phase I fields.
   const existing = {
     tags: ["a"],
     relationship: {
@@ -306,16 +434,332 @@ test("Phase I: existing relationship block is NOT overwritten by a new pass-thro
   };
   const out = buildPersistedMetadata(existing, derived);
   const rel = out.relationship as Record<string, unknown>;
-  // Pre-existing block is preserved verbatim.
+  // Detector-derived fields are preserved verbatim.
   assert.equal(rel.derivedSchemaVersion, "ccm-draft-1");
   assert.equal(rel.derivedAt, 1);
   assert.deepEqual(rel.conflictsWith, [99]);
   assert.equal(rel.detectionConfidence, 0.95);
-  // The new pass-through fields are NOT merged into the
-  // pre-existing block.
-  assert.equal(rel.supersedes, undefined);
-  assert.equal(rel.supersededBy, undefined);
-  assert.equal(rel.resolvedAt, undefined);
+  // The new Phase I pass-through fields are merged into
+  // the pre-existing block.
+  assert.deepEqual(rel.supersedes, [10]);
+  assert.deepEqual(rel.supersededBy, [11]);
+  assert.equal(rel.resolvedAt, 3);
+});
+
+test("Phase I merge: supersedes accumulates disjoint entries (existing [10] + new [20] -> [10,20])", () => {
+  // Disjoint accumulation: when the existing and
+  // incoming supersedes lists share no ids, the merged
+  // result is the ascending union of both.
+  const existing = {
+    tags: ["a"],
+    relationship: {
+      derivedSchemaVersion: DERIVED_SCHEMA_VERSION,
+      derivedAt: 1,
+      conflictsWith: [99],
+      olderVariantsOf: [],
+      detectionConfidence: 0.95,
+      supersedes: [10],
+    },
+  };
+  const derived: RelationshipMetadataFields = {
+    conflictsWith: [42],
+    olderVariantsOf: [],
+    detectionConfidence: 0.91,
+    derivedSchemaVersion: DERIVED_SCHEMA_VERSION,
+    derivedAt: 2,
+    supersedes: [20],
+  };
+  const out = buildPersistedMetadata(existing, derived);
+  const rel = out.relationship as Record<string, unknown>;
+  assert.deepEqual(rel.supersedes, [10, 20]);
+  // Detector fields stay unchanged.
+  assert.deepEqual(rel.conflictsWith, [99]);
+  assert.equal(rel.detectionConfidence, 0.95);
+});
+
+test("Phase I merge: supersedes dedupes overlapping entries (existing [10,20] + new [10,30] -> [10,20,30])", () => {
+  // Duplicate removal: when the existing and incoming
+  // lists overlap, the merged result is the
+  // de-duplicated ascending union. The duplicate `10`
+  // appears once in the output.
+  const existing = {
+    tags: ["a"],
+    relationship: {
+      derivedSchemaVersion: DERIVED_SCHEMA_VERSION,
+      derivedAt: 1,
+      conflictsWith: [99],
+      olderVariantsOf: [],
+      detectionConfidence: 0.95,
+      supersedes: [10, 20],
+    },
+  };
+  const derived: RelationshipMetadataFields = {
+    conflictsWith: [42],
+    olderVariantsOf: [],
+    detectionConfidence: 0.91,
+    derivedSchemaVersion: DERIVED_SCHEMA_VERSION,
+    derivedAt: 2,
+    // Incoming contains a duplicate of `10` AND a new
+    // `30`; the merged list must be sorted ascending
+    // and de-duplicated.
+    supersedes: [10, 30],
+  };
+  const out = buildPersistedMetadata(existing, derived);
+  const rel = out.relationship as Record<string, unknown>;
+  assert.deepEqual(rel.supersedes, [10, 20, 30]);
+  // Detector fields stay unchanged.
+  assert.deepEqual(rel.conflictsWith, [99]);
+});
+
+test("Phase I merge: supersededBy dedupes and sorts the same way supersedes does", () => {
+  // Same merge rule applied to the inverted id list.
+  // The merge helper is shared between both Phase I
+  // id-list fields; this test pins the symmetric
+  // behaviour so a future change to one branch doesn't
+  // silently desync the other.
+  const existing = {
+    tags: ["a"],
+    relationship: {
+      derivedSchemaVersion: DERIVED_SCHEMA_VERSION,
+      derivedAt: 1,
+      conflictsWith: [],
+      olderVariantsOf: [],
+      detectionConfidence: 0,
+      supersededBy: [5, 7],
+    },
+  };
+  const derived: RelationshipMetadataFields = {
+    conflictsWith: [1],
+    olderVariantsOf: [],
+    detectionConfidence: 0.9,
+    derivedSchemaVersion: DERIVED_SCHEMA_VERSION,
+    derivedAt: 2,
+    supersededBy: [7, 9, 3],
+  };
+  const out = buildPersistedMetadata(existing, derived);
+  const rel = out.relationship as Record<string, unknown>;
+  // Sorted ascending, deduplicated.
+  assert.deepEqual(rel.supersededBy, [3, 5, 7, 9]);
+});
+
+test("Phase I merge: supersedes at cap (16) + new unique id stays capped at 16 (no overflow)", () => {
+  // Regression: the merge path must enforce the cap
+  // STRICTLY. When the pre-existing `supersedes` list is
+  // already at `MAX_RELATED_IDS` (16) and the incoming
+  // derived list contains a brand-new unique id, the
+  // merged result must remain at 16 entries — the new
+  // unique id is dropped (the cap wins) and the existing
+  // ids are preserved. A regression here would push the
+  // merged length to 17 (existing 16 + new 1) by checking
+  // the cap after the push instead of before.
+  const existingAtCap = Array.from({ length: MAX_RELATED_IDS }, (_, i) => i + 1); // [1..16]
+  const existing = {
+    tags: ["a"],
+    relationship: {
+      derivedSchemaVersion: DERIVED_SCHEMA_VERSION,
+      derivedAt: 1,
+      conflictsWith: [99],
+      olderVariantsOf: [],
+      detectionConfidence: 0.95,
+      supersedes: existingAtCap,
+    },
+  };
+  const derived: RelationshipMetadataFields = {
+    conflictsWith: [42],
+    olderVariantsOf: [],
+    detectionConfidence: 0.91,
+    derivedSchemaVersion: DERIVED_SCHEMA_VERSION,
+    derivedAt: 2,
+    // A brand-new unique id, disjoint from the existing
+    // 16 entries.
+    supersedes: [999],
+  };
+  const out = buildPersistedMetadata(existing, derived);
+  const rel = out.relationship as Record<string, unknown>;
+  const merged = rel.supersedes as number[];
+  // Hard invariant: the merged array must not exceed the
+  // cap, regardless of the incoming side.
+  assert.equal(
+    merged.length,
+    MAX_RELATED_IDS,
+    `merged supersedes length must be <= ${MAX_RELATED_IDS}, got ${merged.length}`
+  );
+  assert.ok(
+    merged.length <= MAX_RELATED_IDS,
+    `merged supersedes length must be <= ${MAX_RELATED_IDS}, got ${merged.length}`
+  );
+  // All pre-existing ids are preserved (none dropped).
+  for (const id of existingAtCap) {
+    assert.ok(merged.includes(id), `expected merged supersedes to contain existing id ${id}`);
+  }
+  // The new unique id was dropped because the cap was
+  // already reached by the existing side. This pins the
+  // "cap wins, new id is dropped" rule.
+  assert.equal(
+    merged.includes(999),
+    false,
+    "expected the new unique id 999 to be dropped when existing list is at cap"
+  );
+  // Deterministic ascending order.
+  for (let i = 1; i < merged.length; i += 1) {
+    assert.ok(merged[i - 1]! < merged[i]!, "expected merged supersedes to be sorted ascending");
+  }
+});
+
+test("Phase I merge: supersededBy at cap (16) + new unique id stays capped at 16 (no overflow)", () => {
+  // Symmetric regression for `supersededBy`: the same
+  // cap-strict invariant must hold for the inverted id
+  // list. The merge helper is shared between both Phase I
+  // id-list fields, so a single fix in `mergeIdListField`
+  // covers both, but this test pins the symmetric
+  // behaviour so a future per-key refactor cannot
+  // silently desync them.
+  const existingAtCap = Array.from({ length: MAX_RELATED_IDS }, (_, i) => i + 100); // [100..115]
+  const existing = {
+    tags: ["a"],
+    relationship: {
+      derivedSchemaVersion: DERIVED_SCHEMA_VERSION,
+      derivedAt: 1,
+      conflictsWith: [],
+      olderVariantsOf: [],
+      detectionConfidence: 0,
+      supersededBy: existingAtCap,
+    },
+  };
+  const derived: RelationshipMetadataFields = {
+    conflictsWith: [1],
+    olderVariantsOf: [],
+    detectionConfidence: 0.9,
+    derivedSchemaVersion: DERIVED_SCHEMA_VERSION,
+    derivedAt: 2,
+    // A brand-new unique id, disjoint from the existing
+    // 16 entries.
+    supersededBy: [7777],
+  };
+  const out = buildPersistedMetadata(existing, derived);
+  const rel = out.relationship as Record<string, unknown>;
+  const merged = rel.supersededBy as number[];
+  assert.equal(
+    merged.length,
+    MAX_RELATED_IDS,
+    `merged supersededBy length must be <= ${MAX_RELATED_IDS}, got ${merged.length}`
+  );
+  for (const id of existingAtCap) {
+    assert.ok(merged.includes(id), `expected merged supersededBy to contain existing id ${id}`);
+  }
+  assert.equal(
+    merged.includes(7777),
+    false,
+    "expected the new unique id 7777 to be dropped when existing list is at cap"
+  );
+  for (let i = 1; i < merged.length; i += 1) {
+    assert.ok(merged[i - 1]! < merged[i]!, "expected merged supersededBy to be sorted ascending");
+  }
+});
+
+test("Phase I merge: resolvedAt does not regress when an older incoming timestamp arrives", () => {
+  // Latest-wins invariant for resolvedAt: the merged
+  // value is `Math.max(existing, incoming)`. An older
+  // incoming timestamp must NEVER overwrite a newer
+  // existing one. The existing row's resolution is
+  // preserved.
+  const existing = {
+    tags: ["a"],
+    relationship: {
+      derivedSchemaVersion: DERIVED_SCHEMA_VERSION,
+      derivedAt: 1,
+      conflictsWith: [99],
+      olderVariantsOf: [],
+      detectionConfidence: 0.95,
+      resolvedAt: 1_700_000_000_100,
+    },
+  };
+  const derived: RelationshipMetadataFields = {
+    conflictsWith: [42],
+    olderVariantsOf: [],
+    detectionConfidence: 0.91,
+    derivedSchemaVersion: DERIVED_SCHEMA_VERSION,
+    derivedAt: 2,
+    // Incoming timestamp is strictly older.
+    resolvedAt: 1_700_000_000_050,
+  };
+  const out = buildPersistedMetadata(existing, derived);
+  const rel = out.relationship as Record<string, unknown>;
+  // Existing (newer) timestamp wins.
+  assert.equal(rel.resolvedAt, 1_700_000_000_100);
+  // Detector fields stay unchanged.
+  assert.deepEqual(rel.conflictsWith, [99]);
+});
+
+test("Phase I merge: resolvedAt advances when a newer incoming timestamp arrives", () => {
+  // Newer-wins invariant for resolvedAt: when the
+  // incoming timestamp is strictly greater than the
+  // existing one, the merged value advances to the
+  // incoming timestamp.
+  const existing = {
+    tags: ["a"],
+    relationship: {
+      derivedSchemaVersion: DERIVED_SCHEMA_VERSION,
+      derivedAt: 1,
+      conflictsWith: [99],
+      olderVariantsOf: [],
+      detectionConfidence: 0.95,
+      resolvedAt: 1_700_000_000_100,
+    },
+  };
+  const derived: RelationshipMetadataFields = {
+    conflictsWith: [42],
+    olderVariantsOf: [],
+    detectionConfidence: 0.91,
+    derivedSchemaVersion: DERIVED_SCHEMA_VERSION,
+    derivedAt: 2,
+    // Incoming timestamp is strictly newer.
+    resolvedAt: 1_700_000_000_200,
+  };
+  const out = buildPersistedMetadata(existing, derived);
+  const rel = out.relationship as Record<string, unknown>;
+  // Incoming (newer) timestamp wins.
+  assert.equal(rel.resolvedAt, 1_700_000_000_200);
+  // Detector fields stay unchanged.
+  assert.deepEqual(rel.conflictsWith, [99]);
+});
+
+test("Phase I merge: detector-derived fields are NOT overwritten by a new write", () => {
+  // Detector-derived fields (`conflictsWith`,
+  // `olderVariantsOf`, `detectionConfidence`,
+  // `derivedAt`, `derivedSchemaVersion`) are NOT
+  // re-derived on a new write. The pre-existing values
+  // are kept verbatim even when the new derived block
+  // supplies conflicting values. This is the explicit
+  // spec §6.1 future-work carve-out: a re-derivation
+  // policy is NOT in scope for this merge step.
+  const existing = {
+    tags: ["a"],
+    relationship: {
+      derivedSchemaVersion: "ccm-draft-1",
+      derivedAt: 1,
+      conflictsWith: [99],
+      olderVariantsOf: [98],
+      detectionConfidence: 0.95,
+    },
+  };
+  const derived: RelationshipMetadataFields = {
+    // Every detector field conflicts with the existing
+    // block. None of them may land on the persisted
+    // block.
+    conflictsWith: [42],
+    olderVariantsOf: [41],
+    detectionConfidence: 0.11,
+    derivedSchemaVersion: DERIVED_SCHEMA_VERSION,
+    derivedAt: 9999,
+  };
+  const out = buildPersistedMetadata(existing, derived);
+  const rel = out.relationship as Record<string, unknown>;
+  assert.equal(rel.derivedSchemaVersion, "ccm-draft-1");
+  assert.equal(rel.derivedAt, 1);
+  assert.deepEqual(rel.conflictsWith, [99]);
+  assert.deepEqual(rel.olderVariantsOf, [98]);
+  assert.equal(rel.detectionConfidence, 0.95);
 });
 
 // ---------------------------------------------------------------------------

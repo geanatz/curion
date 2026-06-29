@@ -401,11 +401,14 @@ export function hasMeaningfulRelationshipData(fields: RelationshipMetadataFields
  *     `olderVariantsOf`), the existing metadata is returned
  *     unchanged — no noisy empty block is appended.
  *   - If the existing metadata already carries a `relationship`
- *     key, the helper does NOT silently merge or overwrite it.
- *     The pre-existing block is left in place; the new block is
- *     not written. This is the safe default for the first
- *     version and is future-compatible: a later phase that wants
- *     to re-derive on read can opt in explicitly.
+ *     key, the Phase I pass-through fields (`supersedes`,
+ *     `supersededBy`, `resolvedAt`) from the new derived block
+ *     are MERGED into the pre-existing block. The detector-
+ *     derived fields (`conflictsWith`, `olderVariantsOf`,
+ *     `detectionConfidence`, `derivedAt`, `derivedSchemaVersion`)
+ *     are NOT re-derived; the pre-existing values are kept
+ *     verbatim. Re-derivation of detector fields is explicit
+ *     future work (spec §6.1).
  *   - If the existing metadata is not a plain object (e.g. a
  *     malformed JSON blob decoded to `null` / array / string),
  *     it is treated as `{}` and the derived block is written
@@ -413,16 +416,36 @@ export function hasMeaningfulRelationshipData(fields: RelationshipMetadataFields
  *     read-side fallback in `listActiveMemorySummaries`.
  *
  * **Phase I pass-through rule.** The new optional fields
- * (`supersedes`, `supersededBy`, `resolvedAt`) are copied
- * verbatim onto the persisted block when the caller supplies
- * them. They are NOT derived by the detector, and they do NOT
- * affect the "append only if there is actual relationship
- * data" gate. A caller that wants a Phase I block must pass a
- * derived `RelationshipMetadataFields` with at least one of
- * the conservative detector fields (`conflictsWith` /
+ * (`supersedes`, `supersededBy`, `resolvedAt`) are copied onto
+ * the persisted block when the caller supplies them. They are
+ * NOT derived by the detector, and they do NOT affect the
+ * "append only if there is actual relationship data" gate. A
+ * caller that wants a Phase I block must pass a derived
+ * `RelationshipMetadataFields` with at least one of the
+ * conservative detector fields (`conflictsWith` /
  * `olderVariantsOf`) non-empty; the Phase I fields are
  * appended alongside the conservative fields as-is. The
  * detector-derived fields remain the gate.
+ *
+ * **Phase I merge-on-existing rule.** When a pre-existing
+ * `relationship` key is present on the existing metadata,
+ * the Phase I fields are merged as follows:
+ *
+ *   - `supersedes` is the de-duplicated, ascending-sorted
+ *     union of the existing and incoming id lists, each
+ *     filtered to finite positive integers and capped at
+ *     `MAX_RELATED_IDS` (16). An entry absent on either
+ *     side is treated as an empty list; a side whose
+ *     filtered list is empty contributes nothing but does
+ *     not drop what the other side supplied.
+ *   - `supersededBy` follows the same rule as `supersedes`.
+ *   - `resolvedAt` is the maximum of the existing and
+ *     incoming values (both filtered to finite non-negative
+ *     integers). The later timestamp wins; an older
+ *     incoming timestamp never regresses an existing one.
+ *     A side whose value is missing or invalid contributes
+ *     `0` to the max.
+ *   - The detector-derived fields are left untouched.
  *
  * The function never reads the wall clock; whatever
  * `derived.derivedAt` was passed in (typically `Date.now()` from
@@ -449,11 +472,24 @@ export function buildPersistedMetadata(
     return base;
   }
 
-  // If a previous relationship block exists, leave it alone.
-  // The first version is additive-only; a re-derivation policy
-  // is explicit future work (spec §6.1).
+  // If a previous relationship block exists, the detector-
+  // derived fields stay as they were. Only the Phase I
+  // pass-through fields (`supersedes`, `supersededBy`,
+  // `resolvedAt`) from the new derived block are merged in.
+  // Re-derivation of the conservative detector fields is
+  // explicit future work (spec §6.1).
   if (base.relationship !== undefined) {
-    return base;
+    const existingBlock = base.relationship as Record<string, unknown>;
+    const mergedBlock: Record<string, unknown> = { ...existingBlock };
+
+    // Merge `supersedes`: de-duplicated union of existing
+    // and incoming, sorted ascending. Each side is filtered
+    // to finite positive integers and capped at 16.
+    mergeIdListField(mergedBlock, "supersedes", derived.supersedes);
+    mergeIdListField(mergedBlock, "supersededBy", derived.supersededBy);
+    mergeResolvedAtField(mergedBlock, derived.resolvedAt);
+
+    return { ...base, relationship: mergedBlock };
   }
 
   const block: PersistedRelationshipBlock = {
@@ -483,23 +519,26 @@ export function buildPersistedMetadata(
   // at all, exactly as a row that the caller never
   // supplied the field.
   if (Array.isArray(derived.supersedes)) {
-    const filtered = derived.supersedes
-      .filter(
-        (x): x is number =>
-          typeof x === "number" && Number.isFinite(x) && Number.isInteger(x) && x > 0
-      )
-      .slice(0, 16);
+    // Use the shared `filterPositiveIds` helper so the
+    // initial write path applies the same normalization as
+    // the merge path: filter finite positive integers,
+    // dedupe, deterministic ascending sort, cap at
+    // `MAX_RELATED_IDS`. The previous inline
+    // `filter(...).slice(0, 16)` only filtered and
+    // truncated, leaving duplicates and insertion order
+    // intact; the merge path expected ascending-sorted,
+    // deduplicated ids, so the two paths could disagree
+    // on the shape of a row written from a fresh write
+    // vs. one written through a merge.
+    const filtered = filterPositiveIds(derived.supersedes);
     if (filtered.length > 0) {
       block.supersedes = filtered;
     }
   }
   if (Array.isArray(derived.supersededBy)) {
-    const filtered = derived.supersededBy
-      .filter(
-        (x): x is number =>
-          typeof x === "number" && Number.isFinite(x) && Number.isInteger(x) && x > 0
-      )
-      .slice(0, 16);
+    // Same normalization as `supersedes` above. See the
+    // shared `filterPositiveIds` helper for the rule.
+    const filtered = filterPositiveIds(derived.supersededBy);
     if (filtered.length > 0) {
       block.supersededBy = filtered;
     }
@@ -515,6 +554,128 @@ export function buildPersistedMetadata(
   // Use a fresh object so the caller never sees in-place
   // mutation of the existing record.
   return { ...base, relationship: block };
+}
+
+/**
+ * Filter a list of candidate ids down to the finite positive
+ * integers, deduped, ascending, capped at `MAX_RELATED_IDS`.
+ * Used by the merge path so the existing and incoming id
+ * lists get the same defensive treatment.
+ */
+function filterPositiveIds(input: unknown): number[] {
+  if (!Array.isArray(input)) return [];
+  const seen = new Set<number>();
+  const out: number[] = [];
+  for (const x of input) {
+    if (typeof x !== "number") continue;
+    if (!Number.isFinite(x)) continue;
+    if (!Number.isInteger(x)) continue;
+    if (x <= 0) continue;
+    if (seen.has(x)) continue;
+    seen.add(x);
+    out.push(x);
+    if (out.length >= MAX_RELATED_IDS) break;
+  }
+  out.sort((a, b) => a - b);
+  return out;
+}
+
+/**
+ * Merge a single id-list Phase I field
+ * (`supersedes` / `supersededBy`) into a target block.
+ *
+ * Rules:
+ *   - The existing field on the target block, if any, is
+ *     filtered to finite positive integers first.
+ *   - The incoming field on `derived` is filtered to
+ *     finite positive integers first.
+ *   - The merged result is the de-duplicated ascending
+ *     union of both, capped at `MAX_RELATED_IDS`.
+ *   - The field stays absent (the key is NOT written) when
+ *     neither side contributes any valid ids. This matches
+ *     the first-version "absent in the first version"
+ *     semantics: a row that had no Phase I field before,
+ *     and where the new derived block also has no Phase I
+ *     field, gets no Phase I key.
+ */
+function mergeIdListField(
+  target: Record<string, unknown>,
+  key: "supersedes" | "supersededBy",
+  incoming: readonly number[] | undefined
+): void {
+  const existingRaw = target[key];
+  const existingIds = filterPositiveIds(existingRaw);
+  const incomingIds = filterPositiveIds(incoming);
+
+  if (existingIds.length === 0 && incomingIds.length === 0) {
+    // Nothing to merge from either side: leave the key
+    // absent (matches first-version behavior for an empty
+    // pre-existing block + an empty new block).
+    return;
+  }
+
+  const seen = new Set<number>();
+  const merged: number[] = [];
+  // The cap check must fire BEFORE the push, not after: the
+  // existing list may already be at `MAX_RELATED_IDS`, in
+  // which case the first iteration of the incoming loop
+  // would push a 17th entry before the post-push break
+  // could fire. Walking the cap check at the top of the
+  // loop body guarantees the merged result never exceeds
+  // `MAX_RELATED_IDS`, regardless of the existing side's
+  // size.
+  for (const id of existingIds) {
+    if (merged.length >= MAX_RELATED_IDS) break;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    merged.push(id);
+  }
+  for (const id of incomingIds) {
+    if (merged.length >= MAX_RELATED_IDS) break;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    merged.push(id);
+  }
+  merged.sort((a, b) => a - b);
+  target[key] = merged;
+}
+
+/**
+ * Merge the `resolvedAt` Phase I field into a target block.
+ *
+ * Rules:
+ *   - The existing value on the target block (if a finite
+ *     non-negative number) is treated as the floor.
+ *   - The incoming value on `derived` (if a finite
+ *     non-negative number) is treated as the candidate.
+ *   - The merged value is `Math.max(existing, incoming,
+ *     0)`, truncated to an integer. A newer incoming
+ *     timestamp advances the stored value; an older
+ *     incoming timestamp never regresses an existing one.
+ *   - The field stays absent (the key is NOT written) when
+ *     neither side has a finite non-negative value: the
+ *     merged value would be `0`, and the first-version
+ *     semantics are "absent" rather than "0".
+ */
+function mergeResolvedAtField(target: Record<string, unknown>, incoming: number | undefined): void {
+  const existingRaw = target.resolvedAt;
+  const existing =
+    typeof existingRaw === "number" && Number.isFinite(existingRaw) && existingRaw >= 0
+      ? Math.trunc(existingRaw)
+      : 0;
+  const inc =
+    typeof incoming === "number" && Number.isFinite(incoming) && incoming >= 0
+      ? Math.trunc(incoming)
+      : 0;
+  const merged = Math.max(existing, inc, 0);
+  if (merged > 0) {
+    target.resolvedAt = merged;
+  } else {
+    // No side contributed a positive timestamp. Match the
+    // first-version semantics: leave the key absent rather
+    // than persist `0`.
+    delete target.resolvedAt;
+  }
 }
 
 // ---------------------------------------------------------------------------
