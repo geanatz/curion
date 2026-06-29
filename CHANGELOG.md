@@ -7,6 +7,79 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-06-30
+
+Documentation-only patch release. No source-code, runtime, or
+behaviour change versus v0.3.2; no detector, storage, controller,
+projection, MCP-surface, or release-engineering changes. The npm
+package name and the Trusted Publishing / provenance path are
+unchanged. This release exists solely to sync the **public
+README** published to npm with the README on GitHub, and to split
+the project documentation that used to live in the long-form
+README into separate files under `docs/`.
+
+### Changed
+
+- **Public README streamlined for npm.** The README shipped to the
+  npm registry is now the focused "What / Why / Install / Quick
+  start / Other clients / Features / Privacy / Config / Docs /
+  Contributing / License" form. Long-form reference material that
+  used to bloat the README (per-client configuration, full
+  configuration variable list, full API reference, privacy /
+  storage deep dive, diagnostic notes) is moved into dedicated
+  pages under `docs/` and linked from the README. The GitHub
+  README, the npm README, and the rendered project page now show
+  the same public surface.
+- **Documentation split into `docs/`.** Four new pages live under
+  `docs/`:
+  - `docs/mcp-clients.md` — per-client wiring for Claude Code,
+    OpenAI Codex CLI, OpenCode, Claude Desktop, the Pi Coding
+    Agent caveat, and the generic stdio path.
+  - `docs/configuration.md` — full environment-variable list,
+    primary / fallback provider examples, semantic-retrieval
+    toggle, logging knob.
+  - `docs/reference.md` — full `remember` / `recall` tool
+    reference, status taxonomy, `text` / `structuredContent`
+    shapes, and the `clarification_needed` contract.
+  - `docs/privacy-storage.md` — `.curion/` layout, WAL /
+    foreign-key SQLite posture, multi-project registry,
+    private-project visibility rules.
+  - The README links into each of these pages; nothing in the
+    public MCP API surface changes.
+- **Install command stays scoped.** The README's install snippet
+  remains `npm install -g @geanatz/curion`; the binary on `PATH`
+  is still `curion`; the MCP server identity (`serverInfo.name =
+  "curion"`) is unchanged. There is no unscoped `npm install
+  curion` path; the package has only ever published under
+  `@geanatz/curion`.
+- **No stale references remain.** The README and `docs/` pages
+  no longer reference any `v0.2.0 is tagged` framing, any
+  `gpt-5.5` / out-of-date model placeholder, or any unscoped
+  `npm install curion` install line. The npm README and the
+  GitHub README match.
+
+### Deprecated
+
+- Nothing in this release.
+
+### Removed
+
+- Nothing in this release.
+
+### Fixed
+
+- Nothing in this release. All behavioural fixes from v0.3.2
+  (Trusted Publishing OIDC, `npm ci --no-audit --no-fund`,
+  `--provenance --access public`, cache-disabled publish step,
+  CLI-version diagnostics) carry over unchanged.
+
+### Security
+
+- Nothing in this release. Provenance attestation remains enabled
+  for every published tarball via Trusted Publishing and
+  `publishConfig.provenance: true`, and no long-lived `NPM_TOKEN`
+  secret is read or required.
+
 ## [0.3.2] - 2026-06-30
 
 Release-engineering fix release. No user-facing behaviour change versus
@@ -444,7 +517,8 @@ no semantic enrichment, no multi-project awareness. Lexical-only
 match scoring on the controller. Provider adapter for a single
 OpenAI-compatible endpoint.
 
-[Unreleased]: https://github.com/geanatz/curion/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/geanatz/curion/compare/v0.3.3...HEAD
+[0.3.3]: https://github.com/geanatz/curion/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/geanatz/curion/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/geanatz/curion/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/geanatz/curion/compare/v0.2.0...v0.3.0
