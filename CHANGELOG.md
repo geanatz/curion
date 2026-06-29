@@ -7,6 +7,97 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-29
+
+Phase I of the relationship-metadata design. The persisted
+`relationship` block on a memory row now extends with three
+optional forward-looking fields (`supersedes`, `supersededBy`,
+`resolvedAt`) and the write-side helper learns to merge them
+into a pre-existing block over time. The conservative detector
+itself is unchanged; the new fields are pass-through and intended
+to be supplied by future controller-side commands or
+provider-driven extraction. No data migration is required:
+rows written under the previous schema version (`"ccm-draft-1"`)
+project cleanly through the new read-side path.
+
+### Added
+
+- **Phase I relationship fields.** The `relationship` block on a
+  memory row now accepts three additional optional keys:
+  `supersedes` (ids this memory supersedes), `supersededBy`
+  (ids that supersede this memory), and `resolvedAt` (ms-epoch
+  resolution timestamp). The detector in
+  `src/retrieval/relationship.ts` does not derive them; they
+  are caller-supplied and copied verbatim onto the persisted
+  block when non-empty.
+- **Merge-on-existing rule for Phase I fields.** When a
+  pre-existing `relationship` key is already present on a
+  memory row, the new Phase I fields are merged into it on
+  write:
+  - ID lists (`supersedes`, `supersededBy`) are the
+    **de-duplicated, ascending-sorted union** of the existing
+    and incoming id lists, each filtered to finite positive
+    integers and capped at `MAX_RELATED_IDS` (16). The merged
+    list is deterministic and never exceeds the cap.
+  - `resolvedAt` follows a **latest-wins** rule: the merged
+    value is `Math.max(existing, incoming, 0)`, truncated to an
+    integer. A newer incoming timestamp advances the stored
+    value; an older incoming timestamp never regresses an
+    existing one. When neither side contributes a positive
+    timestamp, the key is left absent rather than persisted
+    as `0`.
+  - The detector-derived fields (`conflictsWith`,
+    `olderVariantsOf`, `detectionConfidence`, `derivedAt`,
+    `derivedSchemaVersion`) are **preserved verbatim** from the
+    pre-existing block. Re-derivation of the conservative
+    detector is explicit future work; Phase I never re-runs it.
+- **`hasMeaningfulRelationshipData` updated.** A derived block
+  that carries only `supersedes` (no `conflictsWith` /
+  `olderVariantsOf`) is now considered meaningful, so a
+  supersession-only block can be written without requiring a
+  coincident conflict or older-variant signal.
+- **Schema version bump.** The derived-block schema version
+  literal is bumped from `"ccm-draft-1"` to `"ccm-draft-2"`.
+  The old literal is preserved as `LEGACY_DERIVED_SCHEMA_VERSION`
+  for compatibility tests and the read-side fallback in
+  `listActiveMemoryRelationshipBlocks`. Old rows continue to
+  project with empty id arrays and `resolvedAt: 0`.
+- **Phase I read-side coverage.** 18 new property-based and
+  unit tests under
+  `tests/resolved-history-metadata.test.ts` exercise the
+  merge path, the id-list cap, the resolved-at latest-wins
+  rule, the legacy-block fallback, and the write-then-read
+  round-trip end to end.
+
+### Changed
+
+- **`buildPersistedMetadata` write path.** The initial-write
+  and merge paths now share the same `filterPositiveIds`
+  normalisation (filter to finite positive integers, dedupe,
+  ascending sort, cap at `MAX_RELATED_IDS`). Previously the
+  initial-write path only filtered and truncated, while the
+  merge path expected ascending-sorted, deduplicated ids; the
+  two paths could disagree on the shape of a row written
+  fresh vs. one written through a merge. The initial write
+  path now applies the same normalisation so the persisted
+  shape is consistent regardless of which path wrote the row.
+
+### Deprecated
+
+- Nothing in this release.
+
+### Removed
+
+- Nothing in this release.
+
+### Fixed
+
+- Nothing in this release.
+
+### Security
+
+- Nothing in this release.
+
 ## [0.2.0] - 2026-06-28
 
 The first release of Curion as a stand-alone public project. This release
@@ -221,6 +312,7 @@ no semantic enrichment, no multi-project awareness. Lexical-only
 match scoring on the controller. Provider adapter for a single
 OpenAI-compatible endpoint.
 
-[Unreleased]: https://github.com/geanatz/curion/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/geanatz/curion/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/geanatz/curion/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/geanatz/curion/releases/tag/v0.2.0
 [0.1.0]: https://github.com/geanatz/curion/releases/tag/v0.1.0
