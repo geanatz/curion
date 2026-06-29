@@ -7,6 +7,83 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-06-30
+
+Release-engineering fix release. No user-facing behaviour change versus
+v0.3.1; no detector, storage, controller, projection, or MCP-surface
+changes. The npm Trusted Publishing workflow that shipped in v0.3.1
+failed to publish because the runner's npm CLI was older than the
+version npm Trusted Publishing requires for the OIDC credential
+exchange. This release rewires the publish workflow to use a Node/npm
+combination that satisfies the current npm Trusted Publishing
+requirement and re-tries the v0.3.1 publish under a new tag.
+
+### Changed
+
+- **Publish workflow uses Node 24 and the latest npm.** The
+  `actions/setup-node` step is now pinned to `node-version: "24"`.
+  Node 22 LTS ships with npm 10.x and Node 20 LTS ships with npm 9.x;
+  neither satisfies the npm CLI version npm Trusted Publishing
+  currently requires for the OIDC publish credential exchange.
+  Node 24 ships a newer bundled npm and the workflow additionally
+  installs `npm@latest` from the public registry immediately after
+  setup, so the publish step is guaranteed to run on a CLI that
+  npm Trusted Publishing accepts.
+- **Cache explicitly disabled on the publish workflow.**
+  `actions/setup-node` is now passed `cache: ""` for the publish job
+  so a future default-on caching behaviour from the action cannot
+  silently re-enable a warm package-manager cache for the trusted
+  publish path. A warm cache could otherwise mask a stale lockfile
+  or a compromised cache entry between the lockfile-resolved install
+  and the tarball that npm publishes.
+- **Publish job prints CLI diagnostics.** Two `npm --version` /
+  `node --version` lines are emitted: one immediately after the
+  latest-npm install and one immediately before `npm publish`. They
+  are intentionally redundant so the exact CLI version that signs
+  the provenance statement is auditable from the publish step's
+  log alone, and so any future CLI regression on the runner image
+  is visible without cross-referencing other steps.
+- **Publish step promoted to a multi-line `shell: bash` run.** The
+  publish step now uses an explicit `set -euo pipefail` block so a
+  failure in the diagnostic print or the publish invocation surfaces
+  as a workflow failure rather than as a silently skipped publish.
+
+### Deprecated
+
+- Nothing in this release.
+
+### Removed
+
+- Nothing in this release.
+
+### Fixed
+
+- **npm Trusted Publishing publish failure from v0.3.1.** The
+  v0.3.1 tag push triggered the publish workflow, which produced a
+  valid tarball and a signed provenance statement from the
+  GitHub OIDC token, but `npm publish` then returned
+  `404 Not Found - PUT https://registry.npmjs.org/@geanatz%2fcurion`
+  with `'@geanatz/curion@0.3.1' is not in this registry.`. The
+  CLI-side root cause was that the runner's bundled npm was older
+  than the version npm Trusted Publishing currently accepts for
+  the OIDC publish credential exchange. The v0.3.1 tag is left in
+  place but was never associated with a published npm release; the
+  v0.3.1 changelog entry above is preserved as-is so the v0.3.0 →
+  v0.3.1 → v0.3.2 history remains readable. v0.3.2 ships the same
+  `@geanatz/curion@0.3.1` tarball contents under the workflow and
+  CLI combination that npm Trusted Publishing accepts.
+- **v0.3.1 publish attempt removed from the registry.** No v0.3.1
+  release was ever published, so no `npm deprecate` cleanup is
+  needed for that version. This release only adds the workflow
+  fix and a re-publish under the new version.
+
+### Security
+
+- Nothing in this release. Provenance attestation remains enabled
+  for every published tarball via Trusted Publishing and
+  `publishConfig.provenance: true`, and no long-lived `NPM_TOKEN`
+  secret is read or required.
+
 ## [0.3.1] - 2026-06-30
 
 Release-engineering prep. No user-facing behaviour change versus v0.3.0;
@@ -367,7 +444,8 @@ no semantic enrichment, no multi-project awareness. Lexical-only
 match scoring on the controller. Provider adapter for a single
 OpenAI-compatible endpoint.
 
-[Unreleased]: https://github.com/geanatz/curion/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/geanatz/curion/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/geanatz/curion/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/geanatz/curion/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/geanatz/curion/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/geanatz/curion/releases/tag/v0.2.0

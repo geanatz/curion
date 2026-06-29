@@ -1,7 +1,7 @@
 name: publish
 
 # Publish to the npm registry using OIDC Trusted Publishing. Triggered
-# exclusively by a pushed tag matching `v*` (for example `v0.3.1`). The
+# exclusively by a pushed tag matching `v*` (for example `v0.3.2`). The
 # workflow exchanges a GitHub OIDC token for a short-lived npm publish
 # credential; no long-lived NPM_TOKEN secret is required or read.
 #
@@ -46,15 +46,35 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Use Node.js 22 with npm registry
+      - name: Use Node.js 24 with npm registry
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"
           registry-url: "https://registry.npmjs.org/"
-          # No `cache:` is set on purpose. Trusted publishing reads the
-          # exact lockfile-resolved tree via `npm ci`, so we do not
+          # `cache:` is intentionally NOT set. Trusted publishing reads
+          # the exact lockfile-resolved tree via `npm ci`, so we do not
           # want a warm cache that could mask a stale lockfile or a
-          # compromised cache entry.
+          # compromised cache entry. `cache: ""` is set explicitly so a
+          # future default-on behaviour from `actions/setup-node` can
+          # not silently re-enable caching for this job.
+          cache: ""
+
+      - name: Install latest npm and print diagnostic version
+        # npm Trusted Publishing via OIDC requires npm >= 11.5.1 on the
+        # runner. Node 22 LTS ships with npm 10.x and Node 20 LTS ships
+        # with npm 9.x, both of which pre-date the OIDC publish
+        # credential exchange. We pin Node 24 above and explicitly
+        # install the latest npm from the public registry here so the
+        # publish step runs against a known-good CLI. The
+        # `npm --version` line is a diagnostic that prints the exact
+        # CLI version that will run the publish, so any future
+        # regression is visible in the run log.
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install -g npm@latest
+          echo "npm version: $(npm --version)"
+          echo "node version: $(node --version)"
 
       - name: Verify the tag matches package.json version
         shell: bash
@@ -90,5 +110,13 @@ jobs:
         # No `NODE_AUTH_TOKEN` env is set on purpose: authentication
         # is handled by the GitHub OIDC -> npm Trusted Publisher
         # exchange, which `actions/setup-node` + `id-token: write`
-        # + `npm 9.5+` perform automatically.
-        run: npm publish --provenance --access public
+        # + `npm >= 11.5.1` perform automatically. We re-print
+        # `npm --version` here for redundancy with the earlier
+        # diagnostic and to make the publish-time CLI version
+        # auditable in the run log on its own.
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "publish-time npm version: $(npm --version)"
+          echo "publish-time node version: $(node --version)"
+          npm publish --provenance --access public
