@@ -1,6 +1,6 @@
 {
-  "name": "curion",
-  "version": "0.3.0",
+  "name": "@geanatz/curion",
+  "version": "0.3.1",
   "description": "Curion — project-local memory layer for AI agents",
   "type": "module",
   "license": "Apache-2.0",

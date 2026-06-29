@@ -7,6 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-06-30
+
+Release-engineering prep. No user-facing behaviour change versus v0.3.0;
+no detector, storage, controller, projection, or MCP-surface changes.
+The package is now published under the scoped npm name
+`@geanatz/curion` instead of the unscoped `curion` placeholder, and
+publishing is wired through the npm Trusted Publishing flow so every
+release is signed with a build provenance attestation from GitHub
+Actions.
+
+### Changed
+
+- **npm package name is now `@geanatz/curion`.** The previous
+  unscoped name `curion` was only a local-development placeholder
+  and was never published to the public registry under that name.
+  The new scoped name reserves the namespace under the
+  `geanatz` npm organisation. The installed **binary name is
+  unchanged** (`curion`) — `npm install -g @geanatz/curion`
+  exposes the `curion` command exactly as before — and so is the
+  MCP server identity (`serverInfo.name = "curion"`), the config
+  directory (`.curion/`), the env-var prefix (`CURION_*`), and
+  the central registry location (`~/.curion/`).
+- **Release workflow switched to npm Trusted Publishing.** A new
+  `.github/workflows/publish.yml` releases on a pushed `v*` tag
+  using OIDC federation between GitHub Actions and npmjs.org.
+  No long-lived `NPM_TOKEN` secret is required: the workflow
+  exchanges the GitHub OIDC token for a short-lived npm publish
+  credential, and the published tarball is automatically
+  accompanied by a signed provenance attestation. `id-token:
+  write` is granted at the job level and `contents: read`
+  elsewhere, keeping the workflow least-privilege.
+
+### Deprecated
+
+- Nothing in this release.
+
+### Removed
+
+- Nothing in this release.
+
+### Fixed
+
+- Nothing in this release.
+
+### Security
+
+- **Provenance attestation on every release.** With Trusted
+  Publishing enabled and `publishConfig.provenance: true` set in
+  `package.json`, every published tarball carries a SLSA-style
+  provenance attestation that cryptographically binds the
+  tarball to the source commit, the GitHub Actions run, and the
+  npm publish step. Consumers can verify the attestation with
+  `npm audit signatures` or the npm registry's "Provenance"
+  panel on the package page.
+
 ## [0.3.0] - 2026-06-29
 
 Phase I of the relationship-metadata design. The persisted
@@ -312,7 +367,8 @@ no semantic enrichment, no multi-project awareness. Lexical-only
 match scoring on the controller. Provider adapter for a single
 OpenAI-compatible endpoint.
 
-[Unreleased]: https://github.com/geanatz/curion/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/geanatz/curion/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/geanatz/curion/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/geanatz/curion/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/geanatz/curion/releases/tag/v0.2.0
 [0.1.0]: https://github.com/geanatz/curion/releases/tag/v0.1.0

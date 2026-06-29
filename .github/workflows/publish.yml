@@ -1,0 +1,94 @@
+name: publish
+
+# Publish to the npm registry using OIDC Trusted Publishing. Triggered
+# exclusively by a pushed tag matching `v*` (for example `v0.3.1`). The
+# workflow exchanges a GitHub OIDC token for a short-lived npm publish
+# credential; no long-lived NPM_TOKEN secret is required or read.
+#
+# Prerequisites on npmjs.org (one-time setup under the `@geanatz/curion`
+# package page -> "Trusted Publisher" -> "GitHub Actions"):
+#   - Owner / Organization: geanatz
+#   - Repository:           curion
+#   - Workflow filename:    publish.yml
+#   - Environment:          (optional, leave blank unless a GitHub
+#                           Environment is configured)
+#
+# Tag convention: a release is cut by pushing a tag of the form
+# `v<semver>` against `main`. The tag's `v`-prefixed version is the
+# npm dist-tag. The `package.json` version must already be bumped and
+# committed before the tag is pushed; the publish job does not mutate
+# `package.json` itself.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+# Least-privilege default at the workflow level. The publish job below
+# adds `id-token: write` (required for npm Trusted Publishing / OIDC).
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: publish to npm with provenance
+    runs-on: ubuntu-latest
+
+    # `id-token: write` is required for the OIDC exchange that produces
+    # the short-lived npm publish credential. `contents: read` is
+    # already inherited from the workflow-level defaults; restated here
+    # so the job's full permission set is auditable in one place.
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22 with npm registry
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org/"
+          # No `cache:` is set on purpose. Trusted publishing reads the
+          # exact lockfile-resolved tree via `npm ci`, so we do not
+          # want a warm cache that could mask a stale lockfile or a
+          # compromised cache entry.
+
+      - name: Verify the tag matches package.json version
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          pkg_version="$(node -p "require('./package.json').version")"
+          tag_version="${tag#v}"
+          if [ "${tag_version}" != "${pkg_version}" ]; then
+            echo "::error::Tag ${tag} (version ${tag_version}) does not match package.json version ${pkg_version}."
+            echo "::error::Bump package.json (and the lockfile) to ${tag_version}, commit, then push the tag."
+            exit 1
+          fi
+          echo "Tag ${tag} matches package.json version ${pkg_version}."
+
+      - name: Install dependencies from the lockfile
+        run: npm ci --no-audit --no-fund
+
+      - name: Build TypeScript
+        run: npm run build
+
+      - name: Publish to npm with provenance
+        # `publishConfig.provenance: true` and `publishConfig.access:
+        # "public"` in package.json already enable provenance and
+        # public access for the scoped `@geanatz/curion` package.
+        # `--provenance` is passed explicitly for clarity; it is a
+        # no-op given the publishConfig flag and is safe to keep.
+        # `--access public` is also redundant with publishConfig but
+        # is passed explicitly so that a future publishConfig regression
+        # (for example access reverting to the scoped default of
+        # "restricted") cannot silently produce a private publish.
+        #
+        # No `NODE_AUTH_TOKEN` env is set on purpose: authentication
+        # is handled by the GitHub OIDC -> npm Trusted Publisher
+        # exchange, which `actions/setup-node` + `id-token: write`
+        # + `npm 9.5+` perform automatically.
+        run: npm publish --provenance --access public
