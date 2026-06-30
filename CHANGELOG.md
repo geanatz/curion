@@ -7,6 +7,81 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-06-30
+
+Documentation-only patch release. No source-code, runtime, or
+behaviour change versus v0.3.3; no detector, storage, controller,
+projection, MCP-surface, or release-engineering changes. The npm
+package name and the Trusted Publishing / provenance path are
+unchanged. This release exists solely to fix the **public README
+shipped to npm** so the documentation links from the README point
+at the rendered `docs/` pages on GitHub instead of at relative
+`docs/*.md` paths that do not resolve when the README is read
+from the npm registry.
+
+### Changed
+
+- **README documentation links are now absolute GitHub URLs.**
+  The README's links into the per-client, configuration, API
+  reference, and privacy / storage pages under `docs/` are now
+  written as
+  `https://github.com/geanatz/curion/blob/main/docs/<page>.md`
+  (with the same fragment anchors the relative links used). When
+  the README is published to npm, those links now resolve on the
+  GitHub repo's `main` branch instead of failing as 404s against
+  the npm registry's relative-link renderer. The relative-form
+  README that lives on the GitHub repo renders identically
+  because GitHub already resolves both forms to the same target.
+- **`docs/` pages themselves are unchanged.** `docs/mcp-clients.md`,
+  `docs/configuration.md`, `docs/reference.md`, and
+  `docs/privacy-storage.md` were not edited; only the README's
+  link targets moved from `docs/*.md` to the absolute form above.
+  The README's prose, the per-client snippets, the configuration
+  variable list, the `remember` / `recall` reference, and the
+  privacy / storage section all retain v0.3.3 wording verbatim.
+- **Install command stays scoped.** The README's install snippet
+  remains `npm install -g @geanatz/curion`; the binary on `PATH`
+  is still `curion`; the MCP server identity (`serverInfo.name =
+  "curion"`) is unchanged. There is no unscoped `npm install
+  curion` path; the package has only ever published under
+  `@geanatz/curion`.
+- **No stale references remain.** The README and `docs/` pages
+  continue to have no `v0.2.0 is tagged` framing, no `gpt-5.5` /
+  out-of-date model placeholder, and no unscoped `npm install
+  curion` install line. The npm README and the GitHub README
+  carry the same prose; the only difference is that the
+  documentation links are now absolute GitHub URLs.
+
+### Deprecated
+
+- Nothing in this release.
+
+### Removed
+
+- Nothing in this release.
+
+### Fixed
+
+- **npm README documentation links now resolve.** The v0.3.3
+  README was published to npm with relative `docs/*.md` links.
+  On the npm registry those links do not resolve because the
+  `docs/` directory is not shipped in the npm tarball — only
+  `README.md`, `LICENSE`, and the package `package.json` are
+  present. The result was a published README whose
+  "Documentation", "Other MCP clients", "API reference",
+  "Privacy & storage", and "Configuration" links silently
+  pointed at 404s on npmjs.org. v0.3.4 re-publishes the README
+  with absolute `https://github.com/geanatz/curion/blob/main/...`
+  targets so the same links resolve correctly from both the npm
+  registry and the GitHub repo.
+
+### Security
+
+- Nothing in this release. Provenance attestation remains enabled
+  for every published tarball via Trusted Publishing and
+  `publishConfig.provenance: true`, and no long-lived `NPM_TOKEN`
+  secret is read or required.
+
 ## [0.3.3] - 2026-06-30
 
 Documentation-only patch release. No source-code, runtime, or
@@ -517,7 +592,8 @@ no semantic enrichment, no multi-project awareness. Lexical-only
 match scoring on the controller. Provider adapter for a single
 OpenAI-compatible endpoint.
 
-[Unreleased]: https://github.com/geanatz/curion/compare/v0.3.3...HEAD
+[Unreleased]: https://github.com/geanatz/curion/compare/v0.3.4...HEAD
+[0.3.4]: https://github.com/geanatz/curion/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/geanatz/curion/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/geanatz/curion/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/geanatz/curion/compare/v0.3.0...v0.3.1

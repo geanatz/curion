@@ -68,7 +68,7 @@ export CURION_PRIMARY_MODEL=your-model-id
 
 For full client wiring (project-scoped `.mcp.json` with an `env` block,
 team-shared config tips, etc.) see
-[MCP client setup](docs/mcp-clients.md#claude-code-recommended).
+[MCP client setup](https://github.com/geanatz/curion/blob/main/docs/mcp-clients.md#claude-code-recommended).
 
 ---
 
@@ -77,11 +77,11 @@ team-shared config tips, etc.) see
 Curion works with any MCP client that can spawn a stdio server. Full
 configuration snippets and caveats:
 
-- **[OpenAI Codex CLI](docs/mcp-clients.md#openai-codex-cli)** — `config.toml` or `codex mcp add`.
-- **[OpenCode](docs/mcp-clients.md#opencode)** — `opencode.json`.
-- **[Claude Desktop](docs/mcp-clients.md#claude-desktop-generic--secondary)** — generic stdio client.
-- **[Pi Coding Agent](docs/mcp-clients.md#pi-coding-agent-no-native-mcp-support)** — Pi has no native MCP support; use Claude Code, Codex CLI, or OpenCode instead.
-- **[Any other stdio MCP client](docs/mcp-clients.md#other-mcp-clients-generic-stdio)** — spawn `curion` with provider env vars in the environment.
+- **[OpenAI Codex CLI](https://github.com/geanatz/curion/blob/main/docs/mcp-clients.md#openai-codex-cli)** — `config.toml` or `codex mcp add`.
+- **[OpenCode](https://github.com/geanatz/curion/blob/main/docs/mcp-clients.md#opencode)** — `opencode.json`.
+- **[Claude Desktop](https://github.com/geanatz/curion/blob/main/docs/mcp-clients.md#claude-desktop-generic--secondary)** — generic stdio client.
+- **[Pi Coding Agent](https://github.com/geanatz/curion/blob/main/docs/mcp-clients.md#pi-coding-agent-no-native-mcp-support)** — Pi has no native MCP support; use Claude Code, Codex CLI, or OpenCode instead.
+- **[Any other stdio MCP client](https://github.com/geanatz/curion/blob/main/docs/mcp-clients.md#other-mcp-clients-generic-stdio)** — spawn `curion` with provider env vars in the environment.
 
 ---
 
@@ -100,7 +100,7 @@ configuration snippets and caveats:
 - **Stable, frozen public API.** The two tools, their strict input schemas,
   and the public `text` / `structuredContent` surfaces are stable and frozen.
 
-See the full [API reference](docs/reference.md) for statuses, output shapes,
+See the full [API reference](https://github.com/geanatz/curion/blob/main/docs/reference.md) for statuses, output shapes,
 and the `clarification_needed` contract.
 
 ---
@@ -124,7 +124,7 @@ projects are never surfaced.** Mark a project private with
 { "version": 1, "isPrivate": true }
 ```
 
-See [Privacy & storage](docs/privacy-storage.md) for the full story.
+See [Privacy & storage](https://github.com/geanatz/curion/blob/main/docs/privacy-storage.md) for the full story.
 
 ---
 
@@ -139,20 +139,20 @@ The minimum is a primary provider (`CURION_PRIMARY_API_KEY`,
 semantic retrieval (`CURION_SEMANTIC_ENABLED`), and log level
 (`CURION_LOG_LEVEL`).
 
-See [Configuration](docs/configuration.md) for the full variable list and
+See [Configuration](https://github.com/geanatz/curion/blob/main/docs/configuration.md) for the full variable list and
 examples.
 
 ---
 
 ## Documentation
 
-- **[MCP client setup](docs/mcp-clients.md)** — Claude Code, Codex CLI,
+- **[MCP client setup](https://github.com/geanatz/curion/blob/main/docs/mcp-clients.md)** — Claude Code, Codex CLI,
   OpenCode, Claude Desktop, Pi caveat, generic stdio.
-- **[Configuration](docs/configuration.md)** — primary/fallback provider
+- **[Configuration](https://github.com/geanatz/curion/blob/main/docs/configuration.md)** — primary/fallback provider
   env vars, semantic retrieval, logging.
-- **[API reference](docs/reference.md)** — `remember` / `recall` tools,
+- **[API reference](https://github.com/geanatz/curion/blob/main/docs/reference.md)** — `remember` / `recall` tools,
   output shapes, statuses, `clarification_needed`.
-- **[Privacy & storage](docs/privacy-storage.md)** — local store layout,
+- **[Privacy & storage](https://github.com/geanatz/curion/blob/main/docs/privacy-storage.md)** — local store layout,
   cross-project semantic search, private projects.
 
 ---
