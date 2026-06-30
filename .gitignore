@@ -23,6 +23,14 @@ npm-debug.log*
 # contain environment-variable bindings; it must never be committed.
 .mcp.json
 
+# Local Playwright MCP runtime artifacts (kept locally but not
+# source-controlled). The Playwright MCP server writes per-session
+# accessibility-tree page snapshots as `page-*.yml` and browser
+# console logs as `console-*.log` to a project-scoped `.playwright-mcp/`
+# directory. These are transient, machine-specific browser captures
+# and must never be committed.
+.playwright-mcp/
+
 # Archived/exploratory work, kept locally but not source-controlled
 .archive/
 
