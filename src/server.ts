@@ -71,6 +71,7 @@ import {
   buildRememberStructuredContent,
 } from "./tools/remember-projection.js";
 import { logger } from "./logging/logger.js";
+import { VERSION } from "./version.js";
 
 export const PUBLIC_TOOL_NAMES = ["remember", "recall"] as const;
 export type PublicToolName = (typeof PUBLIC_TOOL_NAMES)[number];
@@ -98,7 +99,12 @@ export function buildServer(options: BuildServerOptions = {}): McpServer {
   const server = new McpServer(
     {
       name: options.name ?? "curion",
-      version: options.version ?? "0.2.0",
+      // The package version is the single source of truth. `VERSION`
+      // is generated from `package.json#version` by
+      // `scripts/sync-version.mjs`, wired into `prebuild`/`pretest`
+      // so this value can never drift from a release tag. A caller
+      // may still override it via `options.version` for tests.
+      version: options.version ?? VERSION,
     },
     {
       capabilities: {

@@ -7,6 +7,86 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.3.6] - 2026-06-30
+
+User-facing CLI release. Adds the two metadata flags
+(`--help` / `-h` and `--version` / `-v`) to the `curion` binary
+and replaces the previously hardcoded server version with a
+generated, package-synced version constant. No MCP tool surface
+change; no storage or controller change; no release-engineering
+change. The npm package name (`@geanatz/curion`), the Trusted
+Publishing / OIDC provenance path, and the binary name (`curion`)
+are unchanged.
+
+### Added
+
+- **`curion --help` / `-h` and `curion --version` / `-v` flag
+  interception.** Running `curion` with any of these four flags
+  now prints to stdout and exits 0 *before* any storage or MCP
+  transport startup. The flag handlers never create or touch the
+  project-local `.curion/` directory and never write to stderr
+  (logs). Normal MCP stdio behaviour for unflagged invocations is
+  unchanged. The help text (`src/cli-help.ts`) advertises the
+  two public tools, the env-var configuration contract, and a
+  docs link.
+- **Runtime server version now syncs from `package.json`.** The
+  McpServer `serverInfo.version` field is no longer hardcoded to
+  `"0.2.0"`; it is sourced from a generated `src/version.ts`
+  constant that `scripts/sync-version.mjs` regenerates from
+  `package.json#version` on every `prebuild` / `pretest`. A
+  caller can still override the value through `buildServer({
+  version })` for tests. The `--version` CLI output, the MCP
+  `serverInfo.version` field, and the published npm tarball
+  version are now guaranteed to match `package.json#version` at
+  every release.
+- **Generated version script.** `scripts/sync-version.mjs` is a
+  pure-Node, dependency-free script that writes
+  `src/version.ts` (gitignored) from `package.json#version`. It
+  is idempotent: re-running it on an in-sync tree is a no-op.
+  The `sync-version` script is wired into `prebuild` and
+  `pretest` so the generated file is always in sync before a
+  build or test run.
+
+### Changed
+
+- **`src/server.ts` no longer hardcodes `"0.2.0"`.** The previous
+  hardcoded `version: options.version ?? "0.2.0"` fallback has
+  been removed in favour of `options.version ?? VERSION`, where
+  `VERSION` is the generated constant from `src/version.ts`. This
+  is the only source-code change to the runtime server module;
+  the McpServer / MCP transport wiring, the tool surface, the
+  detector, and the storage layer are all unchanged.
+- **No behavioural change to the MCP server.** The two tools,
+  their `text` / `structuredContent` shapes, the
+  `clarification_needed` contract, and the project-local
+  `.curion/` storage shape are unchanged. The only McpServer
+  surface that changed is `serverInfo.version`.
+
+### Deprecated
+
+- Nothing in this release.
+
+### Removed
+
+- Nothing in this release.
+
+### Fixed
+
+- **`serverInfo.version` no longer reports the stale `0.2.0`
+  value.** The previous hardcoded fallback meant the MCP
+  `initialize` response advertised a server version that lagged
+  every release tag. The generated `VERSION` constant now keeps
+  it in lock-step with `package.json#version`.
+
+### Security
+
+- Nothing in this release. Provenance attestation remains enabled
+  for every published tarball via Trusted Publishing and
+  `publishConfig.provenance: true`, and no long-lived `NPM_TOKEN`
+  secret is read or required.
+
 ## [0.3.5] - 2026-06-30
 
 Documentation-only patch release. No source-code, runtime, or
@@ -683,7 +763,8 @@ no semantic enrichment, no multi-project awareness. Lexical-only
 match scoring on the controller. Provider adapter for a single
 OpenAI-compatible endpoint.
 
-[Unreleased]: https://github.com/geanatz/curion/compare/v0.3.5...HEAD
+[Unreleased]: https://github.com/geanatz/curion/compare/v0.3.6...HEAD
+[0.3.6]: https://github.com/geanatz/curion/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/geanatz/curion/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/geanatz/curion/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/geanatz/curion/compare/v0.3.2...v0.3.3

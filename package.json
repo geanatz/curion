@@ -1,6 +1,6 @@
 {
   "name": "@geanatz/curion",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "description": "Curion — project-local memory layer for AI agents",
   "type": "module",
   "license": "Apache-2.0",
@@ -38,7 +38,10 @@
     "access": "public"
   },
   "scripts": {
+    "sync-version": "node scripts/sync-version.mjs",
+    "prebuild": "npm run sync-version",
     "build": "tsc -p tsconfig.json",
+    "pretest": "npm run sync-version",
     "prepublishOnly": "npm run build && npm test",
     "test": "node --import tsx --test tests/*.test.ts --test 'tests/diagnostics/*.test.ts'",
     "test:contracts": "node --import tsx --test tests/contracts.test.ts",

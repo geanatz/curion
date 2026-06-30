@@ -2,6 +2,10 @@
 dist/
 *.tsbuildinfo
 
+# Generated src/version.ts (synced from package.json by
+# `scripts/sync-version.mjs`; wired into prebuild/pretest).
+src/version.ts
+
 # Dependencies
 node_modules/
 
