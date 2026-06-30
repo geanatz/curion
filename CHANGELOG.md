@@ -7,6 +7,97 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-06-30
+
+Documentation-only patch release. No source-code, runtime, or
+behaviour change versus v0.3.4; no detector, storage, controller,
+projection, MCP-surface, or release-engineering changes. The npm
+package name and the Trusted Publishing / provenance path are
+unchanged. This release exists solely to fix the remaining
+**top-level file links** shipped to npm in the README and to ensure
+that the project-scoped MCP configuration Claude Code writes on
+`claude mcp add --scope project` cannot accidentally be committed.
+
+### Changed
+
+- **README top-level file links are now absolute GitHub URLs.**
+  The README links that pointed at files living at the repo
+  root — the License badge target (`./LICENSE`), the Contributing
+  section's `[CONTRIBUTING.md]`, the Contributing section's
+  `[CODE_OF_CONDUCT.md]`, the Contributing section's `[SECURITY.md]`,
+  and the License section's `[Apache License 2.0](LICENSE)` — are
+  now written as
+  `https://github.com/geanatz/curion/blob/main/<file>` against
+  the same targets the relative links used. The README's links
+  into the per-client, configuration, API reference, and privacy
+  / storage pages under `docs/` were already absolute GitHub URLs
+  after v0.3.4 and remain unchanged.
+  - On the GitHub repo the absolute-form README renders
+    identically because GitHub already resolves both forms to the
+    same target. On the npm registry only `LICENSE`, `README.md`,
+    and `package.json` ship at the top of the tarball (the
+    `files` field in `package.json` is `["dist", ...]` and npm
+    adds `LICENSE`, `README.md`, and `package.json` automatically;
+    `CHANGELOG.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, and
+    `SECURITY.md` are not in that set). That means the v0.3.4
+    README's relative `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`,
+    and `SECURITY.md` links — and any future top-level file link
+    added in the same style — silently 404 on the npm registry
+    for every consumer reading the README from the npm page.
+    v0.3.5 converts every top-level file link to the absolute
+    GitHub form so the README cannot regress against the
+    tarball's published-shape (the `./LICENSE` link is converted
+    too for consistency with the other top-level file links even
+    though `LICENSE` *is* shipped today).
+- **No `docs/` content changes.** `docs/mcp-clients.md`,
+  `docs/configuration.md`, `docs/reference.md`, and
+  `docs/privacy-storage.md` were not edited. The README prose,
+  the per-client snippets, the configuration variable list, the
+  `remember` / `recall` reference, the privacy / storage section,
+  and the install / quick-start instructions all retain v0.3.4
+  wording verbatim.
+- **No stale references remain.** The README and `docs/` pages
+  continue to have no `v0.2.0 is tagged` framing, no `gpt-5.5` /
+  out-of-date model placeholder, and no unscoped `npm install
+  curion` install line. The npm README and the GitHub README
+  carry the same prose; the only difference is that the
+  top-level file links (License badge target, `CONTRIBUTING.md`,
+  `CODE_OF_CONDUCT.md`, `SECURITY.md`, License body link) are now
+  absolute GitHub URLs.
+
+### Deprecated
+
+- Nothing in this release.
+
+### Removed
+
+- Nothing in this release.
+
+### Fixed
+
+- **`.mcp.json` is now gitignored.** Claude Code's
+  `claude mcp add --scope project --transport stdio curion -- curion`
+  flow writes a project-scoped `.mcp.json` next to `package.json`
+  when a contributor registers Curion locally. The previous
+  `.gitignore` did not list `.mcp.json`, so a contributor who
+  ran that command and then `git add .` could accidentally
+  stage and commit a file that contains environment-variable
+  bindings. v0.3.5 adds `.mcp.json` to a new "Local MCP /
+  AI-tooling project config" section in `.gitignore` (alongside
+  the existing `.curion/`, `.vscode/`, `.idea/`, and `.archive/`
+  local-only entries) with a comment explaining why the file is
+  not source-controlled. Untracked `.mcp.json` files already on
+  working copies become ignored automatically; no committed
+  `.mcp.json` exists in the v0.3.5 tree, so no `git rm --cached`
+  step is required.
+
+### Security
+
+- Nothing in this release. Provenance attestation remains enabled
+  for every published tarball via Trusted Publishing and
+  `publishConfig.provenance: true`, and no long-lived `NPM_TOKEN`
+  secret is read or required.
+
 ## [0.3.4] - 2026-06-30
 
 Documentation-only patch release. No source-code, runtime, or
@@ -592,7 +683,8 @@ no semantic enrichment, no multi-project awareness. Lexical-only
 match scoring on the controller. Provider adapter for a single
 OpenAI-compatible endpoint.
 
-[Unreleased]: https://github.com/geanatz/curion/compare/v0.3.4...HEAD
+[Unreleased]: https://github.com/geanatz/curion/compare/v0.3.5...HEAD
+[0.3.5]: https://github.com/geanatz/curion/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/geanatz/curion/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/geanatz/curion/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/geanatz/curion/compare/v0.3.1...v0.3.2

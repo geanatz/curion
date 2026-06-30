@@ -16,6 +16,13 @@ npm-debug.log*
 .vscode/
 .idea/
 
+# Local MCP / AI-tooling project config (kept locally but not
+# source-controlled). Claude Code, Cursor, and similar clients write a
+# project-scoped `.mcp.json` when registering an MCP server with
+# `--scope project`. The file is local-only configuration and may
+# contain environment-variable bindings; it must never be committed.
+.mcp.json
+
 # Archived/exploratory work, kept locally but not source-controlled
 .archive/
 

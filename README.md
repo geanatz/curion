@@ -2,7 +2,7 @@
 
 [![npm](https://img.shields.io/npm/v/@geanatz/curion)](https://www.npmjs.com/package/@geanatz/curion)
 ![Node](https://img.shields.io/node/v/@geanatz/curion)
-[![License](https://img.shields.io/github/license/geanatz/curion)](./LICENSE)
+[![License](https://img.shields.io/github/license/geanatz/curion)](https://github.com/geanatz/curion/blob/main/LICENSE)
 
 > Project-local memory layer for AI agents, exposed as a Model Context Protocol (MCP) stdio server.
 
@@ -159,12 +159,16 @@ examples.
 
 ## Contributing
 
-Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the
-workflow, development setup, and testing expectations. Please also read
-[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) and [SECURITY.md](SECURITY.md).
+Contributions are welcome. See
+[CONTRIBUTING.md](https://github.com/geanatz/curion/blob/main/CONTRIBUTING.md)
+for the workflow, development setup, and testing expectations. Please
+also read
+[CODE_OF_CONDUCT.md](https://github.com/geanatz/curion/blob/main/CODE_OF_CONDUCT.md)
+and
+[SECURITY.md](https://github.com/geanatz/curion/blob/main/SECURITY.md).
 
 ---
 
 ## License
 
-[Apache License 2.0](LICENSE).
+[Apache License 2.0](https://github.com/geanatz/curion/blob/main/LICENSE).
