@@ -98,6 +98,7 @@ import {
   RECALL_PROMPT_BUDGET_KIND,
   RECALL_SELECTED_CANDIDATES_KIND,
   RECALL_SUPERSEDED_DEMOTION_KIND,
+  RECALL_SYNTHESIS_KIND,
 } from "../trace/trace-tool-boundary.js";
 
 // ---------------------------------------------------------------------------
@@ -802,94 +803,80 @@ export async function runRecallController(
     kind: s.kind,
     tags: s.tags,
   }));
+
+  // -- 4. Provider synthesis (instrumented) -----------------------------
+  // The synthesis call is timed so the trace event can record
+  // `durationMs`. The helper below (dispatchSynthesisOutcome)
+  // emits a single `recall.synthesis` event after the call
+  // completes and before the controller returns, regardless
+  // of which outcome branch is taken. The event carries:
+  //
+  //   - status           : "ok" | "error" | "weak" | "refusal"
+  //   - providerUsed     : when the call returned a typed result
+  //   - fallbackUsed     : true if the fallback slot produced the result
+  //   - modelUsed        : when the call returned a typed result
+  //   - durationMs       : wall-clock around synthesizeRecallWithFallback
+  //   - errorKind        : sanitized ProviderErrorKind OR validation reason
+  //   - errorMessage     : truncated, sanitized message
+  //   - answerPresent    : true iff the provider returned a non-empty answer
+  //   - answerLength     : length of the raw provider answer (no content)
+  //   - refusalDetected  : true iff the refusal-shape detector fired
+  //   - errorReasoningOnly: true iff the failure is the reasoning-only path
+  //   - candidateCount   : how many memories the prompt was built from
+  //   - promptMemoryCharTotal: total chars sent in the MEMORIES section
+  //   - httpCalls        : number of provider HTTP calls
+  //
+  // The payload intentionally omits the raw answer text, the raw
+  // reasoning text, the raw prompt body, the raw memory text, and
+  // any API key. The writer's central `redactPayload` pass still
+  // applies as defense in depth. This event is instrumentation
+  // only: the controller's behavior, the public outcome, and the
+  // on-the-wire projection are unchanged.
+  const synthStartMs = Date.now();
   const result: RecallSynthesisResult = await synthesizeRecallWithFallback(
     query,
     memories,
     adapterOptions
   );
+  const synthDurationMs = Math.max(0, Date.now() - synthStartMs);
 
-  if (!result.ok) {
-    logger.debug(`recall: provider error: ${result.kind} (${result.message})`);
-    return {
-      status: "provider_error",
-      reason: result.message,
-    };
-  }
+  // Sum of the post-budget memory text lengths that the synthesis
+  // prompt was built from. We use `depthResult.selected` because
+  // that is the authoritative "what was sent to the model" set
+  // (selector + diversity + budget have already run). This is a
+  // diagnostic number on the trace event; no text content is
+  // included.
+  const promptMemoryCharTotal = depthResult.selected.reduce(
+    (acc, c) => acc + (typeof c.text === "string" ? c.text.length : 0),
+    0
+  );
 
-  // -- 5. Validate the synthesized answer ----------------------------
-  const validation = validateAnswer(result.answer);
-  if (!validation.ok) {
-    if (validation.reason === "refusal_detected") {
-      // Refusal-with-thin-match reroute. The synthesis LLM
-      // declined to answer (the `isProviderRefusal` detector
-      // fired). If the lexical ranker found at least one
-      // stored summary above the relevance threshold, the
-      // "no relevant memory was found" framing of `no_memory`
-      // would be misleading — the ranker DID find something,
-      // it just could not be synthesized into a confident
-      // answer. In that case we surface a `weak_match`
-      // outcome that exposes the top-3 curator-voice
-      // summaries and a coverage block, so the caller can
-      // inspect the closest stored memories instead of
-      // receiving a blank "No relevant memory found.".
-      //
-      // If the ranker found nothing (`topSummaries.length
-      // === 0`), the refusal is genuinely "no memory to
-      // reason about" and we fall back to `no_memory` as
-      // before. Note: in practice `topSummaries` is
-      // guaranteed non-empty here — the controller
-      // short-circuits with `no_memory` at the rank-empty
-      // branch above — but the explicit check keeps the
-      // reroute site defensive and matches the brief's
-      // trigger condition (`topSummaries.length > 0`).
-      if (topSummaries.length > 0) {
-        logger.debug("recall: provider answer was a refusal; rerouting to weak_match");
-        const topScore = finalRanked[0]!.score;
-        const supportingCount = finalRanked.length;
-        const out: RecallOutcome = {
-          status: "weak_match",
-          summaries: topSummaries.slice(0, 3).map((s) => s.memoryContent),
-          coverage: {
-            topScore,
-            supportingCount,
-          },
-        };
-        // Add clarification when coverage suggests competing/conflicting
-        // candidates or very weak match quality.
-        if (suggestsCompetingCandidates(topScore, supportingCount)) {
-          out.clarification_needed = {
-            question:
-              "I found several related memories but wasn't confident synthesizing an answer. Could you rephrase your question or be more specific about what you're looking for?",
-          };
-        }
-        return out;
-      }
-      logger.debug("recall: provider answer was a refusal; rerouting to no_memory");
-      // Also check if the query is vague for the no_memory fallback.
-      if (isVagueQuery(query)) {
-        return {
-          status: "no_memory",
-          clarification_needed: {
-            question:
-              "Could you be more specific about what you're looking for? For example, what topic or project was this about?",
-          },
-        };
-      }
-      return { status: "no_memory" };
-    }
-    logger.debug(`recall: provider answer rejected: ${validation.reason}`);
-    return {
-      status: "provider_error",
-      reason: validation.reason,
-    };
+  // Dispatch the synthesis result through the controller's
+  // classification pipeline (validateAnswer + refusal-with-thin-
+  // match reroute + provider_error branches) and emit the
+  // synthesis trace event. The helper does NOT mutate the
+  // public outcome shape; it only classifies and emits.
+  const dispatch = dispatchSynthesisOutcome({
+    result,
+    query,
+    topSummaries,
+    finalRanked,
+    trace: options.trace,
+    synthDurationMs,
+    candidateCount: memories.length,
+    promptMemoryCharTotal,
+  });
+
+  if (dispatch.kind === "no_answer") {
+    return dispatch.outcome;
   }
   // Use the redacted form so any secret-shaped fragment the
   // model produced (defense in depth) is removed before we hand
   // the text to the tool layer. The validator above already
   // rejected answers that are entirely or mostly redacted.
-  const safeAnswer = validation.answer;
+  const safeAnswer = dispatch.safeAnswer;
 
-  // -- 6. Internal ambiguity detection (Phase C) ----------------------
+  // -- 5. Internal ambiguity detection (Phase C) ----------------------
   // Conservative offline detector. The signal is attached
   // to the answered outcome as an internal-only field.
   // `src/tools/recall.ts` is responsible for dropping it
@@ -902,7 +889,7 @@ export async function runRecallController(
     answer: safeAnswer,
   });
 
-  // -- 7. Internal resolved-history detection (Phase H + J) -----------
+  // -- 6. Internal resolved-history detection (Phase H + J) -----------
   // Conservative offline detector that recognises an
   // **explicit** resolution marker pair (`previous` /
   // `old` / `superseded` / `no longer` on the previous
@@ -1210,10 +1197,10 @@ function looksLikeRawDump(text: string): boolean {
 // Phase 3A: recall stage trace emission
 // ---------------------------------------------------------------------------
 //
-// The three helpers below build and emit the Phase 3A stage
+// The four helpers below build and emit the Phase 3A stage
 // events. They are kept out of the main `runRecallController`
 // body so the hot path stays readable, and so the trace payload
-// shapes are discoverable in one place. All three are pure
+// shapes are discoverable in one place. All four are pure
 // functions over the existing controller state plus a
 // `RecallTraceContext`; they never mutate the controller state
 // and never read raw provider I/O.
@@ -1224,6 +1211,382 @@ function looksLikeRawDump(text: string): boolean {
 // caught at the storage boundary without the controller having
 // to know about it. The controller does NOT attempt to redact
 // its own payload.
+//
+// Phase 3A-recall-synthesis adds:
+//   - `dispatchSynthesisOutcome` — wraps the post-synthesis
+//     classification pipeline (validateAnswer + refusal-with-
+//     thin-match reroute + provider_error branches) and emits
+//     a single `recall.synthesis` event on the way out. The
+//     helper preserves the existing public outcome shape and
+//     the on-the-wire projection byte-for-byte; it only
+//     classifies and emits.
+//   - `emitSynthesisStage` — the actual payload-builder for
+//     the synthesis event. Carries the provider / model
+//     labels, fallback flag, call duration, sanitized error
+//     kind / message, answer presence + length, refusal
+//     classification, reasoning-only classification,
+//     candidate count sent to synthesis, and the prompt-
+//     memory char total. NO raw answer text, NO raw
+//     reasoning text, NO raw prompt body, and NO API keys
+//     are placed in the payload.
+
+/**
+ * Dispatch the post-synthesis result through the controller's
+ * classification pipeline and emit the `recall.synthesis` trace
+ * event.
+ *
+ * Behavior:
+ *   - Runs `validateAnswer` on a successful synthesis result.
+ *   - Routes through the refusal-with-thin-match reroute when
+ *     the validator detects a refusal shape on a non-empty
+ *     candidate set (`topSummaries.length > 0`).
+ *   - Falls back to `no_memory` when a refusal shape is detected
+ *     on an empty candidate set (defensive; in practice the
+ *     controller short-circuits above this branch).
+ *   - Surfaces a `provider_error` for every other failure path
+ *     (provider-level hard failure, validation rejection).
+ *   - On success, returns the validated + redacted answer text
+ *     to the caller so the outer scope can run ambiguity +
+ *     resolved-history detection and produce the `answered`
+ *     outcome.
+ *
+ * The dispatch function NEVER changes the public outcome shape
+ * or the on-the-wire projection: it returns the exact same
+ * `RecallOutcome` objects the inline code returned before this
+ * helper was extracted. The only observable side effect is the
+ * single `recall.synthesis` trace event.
+ *
+ * Trace payload shape (see `emitSynthesisStage`):
+ *   - status, providerUsed, fallbackUsed, modelUsed,
+ *     durationMs, errorKind, errorMessage, answerPresent,
+ *     answerLength, refusalDetected, errorReasoningOnly,
+ *     candidateCount, promptMemoryCharTotal, httpCalls.
+ */
+function dispatchSynthesisOutcome(args: {
+  result: RecallSynthesisResult;
+  query: string;
+  topSummaries: SafeMemorySummaryWithRelationship[];
+  finalRanked: LexicalScoredCandidate[];
+  trace: RecallTraceContext | undefined;
+  synthDurationMs: number;
+  candidateCount: number;
+  promptMemoryCharTotal: number;
+}): { kind: "ok"; safeAnswer: string } | { kind: "no_answer"; outcome: RecallOutcome } {
+  const { result, query, topSummaries, finalRanked } = args;
+
+  // -- Provider-level failure ------------------------------------------
+  // `result.ok === false` covers transport errors, auth
+  // failures, missing-config, and all-providers-failed. The
+  // error message has already been sanitized by the adapter
+  // (no api key, no raw body); we truncate it further here
+  // before placing it in the trace payload.
+  if (!result.ok) {
+    logger.debug(`recall: provider error: ${result.kind} (${result.message})`);
+    emitSynthesisStage(args.trace, {
+      result,
+      durationMs: args.synthDurationMs,
+      candidateCount: args.candidateCount,
+      promptMemoryCharTotal: args.promptMemoryCharTotal,
+      classification: {
+        kind: "provider_error",
+        status: "error",
+        refusalDetected: false,
+        errorReasoningOnly: false,
+        answerPresent: false,
+        errorKind: result.lastError?.kind ?? result.kind,
+        errorMessage: result.message,
+        httpCalls: result.httpCalls,
+      },
+    });
+    return {
+      kind: "no_answer",
+      outcome: {
+        status: "provider_error",
+        reason: result.message,
+      },
+    };
+  }
+
+  // -- Provider returned an answer; run the validator -----------------
+  const validation = validateAnswer(result.answer);
+  if (!validation.ok) {
+    if (validation.reason === "refusal_detected") {
+      // Refusal-with-thin-match reroute. The synthesis LLM
+      // declined to answer (the `isProviderRefusal` detector
+      // fired). If the lexical ranker found at least one
+      // stored summary above the relevance threshold, the
+      // "no relevant memory was found" framing of `no_memory`
+      // would be misleading — the ranker DID find something,
+      // it just could not be synthesized into a confident
+      // answer. In that case we surface a `weak_match`
+      // outcome that exposes the top-3 curator-voice
+      // summaries and a coverage block, so the caller can
+      // inspect the closest stored memories instead of
+      // receiving a blank "No relevant memory found.".
+      //
+      // If the ranker found nothing (`topSummaries.length
+      // === 0`), the refusal is genuinely "no memory to
+      // reason about" and we fall back to `no_memory` as
+      // before. Note: in practice `topSummaries` is
+      // guaranteed non-empty here — the controller
+      // short-circuits with `no_memory` at the rank-empty
+      // branch above — but the explicit check keeps the
+      // reroute site defensive and matches the brief's
+      // trigger condition (`topSummaries.length > 0`).
+      if (topSummaries.length > 0) {
+        logger.debug("recall: provider answer was a refusal; rerouting to weak_match");
+        const topScore = finalRanked[0]!.score;
+        const supportingCount = finalRanked.length;
+        emitSynthesisStage(args.trace, {
+          result,
+          durationMs: args.synthDurationMs,
+          candidateCount: args.candidateCount,
+          promptMemoryCharTotal: args.promptMemoryCharTotal,
+          classification: {
+            kind: "refusal",
+            status: "weak",
+            refusalDetected: true,
+            errorReasoningOnly: false,
+            answerPresent: true,
+            answerLength: typeof result.answer === "string" ? result.answer.length : 0,
+            errorKind: validation.reason,
+            errorMessage: validation.reason,
+            httpCalls: result.httpCalls,
+          },
+        });
+        const out: RecallOutcome = {
+          status: "weak_match",
+          summaries: topSummaries.slice(0, 3).map((s) => s.memoryContent),
+          coverage: {
+            topScore,
+            supportingCount,
+          },
+        };
+        if (suggestsCompetingCandidates(topScore, supportingCount)) {
+          out.clarification_needed = {
+            question:
+              "I found several related memories but wasn't confident synthesizing an answer. Could you rephrase your question or be more specific about what you're looking for?",
+          };
+        }
+        return { kind: "no_answer", outcome: out };
+      }
+      logger.debug("recall: provider answer was a refusal; rerouting to no_memory");
+      emitSynthesisStage(args.trace, {
+        result,
+        durationMs: args.synthDurationMs,
+        candidateCount: args.candidateCount,
+        promptMemoryCharTotal: args.promptMemoryCharTotal,
+        classification: {
+          kind: "refusal",
+          status: "refusal",
+          refusalDetected: true,
+          errorReasoningOnly: false,
+          answerPresent: true,
+          answerLength: typeof result.answer === "string" ? result.answer.length : 0,
+          errorKind: validation.reason,
+          errorMessage: validation.reason,
+          httpCalls: result.httpCalls,
+        },
+      });
+      // Also check if the query is vague for the no_memory fallback.
+      if (isVagueQuery(query)) {
+        return {
+          kind: "no_answer",
+          outcome: {
+            status: "no_memory",
+            clarification_needed: {
+              question:
+                "Could you be more specific about what you're looking for? For example, what topic or project was this about?",
+            },
+          },
+        };
+      }
+      return { kind: "no_answer", outcome: { status: "no_memory" } };
+    }
+    // Validator rejection that is NOT a refusal shape. This
+    // includes the famous
+    // `provider answer was only reasoning; no visible answer to
+    // return` reason (the model produced only a `<think>...</think>`
+    // block) as well as the empty-answer, secret-redaction,
+    // short-after-redaction, and raw-dump gates. We surface
+    // them all as `provider_error` on the public outcome; the
+    // trace event carries the validator's exact reason so a
+    // reader can tell them apart.
+    logger.debug(`recall: provider answer rejected: ${validation.reason}`);
+    emitSynthesisStage(args.trace, {
+      result,
+      durationMs: args.synthDurationMs,
+      candidateCount: args.candidateCount,
+      promptMemoryCharTotal: args.promptMemoryCharTotal,
+      classification: {
+        kind: "validation_rejection",
+        status: "error",
+        refusalDetected: false,
+        errorReasoningOnly: validation.reason === REASONING_ONLY_VALIDATION_REASON,
+        answerPresent: true,
+        answerLength: typeof result.answer === "string" ? result.answer.length : 0,
+        errorKind: validation.reason,
+        errorMessage: validation.reason,
+        httpCalls: result.httpCalls,
+      },
+    });
+    return {
+      kind: "no_answer",
+      outcome: {
+        status: "provider_error",
+        reason: validation.reason,
+      },
+    };
+  }
+
+  // -- Validation passed; the synthesis succeeded ---------------------
+  // Emit the success trace event and hand the validated +
+  // redacted answer back to the outer scope so ambiguity /
+  // resolved-history detection can run.
+  emitSynthesisStage(args.trace, {
+    result,
+    durationMs: args.synthDurationMs,
+    candidateCount: args.candidateCount,
+    promptMemoryCharTotal: args.promptMemoryCharTotal,
+    classification: {
+      kind: "ok",
+      status: "ok",
+      refusalDetected: false,
+      errorReasoningOnly: false,
+      answerPresent: true,
+      answerLength: typeof result.answer === "string" ? result.answer.length : 0,
+      httpCalls: result.httpCalls,
+    },
+  });
+  return { kind: "ok", safeAnswer: validation.answer };
+}
+
+/**
+ * The validator's exact reason string for "the provider's
+ * answer was ONLY a reasoning block". Used by the synthesis
+ * trace event to flag the failure mode the user wants to
+ * diagnose in production traces. Defined as a constant so the
+ * trace event and any future structured-logging site use the
+ * exact same comparison string.
+ */
+const REASONING_ONLY_VALIDATION_REASON =
+  "provider answer was only reasoning; no visible answer to return" as const;
+
+/**
+ * Maximum length of the `errorMessage` field on the synthesis
+ * trace event. The controller-level errors (validator reasons)
+ * are short fixed strings, but the provider-level error
+ * messages can include the http-client's verbose suffix
+ * (`provider/model#recall: hard failure (...)`). The cap is
+ * generous enough to capture the operator-visible shape while
+ * keeping the trace payload small and predictable.
+ */
+const SYNTHESIS_ERROR_MESSAGE_MAX = 256;
+
+/**
+ * Build and emit the `recall.synthesis` trace event. Pure
+ * payload-builder; no I/O, no mutation. The writer applies the
+ * central `redactPayload` pass before persisting, so any
+ * credential / reasoning key that ever slipped into the payload
+ * would still be scrubbed.
+ *
+ * Redaction discipline:
+ *   - The payload carries NO `answer`, NO raw reasoning text,
+ *     NO raw prompt body, and NO API keys. Only metadata
+ *     (status, provider/model labels, durations, lengths,
+ *     counts, sanitized error kind / message) is placed here.
+ *   - The error message is truncated to
+ *     `SYNTHESIS_ERROR_MESSAGE_MAX` characters before being
+ *     placed in the payload; longer messages are still
+ *     available on the controller's public outcome (`reason`),
+ *     but the trace surface is bounded.
+ *   - The error kind is the typed `ProviderErrorKind` enum
+ *     value when present, or the validator's fixed reason
+ *     string. Both are short, bounded, and never carry raw
+ *     provider response bodies.
+ */
+function emitSynthesisStage(
+  trace: RecallTraceContext | undefined,
+  args: {
+    result: RecallSynthesisResult;
+    durationMs: number;
+    candidateCount: number;
+    promptMemoryCharTotal: number;
+    classification: {
+      kind: "ok" | "provider_error" | "refusal" | "validation_rejection";
+      status: "ok" | "error" | "weak" | "refusal";
+      refusalDetected: boolean;
+      errorReasoningOnly: boolean;
+      answerPresent: boolean;
+      answerLength?: number;
+      errorKind?: string;
+      errorMessage?: string;
+      httpCalls: number;
+    };
+  }
+): void {
+  if (!trace || trace.runId === null) return;
+
+  const { result, classification } = args;
+
+  // Provider / model labels are only present on a typed
+  // success result. On the failure paths we leave them
+  // undefined so the reader can tell "provider did not
+  // produce a result" from "provider succeeded".
+  const providerUsed = result.ok ? result.providerUsed : undefined;
+  const modelUsed = result.ok ? result.modelUsed : undefined;
+  const fallbackUsed = result.ok ? result.fallbackUsed : undefined;
+
+  // Sanitize the error message: truncate to a bounded length.
+  // The provider's adapter already scrubs api keys and raw
+  // response bodies from `result.message`, and the validator
+  // reasons are short fixed strings, so the trace surface here
+  // is bounded by the length cap.
+  let errorMessage: string | undefined;
+  if (classification.errorMessage !== undefined) {
+    errorMessage = sanitizeSynthesisErrorMessage(classification.errorMessage);
+  }
+
+  trace.recordStage(RECALL_SYNTHESIS_KIND, {
+    status: classification.status,
+    classification: classification.kind,
+    // Provider / model info (only present on a successful typed result).
+    ...(providerUsed !== undefined ? { providerUsed } : {}),
+    ...(modelUsed !== undefined ? { modelUsed } : {}),
+    ...(fallbackUsed !== undefined ? { fallbackUsed } : {}),
+    // Call diagnostics.
+    durationMs: args.durationMs,
+    httpCalls: classification.httpCalls,
+    // Answer diagnostics (presence + length only; never the raw text).
+    answerPresent: classification.answerPresent,
+    ...(classification.answerLength !== undefined
+      ? { answerLength: classification.answerLength }
+      : {}),
+    // Classification flags.
+    refusalDetected: classification.refusalDetected,
+    errorReasoningOnly: classification.errorReasoningOnly,
+    // Error metadata (sanitized + truncated).
+    ...(classification.errorKind !== undefined ? { errorKind: classification.errorKind } : {}),
+    ...(errorMessage !== undefined ? { errorMessage } : {}),
+    // Prompt diagnostics (counts and totals only; no text content).
+    candidateCount: args.candidateCount,
+    promptMemoryCharTotal: args.promptMemoryCharTotal,
+  });
+}
+
+/**
+ * Truncate a synthesis-stage error message to the bounded
+ * surface. The message is intentionally truncated, not
+ * sanitized here: the adapter already redacts api keys from
+ * `result.message`, and validator reasons are short fixed
+ * strings. The cap is purely to keep the trace payload size
+ * predictable.
+ */
+function sanitizeSynthesisErrorMessage(message: string): string {
+  if (typeof message !== "string") return "";
+  if (message.length <= SYNTHESIS_ERROR_MESSAGE_MAX) return message;
+  return `${message.slice(0, SYNTHESIS_ERROR_MESSAGE_MAX)}…`;
+}
 
 /**
  * Emit `recall.active-memory-read` — the count of active memory

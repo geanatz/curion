@@ -74,6 +74,7 @@ export {
   RECALL_SUPERSEDED_DEMOTION_KIND,
   RECALL_ADAPTIVE_DEPTH_KIND,
   RECALL_PROMPT_BUDGET_KIND,
+  RECALL_SYNTHESIS_KIND,
   type TracedToolName,
   type StartToolBoundaryTraceOptions,
   type ToolBoundaryTracer,

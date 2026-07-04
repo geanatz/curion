@@ -120,6 +120,30 @@ export const TOOL_OUTPUT_KIND = "tool.output" as const;
 //                                   `supersededBy`), and the
 //                                   superseding id when
 //                                   applicable.
+//   - `recall.synthesis`          - what the recall synthesis
+//                                   provider call did and how
+//                                   the controller classified
+//                                   the result. Carries the
+//                                   provider / model used, the
+//                                   fallback flag, the call
+//                                   duration, the answer
+//                                   presence + length, a
+//                                   sanitized error kind /
+//                                   message (truncated), and
+//                                   the controller's verdict
+//                                   (`ok` / `refusal` / `weak`
+//                                   / `error`). No raw answer
+//                                   text, no raw reasoning
+//                                   text, no raw prompt body,
+//                                   and no API keys are ever
+//                                   placed in this payload.
+//                                   Used to diagnose why some
+//                                   recalls surface as
+//                                   `provider_error: provider
+//                                   answer was only reasoning;
+//                                   no visible answer to
+//                                   return` without changing
+//                                   the recall behavior.
 //
 // The events are emitted on the tool-boundary run id (the same
 // run that carries `tool.input` and `tool.output`). The trace
@@ -138,6 +162,8 @@ export const RECALL_SUPERSEDED_DEMOTION_KIND = "recall.superseded-demotion" as c
 export const RECALL_ADAPTIVE_DEPTH_KIND = "recall.adaptive-depth" as const;
 /** Kind tag for the recall prompt-budget stage event. */
 export const RECALL_PROMPT_BUDGET_KIND = "recall.prompt-budget" as const;
+/** Kind tag for the recall synthesis stage event. */
+export const RECALL_SYNTHESIS_KIND = "recall.synthesis" as const;
 
 // ---------------------------------------------------------------------------
 // Public types

@@ -59,6 +59,7 @@ import {
   resetListRegisteredProjectsStub,
   setListRegisteredProjectsStub,
 } from "../src/config/registry.ts";
+import { runRecallController } from "../src/controller/recall-controller.ts";
 import {
   CURION_DIRNAME,
   type StorageHandle,
@@ -93,11 +94,21 @@ import {
   RECALL_PROMPT_BUDGET_KIND,
   RECALL_SELECTED_CANDIDATES_KIND,
   RECALL_SUPERSEDED_DEMOTION_KIND,
+  RECALL_SYNTHESIS_KIND,
   TOOL_INPUT_KIND,
   TOOL_OUTPUT_KIND,
   type ToolBoundaryTracer,
   startToolBoundaryTrace,
 } from "../src/trace/trace-tool-boundary.ts";
+import { okChatResponse, scriptFetch } from "./_helpers/provider-stub.ts";
+import {
+  TEST_FALLBACK_BASE_URL,
+  TEST_FALLBACK_KEY,
+  TEST_FALLBACK_MODEL,
+  TEST_PRIMARY_BASE_URL,
+  TEST_PRIMARY_KEY,
+  TEST_PRIMARY_MODEL,
+} from "./shared-test-provider.ts";
 
 // ---------------------------------------------------------------------------
 // Env / state helpers
@@ -1090,12 +1101,9 @@ test("recall Phase 3A: populated store emits all three stage events before provi
       // Expected: tool.input, recall.active-memory-read,
       // recall.lexical-ranking, recall.superseded-demotion,
       // recall.adaptive-depth, recall.prompt-budget,
-      // recall.selected-candidates, tool.output
-      assert.equal(
-        events.length,
-        8,
-        "expected 8 events: tool.input + 6 stages + tool.output"
-      );
+      // recall.selected-candidates, recall.synthesis,
+      // tool.output
+      assert.equal(events.length, 9, "expected 9 events: tool.input + 7 stages + tool.output");
       assert.equal(events[0]!.kind, TOOL_INPUT_KIND);
       assert.equal(events[1]!.kind, RECALL_ACTIVE_MEMORY_READ_KIND);
       assert.equal(events[2]!.kind, RECALL_LEXICAL_RANKING_KIND);
@@ -1103,7 +1111,8 @@ test("recall Phase 3A: populated store emits all three stage events before provi
       assert.equal(events[4]!.kind, RECALL_ADAPTIVE_DEPTH_KIND);
       assert.equal(events[5]!.kind, RECALL_PROMPT_BUDGET_KIND);
       assert.equal(events[6]!.kind, RECALL_SELECTED_CANDIDATES_KIND);
-      assert.equal(events[7]!.kind, TOOL_OUTPUT_KIND);
+      assert.equal(events[7]!.kind, RECALL_SYNTHESIS_KIND);
+      assert.equal(events[8]!.kind, TOOL_OUTPUT_KIND);
 
       // Verify active-memory-read: 2 memories in the store.
       const amr = events[1]!.payload as { readCount: number };
@@ -1715,10 +1724,7 @@ test("recall adaptive-depth: payload is sufficient to debug what the selector di
       // topScore * relativeFraction (the cutoff score).
       assert.notEqual(payload.topScore, null);
       assert.ok((payload.topScore ?? 0) > 0);
-      assert.equal(
-        payload.relativeFloor,
-        (payload.topScore ?? 0) * payload.relativeFraction
-      );
+      assert.equal(payload.relativeFloor, (payload.topScore ?? 0) * payload.relativeFraction);
       // The kept set must be a parallel-array triple of ids
       // / scores / kinds / lengths.
       assert.equal(payload.keptIds.length, payload.keptAfterBudget);
@@ -1736,7 +1742,10 @@ test("recall adaptive-depth: payload is sufficient to debug what the selector di
       // event's `totalCharsAfterBudget`.
       const pb = events.find((e) => e.kind === RECALL_PROMPT_BUDGET_KIND);
       assert.ok(pb, "prompt-budget event must exist");
-      const pbPayload = pb.payload as { keptContentLengths: number[]; totalCharsAfterBudget: number };
+      const pbPayload = pb.payload as {
+        keptContentLengths: number[];
+        totalCharsAfterBudget: number;
+      };
       const sum = pbPayload.keptContentLengths.reduce((a, n) => a + n, 0);
       assert.equal(pbPayload.totalCharsAfterBudget, sum);
       // The reason string is non-empty and bounded (the
@@ -2067,4 +2076,443 @@ test("recall adaptive-depth + prompt-budget: events are skipped when the trace w
       rmTraceDir(tmp);
     }
   });
+});
+
+// ---------------------------------------------------------------------------
+// 11. Phase 3A: recall.synthesis stage event
+// ---------------------------------------------------------------------------
+//
+// The recall controller emits one `recall.synthesis` event per
+// call to `synthesizeRecallWithFallback`, regardless of outcome.
+// The event carries enough metadata to diagnose
+// `provider answer was only reasoning; no visible answer to
+// return` failures and the failure mode of the synthesis call:
+// provider / model labels, fallback flag, call duration,
+// answer presence + length, refusal classification, reasoning-
+// only classification, candidate count, and prompt-memory char
+// total. The event is instrumentation-only: no provider
+// behavior, no timeout / retry, no parser behavior, no adaptive
+// retrieval, no prompt, no public API, no storage, and no output
+// status is changed by its emission.
+//
+// The tests below drive the controller via the public
+// `runRecallController` entry point so we can inject a scripted
+// `fetch` and explicit provider config. The trace context is
+// attached by `startToolBoundaryTrace`; the events land in the
+// same `.curion/trace.sqlite` the other trace tests exercise.
+
+// Local helper: drive the controller with a scripted fetch and
+// a real tool-boundary tracer (so the trace DB is written).
+async function runRecallWithTrace(
+  handle: StorageHandle,
+  opts: { text: string; fetchImpl: typeof fetch }
+): Promise<RecallResult> {
+  const tracer = startToolBoundaryTrace({
+    toolName: "recall",
+    input: { text: opts.text },
+  });
+  try {
+    const out = await runRecallController(handle, opts.text, {
+      providerFetchImpl: opts.fetchImpl,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
+      trace: { runId: tracer.runId, recordStage: (k, p) => tracer.recordStage(k, p) },
+    });
+    tracer.recordOutput({ status: out.status });
+    tracer.finish("ok");
+    return out;
+  } catch (err) {
+    tracer.finish("error");
+    throw err;
+  }
+}
+
+test("recall.synthesis: fires on the success path with provider/model labels and answer metrics", async () => {
+  const tmp = mkTraceDir();
+  const { memHandle, cleanup } = setupBothStores(tmp);
+  try {
+    setRecallStorageProvider(() => ({
+      handle: memHandle,
+      ownsHandle: false,
+    }));
+    try {
+      insertMemoryRecord(memHandle, {
+        kind: "fact",
+        state: "active",
+        memoryContent: "The project uses Postgres 16 for the primary data store.",
+        providerId: "test",
+        modelId: "test-model",
+        confidence: 0.9,
+        safetyFlags: ["controller-normalized"],
+        metadata: { tags: ["postgres", "database"] },
+      });
+      const { fetchImpl } = scriptFetch(() =>
+        okChatResponse("The project uses Postgres 16 for the primary store.")
+      );
+
+      const out = await runRecallWithTrace(memHandle, {
+        text: "What database does the project use?",
+        fetchImpl,
+      });
+      assert.equal(out.status, "answered");
+
+      const events = listTraceEventsForRun(listTraceRuns()[0]!.id);
+      const synth = events.find((e) => e.kind === RECALL_SYNTHESIS_KIND);
+      assert.ok(synth, "recall.synthesis must be emitted on the success path");
+
+      const p = synth.payload as {
+        status: string;
+        classification: string;
+        providerUsed?: string;
+        modelUsed?: string;
+        fallbackUsed?: boolean;
+        durationMs: number;
+        httpCalls: number;
+        answerPresent: boolean;
+        answerLength: number;
+        refusalDetected: boolean;
+        errorReasoningOnly: boolean;
+        candidateCount: number;
+        promptMemoryCharTotal: number;
+      };
+      assert.equal(p.status, "ok");
+      assert.equal(p.classification, "ok");
+      // Provider / model labels are populated on the success path.
+      assert.equal(typeof p.providerUsed, "string");
+      assert.ok((p.providerUsed ?? "").length > 0);
+      assert.equal(typeof p.modelUsed, "string");
+      assert.ok((p.modelUsed ?? "").length > 0);
+      assert.equal(p.fallbackUsed, false);
+      // Timing / http call counts are numeric.
+      assert.equal(typeof p.durationMs, "number");
+      assert.ok(p.durationMs >= 0);
+      assert.equal(typeof p.httpCalls, "number");
+      assert.ok(p.httpCalls >= 1);
+      // Answer presence + length on the success path.
+      assert.equal(p.answerPresent, true);
+      assert.ok(p.answerLength > 0);
+      // Classification flags must be false on the success path.
+      assert.equal(p.refusalDetected, false);
+      assert.equal(p.errorReasoningOnly, false);
+      // Prompt diagnostics.
+      assert.ok(p.candidateCount >= 1);
+      assert.ok(p.promptMemoryCharTotal > 0);
+    } finally {
+      resetRecallStorageProvider();
+    }
+  } finally {
+    cleanup();
+    rmTraceDir(tmp);
+  }
+});
+
+test("recall.synthesis: fires on the reasoning-only provider_error path with errorReasoningOnly=true", async () => {
+  const tmp = mkTraceDir();
+  const { memHandle, cleanup } = setupBothStores(tmp);
+  try {
+    setRecallStorageProvider(() => ({
+      handle: memHandle,
+      ownsHandle: false,
+    }));
+    try {
+      insertMemoryRecord(memHandle, {
+        kind: "fact",
+        state: "active",
+        memoryContent: "The project uses Postgres 16 for the primary data store.",
+        providerId: "test",
+        modelId: "test-model",
+        confidence: 0.9,
+        safetyFlags: ["controller-normalized"],
+        metadata: { tags: ["postgres", "database"] },
+      });
+      // The provider returns ONLY a <think>...</think> block —
+      // the exact failure mode the synthesis event is meant to
+      // diagnose. The controller surfaces a `provider_error`
+      // with the validator's "provider answer was only
+      // reasoning" reason. The synthesis event MUST record
+      // `errorReasoningOnly=true` so future traces can find this
+      // failure without inspecting the raw answer text.
+      const { fetchImpl } = scriptFetch(() =>
+        okChatResponse("<think>just thinking, no answer</think>")
+      );
+
+      const out = await runRecallWithTrace(memHandle, {
+        text: "What database does the project use?",
+        fetchImpl,
+      });
+      assert.equal(out.status, "provider_error");
+
+      const events = listTraceEventsForRun(listTraceRuns()[0]!.id);
+      const synth = events.find((e) => e.kind === RECALL_SYNTHESIS_KIND);
+      assert.ok(synth, "recall.synthesis must be emitted on the reasoning-only failure path");
+
+      const p = synth.payload as {
+        status: string;
+        classification: string;
+        answerPresent: boolean;
+        answerLength?: number;
+        refusalDetected: boolean;
+        errorReasoningOnly: boolean;
+        errorKind?: string;
+        errorMessage?: string;
+        candidateCount: number;
+        promptMemoryCharTotal: number;
+      };
+      assert.equal(p.status, "error");
+      assert.equal(p.classification, "validation_rejection");
+      // The model DID return an answer (just a reasoning-only
+      // one), so answerPresent is true and answerLength is the
+      // length of the raw provider answer.
+      assert.equal(p.answerPresent, true);
+      assert.ok((p.answerLength ?? 0) > 0);
+      // The headline flag: this is the reasoning-only failure.
+      assert.equal(p.errorReasoningOnly, true);
+      // The validator reason is captured as the errorKind so a
+      // reader can see "why" without re-running the validator.
+      assert.match(p.errorKind ?? "", /reasoning/i);
+      assert.match(p.errorMessage ?? "", /reasoning/i);
+      // Refusal-shape detection must NOT fire for a reasoning-
+      // only answer (the provider returned text that matched
+      // the validator's reasoning-strip path, not a refusal
+      // shape).
+      assert.equal(p.refusalDetected, false);
+    } finally {
+      resetRecallStorageProvider();
+    }
+  } finally {
+    cleanup();
+    rmTraceDir(tmp);
+  }
+});
+
+test("recall.synthesis: event order is strictly after recall.selected-candidates and before tool.output", async () => {
+  const tmp = mkTraceDir();
+  const { memHandle, cleanup } = setupBothStores(tmp);
+  try {
+    setRecallStorageProvider(() => ({
+      handle: memHandle,
+      ownsHandle: false,
+    }));
+    try {
+      insertMemoryRecord(memHandle, {
+        kind: "fact",
+        state: "active",
+        memoryContent: "The project uses Postgres 16 for the primary data store.",
+        providerId: "test",
+        modelId: "test-model",
+        confidence: 0.9,
+        safetyFlags: ["controller-normalized"],
+        metadata: { tags: ["postgres", "database"] },
+      });
+      const { fetchImpl } = scriptFetch(() =>
+        okChatResponse("The project uses Postgres 16 for the primary store.")
+      );
+
+      await runRecallWithTrace(memHandle, {
+        text: "What database does the project use?",
+        fetchImpl,
+      });
+
+      const events = listTraceEventsForRun(listTraceRuns()[0]!.id);
+      const kinds = events.map((e) => e.kind);
+      const scIdx = kinds.indexOf(RECALL_SELECTED_CANDIDATES_KIND);
+      const synIdx = kinds.indexOf(RECALL_SYNTHESIS_KIND);
+      const outIdx = kinds.indexOf(TOOL_OUTPUT_KIND);
+      // All three indices must exist on the populated-store
+      // success path.
+      assert.ok(scIdx >= 0, "recall.selected-candidates must be emitted");
+      assert.ok(synIdx >= 0, "recall.synthesis must be emitted");
+      assert.ok(outIdx >= 0, "tool.output must be emitted");
+      // Ordering invariant: selected-candidates < synthesis <
+      // tool.output. The synthesis event fires AFTER the
+      // synthesis call returns and BEFORE the controller
+      // returns to the tool layer.
+      assert.ok(
+        scIdx < synIdx,
+        `recall.selected-candidates (${scIdx}) must precede recall.synthesis (${synIdx})`
+      );
+      assert.ok(
+        synIdx < outIdx,
+        `recall.synthesis (${synIdx}) must precede tool.output (${outIdx})`
+      );
+    } finally {
+      resetRecallStorageProvider();
+    }
+  } finally {
+    cleanup();
+    rmTraceDir(tmp);
+  }
+});
+
+test("recall.synthesis: payload NEVER includes raw answer text, raw reasoning text, raw prompt body, or API keys", async () => {
+  const tmp = mkTraceDir();
+  const { memHandle, cleanup } = setupBothStores(tmp);
+  try {
+    setRecallStorageProvider(() => ({
+      handle: memHandle,
+      ownsHandle: false,
+    }));
+    try {
+      insertMemoryRecord(memHandle, {
+        kind: "fact",
+        state: "active",
+        memoryContent: "The project uses Postgres 16 for the primary data store.",
+        providerId: "test",
+        modelId: "test-model",
+        confidence: 0.9,
+        safetyFlags: ["controller-normalized"],
+        metadata: { tags: ["postgres", "database"] },
+      });
+      // Distinctive phrases for each leak surface we want to
+      // assert against. The trace payload must NOT include any
+      // of these phrases — they are placeholders that should
+      // only appear in the raw answer / reasoning / prompt /
+      // request body, none of which the trace event carries.
+      const distinctiveAnswer = "purple-walrus-final-answer-X9Q";
+      const distinctiveReasoning = "green-otter-private-thoughts-7Y1";
+      const distinctiveMemory = "yellow-fox-marker-postgres-M3P";
+      const distinctiveApiKey = "sk-distinctive-test-key-VVK-12345";
+      const answerWithEverything = `<think>${distinctiveReasoning}</think>${distinctiveAnswer}`;
+      // Plant the distinctive memory phrase into a memory body
+      // so a reader of the trace DB can detect a memory-text
+      // leak (the memory is NOT used in the recall path for this
+      // test — the test query still matches the postgres memory
+      // above). The query stays plain so the lexical ranker
+      // finds the postgres memory.
+      insertMemoryRecord(memHandle, {
+        kind: "fact",
+        state: "active",
+        memoryContent: `Placeholder about ${distinctiveMemory}.`,
+        providerId: "test",
+        modelId: "test-model",
+        confidence: 0.5,
+        safetyFlags: ["controller-normalized"],
+        metadata: { tags: ["unrelated"] },
+      });
+      const { fetchImpl } = scriptFetch(() => okChatResponse(answerWithEverything));
+
+      await runRecallWithTrace(memHandle, {
+        text: "What database does the project use?",
+        fetchImpl,
+      });
+
+      const events = listTraceEventsForRun(listTraceRuns()[0]!.id);
+      const synth = events.find((e) => e.kind === RECALL_SYNTHESIS_KIND);
+      assert.ok(synth, "recall.synthesis must be emitted");
+      // The persisted payload_json has already been through
+      // `redactPayload`, so we assert against the redacted
+      // JSON (which is what the trace DB actually stores).
+      const persistedJson = JSON.stringify({
+        payload: synth.payload,
+      });
+      for (const phrase of [
+        distinctiveAnswer,
+        distinctiveReasoning,
+        distinctiveMemory,
+        distinctiveApiKey,
+      ]) {
+        assert.ok(
+          !persistedJson.includes(phrase),
+          `recall.synthesis payload must not contain raw "${phrase}"; got: ${persistedJson}`
+        );
+      }
+      // The top-level payload object must NOT carry raw-content
+      // keys.
+      const payloadObj = synth.payload as Record<string, unknown>;
+      assert.equal("answer" in payloadObj, false, "no raw answer field");
+      assert.equal("text" in payloadObj, false, "no raw text field");
+      assert.equal("memoryContent" in payloadObj, false, "no raw memoryContent field");
+      assert.equal("prompt" in payloadObj, false, "no raw prompt field");
+      assert.equal("reasoning" in payloadObj, false, "no raw reasoning field");
+      assert.equal("memories" in payloadObj, false, "no raw memories field");
+      assert.equal("apiKey" in payloadObj, false, "no apiKey field");
+      // The persisted payload_json, which has been redacted by
+      // the writer's `redactPayload` pass, must also NOT
+      // contain the test api key. (The redaction is defense in
+      // depth; we never put the key in the payload in the first
+      // place.)
+      const storedRow = fs.readFileSync(path.join(tmp, ".curion", "trace.sqlite"));
+      assert.ok(
+        !storedRow.includes(Buffer.from(distinctiveApiKey)),
+        "trace.sqlite must not contain the raw test api key"
+      );
+    } finally {
+      resetRecallStorageProvider();
+    }
+  } finally {
+    cleanup();
+    rmTraceDir(tmp);
+  }
+});
+
+test("recall.synthesis: error message on the surface is truncated to the bounded trace size", async () => {
+  const tmp = mkTraceDir();
+  const { memHandle, cleanup } = setupBothStores(tmp);
+  try {
+    setRecallStorageProvider(() => ({
+      handle: memHandle,
+      ownsHandle: false,
+    }));
+    try {
+      insertMemoryRecord(memHandle, {
+        kind: "fact",
+        state: "active",
+        memoryContent: "The project uses Postgres 16 for the primary data store.",
+        providerId: "test",
+        modelId: "test-model",
+        confidence: 0.9,
+        safetyFlags: ["controller-normalized"],
+        metadata: { tags: ["postgres", "database"] },
+      });
+      // The primary returns an error response with a long body.
+      // The http-client redacts the body into a "server error"
+      // message; we synthesize a long message so the trace
+      // event's `errorMessage` is forced through the truncation
+      // cap.
+      const longBody = `boom-${"x".repeat(2000)}`;
+      const { fetchImpl } = scriptFetch(() => new Response(longBody, { status: 500 }));
+
+      await runRecallWithTrace(memHandle, {
+        text: "What database does the project use?",
+        fetchImpl,
+      });
+
+      const events = listTraceEventsForRun(listTraceRuns()[0]!.id);
+      const synth = events.find((e) => e.kind === RECALL_SYNTHESIS_KIND);
+      assert.ok(synth, "recall.synthesis must be emitted on provider hard-failure path");
+      const p = synth.payload as {
+        status: string;
+        answerPresent: boolean;
+        errorKind?: string;
+        errorMessage?: string;
+      };
+      assert.equal(p.status, "error");
+      assert.equal(p.answerPresent, false);
+      // The error kind is the typed ProviderErrorKind.
+      assert.equal(p.errorKind, "server");
+      // The error message is bounded; the truncation cap
+      // (SYNTHESIS_ERROR_MESSAGE_MAX = 256 chars) is enforced.
+      assert.ok(typeof p.errorMessage === "string");
+      assert.ok(
+        (p.errorMessage ?? "").length <= 257, // +1 for the trailing ellipsis character
+        `errorMessage length must be bounded; got ${(p.errorMessage ?? "").length}`
+      );
+      // The long body itself must not survive in the persisted
+      // payload.
+      const persistedJson = JSON.stringify({ payload: synth.payload });
+      assert.ok(
+        !persistedJson.includes(longBody),
+        "long body must not survive in the synthesis payload"
+      );
+    } finally {
+      resetRecallStorageProvider();
+    }
+  } finally {
+    cleanup();
+    rmTraceDir(tmp);
+  }
 });
