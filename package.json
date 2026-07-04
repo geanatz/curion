@@ -152,6 +152,8 @@
     "test:dense-bge-m3-live": "node --import tsx --test tests/_helpers/retrieval-dense-bge-m3-live.test.ts",
     "probe:recall-synthesis": "tsx scripts/recall-synthesis-budget-probe.ts",
     "probe:remember-cap": "tsx scripts/remember-summary-cap-probe.ts",
+    "diagnose:providers": "tsx scripts/provider-diagnostic.ts",
+    "diagnose:providers:both": "tsx scripts/provider-diagnostic.ts --provider both",
     "lint": "biome check src tests",
     "lint:fix": "biome check --write --unsafe src tests",
     "format": "biome format --write src tests",
