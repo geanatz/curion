@@ -400,7 +400,8 @@ function detectSelfConflict(text: string): SelfConflictHit | null {
   // We deliberately do NOT use `\b` after the alternation because
   // alternatives ending in `:` have no word boundary between the
   // `:` and the following space.
-  const pivotRe = /\s*[.!?]\s+(?:actually|wait,?\s*no|wait[,.]\s*actually|correction|updates?:|update\b|nvm|never\s*mind)\b[\s,:-]*/i;
+  const pivotRe =
+    /\s*[.!?]\s+(?:actually|wait,?\s*no|wait[,.]\s*actually|correction|updates?:|update\b|nvm|never\s*mind)\b[\s,:-]*/i;
   const m = text.match(pivotRe);
   if (m && m.index !== undefined) {
     const left = text.slice(0, m.index).trim();
@@ -410,7 +411,8 @@ function detectSelfConflict(text: string): SelfConflictHit | null {
     }
   }
   // "previously / earlier ... X. ... now / currently / as of ... Y"
-  const changeRe = /\b(previously|earlier|at\s+first|initially|old\s+version|v1)\b[\s,]{1,40}([^.!?\n]{8,200})[.!?\n]+\s*(now|currently|as\s+of|going\s+forward|new\s+version|v2|updated|latest)\b[\s,]{1,40}([^.!?\n]{8,200})[.!?\n]?/i;
+  const changeRe =
+    /\b(previously|earlier|at\s+first|initially|old\s+version|v1)\b[\s,]{1,40}([^.!?\n]{8,200})[.!?\n]+\s*(now|currently|as\s+of|going\s+forward|new\s+version|v2|updated|latest)\b[\s,]{1,40}([^.!?\n]{8,200})[.!?\n]?/i;
   const cm = text.match(changeRe);
   if (cm) {
     const left = (cm[2] ?? "").trim();
@@ -424,7 +426,8 @@ function detectSelfConflict(text: string): SelfConflictHit | null {
   // case: both halves must be short, declarative, and the second
   // must contain a database / library / framework name AND a
   // negation-style pivot.
-  const dbRe = /\b(?:uses?|using|runs?\s+on|powered\s+by|based\s+on)\s+([A-Z][A-Za-z0-9-]{2,20})[^.!?\n]{0,80}[.!?\n][^.!?\n]{0,80}\b(?:actually|wait|but|however|though)\b[^.!?\n]{0,80}\b(?:uses?|using|runs?\s+on|powered\s+by|based\s+on)\s+([A-Z][A-Za-z0-9-]{2,20})/i;
+  const dbRe =
+    /\b(?:uses?|using|runs?\s+on|powered\s+by|based\s+on)\s+([A-Z][A-Za-z0-9-]{2,20})[^.!?\n]{0,80}[.!?\n][^.!?\n]{0,80}\b(?:actually|wait|but|however|though)\b[^.!?\n]{0,80}\b(?:uses?|using|runs?\s+on|powered\s+by|based\s+on)\s+([A-Z][A-Za-z0-9-]{2,20})/i;
   const dm = text.match(dbRe);
   if (dm) {
     const a = (dm[1] ?? "").trim();
@@ -456,15 +459,77 @@ function sharesTopicToken(a: string, b: string): boolean {
   // of common inflectional suffixes so that "deploy" / "deploying"
   // / "deployed" / "deployment" all share a topic.
   const STOP = new Set([
-    "the", "and", "for", "are", "but", "not", "you", "all", "any",
-    "can", "had", "her", "was", "one", "our", "out", "day", "get",
-    "has", "him", "his", "how", "man", "new", "now", "old", "see",
-    "two", "way", "who", "boy", "did", "its", "let", "put", "say",
-    "she", "too", "use", "this", "that", "with", "from", "have",
-    "they", "their", "there", "what", "when", "your", "were", "been",
-    "will", "would", "could", "should", "about", "into", "than",
-    "then", "them", "these", "those", "because", "actually", "wait",
-    "update", "correction", "previously", "earlier", "currently",
+    "the",
+    "and",
+    "for",
+    "are",
+    "but",
+    "not",
+    "you",
+    "all",
+    "any",
+    "can",
+    "had",
+    "her",
+    "was",
+    "one",
+    "our",
+    "out",
+    "day",
+    "get",
+    "has",
+    "him",
+    "his",
+    "how",
+    "man",
+    "new",
+    "now",
+    "old",
+    "see",
+    "two",
+    "way",
+    "who",
+    "boy",
+    "did",
+    "its",
+    "let",
+    "put",
+    "say",
+    "she",
+    "too",
+    "use",
+    "this",
+    "that",
+    "with",
+    "from",
+    "have",
+    "they",
+    "their",
+    "there",
+    "what",
+    "when",
+    "your",
+    "were",
+    "been",
+    "will",
+    "would",
+    "could",
+    "should",
+    "about",
+    "into",
+    "than",
+    "then",
+    "them",
+    "these",
+    "those",
+    "because",
+    "actually",
+    "wait",
+    "update",
+    "correction",
+    "previously",
+    "earlier",
+    "currently",
   ]);
   const stem = (w: string): string => {
     if (w.length < 5) return w;
@@ -473,10 +538,7 @@ function sharesTopicToken(a: string, b: string): boolean {
     // deterministic and easy to reason about. Conservative
     // stripping — the overlap test only needs to succeed when
     // a clear topic word is reused.
-    return w.replace(
-      /(?:ingly|edly|ing|edly|ed|ies|ied|ies|ly|s)$/,
-      "",
-    );
+    return w.replace(/(?:ingly|edly|ing|edly|ed|ies|ied|ies|ly|s)$/, "");
   };
   const toks = (s: string): Set<string> => {
     const out = new Set<string>();
@@ -657,9 +719,7 @@ interface ReplacementCorrectionHit {
  * `self-conflict`), bare negations ("X is not Y"), or
  * comparatives ("faster than X").
  */
-function detectReplacementCorrection(
-  text: string,
-): ReplacementCorrectionHit | null {
+function detectReplacementCorrection(text: string): ReplacementCorrectionHit | null {
   for (const re of REPLACEMENT_CORRECTION_PATTERNS) {
     const r = new RegExp(re.source, re.flags.includes("g") ? re.flags : re.flags + "g");
     if (r.test(text)) {
@@ -908,10 +968,7 @@ function collectUnsafePreferenceHits(text: string): { label: string }[] {
     // global safety-bypass preferences ("Always disable
     // redaction", "Never redact API keys") rejected even when the
     // text happens to mention "test" or "docs" in passing.
-    if (
-      testDocsScope &&
-      (label === "bypass-safety" || label === "disable-redaction")
-    ) {
+    if (testDocsScope && (label === "bypass-safety" || label === "disable-redaction")) {
       continue;
     }
     const r = new RegExp(re.source, re.flags.includes("g") ? re.flags : re.flags + "g");
@@ -929,7 +986,7 @@ function collectUnsafePreferenceHits(text: string): { label: string }[] {
  */
 function looksLikeMetaDiscussion(text: string): boolean {
   return /(?:the\s+(?:rule|policy|spec|guideline|documentation)|policy\s*:|rule\s*:|spec\s*:|guideline\s*:)\b[^.\n]{0,200}?(?:should\s+never\s+(?:appear|be\s+included|be\s+used|match)|should\s+not\s+(?:appear|be\s+included|be\s+used|match)|must\s+never\s+(?:appear|be\s+included|be\s+used|match)|never\s+(?:appear|be\s+included|be\s+used|match)\s+in\s+user\s+input)/i.test(
-    text,
+    text
   );
 }
 
@@ -942,7 +999,7 @@ function looksLikeMetaDiscussion(text: string): boolean {
  */
 function isScopedToTestOrDocs(text: string): boolean {
   return /\b(?:during|for|in|within|inside|as\s+part\s+of|while\s+running|when\s+running)\s+(?:the\s+|our\s+|a\s+)?(?:test(?:\s+(?:runs?|suite|fixtures?|code|examples?|mode))?|tests|test\s+fixtures?|docs(?:\s+(?:examples?|site|build|builds))?|documentation\s+examples?|public\s+docs|example\s+only|example\s+purposes)\b/i.test(
-    text,
+    text
   );
 }
 

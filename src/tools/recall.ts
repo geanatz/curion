@@ -89,52 +89,29 @@
  *     supplemental only.
  */
 
-import {
-  runRecallController,
-  type RecallOutcome,
-} from "../controller/recall-controller.js";
-import type { Clarification } from "./remember-structured-content.js";
-import { buildRecallStructuredContent } from "./recall-projection.js";
-import {
-  initStorage,
-  closeStorage,
-  resolveCurionDir,
-  type StorageHandle,
-} from "../storage/storage.js";
-import { formatAmbiguityNote } from "../retrieval/ambiguity.js";
-import { formatResolvedHistoryNote } from "../retrieval/resolved-history.js";
-import { logger } from "../logging/logger.js";
-import { startToolBoundaryTrace } from "../trace/index.js";
-import { z } from "zod";
 import path from "node:path";
-import { registerProject } from "../config/registry.js";
+import { z } from "zod";
+import { loadEnv } from "../config/env.js";
 import { isProjectPrivate } from "../config/project-config.js";
+import { registerProject } from "../config/registry.js";
+import { type RegistryEntry, listRegisteredProjects } from "../config/registry.js";
+import { type RecallOutcome, runRecallController } from "../controller/recall-controller.js";
+import { logger } from "../logging/logger.js";
+import { formatAmbiguityNote } from "../retrieval/ambiguity.js";
+import { rankLexical } from "../retrieval/lexical.js";
+import { formatResolvedHistoryNote } from "../retrieval/resolved-history.js";
+import { backfillMissingEmbeddings } from "../retrieval/semantic/embed-on-remember.js";
+import { type SemanticEmbedder, createSemanticEmbedder } from "../retrieval/semantic/embedder.js";
+import { scoreSemanticCandidates } from "../retrieval/semantic/score.js";
+import { type StorageHandle, closeStorage, initStorage } from "../storage/storage.js";
 import {
-  listRegisteredProjects,
-  type RegistryEntry,
-} from "../config/registry.js";
-import {
-  rankLexical,
-  DEFAULT_RELEVANCE_THRESHOLD,
-  type LexicalScoredCandidate,
-} from "../retrieval/lexical.js";
-import {
+  getEmbeddingsForMemories,
   listActiveMemorySummaries,
   listActiveMemorySummariesByFts5,
-  getEmbeddingsForMemories,
-  type SafeMemorySummary,
 } from "../storage/storage.js";
-import {
-  createSemanticEmbedder,
-  type SemanticEmbedder,
-} from "../retrieval/semantic/embedder.js";
-import {
-  backfillMissingEmbeddings,
-} from "../retrieval/semantic/embed-on-remember.js";
-import {
-  scoreSemanticCandidates,
-} from "../retrieval/semantic/score.js";
-import { loadEnv } from "../config/env.js";
+import { startToolBoundaryTrace } from "../trace/index.js";
+import { buildRecallStructuredContent } from "./recall-projection.js";
+import type { Clarification } from "./remember-structured-content.js";
 
 export const RECALL_TOOL_NAME = "recall" as const;
 export const RECALL_TOOL_DESCRIPTION =
@@ -175,10 +152,7 @@ export interface RecallInput {
  */
 export const RECALL_INPUT_SCHEMA = z
   .object({
-    text: z
-      .string()
-      .min(1, "text must not be empty")
-      .describe("The query to recall memory for."),
+    text: z.string().min(1, "text must not be empty").describe("The query to recall memory for."),
   })
   .strict();
 
@@ -362,7 +336,7 @@ interface ExternalProjectResult {
 function queryExternalProject(
   projectRoot: string,
   displayName: string,
-  query: string,
+  query: string
 ): { projectRoot: string; displayName: string; candidates: ExternalCandidate[] } | null {
   try {
     // Skip private projects.
@@ -427,9 +401,7 @@ function queryExternalProject(
     }
   } catch (err) {
     // Inaccessible or corrupt project — skip silently.
-    logger.debug(
-      `external recall: skipping ${projectRoot}: ${(err as Error).message}`,
-    );
+    logger.debug(`external recall: skipping ${projectRoot}: ${(err as Error).message}`);
     return null;
   }
 }
@@ -490,7 +462,7 @@ async function queryExternalProjectSemantic(
   displayName: string,
   query: string,
   queryVec: number[],
-  embedder: SemanticEmbedder,
+  embedder: SemanticEmbedder
 ): Promise<ExternalProjectSemanticResult_> {
   try {
     // Skip private projects.
@@ -505,7 +477,7 @@ async function queryExternalProjectSemantic(
       });
       if (backfillCount > 0) {
         logger.debug(
-          `external semantic recall: backfilled ${backfillCount} embedding(s) in ${displayName}`,
+          `external semantic recall: backfilled ${backfillCount} embedding(s) in ${displayName}`
         );
       }
 
@@ -578,9 +550,7 @@ async function queryExternalProjectSemantic(
     }
   } catch (err) {
     // Inaccessible or corrupt project — skip silently.
-    logger.debug(
-      `external semantic recall: skipping ${projectRoot}: ${(err as Error).message}`,
-    );
+    logger.debug(`external semantic recall: skipping ${projectRoot}: ${(err as Error).message}`);
     return { result: null, backfillCount: 0 };
   }
 }
@@ -601,7 +571,7 @@ async function queryExternalProjectSemantic(
 async function queryExternalProjectsSemantic(
   currentProjectRoot: string,
   query: string,
-  embedder: SemanticEmbedder,
+  embedder: SemanticEmbedder
 ): Promise<{ projectRoot: string; displayName: string; candidates: ExternalCandidate[] }[]> {
   const registered = listRegisteredProjects();
   if (registered.length === 0) {
@@ -611,7 +581,7 @@ async function queryExternalProjectsSemantic(
   // Filter to eligible projects: non-private, not current.
   const eligible = registered.filter(
     (entry: RegistryEntry) =>
-      entry.projectRoot !== currentProjectRoot && !isProjectPrivate(entry.projectRoot),
+      entry.projectRoot !== currentProjectRoot && !isProjectPrivate(entry.projectRoot)
   );
   if (eligible.length === 0) {
     return [];
@@ -622,7 +592,8 @@ async function queryExternalProjectsSemantic(
 
   // Track total backfill across all projects to respect the global cap.
   let totalBackfill = 0;
-  const results: { projectRoot: string; displayName: string; candidates: ExternalCandidate[] }[] = [];
+  const results: { projectRoot: string; displayName: string; candidates: ExternalCandidate[] }[] =
+    [];
 
   for (const entry of eligible) {
     // Stop backfill early if we've hit the global cap.
@@ -634,7 +605,7 @@ async function queryExternalProjectsSemantic(
       entry.displayName,
       query,
       queryVec,
-      embedder,
+      embedder
     );
     // Accumulate backfill count and enforce global cap before next project.
     totalBackfill += backfillCount;
@@ -678,7 +649,7 @@ async function queryExternalProjectsSemantic(
  */
 function mergeExternalResults(
   lexicalResults: { projectRoot: string; displayName: string; candidates: ExternalCandidate[] }[],
-  semanticResults: { projectRoot: string; displayName: string; candidates: ExternalCandidate[] }[],
+  semanticResults: { projectRoot: string; displayName: string; candidates: ExternalCandidate[] }[]
 ): ExternalProjectResult[] {
   // Build a map of projectRoot -> { displayName, candidates }
   const projectMap = new Map<string, { displayName: string; candidates: ExternalCandidate[] }>();
@@ -790,7 +761,7 @@ function mergeExternalResults(
  */
 function queryExternalProjects(
   currentProjectRoot: string,
-  query: string,
+  query: string
 ): { projectRoot: string; displayName: string; candidates: ExternalCandidate[] }[] {
   const registered = listRegisteredProjects();
   if (registered.length === 0) {
@@ -800,13 +771,14 @@ function queryExternalProjects(
   // Filter to eligible projects: non-private, not current.
   const eligible = registered.filter(
     (entry: RegistryEntry) =>
-      entry.projectRoot !== currentProjectRoot && !isProjectPrivate(entry.projectRoot),
+      entry.projectRoot !== currentProjectRoot && !isProjectPrivate(entry.projectRoot)
   );
   if (eligible.length === 0) {
     return [];
   }
 
-  const results: { projectRoot: string; displayName: string; candidates: ExternalCandidate[] }[] = [];
+  const results: { projectRoot: string; displayName: string; candidates: ExternalCandidate[] }[] =
+    [];
   for (const entry of eligible) {
     const result = queryExternalProject(entry.projectRoot, entry.displayName, query);
     if (result !== null && result.candidates.length > 0) {
@@ -828,7 +800,8 @@ function queryExternalProjects(
   // Flatten and cap: take up to EXTERNAL_MAX_RESULTS total candidates,
   // preferring higher-scoring projects.
   const totalCap = EXTERNAL_MAX_RESULTS;
-  const flattened: { projectRoot: string; displayName: string; candidates: ExternalCandidate[] }[] = [];
+  const flattened: { projectRoot: string; displayName: string; candidates: ExternalCandidate[] }[] =
+    [];
   for (const r of results) {
     if (flattened.length >= totalCap) break;
     const remaining = totalCap - flattened.length;
@@ -863,7 +836,7 @@ function queryExternalProjects(
 function formatExternalContext(
   externalResults: ExternalProjectResult[],
   currentAnswer: string,
-  baseMessage?: string,
+  baseMessage?: string
 ): string {
   if (externalResults.length === 0) {
     return currentAnswer;
@@ -946,20 +919,22 @@ export async function handleRecall(input: unknown): Promise<RecallResult> {
         // The backfill processes memories missing embeddings in batches,
         // stopping after the first partial batch to keep recall responsive.
         const backfillLimit = 25;
-        const backfillResult = await backfillMissingEmbeddings(
-          storage,
-          embedder,
-          { batchSize: backfillLimit },
-        );
+        const backfillResult = await backfillMissingEmbeddings(storage, embedder, {
+          batchSize: backfillLimit,
+        });
         if (backfillResult > 0) {
           logger.debug(
-            `recall: backfilled ${backfillResult} missing embedding(s) before semantic recall`,
+            `recall: backfilled ${backfillResult} missing embedding(s) before semantic recall`
           );
         }
       } catch (err) {
         // Non-fatal: if embedder creation or backfill fails, fall back to lexical.
-        logger.debug(
-          `recall: semantic setup failed: ${(err as Error).message}; falling back to lexical`,
+        // Phase 2 quality hardening: this is a silent semantic-recall
+        // degradation, so we surface it at `warn` (was `debug`) so the
+        // degradation is visible in default logs. The returned outcome
+        // and status are unchanged.
+        logger.warn(
+          `recall: semantic setup failed: ${(err as Error).message}; falling back to lexical`
         );
         // semanticEnabled stays false, semanticEmbedder stays undefined
       }
@@ -982,8 +957,7 @@ export async function handleRecall(input: unknown): Promise<RecallResult> {
       logger.error(`recall: unexpected controller error: ${msg}`);
       const result: RecallResult = {
         status: "provider_error",
-        message:
-          "recall: unexpected internal error; no memory was returned",
+        message: "recall: unexpected internal error; no memory was returned",
       };
       // The handler returned a result, so the run is `ok` (the
       // handler itself did not throw). The provider_error status
@@ -1027,12 +1001,18 @@ export async function handleRecall(input: unknown): Promise<RecallResult> {
     // semantic cross-project retrieval and merge with lexical results.
     if (outcome.status === "answered" || outcome.status === "no_memory") {
       const lexicalResults = queryExternalProjects(currentProjectRoot, text);
-      let semanticResults: { projectRoot: string; displayName: string; candidates: ExternalCandidate[] }[] = [];
-      let crossProjectStats: {
-        projectsTouched: number;
-        semanticCandidates: number;
-        semanticResultsAdded: number;
-      } | undefined;
+      let semanticResults: {
+        projectRoot: string;
+        displayName: string;
+        candidates: ExternalCandidate[];
+      }[] = [];
+      let crossProjectStats:
+        | {
+            projectsTouched: number;
+            semanticCandidates: number;
+            semanticResultsAdded: number;
+          }
+        | undefined;
 
       // Run semantic cross-project if embedder is available.
       if (semanticEmbedder && semanticEmbedder.metadata.status === "ready") {
@@ -1040,7 +1020,7 @@ export async function handleRecall(input: unknown): Promise<RecallResult> {
           semanticResults = await queryExternalProjectsSemantic(
             currentProjectRoot,
             text,
-            semanticEmbedder,
+            semanticEmbedder
           );
           crossProjectStats = {
             projectsTouched: semanticResults.length,
@@ -1049,8 +1029,13 @@ export async function handleRecall(input: unknown): Promise<RecallResult> {
           };
         } catch (err) {
           // Non-fatal: fall back to lexical-only cross-project.
-          logger.debug(
-            `recall: cross-project semantic failed: ${(err as Error).message}; falling back to lexical-only`,
+          // Phase 2 quality hardening: a cross-project semantic failure
+          // is a silent semantic-recall degradation, so we surface it at
+          // `warn` (was `debug`) so the degradation is visible in
+          // default logs. The returned outcome, status, and cross-project
+          // promotion behavior are unchanged.
+          logger.warn(
+            `recall: cross-project semantic failed: ${(err as Error).message}; falling back to lexical-only`
           );
           semanticResults = [];
         }
@@ -1065,9 +1050,10 @@ export async function handleRecall(input: unknown): Promise<RecallResult> {
         // When outcome.status is "no_memory" and cross-project results are
         // appended, use "Based on cross-project memory:" as the prefix instead
         // of the default "No relevant memory found." text.
-        const updatedMessage = outcome.status === "no_memory"
-          ? formatExternalContext(mergedResults, result.message, "Based on cross-project memory:")
-          : formatExternalContext(mergedResults, result.message);
+        const updatedMessage =
+          outcome.status === "no_memory"
+            ? formatExternalContext(mergedResults, result.message, "Based on cross-project memory:")
+            : formatExternalContext(mergedResults, result.message);
         result = { ...result, message: updatedMessage };
 
         // Option 2 (spec): promote status to "answered" when:
@@ -1168,17 +1154,9 @@ function formatOutcome(outcome: RecallOutcome): RecallResult {
       // answer text (byte-equal to pre-Phase-D and
       // pre-Phase-J).
       const ambiguityNote = formatAmbiguityNote(outcome.internalAmbiguity);
-      const resolvedHistoryNote = formatResolvedHistoryNote(
-        outcome.internalResolvedHistory,
-      );
-      const note =
-        ambiguityNote.length > 0
-          ? ambiguityNote
-          : resolvedHistoryNote;
-      const message =
-        note.length === 0
-          ? outcome.answer
-          : `${note}\n\n${outcome.answer}`;
+      const resolvedHistoryNote = formatResolvedHistoryNote(outcome.internalResolvedHistory);
+      const note = ambiguityNote.length > 0 ? ambiguityNote : resolvedHistoryNote;
+      const message = note.length === 0 ? outcome.answer : `${note}\n\n${outcome.answer}`;
       return {
         status: "answered",
         message,

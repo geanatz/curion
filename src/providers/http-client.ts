@@ -144,7 +144,7 @@ export interface ProviderClientOptions {
  */
 export async function chatCompletion(
   req: ChatCompletionRequest,
-  options: ProviderClientOptions,
+  options: ProviderClientOptions
 ): Promise<{ ok: true; response: ChatCompletionResponse } | { ok: false; error: ProviderError }> {
   if (!options.apiKey) {
     return {
@@ -238,12 +238,7 @@ export async function chatCompletion(
     const text = await safeReadText(res);
     return {
       ok: false,
-      error: classifyHttpError(
-        res.status,
-        text,
-        options.providerLabel,
-        options.apiKey,
-      ),
+      error: classifyHttpError(res.status, text, options.providerLabel, options.apiKey),
     };
   }
 
@@ -279,12 +274,10 @@ export async function chatCompletion(
     ok: true,
     response: {
       id: stringOrUndefined((json as { id?: unknown }).id),
-      model:
-        stringOrUndefined((json as { model?: unknown }).model) ?? req.model,
+      model: stringOrUndefined((json as { model?: unknown }).model) ?? req.model,
       content,
       finishReason: stringOrUndefined(
-        (json as { choices?: Array<{ finish_reason?: unknown }> }).choices?.[0]
-          ?.finish_reason,
+        (json as { choices?: Array<{ finish_reason?: unknown }> }).choices?.[0]?.finish_reason
       ),
       usage: extractUsage(json),
       latencyMs,
@@ -296,7 +289,7 @@ function classifyHttpError(
   status: number,
   text: string,
   providerLabel?: string,
-  apiKey?: string,
+  apiKey?: string
 ): ProviderError {
   const label = providerLabel ?? "provider";
   // Scrub the request's api key (if any) and any well-known
@@ -308,21 +301,51 @@ function classifyHttpError(
   }
   const safeText = sanitizeServerText(text, secretsToRedact);
   if (status === 401 || status === 403) {
-    return { kind: "auth", status, message: `${label}: auth failed (HTTP ${status})`, reachedServer: true };
+    return {
+      kind: "auth",
+      status,
+      message: `${label}: auth failed (HTTP ${status})`,
+      reachedServer: true,
+    };
   }
   if (status === 408 || status === 504) {
-    return { kind: "timeout", status, message: `${label}: gateway timeout (HTTP ${status})`, reachedServer: true };
+    return {
+      kind: "timeout",
+      status,
+      message: `${label}: gateway timeout (HTTP ${status})`,
+      reachedServer: true,
+    };
   }
   if (status === 429) {
-    return { kind: "rate-limit", status, message: `${label}: rate limited (HTTP 429)`, reachedServer: true };
+    return {
+      kind: "rate-limit",
+      status,
+      message: `${label}: rate limited (HTTP 429)`,
+      reachedServer: true,
+    };
   }
   if (status >= 500) {
-    return { kind: "server", status, message: `${label}: server error (HTTP ${status}): ${safeText}`, reachedServer: true };
+    return {
+      kind: "server",
+      status,
+      message: `${label}: server error (HTTP ${status}): ${safeText}`,
+      reachedServer: true,
+    };
   }
   if (status >= 400) {
-    return { kind: "bad-request", status, message: `${label}: bad request (HTTP ${status}): ${safeText}`, reachedServer: true };
+    return {
+      kind: "bad-request",
+      status,
+      message: `${label}: bad request (HTTP ${status}): ${safeText}`,
+      reachedServer: true,
+    };
   }
-  return { kind: "unknown", status, message: `${label}: unexpected HTTP ${status}: ${safeText}`, reachedServer: true };
+  return {
+    kind: "unknown",
+    status,
+    message: `${label}: unexpected HTTP ${status}: ${safeText}`,
+    reachedServer: true,
+  };
 }
 
 /**
@@ -342,10 +365,7 @@ function classifyHttpError(
  *
  * The result is whitespace-collapsed and truncated to 240 chars.
  */
-export function sanitizeServerText(
-  text: string,
-  knownSecrets: readonly string[] = [],
-): string {
+export function sanitizeServerText(text: string, knownSecrets: readonly string[] = []): string {
   if (typeof text !== "string") return "";
   let t = text;
   // 1) Caller-supplied known secrets.
@@ -355,10 +375,7 @@ export function sanitizeServerText(
     }
   }
   // 2) Authorization: Bearer <token> and Bearer <token> in any context.
-  t = t.replace(
-    /(authorization\s*[:=]\s*"?bearer\s+)([^\s"',}\]]+)/gi,
-    "$1<redacted>",
-  );
+  t = t.replace(/(authorization\s*[:=]\s*"?bearer\s+)([^\s"',}\]]+)/gi, "$1<redacted>");
   t = t.replace(/\bbearer\s+([A-Za-z0-9._\-+/=]{6,})/gi, "Bearer <redacted>");
   // 3) Common API-key prefixes. Use a length cutoff so we do not
   //    nuke short IDs that happen to start with "sk-".
@@ -367,7 +384,7 @@ export function sanitizeServerText(
   // 4) Named JSON / form fields whose value is a string.
   t = t.replace(
     /("(?:api[_-]?key|apikey|token|authorization|password|secret)"\s*:\s*)"([^"]*)"/gi,
-    '$1"<redacted>"',
+    '$1"<redacted>"'
   );
   // Collapse whitespace and truncate.
   t = t.replace(/\s+/g, " ").trim();
@@ -423,9 +440,7 @@ function stripTrailingSlash(s: string): string {
  * Translate a `ChatResponseFormat` into the OpenAI-compatible
  * `response_format` field. Pure function, exported for tests.
  */
-export function buildResponseFormat(
-  rf: ChatResponseFormat,
-): Record<string, unknown> {
+export function buildResponseFormat(rf: ChatResponseFormat): Record<string, unknown> {
   if (rf === "json_object") return { type: "json_object" };
   if (rf === "text") return { type: "text" };
   const inner: Record<string, unknown> = {

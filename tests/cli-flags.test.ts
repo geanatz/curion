@@ -38,8 +38,8 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { buildHelpText } from "../src/cli-help.ts";
-import { VERSION } from "../src/version.ts";
 import { PUBLIC_TOOL_NAMES, buildServer } from "../src/server.ts";
+import { VERSION } from "../src/version.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const REPO_ROOT = path.resolve(path.dirname(__filename), "..");
@@ -95,10 +95,7 @@ test("buildHelpText: contains env-var configuration contract", () => {
     "CURION_SEMANTIC_ENABLED",
     "CURION_LOG_LEVEL",
   ]) {
-    assert.ok(
-      text.includes(envVar),
-      `help text must mention the env var ${envVar}; got: ${text}`
-    );
+    assert.ok(text.includes(envVar), `help text must mention the env var ${envVar}; got: ${text}`);
   }
 });
 
@@ -109,11 +106,7 @@ test("buildHelpText: contains env-var configuration contract", () => {
 test("VERSION matches package.json#version (no stale hardcoded fallback)", () => {
   const pkgRaw = fs.readFileSync(PKG_JSON, "utf8");
   const pkg = JSON.parse(pkgRaw) as { version?: unknown };
-  assert.equal(
-    typeof pkg.version,
-    "string",
-    "package.json must have a string `version` field"
-  );
+  assert.equal(typeof pkg.version, "string", "package.json must have a string `version` field");
   assert.equal(VERSION, pkg.version, "src/version.ts must match package.json#version");
   // Sanity: VERSION must not be the historical stale "0.2.0"
   // fallback that used to live in src/server.ts. If a future
@@ -203,36 +196,33 @@ test("buildServer honors options.version override (test escape hatch)", () => {
  * Returns the captured streams and exit code. The function does
  * not throw on a non-zero exit; the caller asserts on it.
  */
-async function runCli(args: string[], cwd: string): Promise<{
+async function runCli(
+  args: string[],
+  cwd: string
+): Promise<{
   exitCode: number | null;
   signal: NodeJS.Signals | null;
   stdout: string;
   stderr: string;
 }> {
   if (!fs.existsSync(SERVER_ENTRY)) {
-    throw new Error(
-      `server entry not found at ${SERVER_ENTRY}; run \`npm run build\` first`
-    );
+    throw new Error(`server entry not found at ${SERVER_ENTRY}; run \`npm run build\` first`);
   }
   return await new Promise((resolve, reject) => {
-    const child: ChildProcessWithoutNullStreams = spawn(
-      process.execPath,
-      [SERVER_ENTRY, ...args],
-      {
-        cwd,
-        env: {
-          // Strip the developer's real .env / provider keys so the
-          // server cannot accidentally open a socket or write to a
-          // real registry in a non-flag path. For flag paths the
-          // server never reaches the env, but we strip anyway to
-          // keep the test hermetic and avoid network noise.
-          ...process.env,
-          HOME: cwd, // also hermetic for any registry reads
-          CURION_LOG_LEVEL: "info",
-        },
-        stdio: ["pipe", "pipe", "pipe"],
-      }
-    );
+    const child: ChildProcessWithoutNullStreams = spawn(process.execPath, [SERVER_ENTRY, ...args], {
+      cwd,
+      env: {
+        // Strip the developer's real .env / provider keys so the
+        // server cannot accidentally open a socket or write to a
+        // real registry in a non-flag path. For flag paths the
+        // server never reaches the env, but we strip anyway to
+        // keep the test hermetic and avoid network noise.
+        ...process.env,
+        HOME: cwd, // also hermetic for any registry reads
+        CURION_LOG_LEVEL: "info",
+      },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
     child.stdout.on("data", (chunk: Buffer) => stdoutChunks.push(chunk));

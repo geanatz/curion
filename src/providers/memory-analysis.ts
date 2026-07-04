@@ -96,18 +96,14 @@
  *     `chatCompletion`, which is the only place it is used.
  */
 
-import {
-  chatCompletion,
-  type ChatMessage,
-  type ProviderError,
-} from "./http-client.js";
 import { anthropicChatCompletion } from "./anthropic.js";
+import { type AdapterRoleConfig, loadRoleConfig } from "./env-helpers.js";
+import { type ChatMessage, type ProviderError, chatCompletion } from "./http-client.js";
 import {
-  parseMemoryAnalysis,
   MEMORY_ANALYSIS_JSON_SCHEMA,
   type MemoryAnalysis,
+  parseMemoryAnalysis,
 } from "./structured-output.js";
-import { loadRoleConfig, type AdapterRoleConfig } from "./env-helpers.js";
 
 // ---------------------------------------------------------------------------
 // Defaults
@@ -338,10 +334,7 @@ export interface AdapterFailure {
    * means primary and fallback both failed; `"missing-config"`
    * means neither provider had a configured key at all.
    */
-  kind:
-    | "all-providers-failed"
-    | "missing-config"
-    | "invalid-input";
+  kind: "all-providers-failed" | "missing-config" | "invalid-input";
   /**
    * Human-readable, redacted message. Never contains a key
    * value or the input text.
@@ -406,9 +399,7 @@ export interface AdapterConfig extends AdapterRoleConfig {
  * opaque trimmed strings and never echoed back through any
  * other adapter API surface.
  */
-export function loadAdapterConfig(
-  overrides: Partial<AdapterConfig> = {},
-): AdapterConfig {
+export function loadAdapterConfig(overrides: Partial<AdapterConfig> = {}): AdapterConfig {
   const cfg = loadRoleConfig({
     defaults: {
       timeoutMs: DEFAULT_ADAPTER_TIMEOUT_MS,
@@ -436,26 +427,36 @@ export function loadAdapterConfig(
  */
 function buildAnalysisUserPrompt(
   text: string,
-  relatedMemories: readonly RelatedMemory[] | undefined,
+  relatedMemories: readonly RelatedMemory[] | undefined
 ): string {
   const lines: string[] = [];
   lines.push("Return EXACTLY one JSON object. No prose, no markdown, no code fences.");
   lines.push("The object MUST match this TypeScript shape:");
   lines.push("{");
-  lines.push('  "summary": string,        // Write a 1-3 sentence narrative memory that preserves the useful context from the input. Write as if the information is being remembered for future recall, not as a retrospective curator note. Preserve who/what/why/when and concrete terms (file names, branch names, feature names, decisions, constraints) when present. Do not start with "The user asked", "This memory captures", or similar curator framings. Do not invent details. Do not include memory IDs or internal storage references.');
+  lines.push(
+    '  "summary": string,        // Write a 1-3 sentence narrative memory that preserves the useful context from the input. Write as if the information is being remembered for future recall, not as a retrospective curator note. Preserve who/what/why/when and concrete terms (file names, branch names, feature names, decisions, constraints) when present. Do not start with "The user asked", "This memory captures", or similar curator framings. Do not invent details. Do not include memory IDs or internal storage references.'
+  );
   lines.push('  "confidence": number,     // 0..1, your confidence in the summary');
   lines.push('  "tags": string[],         // up to 8 short tags');
   lines.push('  "entities"?: {name: string, kind: string}[], // optional named entities');
   lines.push('  "classification"?: string // optional short label. Valid labels:');
-  lines.push('                               //   decision  = chosen direction / resolved choice');
-  lines.push('                               //   policy    = standing future behavior / rule (e.g. "always use X for Y")');
-  lines.push('                               //   constraint = hard boundary / requirement / limitation (e.g. "never exceed N")');
-  lines.push('                               //   preference = user likes / style');
-  lines.push('                               //   fact       = observed result / verifiable info');
-  lines.push('                               //   context    = background / surrounding situation');
-  lines.push('                               //   conflict   = tension / contradiction');
-  lines.push('                               //   reference  = domain knowledge / schema / documented fact');
-  lines.push('                               //   finding    = observed result / evidence (default fallback)');
+  lines.push("                               //   decision  = chosen direction / resolved choice");
+  lines.push(
+    '                               //   policy    = standing future behavior / rule (e.g. "always use X for Y")'
+  );
+  lines.push(
+    '                               //   constraint = hard boundary / requirement / limitation (e.g. "never exceed N")'
+  );
+  lines.push("                               //   preference = user likes / style");
+  lines.push("                               //   fact       = observed result / verifiable info");
+  lines.push("                               //   context    = background / surrounding situation");
+  lines.push("                               //   conflict   = tension / contradiction");
+  lines.push(
+    "                               //   reference  = domain knowledge / schema / documented fact"
+  );
+  lines.push(
+    "                               //   finding    = observed result / evidence (default fallback)"
+  );
   lines.push("}");
   lines.push("");
   lines.push("Wrap the JSON in a ```json ... ``` block. Do not include any other text.");
@@ -496,9 +497,10 @@ function buildAnalysisUserPrompt(
  * keeps the repair prompt free of the user input.
  */
 function buildRepairUserPrompt(previousBadResponse: string): string {
-  const truncated = previousBadResponse.length > 1500
-    ? `${previousBadResponse.slice(0, 1500)}...`
-    : previousBadResponse;
+  const truncated =
+    previousBadResponse.length > 1500
+      ? `${previousBadResponse.slice(0, 1500)}...`
+      : previousBadResponse;
   return [
     "Your previous response could not be parsed as a valid JSON object matching the requested schema.",
     "Return ONLY a single JSON object that matches the schema below. No prose, no markdown, no code fences.",
@@ -601,7 +603,7 @@ export function resolveAdapterProviderId(baseUrl: string): AdapterProviderId {
 export async function analyzeMemoryWithFallback(
   input: string,
   relatedMemories?: readonly RelatedMemory[],
-  options: MemoryAnalysisAdapterOptions = {},
+  options: MemoryAnalysisAdapterOptions = {}
 ): Promise<MemoryAnalysisResult> {
   if (typeof input !== "string" || input.trim().length === 0) {
     return {
@@ -613,24 +615,12 @@ export async function analyzeMemoryWithFallback(
   }
 
   const cfg = loadAdapterConfig({
-    ...(options.primaryApiKey !== undefined
-      ? { primaryApiKey: options.primaryApiKey }
-      : {}),
-    ...(options.fallbackApiKey !== undefined
-      ? { fallbackApiKey: options.fallbackApiKey }
-      : {}),
-    ...(options.primaryBaseUrl !== undefined
-      ? { primaryBaseUrl: options.primaryBaseUrl }
-      : {}),
-    ...(options.fallbackBaseUrl !== undefined
-      ? { fallbackBaseUrl: options.fallbackBaseUrl }
-      : {}),
-    ...(options.primaryModel !== undefined
-      ? { primaryModel: options.primaryModel }
-      : {}),
-    ...(options.fallbackModel !== undefined
-      ? { fallbackModel: options.fallbackModel }
-      : {}),
+    ...(options.primaryApiKey !== undefined ? { primaryApiKey: options.primaryApiKey } : {}),
+    ...(options.fallbackApiKey !== undefined ? { fallbackApiKey: options.fallbackApiKey } : {}),
+    ...(options.primaryBaseUrl !== undefined ? { primaryBaseUrl: options.primaryBaseUrl } : {}),
+    ...(options.fallbackBaseUrl !== undefined ? { fallbackBaseUrl: options.fallbackBaseUrl } : {}),
+    ...(options.primaryModel !== undefined ? { primaryModel: options.primaryModel } : {}),
+    ...(options.fallbackModel !== undefined ? { fallbackModel: options.fallbackModel } : {}),
     ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
     ...(options.maxTokens !== undefined ? { maxTokens: options.maxTokens } : {}),
     ...(options.primaryApiFormat !== undefined
@@ -655,8 +645,8 @@ export async function analyzeMemoryWithFallback(
   // The primary provider id is derived from `cfg.primaryBaseUrl`
   // so the label in `providerLabel` / `providerUsed` / error
   // messages always matches the endpoint the request is sent to.
-  const primaryProvider: AdapterProviderId = (cfg.primaryProviderLabel as AdapterProviderId)
-    || resolveAdapterProviderId(cfg.primaryBaseUrl);
+  const primaryProvider: AdapterProviderId =
+    (cfg.primaryProviderLabel as AdapterProviderId) || resolveAdapterProviderId(cfg.primaryBaseUrl);
   const primaryResult: ProviderAttemptResult = cfg.primaryApiKey
     ? await runProviderWithRepair({
         provider: primaryProvider,
@@ -721,8 +711,9 @@ export async function analyzeMemoryWithFallback(
   // derivation rule as the primary: the label follows the base
   // URL, so a swapped or overridden fallback URL still produces
   // a label that matches the actual endpoint.
-  const fallbackProvider: AdapterProviderId = (cfg.fallbackProviderLabel as AdapterProviderId)
-    || resolveAdapterProviderId(cfg.fallbackBaseUrl);
+  const fallbackProvider: AdapterProviderId =
+    (cfg.fallbackProviderLabel as AdapterProviderId) ||
+    resolveAdapterProviderId(cfg.fallbackBaseUrl);
   const fallbackResult: ProviderAttemptResult = await runProviderWithRepair({
     provider: fallbackProvider,
     baseUrl: cfg.fallbackBaseUrl,
@@ -755,7 +746,7 @@ export async function analyzeMemoryWithFallback(
 function toAdapterSuccess(
   attempt: ProviderAttemptOk,
   fallbackUsed: boolean,
-  priorCalls: number,
+  priorCalls: number
 ): AdapterSuccess {
   const success: AdapterSuccess = {
     ok: true,
@@ -826,12 +817,14 @@ interface RunProviderArgs {
 }
 
 /** Build responseFormat based on strictJson setting. */
-function buildResponseFormat(strictJson: boolean): "json_object" | {
-  kind: "json_schema";
-  schema: Record<string, unknown>;
-  strict: boolean;
-  name: string;
-} {
+function buildResponseFormat(strictJson: boolean):
+  | "json_object"
+  | {
+      kind: "json_schema";
+      schema: Record<string, unknown>;
+      strict: boolean;
+      name: string;
+    } {
   if (strictJson) {
     return {
       kind: "json_schema",
@@ -843,9 +836,7 @@ function buildResponseFormat(strictJson: boolean): "json_object" | {
   return "json_object";
 }
 
-async function runProviderWithRepair(
-  args: RunProviderArgs,
-): Promise<ProviderAttemptResult> {
+async function runProviderWithRepair(args: RunProviderArgs): Promise<ProviderAttemptResult> {
   const messages: ChatMessage[] = [
     {
       role: "system",
@@ -997,7 +988,10 @@ async function runOpenAiCompatibleCall(opts: {
   timeoutMs: number;
   strictJson: boolean;
   providerLabel: string;
-}): Promise<{ ok: true; response: { content: string; latencyMs: number } } | { ok: false; error: ProviderError }> {
+}): Promise<
+  | { ok: true; response: { content: string; latencyMs: number } }
+  | { ok: false; error: ProviderError }
+> {
   const responseFormat = buildResponseFormat(opts.strictJson);
   const r = await chatCompletion(
     {
@@ -1013,7 +1007,7 @@ async function runOpenAiCompatibleCall(opts: {
       timeoutMs: opts.timeoutMs,
       ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
       providerLabel: opts.providerLabel,
-    },
+    }
   );
   if (!r.ok) return { ok: false, error: r.error };
   return { ok: true, response: { content: r.response.content, latencyMs: r.response.latencyMs } };
@@ -1029,7 +1023,10 @@ async function runAnthropicCall(opts: {
   apiKey: string;
   timeoutMs: number;
   providerLabel: string;
-}): Promise<{ ok: true; response: { content: string; latencyMs: number } } | { ok: false; error: ProviderError }> {
+}): Promise<
+  | { ok: true; response: { content: string; latencyMs: number } }
+  | { ok: false; error: ProviderError }
+> {
   // strictJson is not implemented for Anthropic in this initial version;
   // we use prompt-delimited JSON parsing only. The SDK does not currently
   // have a stable public parameter for structured output that we can enable
@@ -1044,8 +1041,11 @@ async function runAnthropicCall(opts: {
       apiKey: opts.apiKey,
       timeoutMs: opts.timeoutMs,
     },
-    opts.providerLabel,
+    opts.providerLabel
   );
   if (!r.ok) return { ok: false, error: r.error };
-  return { ok: true, response: { content: r.result.response.content, latencyMs: r.result.response.latencyMs } };
+  return {
+    ok: true,
+    response: { content: r.result.response.content, latencyMs: r.result.response.latencyMs },
+  };
 }

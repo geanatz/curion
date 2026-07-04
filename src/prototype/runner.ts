@@ -59,26 +59,22 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { type PrototypeConfig, loadPrototypeConfig, redactValue } from "../config/env-loader.js";
 import {
-  loadPrototypeConfig,
-  redactValue,
-  type PrototypeConfig,
-} from "../config/env-loader.js";
-import { PROTOTYPE_FIXTURES } from "./fixtures.js";
-import {
-  buildStructuredPrompt,
-  MEMORY_ANALYSIS_JSON_SCHEMA,
-  parseMemoryAnalysis,
-  type MemoryAnalysis,
-  type ParseResult,
-} from "../providers/structured-output.js";
-import {
-  chatCompletion,
   type ChatCompletionResponse,
   type ChatMessage,
   type ChatResponseFormat,
   type ProviderError,
+  chatCompletion,
 } from "../providers/http-client.js";
+import {
+  MEMORY_ANALYSIS_JSON_SCHEMA,
+  type MemoryAnalysis,
+  type ParseResult,
+  buildStructuredPrompt,
+  parseMemoryAnalysis,
+} from "../providers/structured-output.js";
+import { PROTOTYPE_FIXTURES } from "./fixtures.js";
 
 export type ProviderId = "minimax" | "nvidia-nim" | "groq";
 
@@ -187,12 +183,18 @@ export function parseCli(argv: string[]): RunnerOptions {
     if (a === "--live") opts.live = true;
     else if (a === "--dry-run") opts.live = false;
     else if (a === "--only-provider" && argv[i + 1]) {
-      const ids = argv[++i]!.split(",").map((s) => s.trim()).filter(isProviderId);
+      const ids = argv[++i]!.split(",")
+        .map((s) => s.trim())
+        .filter(isProviderId);
       opts.onlyProviders = ids;
     } else if (a === "--only-fixture" && argv[i + 1]) {
-      opts.onlyFixtures = argv[++i]!.split(",").map((s) => s.trim()).filter(Boolean);
+      opts.onlyFixtures = argv[++i]!.split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
     } else if (a === "--only-nim-model" && argv[i + 1]) {
-      opts.onlyNimModels = argv[++i]!.split(",").map((s) => s.trim()).filter(Boolean);
+      opts.onlyNimModels = argv[++i]!.split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
     } else if (a === "--artifacts" && argv[i + 1]) {
       opts.artifactsDir = argv[++i]!;
     } else if (a === "--max-tokens" && argv[i + 1]) {
@@ -241,14 +243,11 @@ function printHelp(): void {
       "Environment:",
       "  See .env.example for the full list. The runner loads .env",
       "  from the current working directory if present.",
-    ].join("\n") + "\n",
+    ].join("\n") + "\n"
   );
 }
 
-export function resolveArtifactsDir(
-  cfg: PrototypeConfig,
-  options: RunnerOptions,
-): string {
+export function resolveArtifactsDir(cfg: PrototypeConfig, options: RunnerOptions): string {
   const root = options.artifactsDir
     ? path.resolve(options.artifactsDir)
     : path.join(process.cwd(), ".curion", ARTIFACT_DIRNAME);
@@ -289,7 +288,7 @@ function selectProviders(opts: RunnerOptions): ProviderId[] {
   return ALL_PROVIDERS.filter((p) => opts.onlyProviders!.includes(p));
 }
 
-function selectFixtures(opts: RunnerOptions): typeof PROTOTYPE_FIXTURES[number][] {
+function selectFixtures(opts: RunnerOptions): (typeof PROTOTYPE_FIXTURES)[number][] {
   if (!opts.onlyFixtures || opts.onlyFixtures.length === 0) return [...PROTOTYPE_FIXTURES];
   const wanted = new Set(opts.onlyFixtures);
   return PROTOTYPE_FIXTURES.filter((f) => wanted.has(f.id));
@@ -311,16 +310,12 @@ async function runOneAttempt(
   fixtureId: string,
   text: string,
   cfg: PrototypeConfig,
-  options: RunnerOptions,
+  options: RunnerOptions
 ): Promise<ProviderAttempt> {
   // Resolve the per-provider request metadata up front so it is
   // available in the dry-run attempt too (and shows up in the
   // human / artifact report before any network call is made).
-  const requestOverrides = buildProviderRequestOverrides(
-    provider,
-    cfg,
-    options,
-  );
+  const requestOverrides = buildProviderRequestOverrides(provider, cfg, options);
   const baseAttempt: ProviderAttempt = {
     provider,
     model,
@@ -387,7 +382,7 @@ async function runOneAttempt(
       timeoutMs: cfg.timeoutMs,
       ...(options.fetchImpl !== undefined && { fetchImpl: options.fetchImpl }),
       providerLabel: `${provider}/${model}`,
-    },
+    }
   );
 
   if (!result.ok) {
@@ -420,7 +415,7 @@ async function runOneAttempt(
 function buildProviderRequestOverrides(
   provider: ProviderId,
   cfg: PrototypeConfig,
-  options: RunnerOptions,
+  options: RunnerOptions
 ): { responseFormat: ChatResponseFormat; reasoningEffort?: string } {
   if (provider === "groq") {
     const responseFormat: ChatResponseFormat = options.groqDisableStrictJsonSchema
@@ -440,10 +435,7 @@ function buildProviderRequestOverrides(
   return { responseFormat: "json_object" };
 }
 
-function resolveGroqReasoningEffort(
-  cfg: PrototypeConfig,
-  options: RunnerOptions,
-): string {
+function resolveGroqReasoningEffort(cfg: PrototypeConfig, options: RunnerOptions): string {
   if (options.groqReasoningEffortOverride !== undefined) {
     return options.groqReasoningEffortOverride.trim();
   }
@@ -458,16 +450,10 @@ function providerBaseUrl(provider: ProviderId, cfg: PrototypeConfig): string {
 
 function readKey(provider: ProviderId): string | undefined {
   if (provider === "minimax") {
-    return (
-      process.env.CURION_PROVIDER_PRIMARY_KEY ??
-      process.env.MINIMAX_API_KEY
-    );
+    return process.env.CURION_PROVIDER_PRIMARY_KEY ?? process.env.MINIMAX_API_KEY;
   }
   if (provider === "nvidia-nim") {
-    return (
-      process.env.CURION_PROVIDER_FALLBACK_KEY ??
-      process.env.NVIDIA_NIM_API_KEY
-    );
+    return process.env.CURION_PROVIDER_FALLBACK_KEY ?? process.env.NVIDIA_NIM_API_KEY;
   }
   return process.env.GROQ_API_KEY;
 }
@@ -475,7 +461,7 @@ function readKey(provider: ProviderId): string | undefined {
 export function buildReport(
   attempts: ProviderAttempt[],
   cfg: PrototypeConfig,
-  options: RunnerOptions,
+  options: RunnerOptions
 ): ExperimentReport {
   const byProvider: Record<string, { total: number; parsed: number }> = {};
   let parsed = 0;
@@ -577,10 +563,7 @@ export function writeReport(report: ExperimentReport, dir: string): string {
   return full;
 }
 
-export function formatHumanReport(
-  report: ExperimentReport,
-  cfg: PrototypeConfig,
-): string {
+export function formatHumanReport(report: ExperimentReport, cfg: PrototypeConfig): string {
   const lines: string[] = [];
   lines.push("=== curion provider prototype runner ===");
   lines.push(`mode:         ${report.mode}`);
@@ -606,7 +589,7 @@ export function formatHumanReport(
     const rfTag = a.responseFormatType ? ` rf=${a.responseFormatType}` : "";
     const effortTag = a.reasoningEffort ? ` re=${a.reasoningEffort}` : "";
     lines.push(
-      `  [${a.fixture}] ${a.provider}/${a.model} -> ${status} (${latency})${rfTag}${effortTag} summary="${truncate(summary, 60)}"`,
+      `  [${a.fixture}] ${a.provider}/${a.model} -> ${status} (${latency})${rfTag}${effortTag} summary="${truncate(summary, 60)}"`
     );
     if (a.parse.errors.length > 0) {
       lines.push(`     parse errors: ${a.parse.errors.join("; ")}`);
@@ -635,9 +618,7 @@ function truncate(s: string, n: number): string {
 /**
  * Public entry point used by the CLI and by tests.
  */
-export async function runExperiments(
-  options: RunnerOptions,
-): Promise<ExperimentReport> {
+export async function runExperiments(options: RunnerOptions): Promise<ExperimentReport> {
   const cfg = loadPrototypeConfig({
     ...(options.dotenvPath ? { path: options.dotenvPath } : {}),
     ...(options.dotenvSkip ? { skip: true } : {}),
@@ -650,17 +631,17 @@ export async function runExperiments(
   if (options.live && !cfg.hasPrimaryKey && providers.includes("minimax")) {
     // Make the missing config visible early.
     process.stderr.write(
-      "[curion-prototype] minimax key missing; live calls to minimax will be skipped\n",
+      "[curion-prototype] minimax key missing; live calls to minimax will be skipped\n"
     );
   }
   if (options.live && !cfg.hasFallbackKey && providers.includes("nvidia-nim")) {
     process.stderr.write(
-      "[curion-prototype] nvidia-nim key missing; live calls to nvidia-nim will be skipped\n",
+      "[curion-prototype] nvidia-nim key missing; live calls to nvidia-nim will be skipped\n"
     );
   }
   if (options.live && !cfg.hasGroqKey && providers.includes("groq")) {
     process.stderr.write(
-      "[curion-prototype] groq key missing; live calls to groq will be skipped\n",
+      "[curion-prototype] groq key missing; live calls to groq will be skipped\n"
     );
   }
 
@@ -668,37 +649,19 @@ export async function runExperiments(
     if (provider === "minimax") {
       for (const fx of fixtures) {
         attempts.push(
-          await runOneAttempt(
-            "minimax",
-            cfg.minimaxModel,
-            fx.id,
-            fx.text,
-            cfg,
-            options,
-          ),
+          await runOneAttempt("minimax", cfg.minimaxModel, fx.id, fx.text, cfg, options)
         );
       }
     } else if (provider === "nvidia-nim") {
       for (const model of nimModels) {
         for (const fx of fixtures) {
-          attempts.push(
-            await runOneAttempt("nvidia-nim", model, fx.id, fx.text, cfg, options),
-          );
+          attempts.push(await runOneAttempt("nvidia-nim", model, fx.id, fx.text, cfg, options));
         }
       }
     } else {
       // groq: prototype-only comparison candidate. One attempt per fixture.
       for (const fx of fixtures) {
-        attempts.push(
-          await runOneAttempt(
-            "groq",
-            cfg.groqModel,
-            fx.id,
-            fx.text,
-            cfg,
-            options,
-          ),
-        );
+        attempts.push(await runOneAttempt("groq", cfg.groqModel, fx.id, fx.text, cfg, options));
       }
     }
   }

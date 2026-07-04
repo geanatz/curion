@@ -58,13 +58,9 @@
  *     fabricated answer.
  */
 
-import {
-  chatCompletion,
-  type ChatMessage,
-  type ProviderError,
-} from "./http-client.js";
 import { anthropicChatCompletion } from "./anthropic.js";
 import { loadRoleConfig } from "./env-helpers.js";
+import { type ChatMessage, type ProviderError, chatCompletion } from "./http-client.js";
 
 // ---------------------------------------------------------------------------
 // Defaults
@@ -190,9 +186,7 @@ export interface RecallSynthesisFailure {
   httpCalls: number;
 }
 
-export type RecallSynthesisResult =
-  | RecallSynthesisSuccess
-  | RecallSynthesisFailure;
+export type RecallSynthesisResult = RecallSynthesisSuccess | RecallSynthesisFailure;
 
 // ---------------------------------------------------------------------------
 // Config resolution (env-only, mirrors the analysis adapter)
@@ -230,7 +224,7 @@ export interface RecallAdapterConfig {
  * URL is part of the API format specification.
  */
 export function loadRecallAdapterConfig(
-  overrides: Partial<RecallAdapterConfig> = {},
+  overrides: Partial<RecallAdapterConfig> = {}
 ): RecallAdapterConfig {
   const full = loadRoleConfig({
     defaults: {
@@ -324,24 +318,26 @@ function resolveRecallProviderId(baseUrl: string): RecallProviderId {
  */
 function buildSynthesisUserPrompt(
   query: string,
-  memories: ReadonlyArray<RecallMemoryInput>,
+  memories: ReadonlyArray<RecallMemoryInput>
 ): string {
   const lines: string[] = [];
   lines.push("Answer the QUERY using only the MEMORIES below.");
   lines.push(
-    "Write a useful recall result. Include the relevant details from the memories that answer the query — names, decisions, dates, file paths, branches, and concrete specifics — not just a compressed summary.",
+    "Write a useful recall result. Include the relevant details from the memories that answer the query — names, decisions, dates, file paths, branches, and concrete specifics — not just a compressed summary."
   );
   lines.push(
-    "For broad orientation queries, identify the main themes and include the specific entities, decisions, and constraints that support each theme.",
+    "For broad orientation queries, identify the main themes and include the specific entities, decisions, and constraints that support each theme."
   );
   lines.push(
-    "Use multiple sentences when the query covers multiple topics or memories. Use as many sentences as needed to cover the relevant material; do not artificially compress.",
+    "Use multiple sentences when the query covers multiple topics or memories. Use as many sentences as needed to cover the relevant material; do not artificially compress."
   );
   lines.push(
-    "Write in continuous prose. Do not include memory IDs, bullets, headings, code blocks, raw logs, or instruction commentary.",
+    "Write in continuous prose. Do not include memory IDs, bullets, headings, code blocks, raw logs, or instruction commentary."
   );
   lines.push("Do not invent details that are not in the memories.");
-  lines.push("If the memories do not answer the query, say: I don't have that information in memory.");
+  lines.push(
+    "If the memories do not answer the query, say: I don't have that information in memory."
+  );
   lines.push("");
   lines.push("MEMORIES (id: summary):");
   for (const m of memories) {
@@ -370,7 +366,7 @@ function buildSynthesisUserPrompt(
 export async function synthesizeRecallWithFallback(
   query: string,
   memories: ReadonlyArray<RecallMemoryInput>,
-  options: RecallSynthesisOptions = {},
+  options: RecallSynthesisOptions = {}
 ): Promise<RecallSynthesisResult> {
   if (typeof query !== "string" || query.trim().length === 0) {
     return {
@@ -392,24 +388,12 @@ export async function synthesizeRecallWithFallback(
   }
 
   const cfg = loadRecallAdapterConfig({
-    ...(options.primaryApiKey !== undefined
-      ? { primaryApiKey: options.primaryApiKey }
-      : {}),
-    ...(options.fallbackApiKey !== undefined
-      ? { fallbackApiKey: options.fallbackApiKey }
-      : {}),
-    ...(options.primaryBaseUrl !== undefined
-      ? { primaryBaseUrl: options.primaryBaseUrl }
-      : {}),
-    ...(options.fallbackBaseUrl !== undefined
-      ? { fallbackBaseUrl: options.fallbackBaseUrl }
-      : {}),
-    ...(options.primaryModel !== undefined
-      ? { primaryModel: options.primaryModel }
-      : {}),
-    ...(options.fallbackModel !== undefined
-      ? { fallbackModel: options.fallbackModel }
-      : {}),
+    ...(options.primaryApiKey !== undefined ? { primaryApiKey: options.primaryApiKey } : {}),
+    ...(options.fallbackApiKey !== undefined ? { fallbackApiKey: options.fallbackApiKey } : {}),
+    ...(options.primaryBaseUrl !== undefined ? { primaryBaseUrl: options.primaryBaseUrl } : {}),
+    ...(options.fallbackBaseUrl !== undefined ? { fallbackBaseUrl: options.fallbackBaseUrl } : {}),
+    ...(options.primaryModel !== undefined ? { primaryModel: options.primaryModel } : {}),
+    ...(options.fallbackModel !== undefined ? { fallbackModel: options.fallbackModel } : {}),
     ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
     ...(options.maxTokens !== undefined ? { maxTokens: options.maxTokens } : {}),
     ...(options.primaryApiFormat !== undefined
@@ -434,8 +418,8 @@ export async function synthesizeRecallWithFallback(
   // The primary provider id is derived from `cfg.primaryBaseUrl`
   // so the label in `providerLabel` / `providerUsed` / error
   // messages always matches the endpoint the request is sent to.
-  const primaryProvider: RecallProviderId = (cfg.primaryProviderLabel as RecallProviderId)
-    || resolveRecallProviderId(cfg.primaryBaseUrl);
+  const primaryProvider: RecallProviderId =
+    (cfg.primaryProviderLabel as RecallProviderId) || resolveRecallProviderId(cfg.primaryBaseUrl);
   const primaryResult = cfg.primaryApiKey
     ? await runSynthesisCall({
         provider: primaryProvider,
@@ -503,8 +487,8 @@ export async function synthesizeRecallWithFallback(
   // Same derivation rule as the primary: the label follows the
   // base URL, so a swapped or overridden fallback URL still
   // produces a label that matches the actual endpoint.
-  const fallbackProvider: RecallProviderId = (cfg.fallbackProviderLabel as RecallProviderId)
-    || resolveRecallProviderId(cfg.fallbackBaseUrl);
+  const fallbackProvider: RecallProviderId =
+    (cfg.fallbackProviderLabel as RecallProviderId) || resolveRecallProviderId(cfg.fallbackBaseUrl);
   const fallbackResult = await runSynthesisCall({
     provider: fallbackProvider,
     baseUrl: cfg.fallbackBaseUrl,
@@ -574,9 +558,7 @@ interface RunSynthesisArgs {
   apiFormat: RecallApiFormat;
 }
 
-async function runSynthesisCall(
-  args: RunSynthesisArgs,
-): Promise<SynthesisAttemptResult> {
+async function runSynthesisCall(args: RunSynthesisArgs): Promise<SynthesisAttemptResult> {
   const messages: ChatMessage[] = [
     {
       role: "system",
@@ -606,7 +588,7 @@ async function runSynthesisCall(
         apiKey: args.apiKey,
         timeoutMs: args.timeoutMs,
       },
-      providerLabel,
+      providerLabel
     );
     if (!r.ok) {
       return {
@@ -633,7 +615,7 @@ async function runSynthesisCall(
         timeoutMs: args.timeoutMs,
         ...(args.fetchImpl ? { fetchImpl: args.fetchImpl } : {}),
         providerLabel,
-      },
+      }
     );
     if (!r.ok) {
       return {

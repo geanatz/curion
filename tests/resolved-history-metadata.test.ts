@@ -308,11 +308,7 @@ test("buildPersistedMetadata: initial write of supersedes dedupes + sorts determ
   const out = buildPersistedMetadata({ tags: ["x"] }, derived);
   const rel = out.relationship as Record<string, unknown>;
   const arr = rel.supersedes as number[];
-  assert.deepEqual(
-    arr,
-    [1, 2, 3, 5],
-    "expected initial write to dedupe and sort ascending"
-  );
+  assert.deepEqual(arr, [1, 2, 3, 5], "expected initial write to dedupe and sort ascending");
   // Determinism: a second call with the same input must
   // produce the same output. Pin byte-equal output so any
   // future reliance on insertion order surfaces here.
@@ -362,7 +358,22 @@ test("buildPersistedMetadata: initial write of supersedes filters non-finite / n
     // filtered out before the cap is applied.
     supersedes: [
       // 16 valid ids, mixed order, with duplicates.
-      20, 5, 10, 1, 15, 8, 3, 12, 6, 1, 18, 9, 14, 7, 11, 5,
+      20,
+      5,
+      10,
+      1,
+      15,
+      8,
+      3,
+      12,
+      6,
+      1,
+      18,
+      9,
+      14,
+      7,
+      11,
+      5,
       // 9 invalid entries that must NOT appear in the
       // persisted block (and must NOT consume cap slots).
       Number.NaN,

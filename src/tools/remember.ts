@@ -36,30 +36,19 @@
  *   - Private projects are not registered.
  */
 
-import {
-  runRememberController,
-  type RememberOutcome,
-} from "../controller/remember-controller.js";
-import type { Clarification } from "./remember-structured-content.js";
-import { buildRememberStructuredContent } from "./remember-projection.js";
-import {
-  initStorage,
-  closeStorage,
-  type StorageHandle,
-} from "../storage/storage.js";
-import {
-  createSemanticEmbedder,
-} from "../retrieval/semantic/embedder.js";
-import {
-  embedOnRemember,
-} from "../retrieval/semantic/embed-on-remember.js";
-import { logger } from "../logging/logger.js";
-import { startToolBoundaryTrace } from "../trace/index.js";
-import { z } from "zod";
 import path from "node:path";
-import { registerProject } from "../config/registry.js";
-import { isProjectPrivate } from "../config/project-config.js";
+import { z } from "zod";
 import { loadEnv } from "../config/env.js";
+import { isProjectPrivate } from "../config/project-config.js";
+import { registerProject } from "../config/registry.js";
+import { type RememberOutcome, runRememberController } from "../controller/remember-controller.js";
+import { logger } from "../logging/logger.js";
+import { embedOnRemember } from "../retrieval/semantic/embed-on-remember.js";
+import { createSemanticEmbedder } from "../retrieval/semantic/embedder.js";
+import { type StorageHandle, closeStorage, initStorage } from "../storage/storage.js";
+import { startToolBoundaryTrace } from "../trace/index.js";
+import { buildRememberStructuredContent } from "./remember-projection.js";
+import type { Clarification } from "./remember-structured-content.js";
 
 export const REMEMBER_TOOL_NAME = "remember" as const;
 export const REMEMBER_TOOL_DESCRIPTION =
@@ -86,10 +75,7 @@ export interface RememberInput {
  */
 export const REMEMBER_INPUT_SCHEMA = z
   .object({
-    text: z
-      .string()
-      .min(1, "text must not be empty")
-      .describe("The memory text to store."),
+    text: z.string().min(1, "text must not be empty").describe("The memory text to store."),
   })
   .strict();
 
@@ -245,18 +231,22 @@ export async function handleRemember(input: unknown): Promise<RememberResult> {
             embedder,
             outcome.record.id,
             outcome.record.memoryContent,
-            outcome.record.modelId ?? undefined,
+            outcome.record.modelId ?? undefined
           );
           if (!embedResult.stored) {
-            logger.debug(
-              `remember: embedding failed: ${embedResult.error ?? "unknown"}`,
-            );
+            // Phase 2 quality hardening: a failed embed-on-remember is a
+            // silent semantic-recall degradation, so we surface it at
+            // `warn` (was `debug`) so the degradation is visible in
+            // default logs. The returned outcome and status are
+            // unchanged — the memory is already persisted, only the
+            // embedding side-effect failed.
+            logger.warn(`remember: embedding failed: ${embedResult.error ?? "unknown"}`);
           }
         } catch (err) {
           // Non-fatal: embedding failure should not break the save outcome.
-          logger.debug(
-            `remember: embedding threw: ${(err as Error).message}`,
-          );
+          // Phase 2 quality hardening: surfaced at `warn` (was `debug`)
+          // for the same reason as above — silent semantic degradation.
+          logger.warn(`remember: embedding threw: ${(err as Error).message}`);
         }
       }
     } catch (err) {
@@ -265,8 +255,7 @@ export async function handleRemember(input: unknown): Promise<RememberResult> {
       logger.error(`remember: unexpected controller error: ${msg}`);
       const result: RememberResult = {
         status: "provider_error",
-        message:
-          "remember: unexpected internal error; nothing was stored",
+        message: "remember: unexpected internal error; nothing was stored",
       };
       // The handler returned a result, so the run is `ok` (the
       // handler itself did not throw). The provider_error status

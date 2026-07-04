@@ -28,11 +28,7 @@
  */
 
 import Anthropic from "@anthropic-ai/sdk";
-import type {
-  ChatMessage,
-  ProviderError,
-  ProviderErrorKind,
-} from "./http-client.js";
+import type { ChatMessage, ProviderError, ProviderErrorKind } from "./http-client.js";
 
 /** Anthropic SDK message role. */
 type AnthropicRole = "user" | "assistant" | "system";
@@ -115,9 +111,10 @@ function buildSdkClient(opts: AnthropicChatOptions): Anthropic {
  * messages array. A `role: "system"` message is not valid in the messages
  * array and must be passed as the top-level `system` field.
  */
-function convertMessages(
-  messages: ChatMessage[],
-): { system: string | undefined; converted: AnthropicMessage[] } {
+function convertMessages(messages: ChatMessage[]): {
+  system: string | undefined;
+  converted: AnthropicMessage[];
+} {
   const systemParts: string[] = [];
   const converted: AnthropicMessage[] = [];
 
@@ -141,9 +138,7 @@ function convertMessages(
  * Returns the concatenated text of all `type: "text"` blocks, or undefined
  * if no text block is found.
  */
-function extractTextContent(
-  content: Anthropic.Message["content"],
-): string | undefined {
+function extractTextContent(content: Anthropic.Message["content"]): string | undefined {
   if (!Array.isArray(content) || content.length === 0) return undefined;
   const parts: string[] = [];
   for (const block of content) {
@@ -159,12 +154,8 @@ function extractTextContent(
  * the API key. The SDK surfaces auth/configuration errors via `cause`
  * chains; we scrub any key-shaped values from the message text.
  */
-function mapSdkError(
-  err: unknown,
-  providerLabel: string,
-  apiKey: string,
-): ProviderError {
-  const rawMsg = (err instanceof Error) ? err.message : String(err);
+function mapSdkError(err: unknown, providerLabel: string, apiKey: string): ProviderError {
+  const rawMsg = err instanceof Error ? err.message : String(err);
   const safeMsg = sanitizeForKey(rawMsg, apiKey);
   const kind = classifyAnthropicError(err, safeMsg);
 
@@ -219,10 +210,18 @@ function classifyAnthropicError(err: unknown, safeMsg: string): ProviderErrorKin
 
   //宁可错杀，不可放过
   if (safeMsg.includes("timeout") || safeMsg.includes("timed out")) return "timeout";
-  if (safeMsg.includes("401") || safeMsg.includes("403") || safeMsg.includes("authentication")) return "auth";
+  if (safeMsg.includes("401") || safeMsg.includes("403") || safeMsg.includes("authentication"))
+    return "auth";
   if (safeMsg.includes("429") || safeMsg.includes("rate limit")) return "rate-limit";
-  if (safeMsg.includes("500") || safeMsg.includes("502") || safeMsg.includes("503") || safeMsg.includes("server error")) return "server";
-  if (safeMsg.includes("400") || safeMsg.includes("bad request") || safeMsg.includes("invalid")) return "bad-request";
+  if (
+    safeMsg.includes("500") ||
+    safeMsg.includes("502") ||
+    safeMsg.includes("503") ||
+    safeMsg.includes("server error")
+  )
+    return "server";
+  if (safeMsg.includes("400") || safeMsg.includes("bad request") || safeMsg.includes("invalid"))
+    return "bad-request";
 
   return "unknown";
 }
@@ -279,7 +278,7 @@ function sanitizeForKey(text: string, apiKey: string): string {
   t = t.replace(/\bnvapi-[A-Za-z0-9_\-]{16,}\b/g, "nvapi-<redacted>");
   t = t.replace(
     /("(?:api[_-]?key|apikey|token|authorization|password|secret)"\s*:\s*)"([^"]*)"/gi,
-    '$1"<redacted>"',
+    '$1"<redacted>"'
   );
   t = t.replace(/\s+/g, " ").trim();
   return t.length > 240 ? `${t.slice(0, 240)}...` : t;
@@ -296,7 +295,7 @@ function sanitizeForKey(text: string, apiKey: string): string {
  */
 export async function anthropicChatCompletion(
   opts: AnthropicChatOptions,
-  providerLabel = "anthropic",
+  providerLabel = "anthropic"
 ): Promise<{ ok: true; result: AnthropicChatResult } | { ok: false; error: ProviderError }> {
   if (!opts.apiKey) {
     return {
@@ -371,9 +370,7 @@ export async function anthropicChatCompletion(
             usage: {
               promptTokens: message.usage.input_tokens,
               completionTokens: message.usage.output_tokens,
-              totalTokens:
-                (message.usage.input_tokens ?? 0) +
-                (message.usage.output_tokens ?? 0),
+              totalTokens: (message.usage.input_tokens ?? 0) + (message.usage.output_tokens ?? 0),
             },
           }),
           latencyMs,

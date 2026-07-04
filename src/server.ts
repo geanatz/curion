@@ -44,33 +44,26 @@
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import {
-  handleRemember,
-  REMEMBER_TOOL_DESCRIPTION,
-  REMEMBER_INPUT_SCHEMA,
-} from "./tools/remember.js";
-import {
-  handleRecall,
-  RECALL_TOOL_DESCRIPTION,
-  RECALL_INPUT_SCHEMA,
-} from "./tools/recall.js";
+import { logger } from "./logging/logger.js";
+import { buildRecallPublicText, buildRecallStructuredContent } from "./tools/recall-projection.js";
 import {
   RECALL_STRUCTURED_CONTENT_SCHEMA,
   type RecallStructuredContent,
 } from "./tools/recall-structured-content.js";
+import { RECALL_INPUT_SCHEMA, RECALL_TOOL_DESCRIPTION, handleRecall } from "./tools/recall.js";
+import {
+  buildRememberPublicText,
+  buildRememberStructuredContent,
+} from "./tools/remember-projection.js";
 import {
   REMEMBER_STRUCTURED_CONTENT_SCHEMA,
   type RememberStructuredContent,
 } from "./tools/remember-structured-content.js";
 import {
-  buildRecallPublicText,
-  buildRecallStructuredContent,
-} from "./tools/recall-projection.js";
-import {
-  buildRememberPublicText,
-  buildRememberStructuredContent,
-} from "./tools/remember-projection.js";
-import { logger } from "./logging/logger.js";
+  REMEMBER_INPUT_SCHEMA,
+  REMEMBER_TOOL_DESCRIPTION,
+  handleRemember,
+} from "./tools/remember.js";
 import { VERSION } from "./version.js";
 
 export const PUBLIC_TOOL_NAMES = ["remember", "recall"] as const;
@@ -86,10 +79,7 @@ export interface BuildServerOptions {
 // Re-export the wire-format types so consumers (tests, future
 // agent-facing code) can pin the contract from a single import.
 export type { RecallStructuredContent, RememberStructuredContent };
-export {
-  RECALL_STRUCTURED_CONTENT_SCHEMA,
-  REMEMBER_STRUCTURED_CONTENT_SCHEMA,
-};
+export { RECALL_STRUCTURED_CONTENT_SCHEMA, REMEMBER_STRUCTURED_CONTENT_SCHEMA };
 
 /**
  * Build a fresh McpServer instance with the two public tools registered.
@@ -111,7 +101,7 @@ export function buildServer(options: BuildServerOptions = {}): McpServer {
         // Tools only. No resources, no prompts.
         tools: {},
       },
-    },
+    }
   );
 
   // remember(text)
@@ -141,8 +131,7 @@ export function buildServer(options: BuildServerOptions = {}): McpServer {
     async (args) => {
       const result = await handleRemember(args);
       const text = buildRememberPublicText(result);
-      const structuredContent: RememberStructuredContent =
-        buildRememberStructuredContent(result);
+      const structuredContent: RememberStructuredContent = buildRememberStructuredContent(result);
       return {
         content: [
           {
@@ -152,7 +141,7 @@ export function buildServer(options: BuildServerOptions = {}): McpServer {
         ],
         structuredContent,
       };
-    },
+    }
   );
 
   // recall(text)
@@ -166,8 +155,7 @@ export function buildServer(options: BuildServerOptions = {}): McpServer {
     async (args) => {
       const result = await handleRecall(args);
       const text = buildRecallPublicText(result);
-      const structuredContent: RecallStructuredContent =
-        buildRecallStructuredContent(result);
+      const structuredContent: RecallStructuredContent = buildRecallStructuredContent(result);
       return {
         content: [
           {
@@ -177,11 +165,11 @@ export function buildServer(options: BuildServerOptions = {}): McpServer {
         ],
         structuredContent,
       };
-    },
+    }
   );
 
   logger.debug(
-    `server built with ${PUBLIC_TOOL_NAMES.length} public tools: ${PUBLIC_TOOL_NAMES.join(", ")}`,
+    `server built with ${PUBLIC_TOOL_NAMES.length} public tools: ${PUBLIC_TOOL_NAMES.join(", ")}`
   );
 
   return server;

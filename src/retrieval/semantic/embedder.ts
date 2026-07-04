@@ -32,7 +32,6 @@
  * Embeddings are generated only from sanitized stored summaries.
  */
 
-import { fileURLToPath } from "node:url";
 import { logger } from "../../logging/logger.js";
 
 // ---------------------------------------------------------------------------
@@ -74,10 +73,7 @@ export interface SemanticEmbedder {
   /**
    * Batch-embed texts. Default implementation loops over `embed`.
    */
-  embedBatch(
-    texts: ReadonlyArray<string>,
-    kind: "query" | "document",
-  ): Promise<number[][]>;
+  embedBatch(texts: ReadonlyArray<string>, kind: "query" | "document"): Promise<number[][]>;
 }
 
 /**
@@ -102,16 +98,88 @@ export interface SemanticEmbedderOptions {
 // ---------------------------------------------------------------------------
 
 const STUB_STOP_WORDS: ReadonlySet<string> = new Set([
-  "the", "and", "for", "are", "but", "not", "you", "all", "any",
-  "can", "had", "her", "was", "one", "our", "out", "day", "get",
-  "has", "him", "his", "how", "man", "new", "now", "old", "see",
-  "two", "way", "who", "boy", "did", "its", "let", "put", "say",
-  "she", "too", "use", "this", "that", "with", "from", "have",
-  "they", "their", "there", "what", "when", "your", "were", "been",
-  "will", "would", "could", "should", "about", "into", "than",
-  "then", "them", "these", "those", "because", "where", "which",
-  "while", "whom", "ever", "very", "just", "also", "into", "over",
-  "such", "some", "only", "more", "most", "other", "than", "each",
+  "the",
+  "and",
+  "for",
+  "are",
+  "but",
+  "not",
+  "you",
+  "all",
+  "any",
+  "can",
+  "had",
+  "her",
+  "was",
+  "one",
+  "our",
+  "out",
+  "day",
+  "get",
+  "has",
+  "him",
+  "his",
+  "how",
+  "man",
+  "new",
+  "now",
+  "old",
+  "see",
+  "two",
+  "way",
+  "who",
+  "boy",
+  "did",
+  "its",
+  "let",
+  "put",
+  "say",
+  "she",
+  "too",
+  "use",
+  "this",
+  "that",
+  "with",
+  "from",
+  "have",
+  "they",
+  "their",
+  "there",
+  "what",
+  "when",
+  "your",
+  "were",
+  "been",
+  "will",
+  "would",
+  "could",
+  "should",
+  "about",
+  "into",
+  "than",
+  "then",
+  "them",
+  "these",
+  "those",
+  "because",
+  "where",
+  "which",
+  "while",
+  "whom",
+  "ever",
+  "very",
+  "just",
+  "also",
+  "into",
+  "over",
+  "such",
+  "some",
+  "only",
+  "more",
+  "most",
+  "other",
+  "than",
+  "each",
 ]);
 
 const FNV1A_OFFSET_BASIS_32 = 0x811c9dc5;
@@ -158,10 +226,7 @@ export class StubSemanticEmbedder implements SemanticEmbedder {
     return out;
   }
 
-  async embed(
-    text: string,
-    _kind: "query" | "document",
-  ): Promise<number[]> {
+  async embed(text: string, _kind: "query" | "document"): Promise<number[]> {
     const values = new Float64Array(this.dim);
     const tokens = this.tokenize(text);
     if (tokens.length === 0) {
@@ -182,10 +247,7 @@ export class StubSemanticEmbedder implements SemanticEmbedder {
     return Array.from(values);
   }
 
-  async embedBatch(
-    texts: ReadonlyArray<string>,
-    kind: "query" | "document",
-  ): Promise<number[][]> {
+  async embedBatch(texts: ReadonlyArray<string>, kind: "query" | "document"): Promise<number[][]> {
     const out: number[][] = new Array(texts.length);
     for (let i = 0; i < texts.length; i++) {
       out[i] = await this.embed(texts[i] ?? "", kind);
@@ -200,16 +262,16 @@ export class StubSemanticEmbedder implements SemanticEmbedder {
 
 type FeatureExtractionPipeline = (
   input: string | string[],
-  options?: { pooling?: "mean" | "cls" | "none"; normalize?: boolean },
+  options?: { pooling?: "mean" | "cls" | "none"; normalize?: boolean }
 ) => Promise<{ data: Float32Array | number[]; dims?: number[] }>;
 
 let cachedTransformers: typeof import("@xenova/transformers") | null = null;
 
 async function loadTransformers(): Promise<typeof import("@xenova/transformers")> {
   if (cachedTransformers) return cachedTransformers;
-  const mod = (await import(
-    /* @vite-ignore */ "@xenova/transformers"
-  )) as typeof import("@xenova/transformers");
+  const mod = (await import(/* @vite-ignore */ "@xenova/transformers")) as typeof import(
+    "@xenova/transformers"
+  );
   cachedTransformers = mod;
   return mod;
 }
@@ -241,9 +303,7 @@ export class BgeSmallEmbedder implements SemanticEmbedder {
 
   constructor(options: SemanticEmbedderOptions = {}) {
     this.modelId = options.modelId ?? "Xenova/bge-small-en-v1.5";
-    this.cacheDir =
-      options.cacheDir ??
-      `${process.cwd()}/.curion/transformers-cache`;
+    this.cacheDir = options.cacheDir ?? `${process.cwd()}/.curion/transformers-cache`;
     this.allowRemote = options.allowRemote ?? true;
     this.metadata = {
       ...this.metadata,
@@ -261,23 +321,21 @@ export class BgeSmallEmbedder implements SemanticEmbedder {
     const t0 = Date.now();
     try {
       const tr = await loadTransformers();
-      const env = (tr as unknown as {
-        env: {
-          cacheDir?: string;
-          allowLocalModels?: boolean;
-          allowRemoteModels?: boolean;
-        };
-      }).env;
+      const env = (
+        tr as unknown as {
+          env: {
+            cacheDir?: string;
+            allowLocalModels?: boolean;
+            allowRemoteModels?: boolean;
+          };
+        }
+      ).env;
       if (env) {
         env.cacheDir = this.cacheDir;
         env.allowLocalModels = true;
         env.allowRemoteModels = this.allowRemote;
       }
-      const built = await tr.pipeline(
-        "feature-extraction",
-        this.modelId,
-        { quantized: true },
-      );
+      const built = await tr.pipeline("feature-extraction", this.modelId, { quantized: true });
       this.pipeline = built as unknown as FeatureExtractionPipeline;
       // Probe the output dimension.
       const probe = await this.pipeline("test", {
@@ -296,8 +354,7 @@ export class BgeSmallEmbedder implements SemanticEmbedder {
       };
     } catch (err: unknown) {
       this.failed = true;
-      this.errorMessage =
-        err instanceof Error ? err.message : String(err);
+      this.errorMessage = err instanceof Error ? err.message : String(err);
       this.loadMs = Date.now() - t0;
       this.metadata = {
         ...this.metadata,
@@ -317,20 +374,15 @@ export class BgeSmallEmbedder implements SemanticEmbedder {
       if (this.failed && this.errorMessage && !this._warnedOfFailure) {
         this._warnedOfFailure = true;
         logger.warn(
-          `BgeSmallEmbedder: ONNX init failed (${this.errorMessage}); falling back to stub hash embedder for this session. Semantic recall will use lexical only.`,
+          `BgeSmallEmbedder: ONNX init failed (${this.errorMessage}); falling back to stub hash embedder for this session. Semantic recall will use lexical only.`
         );
       }
-      return new StubSemanticEmbedder({ stubDim: this.metadata.dim }).embed(
-        text,
-        kind,
-      );
+      return new StubSemanticEmbedder({ stubDim: this.metadata.dim }).embed(text, kind);
     }
     const t0 = Date.now();
     try {
       const prefix =
-        kind === "query"
-          ? "Represent this sentence for searching relevant passages: "
-          : "";
+        kind === "query" ? "Represent this sentence for searching relevant passages: " : "";
       const out = await this.pipeline(prefix + text, {
         pooling: "mean",
         normalize: true,
@@ -347,16 +399,13 @@ export class BgeSmallEmbedder implements SemanticEmbedder {
     }
   }
 
-  async embedBatch(
-    texts: ReadonlyArray<string>,
-    kind: "query" | "document",
-  ): Promise<number[][]> {
+  async embedBatch(texts: ReadonlyArray<string>, kind: "query" | "document"): Promise<number[][]> {
     if (!this.pipeline || this.failed) {
       // Warn once per session when falling back to stub due to init failure.
       if (this.failed && this.errorMessage && !this._warnedOfFailure) {
         this._warnedOfFailure = true;
         logger.warn(
-          `BgeSmallEmbedder: ONNX init failed (${this.errorMessage}); falling back to stub hash embedder for this session. Semantic recall will use lexical only.`,
+          `BgeSmallEmbedder: ONNX init failed (${this.errorMessage}); falling back to stub hash embedder for this session. Semantic recall will use lexical only.`
         );
       }
       const stub = new StubSemanticEmbedder({ stubDim: this.metadata.dim });
@@ -365,9 +414,7 @@ export class BgeSmallEmbedder implements SemanticEmbedder {
     const t0 = Date.now();
     try {
       const prefix =
-        kind === "query"
-          ? "Represent this sentence for searching relevant passages: "
-          : "";
+        kind === "query" ? "Represent this sentence for searching relevant passages: " : "";
       const textsWithPrefix = texts.map((t) => prefix + t);
       const out = await this.pipeline(textsWithPrefix as string[], {
         pooling: "mean",
@@ -415,7 +462,7 @@ export type EmbedderBackend = "stub" | "bge-small";
 export async function createSemanticEmbedder(
   options: SemanticEmbedderOptions & {
     enabled?: boolean;
-  } = {},
+  } = {}
 ): Promise<SemanticEmbedder> {
   if (!options.enabled) {
     const stub = new StubSemanticEmbedder({ stubDim: options.stubDim ?? 64 });
