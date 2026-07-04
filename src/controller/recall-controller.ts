@@ -46,9 +46,17 @@ import {
   synthesizeRecallWithFallback,
 } from "../providers/recall-synthesis.js";
 import {
+  type AdaptiveCandidate,
   type AdaptiveCandidateWithText,
   type AdaptiveDepthPipelineConfig,
+  type AdaptiveDepthPipelineResult,
+  type ResolvedAdaptivePromptBudgetConfig,
+  applyDiversityFilter,
+  applyPromptBudget,
+  resolveAdaptiveDiversityConfig,
+  resolveAdaptivePromptBudgetConfig,
   runAdaptiveDepth,
+  selectAdaptiveCandidates,
 } from "../retrieval/adaptive-depth.js";
 import {
   type AmbiguitySignal,
@@ -85,7 +93,9 @@ import {
 import type { Clarification } from "../tools/remember-structured-content.js";
 import {
   RECALL_ACTIVE_MEMORY_READ_KIND,
+  RECALL_ADAPTIVE_DEPTH_KIND,
   RECALL_LEXICAL_RANKING_KIND,
+  RECALL_PROMPT_BUDGET_KIND,
   RECALL_SELECTED_CANDIDATES_KIND,
   RECALL_SUPERSEDED_DEMOTION_KIND,
 } from "../trace/trace-tool-boundary.js";
@@ -735,6 +745,29 @@ export async function runRecallController(
   logger.debug(
     `recall: adaptive-depth kept ${topSummaries.length}/${candidatePool.length} candidate(s) (${depthResult.trace.selector.reason})`
   );
+
+  // -- Phase 3A trace: adaptive-depth + prompt-budget ------------------
+  // Debugging instrumentation: emit the full adaptive-depth /
+  // prompt-budget decision (counts, scores, kinds, content
+  // lengths, dropped / truncated counts, totals) BEFORE the
+  // `selected-candidates` event so a reader can correlate the
+  // selector's decision with the final synthesis input. The
+  // helper short-circuits when tracing is disabled; the
+  // controller's behavior is unchanged when trace is off. The
+  // kindsById map is built from `candidatePool` (the post-
+  // demotion summary view) so the `keptKinds` field on the
+  // trace event carries the kind of each kept memory without
+  // leaking its content.
+  const kindsById = new Map<number, string>();
+  for (const s of candidatePool) {
+    kindsById.set(s.id, s.kind);
+  }
+  emitAdaptiveDepthStages(options.trace, {
+    rankedWithText,
+    depthResult,
+    config: options.adaptiveDepth ?? DEFAULT_ADAPTIVE_DEPTH_PIPELINE_CONFIG,
+    kindsById,
+  });
 
   // -- Phase 3A trace: selected candidates -----------------------------
   emitSelectedCandidatesStage(options.trace, topSummaries);
@@ -1422,6 +1455,239 @@ function emitSupersededDemotionStage(
 function buildMatchText(s: SafeMemorySummary): string {
   const tagPart = Array.isArray(s.tags) && s.tags.length > 0 ? ` ${s.tags.join(" ")}` : "";
   return `${s.memoryContent}${tagPart}`;
+}
+
+/**
+ * Emit `recall.adaptive-depth` and `recall.prompt-budget` — a
+ * debugging-instrumentation pair that fires immediately AFTER the
+ * adaptive-depth pipeline (`runAdaptiveDepth`) and BEFORE the
+ * existing `recall.selected-candidates` event. The pair gives a
+ * reader the full picture of what the selector / diversity filter /
+ * prompt budget did without leaking raw memory text.
+ *
+ * Phase: instrumentation-only. This is a debugging trace surface;
+ * no adaptive-selection, retry, timeout, cap, threshold, public
+ * API, ranking, synthesis prompt, or storage behavior is changed.
+ * The pipeline itself is still the existing `runAdaptiveDepth`
+ * call; the new helper only re-runs the same pure helper functions
+ * (selectAdaptiveCandidates, applyDiversityFilter,
+ * applyPromptBudget) on the same input to derive the diagnostic
+ * payload, which is guaranteed byte-stable because those
+ * functions are pure and deterministic. No extra I/O, no
+ * allocation in the hot path beyond the diagnostic arrays.
+ *
+ * `recall.adaptive-depth` payload:
+ *   - `rankedCount` / `inputCount` : size of the candidate pool
+ *                                   fed into `runAdaptiveDepth`
+ *                                   (alias, both reported for
+ *                                   clarity).
+ *   - `selectedCount`              : candidate count after the
+ *                                   selector (selector's
+ *                                   `selectedCount`).
+ *   - `keptAfterDiversity`         : candidate count after the
+ *                                   diversity filter.
+ *   - `droppedByDiversity`         : candidates the diversity
+ *                                   filter removed.
+ *   - `keptAfterBudget`            : final candidate count after
+ *                                   the prompt budget (= the
+ *                                   `selected` list that goes to
+ *                                   synthesis).
+ *   - `strategy`                   : `"elbow"` or `"plateau"`.
+ *   - `minK` / `maxK`              : selector minK / maxK caps.
+ *   - `relativeFraction`           : selector relativeFraction
+ *                                   (topScore * relativeFraction
+ *                                   is the relevance floor).
+ *   - `plateauTolerance`           : plateau strategy tolerance.
+ *   - `elbowGapTolerance`          : elbow strategy tolerance.
+ *   - `topScore`                   : top score among input
+ *                                   candidates (`null` on empty
+ *                                   input).
+ *   - `relativeFloor`              : topScore * relativeFraction
+ *                                   (the absolute cutoff score
+ *                                   for the cluster; `null`
+ *                                   on empty input).
+ *   - `reason`                     : the selector's reason string
+ *                                   (e.g. "elbow kept 8/12",
+ *                                   "capped at maxK=15",
+ *                                   "baseline only (input
+ *                                   shorter than minK)").
+ *   - `diversity.enabled`          : whether the diversity
+ *                                   filter ran.
+ *   - `diversity.redundancyThreshold` : Jaccard threshold used.
+ *   - `keptIds` / `keptScores` / `keptKinds` / `keptContentLengths` :
+ *                                   parallel arrays describing
+ *                                   the FINAL kept set
+ *                                   (post-budget, post-truncation).
+ *                                   `kinds` is resolved from the
+ *                                   controller's `candidatePool`
+ *                                   (the post-demotion summary
+ *                                   view) so a reader can
+ *                                   confirm the kind of each
+ *                                   kept memory without seeing
+ *                                   its content.
+ *
+ * `recall.prompt-budget` payload:
+ *   - `inputCount`                 : candidate count that
+ *                                   entered the budget step
+ *                                   (= `keptAfterDiversity`).
+ *   - `keptCount`                  : candidate count that
+ *                                   survived the budget step.
+ *   - `perMemoryCharCap`           : resolved per-memory cap
+ *                                   (Infinity means disabled).
+ *   - `totalCharBudget`            : resolved total char budget
+ *                                   (Infinity means disabled).
+ *   - `dropLowestWhenOverBudget`   : resolved drop-tail flag.
+ *   - `droppedCount`               : number of candidates the
+ *                                   budget dropped.
+ *   - `truncatedCount`             : number of candidates whose
+ *                                   text was truncated.
+ *   - `totalCharsBeforeBudget`     : sum of diversity-result
+ *                                   text lengths (the budget
+ *                                   input's total chars).
+ *   - `totalCharsAfterBudget`      : sum of kept text lengths
+ *                                   (= the final MEMORIES-section
+ *                                   total).
+ *   - `droppedTail`                : same as
+ *                                   `dropLowestWhenOverBudget`,
+ *                                   surfaced as a standalone
+ *                                   boolean so a reader can see
+ *                                   at a glance whether the
+ *                                   budget dropped the tail.
+ *   - `keptContentLengths`         : per-memory text length of
+ *                                   each kept candidate
+ *                                   (post-truncation, parallel
+ *                                   to `keptIds` in the
+ *                                   adaptive-depth event).
+ *
+ * Redaction / safety:
+ *   - The payload intentionally omits raw `memoryContent`,
+ *     `text`, query strings, secret-shaped fragments, and any
+ *     other content the central `redactPayload` pass would
+ *     strip. The trace writer applies `redactPayload` to the
+ *     whole payload as a defense-in-depth pass.
+ *   - Memory ids are included; this matches the existing
+ *     `recall.lexical-ranking` / `recall.superseded-demotion` /
+ *     `recall.selected-candidates` policy where ids are part
+ *     of the trace surface (the public MCP `text` block and
+ *     `structuredContent` are unaffected).
+ *   - The helper short-circuits when the trace context is
+ *     disabled (`runId === null`) or absent, mirroring the
+ *     other `emit*` helpers.
+ *
+ * No call to `runAdaptiveDepth` is replaced: this helper only
+ * reads the existing `depthResult` for the post-budget kept
+ * set, and re-runs the pure pipeline helpers to derive
+ * diagnostic fields that the pipeline trace does not carry
+ * (`keptAfterDiversity` count is already in
+ * `depthResult.trace.diversity.keptAfterFilter`, but the
+ * pre-budget total chars and per-candidate lengths are not).
+ */
+function emitAdaptiveDepthStages(
+  trace: RecallTraceContext | undefined,
+  args: {
+    /** Input pool the controller fed to `runAdaptiveDepth`. */
+    rankedWithText: ReadonlyArray<AdaptiveCandidateWithText>;
+    /** Pipeline result the controller already computed. */
+    depthResult: AdaptiveDepthPipelineResult;
+    /** Config the controller passed to `runAdaptiveDepth`. */
+    config: AdaptiveDepthPipelineConfig | undefined;
+    /** Kind lookup: memory id → kind, built from `candidatePool`. */
+    kindsById: ReadonlyMap<number, string>;
+  }
+): void {
+  if (!trace || trace.runId === null) return;
+
+  // Re-derive the intermediate pipeline state. The selector,
+  // diversity, and budget helpers are pure and deterministic;
+  // re-running them on the same input yields byte-stable output.
+  // The post-budget kept set in `args.depthResult.selected` is
+  // also the kept set we'd get from re-running; both are
+  // referenced (the post-budget set drives the final ids/scores/
+  // kinds/lengths, the intermediate set drives the counts and
+  // pre-budget totals).
+  const scoreOnly: AdaptiveCandidate[] = args.rankedWithText.map((c) => ({
+    id: c.id,
+    score: c.score,
+  }));
+  const selection = selectAdaptiveCandidates(scoreOnly, args.config?.selector);
+  const selectedSet = new Set(selection.selected.map((s) => s.id));
+  const selectedTextEnriched: AdaptiveCandidateWithText[] = [];
+  for (const c of args.rankedWithText) {
+    if (selectedSet.has(c.id)) {
+      selectedTextEnriched.push(c);
+    }
+  }
+  const diversityResult = applyDiversityFilter(selectedTextEnriched, args.config?.diversity);
+  const budget = applyPromptBudget(diversityResult, args.config?.budget);
+
+  // Per-candidate diagnostics on the FINAL kept set
+  // (post-budget, post-truncation). `depthResult.selected` is
+  // the authoritative synthesis-input set; the ids/scores/
+  // lengths below mirror it.
+  const keptIds: number[] = [];
+  const keptScores: number[] = [];
+  const keptKinds: string[] = [];
+  const keptContentLengths: number[] = [];
+  for (const c of args.depthResult.selected) {
+    keptIds.push(c.id);
+    keptScores.push(c.score);
+    keptKinds.push(args.kindsById.get(c.id) ?? "unknown");
+    keptContentLengths.push(c.text.length);
+  }
+
+  const diversityCfg = resolveAdaptiveDiversityConfig(args.config?.diversity);
+  const budgetCfg: ResolvedAdaptivePromptBudgetConfig = resolveAdaptivePromptBudgetConfig(
+    args.config?.budget
+  );
+  const topScore = selection.trace.topScore;
+  const relativeFloor =
+    topScore !== null ? topScore * selection.trace.config.relativeFraction : null;
+
+  trace.recordStage(RECALL_ADAPTIVE_DEPTH_KIND, {
+    rankedCount: args.rankedWithText.length,
+    inputCount: args.rankedWithText.length,
+    selectedCount: selection.trace.selectedCount,
+    keptAfterDiversity: diversityResult.length,
+    droppedByDiversity: selectedTextEnriched.length - diversityResult.length,
+    keptAfterBudget: budget.kept.length,
+    strategy: selection.trace.config.strategy,
+    minK: selection.trace.config.minK,
+    maxK: selection.trace.config.maxK,
+    relativeFraction: selection.trace.config.relativeFraction,
+    plateauTolerance: selection.trace.config.plateauTolerance,
+    elbowGapTolerance: selection.trace.config.elbowGapTolerance,
+    topScore,
+    relativeFloor,
+    reason: selection.trace.reason,
+    diversity: {
+      enabled: diversityCfg.enabled,
+      redundancyThreshold: diversityCfg.redundancyThreshold,
+    },
+    keptIds,
+    keptScores,
+    keptKinds,
+    keptContentLengths,
+  });
+
+  // Sum of the diversity-result text lengths (the budget
+  // INPUT total chars). Per-memory truncation happens inside
+  // `applyPromptBudget`; this sum is the lengths the budget
+  // started with.
+  const totalCharsBeforeBudget = diversityResult.reduce((acc, c) => acc + c.text.length, 0);
+
+  trace.recordStage(RECALL_PROMPT_BUDGET_KIND, {
+    inputCount: diversityResult.length,
+    keptCount: budget.kept.length,
+    perMemoryCharCap: budget.perMemoryCap,
+    totalCharBudget: budgetCfg.totalCharBudget,
+    dropLowestWhenOverBudget: budgetCfg.dropLowestWhenOverBudget,
+    droppedCount: budget.droppedCount,
+    truncatedCount: budget.truncatedCount,
+    totalCharsBeforeBudget,
+    totalCharsAfterBudget: budget.totalChars,
+    droppedTail: budgetCfg.dropLowestWhenOverBudget,
+    keptContentLengths: budget.kept.map((c) => c.text.length),
+  });
 }
 
 // ---------------------------------------------------------------------------

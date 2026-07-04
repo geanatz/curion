@@ -88,7 +88,9 @@ import {
 } from "../src/trace/index.ts";
 import {
   RECALL_ACTIVE_MEMORY_READ_KIND,
+  RECALL_ADAPTIVE_DEPTH_KIND,
   RECALL_LEXICAL_RANKING_KIND,
+  RECALL_PROMPT_BUDGET_KIND,
   RECALL_SELECTED_CANDIDATES_KIND,
   RECALL_SUPERSEDED_DEMOTION_KIND,
   TOOL_INPUT_KIND,
@@ -1087,14 +1089,21 @@ test("recall Phase 3A: populated store emits all three stage events before provi
 
       // Expected: tool.input, recall.active-memory-read,
       // recall.lexical-ranking, recall.superseded-demotion,
+      // recall.adaptive-depth, recall.prompt-budget,
       // recall.selected-candidates, tool.output
-      assert.equal(events.length, 6, "expected 6 events: tool.input + 4 stages + tool.output");
+      assert.equal(
+        events.length,
+        8,
+        "expected 8 events: tool.input + 6 stages + tool.output"
+      );
       assert.equal(events[0]!.kind, TOOL_INPUT_KIND);
       assert.equal(events[1]!.kind, RECALL_ACTIVE_MEMORY_READ_KIND);
       assert.equal(events[2]!.kind, RECALL_LEXICAL_RANKING_KIND);
       assert.equal(events[3]!.kind, RECALL_SUPERSEDED_DEMOTION_KIND);
-      assert.equal(events[4]!.kind, RECALL_SELECTED_CANDIDATES_KIND);
-      assert.equal(events[5]!.kind, TOOL_OUTPUT_KIND);
+      assert.equal(events[4]!.kind, RECALL_ADAPTIVE_DEPTH_KIND);
+      assert.equal(events[5]!.kind, RECALL_PROMPT_BUDGET_KIND);
+      assert.equal(events[6]!.kind, RECALL_SELECTED_CANDIDATES_KIND);
+      assert.equal(events[7]!.kind, TOOL_OUTPUT_KIND);
 
       // Verify active-memory-read: 2 memories in the store.
       const amr = events[1]!.payload as { readCount: number };
@@ -1127,10 +1136,104 @@ test("recall Phase 3A: populated store emits all three stage events before provi
       assert.equal(typeof first.memoryContent, "string");
       assert.ok(first.memoryContent!.length > 0);
 
+      // Verify adaptive-depth event: ranked count, selected
+      // count, strategy, ids, scores, kinds, content lengths.
+      const ad = events[4]!.payload as {
+        rankedCount: number;
+        inputCount: number;
+        selectedCount: number;
+        keptAfterDiversity: number;
+        droppedByDiversity: number;
+        keptAfterBudget: number;
+        strategy: "elbow" | "plateau";
+        minK: number;
+        maxK: number;
+        relativeFraction: number;
+        plateauTolerance: number;
+        elbowGapTolerance: number;
+        topScore: number | null;
+        relativeFloor: number | null;
+        reason: string;
+        diversity: { enabled: boolean; redundancyThreshold: number };
+        keptIds: number[];
+        keptScores: number[];
+        keptKinds: string[];
+        keptContentLengths: number[];
+      };
+      assert.ok(ad.rankedCount > 0, "ranked count must reflect the post-threshold pool");
+      assert.equal(ad.rankedCount, ad.inputCount);
+      assert.ok(ad.selectedCount > 0, "at least one candidate should be selected");
+      assert.equal(ad.keptAfterBudget, ad.keptIds.length);
+      assert.equal(ad.keptAfterBudget, ad.keptScores.length);
+      assert.equal(ad.keptAfterBudget, ad.keptKinds.length);
+      assert.equal(ad.keptAfterBudget, ad.keptContentLengths.length);
+      assert.equal(ad.strategy, "elbow");
+      assert.equal(ad.minK, 3);
+      assert.equal(ad.maxK, 15);
+      assert.equal(typeof ad.relativeFraction, "number");
+      assert.equal(typeof ad.plateauTolerance, "number");
+      assert.equal(typeof ad.elbowGapTolerance, "number");
+      assert.equal(typeof ad.topScore, "number");
+      assert.ok(ad.topScore !== null && ad.topScore > 0);
+      assert.equal(
+        ad.relativeFloor,
+        ad.topScore === null ? null : ad.topScore * ad.relativeFraction
+      );
+      assert.equal(typeof ad.reason, "string");
+      assert.ok(ad.reason.length > 0);
+      assert.equal(typeof ad.diversity.enabled, "boolean");
+      assert.equal(typeof ad.diversity.redundancyThreshold, "number");
+      // The Postgres-related id must be in the kept set.
+      const rankedIds = lr.ranked.map((r) => r.id);
+      for (const id of ad.keptIds) {
+        assert.ok(rankedIds.includes(id), `kept id ${id} must come from the ranked list`);
+      }
+      // No raw memory text must survive in the payload.
+      const adJson = JSON.stringify(events[4]!.payload);
+      assert.ok(!adJson.includes("Postgres"), "no raw memory text in adaptive-depth payload");
+
+      // Verify prompt-budget event: budget fields, dropped /
+      // truncated counts, total chars before / after, kept
+      // content lengths.
+      const pb = events[5]!.payload as {
+        inputCount: number;
+        keptCount: number;
+        perMemoryCharCap: number;
+        totalCharBudget: number;
+        dropLowestWhenOverBudget: boolean;
+        droppedCount: number;
+        truncatedCount: number;
+        totalCharsBeforeBudget: number;
+        totalCharsAfterBudget: number;
+        droppedTail: boolean;
+        keptContentLengths: number[];
+      };
+      assert.equal(pb.keptCount, ad.keptIds.length);
+      assert.equal(pb.keptContentLengths.length, ad.keptIds.length);
+      assert.equal(pb.perMemoryCharCap, 500);
+      assert.equal(pb.totalCharBudget, 6000);
+      assert.equal(pb.dropLowestWhenOverBudget, true);
+      assert.equal(pb.droppedTail, true);
+      assert.equal(typeof pb.droppedCount, "number");
+      assert.equal(typeof pb.truncatedCount, "number");
+      assert.equal(typeof pb.totalCharsBeforeBudget, "number");
+      assert.equal(typeof pb.totalCharsAfterBudget, "number");
+      // For this small fixture, the budget was not exercised
+      // (no long memories, plenty of headroom). The after
+      // total must equal the sum of kept lengths, and the
+      // dropped + truncated counts must be zero.
+      assert.equal(pb.droppedCount, 0);
+      assert.equal(pb.truncatedCount, 0);
+      const expectedAfter = pb.keptContentLengths.reduce((a, n) => a + n, 0);
+      assert.equal(pb.totalCharsAfterBudget, expectedAfter);
+      // No raw memory text in the prompt-budget payload.
+      const pbJson = JSON.stringify(events[5]!.payload);
+      assert.ok(!pbJson.includes("Postgres"), "no raw memory text in prompt-budget payload");
+
       // Verify selected-candidates: the candidates sent to
       // synthesis should match the ranked list (since topK >=
       // the number of ranked candidates).
-      const sc = events[4]!.payload as {
+      const sc = events[6]!.payload as {
         candidates: Array<{
           id: number;
           synthesisOrder: number;
@@ -1140,6 +1243,16 @@ test("recall Phase 3A: populated store emits all three stage events before provi
       assert.ok(sc.candidates.length > 0, "selected candidates must be non-empty");
       assert.equal(sc.candidates[0]!.synthesisOrder, 1);
       assert.equal(typeof sc.candidates[0]!.memoryContent, "string");
+      // The adaptive-depth `keptIds` and the
+      // selected-candidates `ids` must align: the kept set
+      // is what gets forwarded to synthesis.
+      const scIds = sc.candidates.map((c) => c.id);
+      for (const id of scIds) {
+        assert.ok(
+          ad.keptIds.includes(id),
+          `selected-candidates id ${id} must be in the adaptive-depth kept set`
+        );
+      }
     } finally {
       resetRecallStorageProvider();
     }
@@ -1411,4 +1524,547 @@ test("recall Phase 3A: recordStage on the tool-boundary tracer writes stage even
     cleanup();
     rmTraceDir(tmp);
   }
+});
+
+// ---------------------------------------------------------------------------
+// 10. Phase 3A: adaptive-depth + prompt-budget trace events
+// ---------------------------------------------------------------------------
+//
+// The recall controller emits two new debugging-instrumentation
+// events immediately AFTER the adaptive-depth pipeline runs and
+// BEFORE the existing `recall.selected-candidates` event:
+//
+//   - `recall.adaptive-depth`  : selector + diversity decision
+//                                (counts, strategy, minK/maxK,
+//                                relativeFraction, top score,
+//                                relative floor, reason, kept
+//                                ids/scores/kinds/lengths).
+//   - `recall.prompt-budget`   : budget step (per-memory cap,
+//                                total budget, dropped tail,
+//                                dropped / truncated counts,
+//                                total chars before / after,
+//                                kept content lengths).
+//
+// Both events are emitted on the SAME run as the public
+// `tool.input` / `tool.output` events. Both payloads are
+// redaction-safe: no raw memory text, no query text, no secret
+// fragments. Memory ids are included because the existing
+// `recall.lexical-ranking` / `recall.superseded-demotion` /
+// `recall.selected-candidates` events already do so.
+
+test("recall adaptive-depth + prompt-budget: events fire in the right order on populated store path", async () => {
+  const tmp = mkTraceDir();
+  const { memHandle, cleanup } = setupBothStores(tmp);
+  try {
+    setRecallStorageProvider(() => ({
+      handle: memHandle,
+      ownsHandle: false,
+    }));
+    try {
+      // Two related memories. The ranker surfaces at least
+      // one; the adaptive-depth stage runs.
+      insertMemoryRecord(memHandle, {
+        kind: "fact",
+        state: "active",
+        memoryContent: "The project uses Postgres 16 for the primary data store.",
+        providerId: "test",
+        modelId: "test-model",
+        confidence: 0.9,
+        safetyFlags: ["controller-normalized"],
+        metadata: { tags: ["postgres", "database"] },
+      });
+      insertMemoryRecord(memHandle, {
+        kind: "context",
+        state: "active",
+        memoryContent: "The database uses a connection pool with 20 max connections.",
+        providerId: "test",
+        modelId: "test-model",
+        confidence: 0.85,
+        safetyFlags: ["controller-normalized"],
+        metadata: { tags: ["database", "pool"] },
+      });
+
+      const result: RecallResult = await handleRecall({
+        text: "What database does the project use?",
+      });
+      // No API keys configured → provider returns
+      // missing-config error. The trace path still emits
+      // every stage event before the provider call.
+      assert.equal(result.status, "provider_error");
+
+      const runs = listTraceRuns();
+      assert.equal(runs.length, 1);
+      const events = listTraceEventsForRun(runs[0]!.id);
+
+      // The two new events must appear at indices 4 and 5,
+      // strictly between superseded-demotion (3) and
+      // selected-candidates (6).
+      const ad = events.find((e) => e.kind === RECALL_ADAPTIVE_DEPTH_KIND);
+      const pb = events.find((e) => e.kind === RECALL_PROMPT_BUDGET_KIND);
+      assert.ok(ad, "recall.adaptive-depth must be emitted on populated-store path");
+      assert.ok(pb, "recall.prompt-budget must be emitted on populated-store path");
+
+      // Order: adaptive-depth sequence < prompt-budget sequence
+      // < selected-candidates sequence.
+      const adIdx = events.findIndex((e) => e.kind === RECALL_ADAPTIVE_DEPTH_KIND);
+      const pbIdx = events.findIndex((e) => e.kind === RECALL_PROMPT_BUDGET_KIND);
+      const scIdx = events.findIndex((e) => e.kind === RECALL_SELECTED_CANDIDATES_KIND);
+      assert.ok(adIdx < pbIdx, "adaptive-depth must precede prompt-budget");
+      assert.ok(pbIdx < scIdx, "prompt-budget must precede selected-candidates");
+    } finally {
+      resetRecallStorageProvider();
+    }
+  } finally {
+    cleanup();
+    rmTraceDir(tmp);
+  }
+});
+
+test("recall adaptive-depth: payload is sufficient to debug what the selector did", async () => {
+  const tmp = mkTraceDir();
+  const { memHandle, cleanup } = setupBothStores(tmp);
+  try {
+    setRecallStorageProvider(() => ({
+      handle: memHandle,
+      ownsHandle: false,
+    }));
+    try {
+      // Insert a coherent cluster of 8 memories that all
+      // overlap with the query. The elbow strategy should
+      // keep all 8 above the relative-fraction cluster.
+      const themeMemories = [
+        "Project theme is minimal agent memory surfaces with conservative defaults.",
+        "Project theme favors explicit tool contracts over implicit prompt conventions.",
+        "Project theme keeps raw input out of any persisted memory table.",
+        "Project theme routes multi-project recall through a registry of roots.",
+        "Project theme uses lexical-only MVP retrieval before semantic opt-in.",
+        "Project theme pins the public recall(text) tool to a single text parameter.",
+        "Project theme exposes structuredContent for recall outcomes but never for remember.",
+        "Project theme treats the synthesis LLM as best-effort and re-validates the answer.",
+      ];
+      for (const t of themeMemories) {
+        insertMemoryRecord(memHandle, {
+          kind: "context",
+          state: "active",
+          memoryContent: t,
+          providerId: "test",
+          modelId: "test-model",
+          confidence: 0.9,
+          safetyFlags: ["controller-normalized"],
+          metadata: { tags: ["theme", "project"] },
+        });
+      }
+      // 4 unrelated memories (plant / chair / lunch / snow) to
+      // make sure the cluster dominates.
+      for (const t of [
+        "Office plants are watered on a biweekly rotation.",
+        "Conference room chairs are restocked monthly.",
+        "Lunch orders are placed on Mondays for the team.",
+        "Snow removal is contracted out to a local firm.",
+      ]) {
+        insertMemoryRecord(memHandle, {
+          kind: "context",
+          state: "active",
+          memoryContent: t,
+          providerId: "test",
+          modelId: "test-model",
+          confidence: 0.8,
+          safetyFlags: ["controller-normalized"],
+          metadata: { tags: ["unrelated"] },
+        });
+      }
+
+      await handleRecall({ text: "Tell me about the project theme" });
+
+      const events = listTraceEventsForRun(listTraceRuns()[0]!.id);
+      const ad = events.find((e) => e.kind === RECALL_ADAPTIVE_DEPTH_KIND);
+      assert.ok(ad, "recall.adaptive-depth event must exist");
+      const payload = ad.payload as {
+        rankedCount: number;
+        inputCount: number;
+        selectedCount: number;
+        keptAfterDiversity: number;
+        droppedByDiversity: number;
+        keptAfterBudget: number;
+        strategy: "elbow" | "plateau";
+        minK: number;
+        maxK: number;
+        relativeFraction: number;
+        topScore: number | null;
+        relativeFloor: number | null;
+        reason: string;
+        diversity: { enabled: boolean; redundancyThreshold: number };
+        keptIds: number[];
+        keptScores: number[];
+        keptKinds: string[];
+        keptContentLengths: number[];
+      };
+
+      // Counts must reflect the post-lexical-rank pool.
+      assert.ok(payload.rankedCount >= 8, "rankedCount should include the theme cluster");
+      assert.equal(payload.rankedCount, payload.inputCount);
+      assert.ok(payload.selectedCount >= 8, "elbow should keep the whole coherent cluster");
+      // Default config: elbow, minK=3, maxK=15,
+      // relativeFraction=0.5, diversity disabled.
+      assert.equal(payload.strategy, "elbow");
+      assert.equal(payload.minK, 3);
+      assert.equal(payload.maxK, 15);
+      assert.equal(payload.relativeFraction, 0.5);
+      assert.equal(payload.diversity.enabled, false);
+      // topScore is non-null and the relativeFloor is the
+      // topScore * relativeFraction (the cutoff score).
+      assert.notEqual(payload.topScore, null);
+      assert.ok((payload.topScore ?? 0) > 0);
+      assert.equal(
+        payload.relativeFloor,
+        (payload.topScore ?? 0) * payload.relativeFraction
+      );
+      // The kept set must be a parallel-array triple of ids
+      // / scores / kinds / lengths.
+      assert.equal(payload.keptIds.length, payload.keptAfterBudget);
+      assert.equal(payload.keptScores.length, payload.keptAfterBudget);
+      assert.equal(payload.keptKinds.length, payload.keptAfterBudget);
+      assert.equal(payload.keptContentLengths.length, payload.keptAfterBudget);
+      for (const k of payload.keptKinds) {
+        assert.equal(typeof k, "string");
+        assert.ok(k.length > 0);
+      }
+      for (const len of payload.keptContentLengths) {
+        assert.ok(len > 0, "kept content length must be > 0");
+      }
+      // Per-candidate content lengths sum to the budget
+      // event's `totalCharsAfterBudget`.
+      const pb = events.find((e) => e.kind === RECALL_PROMPT_BUDGET_KIND);
+      assert.ok(pb, "prompt-budget event must exist");
+      const pbPayload = pb.payload as { keptContentLengths: number[]; totalCharsAfterBudget: number };
+      const sum = pbPayload.keptContentLengths.reduce((a, n) => a + n, 0);
+      assert.equal(pbPayload.totalCharsAfterBudget, sum);
+      // The reason string is non-empty and bounded (the
+      // selector builds it deterministically).
+      assert.equal(typeof payload.reason, "string");
+      assert.ok(payload.reason.length > 0);
+    } finally {
+      resetRecallStorageProvider();
+    }
+  } finally {
+    cleanup();
+    rmTraceDir(tmp);
+  }
+});
+
+test("recall prompt-budget: payload exposes truncation + drop when memories are long", async () => {
+  const tmp = mkTraceDir();
+  const { memHandle, cleanup } = setupBothStores(tmp);
+  try {
+    setRecallStorageProvider(() => ({
+      handle: memHandle,
+      ownsHandle: false,
+    }));
+    try {
+      // 20 long memories that all share the query tokens.
+      // The total length is far in excess of the budget
+      // (6000 chars total, 500 chars per memory). The budget
+      // step must:
+      //   - truncate every memory that exceeds 500 chars
+      //     (so perMemoryCharCap is exercised), and
+      //   - drop the tail-most candidates so the total fits
+      //     the 6000-char total budget.
+      const longText = (i: number) =>
+        `Project memory number ${i}: detailed notes about the project theme, design decisions, and the related context. ` +
+        `This is a deliberately long memory that exceeds the per-memory cap of 500 chars so the budget step can truncate it. ` +
+        `The padding here is intentional to force the per-memory truncation marker to appear and to push the cumulative total well past the 6000-char total budget so the tail must be dropped. ` +
+        `Adding more padding to make sure the per-memory length is well above 500 characters so the truncation step definitely fires. ` +
+        `Each memory carries a unique index so the ranker can distinguish them, and the project theme tokens ensure lexical ranking puts them all above the relevance threshold. ` +
+        `End of memory number ${i}. Extra tail to push the count well past 500 characters per memory.`;
+      for (let i = 0; i < 20; i++) {
+        insertMemoryRecord(memHandle, {
+          kind: "context",
+          state: "active",
+          memoryContent: longText(i),
+          providerId: "test",
+          modelId: "test-model",
+          confidence: 0.9,
+          safetyFlags: ["controller-normalized"],
+          metadata: { tags: ["project", "theme"] },
+        });
+      }
+
+      await handleRecall({ text: "Tell me about the project theme" });
+
+      const events = listTraceEventsForRun(listTraceRuns()[0]!.id);
+      const pb = events.find((e) => e.kind === RECALL_PROMPT_BUDGET_KIND);
+      assert.ok(pb, "prompt-budget event must exist");
+      const payload = pb.payload as {
+        inputCount: number;
+        keptCount: number;
+        perMemoryCharCap: number;
+        totalCharBudget: number;
+        dropLowestWhenOverBudget: boolean;
+        droppedCount: number;
+        truncatedCount: number;
+        totalCharsBeforeBudget: number;
+        totalCharsAfterBudget: number;
+        droppedTail: boolean;
+        keptContentLengths: number[];
+      };
+
+      // Default config: 6000 total, 500 per memory,
+      // dropLowest=true.
+      assert.equal(payload.perMemoryCharCap, 500);
+      assert.equal(payload.totalCharBudget, 6000);
+      assert.equal(payload.dropLowestWhenOverBudget, true);
+      assert.equal(payload.droppedTail, true);
+      // 20 memories input, some must be dropped to fit
+      // 6000 chars. 20 * 500 = 10000 > 6000 so at least
+      // 8 memories must be dropped (20 - 12 ≈ 8).
+      assert.ok(payload.inputCount > 0);
+      assert.ok(payload.keptCount > 0);
+      assert.ok(payload.keptCount < payload.inputCount, "tail must be dropped");
+      assert.equal(payload.droppedCount, payload.inputCount - payload.keptCount);
+      // Every long memory exceeds 500 chars, so
+      // truncatedCount must equal inputCount (the budget
+      // step truncates per-memory BEFORE dropping).
+      assert.equal(payload.truncatedCount, payload.inputCount);
+      // totalCharsAfterBudget must NOT exceed the budget.
+      assert.ok(payload.totalCharsAfterBudget <= payload.totalCharBudget);
+      // totalCharsBeforeBudget must be > totalCharsAfterBudget
+      // (the budget cut something).
+      assert.ok(
+        payload.totalCharsBeforeBudget > payload.totalCharsAfterBudget,
+        "budget must have cut something"
+      );
+      // Per-kept content lengths must each be <= the
+      // per-memory cap (with the marker tail).
+      const markerTail = "... [truncated]".length;
+      for (const len of payload.keptContentLengths) {
+        assert.ok(len <= payload.perMemoryCharCap + markerTail);
+      }
+    } finally {
+      resetRecallStorageProvider();
+    }
+  } finally {
+    cleanup();
+    rmTraceDir(tmp);
+  }
+});
+
+test("recall adaptive-depth + prompt-budget: payloads never include raw memory text", async () => {
+  const tmp = mkTraceDir();
+  const { memHandle, cleanup } = setupBothStores(tmp);
+  try {
+    setRecallStorageProvider(() => ({
+      handle: memHandle,
+      ownsHandle: false,
+    }));
+    try {
+      // Use a distinctive phrase that is unlikely to be
+      // matched by any redaction / format helper. The trace
+      // payloads must not contain it.
+      const distinctive = "purple-walrus-7Q9";
+      insertMemoryRecord(memHandle, {
+        kind: "fact",
+        state: "active",
+        memoryContent: `${distinctive} project uses Postgres 16 for the primary store.`,
+        providerId: "test",
+        modelId: "test-model",
+        confidence: 0.9,
+        safetyFlags: ["controller-normalized"],
+        metadata: { tags: ["postgres", "database"] },
+      });
+      // Add a long memory that would force truncation so the
+      // budget event is exercised with truncation.
+      const longText =
+        `${distinctive} long memory: ` +
+        `This memory contains the distinctive phrase and is intentionally long enough to exceed the per-memory cap so the budget step truncates it. ` +
+        `The padding here is to force the per-memory truncation marker to appear in the budget event. ` +
+        `End of long memory.`;
+      insertMemoryRecord(memHandle, {
+        kind: "context",
+        state: "active",
+        memoryContent: longText,
+        providerId: "test",
+        modelId: "test-model",
+        confidence: 0.9,
+        safetyFlags: ["controller-normalized"],
+        metadata: { tags: ["long"] },
+      });
+
+      await handleRecall({ text: "Tell me about Postgres" });
+
+      const events = listTraceEventsForRun(listTraceRuns()[0]!.id);
+      const ad = events.find((e) => e.kind === RECALL_ADAPTIVE_DEPTH_KIND);
+      const pb = events.find((e) => e.kind === RECALL_PROMPT_BUDGET_KIND);
+      assert.ok(ad, "recall.adaptive-depth event must exist");
+      assert.ok(pb, "recall.prompt-budget event must exist");
+
+      const adJson = JSON.stringify(ad.payload);
+      const pbJson = JSON.stringify(pb.payload);
+      assert.ok(
+        !adJson.includes(distinctive),
+        `recall.adaptive-depth must not include raw memory text (saw "${distinctive}")`
+      );
+      assert.ok(
+        !pbJson.includes(distinctive),
+        `recall.prompt-budget must not include raw memory text (saw "${distinctive}")`
+      );
+      // Neither payload should include a `text` /
+      // `memoryContent` field. The keptContentLengths /
+      // keptIds / keptScores / keptKinds fields are the
+      // only kept-set diagnostics.
+      assert.equal(
+        "memoryContent" in (ad.payload as Record<string, unknown>),
+        false,
+        "recall.adaptive-depth must not carry a memoryContent field"
+      );
+      assert.equal(
+        "memoryContent" in (pb.payload as Record<string, unknown>),
+        false,
+        "recall.prompt-budget must not carry a memoryContent field"
+      );
+      assert.equal(
+        "text" in (ad.payload as Record<string, unknown>),
+        false,
+        "recall.adaptive-depth must not carry a text field"
+      );
+      assert.equal(
+        "text" in (pb.payload as Record<string, unknown>),
+        false,
+        "recall.prompt-budget must not carry a text field"
+      );
+    } finally {
+      resetRecallStorageProvider();
+    }
+  } finally {
+    cleanup();
+    rmTraceDir(tmp);
+  }
+});
+
+test("recall adaptive-depth + prompt-budget: events do NOT fire on the no_memory short-circuit", async () => {
+  const tmp = mkTraceDir();
+  const { memHandle, cleanup } = setupBothStores(tmp);
+  try {
+    setRecallStorageProvider(() => ({
+      handle: memHandle,
+      ownsHandle: false,
+    }));
+    setListRegisteredProjectsStub(() => []);
+    try {
+      // Empty store → no_memory. The controller never
+      // reaches the adaptive-depth stage, so neither
+      // adaptive-depth nor prompt-budget should fire.
+      const result: RecallResult = await handleRecall({ text: "anything" });
+      assert.equal(result.status, "no_memory");
+
+      const events = listTraceEventsForRun(listTraceRuns()[0]!.id);
+      const ad = events.find((e) => e.kind === RECALL_ADAPTIVE_DEPTH_KIND);
+      const pb = events.find((e) => e.kind === RECALL_PROMPT_BUDGET_KIND);
+      assert.equal(ad, undefined, "recall.adaptive-depth must NOT fire on no_memory");
+      assert.equal(pb, undefined, "recall.prompt-budget must NOT fire on no_memory");
+    } finally {
+      resetListRegisteredProjectsStub();
+      resetRecallStorageProvider();
+    }
+  } finally {
+    cleanup();
+    rmTraceDir(tmp);
+  }
+});
+
+test("recall adaptive-depth + prompt-budget: events are skipped when CURION_TRACE_ENABLED=0", async () => {
+  const tmp = mkTraceDir();
+  await withEnvSnapshot(async () => {
+    process.env.CURION_TRACE_ENABLED = "0";
+    resetTraceWriterForTests();
+    try {
+      const memHandle = initStorage({ projectRoot: tmp });
+      try {
+        insertMemoryRecord(memHandle, {
+          kind: "fact",
+          state: "active",
+          memoryContent: "The project uses Postgres 16 for the primary data store.",
+          providerId: "test",
+          modelId: "test-model",
+          confidence: 0.9,
+          safetyFlags: ["controller-normalized"],
+          metadata: { tags: ["postgres", "database"] },
+        });
+        setRecallStorageProvider(() => ({
+          handle: memHandle,
+          ownsHandle: false,
+        }));
+        setListRegisteredProjectsStub(() => []);
+        try {
+          const result = await handleRecall({ text: "What database does the project use?" });
+          // Tracing off → no trace DB at all.
+          assert.ok(
+            !fs.existsSync(path.join(tmp, ".curion", "trace.sqlite")),
+            "no trace.sqlite must be created when tracing is disabled"
+          );
+          // The result is the same as if tracing were on
+          // (provider_error because no API keys).
+          assert.ok(
+            result.status === "provider_error" || result.status === "no_memory",
+            `expected provider_error or no_memory, got ${result.status}`
+          );
+        } finally {
+          resetListRegisteredProjectsStub();
+          resetRecallStorageProvider();
+        }
+      } finally {
+        closeStorage(memHandle);
+      }
+    } finally {
+      resetTraceWriterForTests();
+      rmTraceDir(tmp);
+    }
+  });
+});
+
+test("recall adaptive-depth + prompt-budget: events are skipped when the trace writer is closed mid-run", async () => {
+  const tmp = mkTraceDir();
+  await withEnvSnapshot(async () => {
+    delete process.env.CURION_TRACE_ENABLED;
+    resetTraceWriterForTests();
+    try {
+      const memHandle = initStorage({ projectRoot: tmp });
+      try {
+        insertMemoryRecord(memHandle, {
+          kind: "fact",
+          state: "active",
+          memoryContent: "The project uses Postgres 16 for the primary data store.",
+          providerId: "test",
+          modelId: "test-model",
+          confidence: 0.9,
+          safetyFlags: ["controller-normalized"],
+          metadata: { tags: ["postgres", "database"] },
+        });
+        setRecallStorageProvider(() => ({
+          handle: memHandle,
+          ownsHandle: false,
+        }));
+        try {
+          // Simulate a trace writer failure before the
+          // recall call. The controller's `recordStage` calls
+          // must short-circuit, so no events are written.
+          closeTraceWriter();
+
+          const result = await handleRecall({
+            text: "What database does the project use?",
+          });
+          // The result is the same as if tracing were
+          // working (provider_error because no API keys).
+          assert.equal(result.status, "provider_error");
+          assert.equal(typeof result.message, "string");
+        } finally {
+          resetRecallStorageProvider();
+        }
+      } finally {
+        closeStorage(memHandle);
+      }
+    } finally {
+      resetTraceWriterForTests();
+      rmTraceDir(tmp);
+    }
+  });
 });
