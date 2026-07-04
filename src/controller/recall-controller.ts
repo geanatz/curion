@@ -45,6 +45,7 @@ import {
   type RecallSynthesisResult,
   synthesizeRecallWithFallback,
 } from "../providers/recall-synthesis.js";
+import { type AdaptiveCandidateWithText, runAdaptiveDepth } from "../retrieval/adaptive-depth.js";
 import {
   type AmbiguitySignal,
   type SafeMemorySummaryWithRelationship,
@@ -285,6 +286,44 @@ export interface RecallTraceContext {
 // length on the input side. The hard 800-character cap that lived
 // here was a placeholder; it has been removed entirely so natural-
 // length answers go to the wire unmodified.
+//
+// Adaptive recall depth (experimental) — knob bundle applied
+// between superseded demotion and synthesis. The defaults are
+// conservative and quality-oriented:
+//
+//   - minK=3: never fewer than three candidates (defensive floor
+//     for the existing weak_match top-3 reroute and the
+//     ambiguity / resolved-history detectors).
+//   - maxK=15: never more than 15 candidates (3x the production
+//     topK of 5; bounded by the prompt budget).
+//   - relativeFraction=0.5: a candidate must score at least half
+//     of the top score to survive past minK.
+//   - elbowGapTolerance=0.05: a candidate below the relative
+//     floor is still kept if it sits within 0.05 of the
+//     baseline score (coherent cluster).
+//   - diversity: disabled by default. Enable via an extension
+//     hook or future config knob if a project sees redundancy.
+//   - budget: total 6000 chars, per-memory 500 chars. With
+//     maxK=15 the worst case is 15 x 500 = 7500 chars; the
+//     total cap (6000) ensures the prompt never exceeds the
+//     configured ceiling.
+const ADAPTIVE_DEPTH_SELECTOR_CONFIG = {
+  strategy: "elbow" as const,
+  minK: 3,
+  maxK: 15,
+  relativeFraction: 0.5,
+  elbowGapTolerance: 0.05,
+  plateauTolerance: 0.05,
+};
+const ADAPTIVE_DEPTH_DIVERSITY_CONFIG = {
+  enabled: false,
+  redundancyThreshold: 0.9,
+};
+const ADAPTIVE_DEPTH_BUDGET_CONFIG = {
+  totalCharBudget: 6000,
+  perMemoryCharCap: 500,
+  dropLowestWhenOverBudget: true,
+};
 
 // ---------------------------------------------------------------------------
 // Controller
@@ -382,10 +421,20 @@ export async function runRecallController(
 
   // -- 3. Lexical ranking ---------------------------------------------
   // Run lexical ranking on ALL summaries (not limited by topK) to build
-  // the candidate pool for semantic fusion. Using storageLimit as the
-  // lexical topK limit gives semantic the broadest possible pool to
-  // recover paraphrase hits that lexical would miss.
-  const lexicalTopK = options.semanticEnabled ? storageLimit : topK;
+  // the candidate pool for semantic fusion AND the adaptive-depth
+  // stage. Using storageLimit as the lexical topK limit gives
+  // semantic the broadest possible pool to recover paraphrase hits
+  // that lexical would miss, and gives the adaptive-depth stage a
+  // large ranked pool to select from (narrow queries still feel
+  // tight because the relative-fraction cluster and the elbow cut
+  // exclude weak candidates; broad queries grow because the
+  // cluster survives the cut).
+  //
+  // The legacy `topK` cap is honoured at the adaptive-depth stage
+  // (`maxK` defaults to 15, well above the legacy 5). The narrow
+  // behaviour is preserved: a single dominant memory is still kept
+  // at the top, just with a defensible minK=3 floor below it.
+  const lexicalTopK = storageLimit;
   const ranked: LexicalScoredCandidate[] = rankLexical(
     query,
     summaries.map((s: SafeMemorySummary) => ({
@@ -555,20 +604,86 @@ export async function runRecallController(
   // block carry `relationship: undefined` and the detector
   // treats them as having no stored data (it can still fire
   // on the lexical / asymmetric-negation path).
-  const topSummaries: SafeMemorySummaryWithRelationship[] = [];
+  const candidatePool: SafeMemorySummaryWithRelationship[] = [];
   for (const r of demotedRanked) {
     const s = summaryById.get(r.id);
     if (!s) continue;
     const block = blockById.get(r.id);
-    topSummaries.push(block === undefined ? { ...s } : { ...s, relationship: { ...block } });
+    candidatePool.push(block === undefined ? { ...s } : { ...s, relationship: { ...block } });
   }
   // Sanity: every ranked id must have a summary. If this ever
   // fails, it means a memory was deleted between the read and
   // the rank — fall back to no_memory rather than fabricating.
-  if (topSummaries.length !== demotedRanked.length) {
+  if (candidatePool.length !== demotedRanked.length) {
     logger.debug("recall: ranked-id missing summary (storage raced); returning no_memory");
     return { status: "no_memory" };
   }
+
+  // -- 3d. Adaptive recall depth (experimental) -----------------------
+  // The production recall pipeline currently caps synthesis at a
+  // fixed topK=5 (see `DEFAULT_TOP_K` in `src/retrieval/lexical.ts`).
+  // Narrow precise queries want that tight cap. Broad / vague
+  // queries, or queries with many closely relevant memories, want
+  // more — but the synthesis prompt must remain bounded.
+  //
+  // The `runAdaptiveDepth` helper replaces the fixed cap with a
+  // deterministic, score-driven selection (default: elbow
+  // strategy, minK=3, maxK=15, relative-fraction=0.5) followed by
+  // an optional diversity filter and an explicit prompt-budget
+  // step. The defaults are conservative and quality-oriented:
+  // narrow queries stay tight, broad queries grow up to a capped
+  // maximum, noisy tail candidates are excluded, and the synthesis
+  // prompt cannot exceed the per-memory and total budgets.
+  //
+  // The adaptive-depth stage is purely internal to the controller.
+  // The public `recall(text)` API is unchanged. Superseded
+  // candidates are still demoted above this stage (so they are
+  // naturally excluded by the relative / absolute cluster).
+  const rankedWithText: AdaptiveCandidateWithText[] = candidatePool.map((s) => {
+    // Find the score from demotedRanked (the demoted order) so
+    // demoted candidates carry their (already-demoted) score.
+    const demotedEntry = demotedRanked.find((r) => r.id === s.id);
+    return {
+      id: s.id,
+      score: demotedEntry?.score ?? 0,
+      text: s.memoryContent,
+      ...(Array.isArray(s.tags) && s.tags.length > 0 ? { tags: s.tags } : {}),
+    };
+  });
+  const depthResult = runAdaptiveDepth(rankedWithText, {
+    selector: ADAPTIVE_DEPTH_SELECTOR_CONFIG,
+    diversity: ADAPTIVE_DEPTH_DIVERSITY_CONFIG,
+    budget: ADAPTIVE_DEPTH_BUDGET_CONFIG,
+  });
+  // Project the kept candidates back to SafeMemorySummaryWithRelationship.
+  // Preserve score-desc order so the synthesis prompt sees the
+  // highest-scoring memories first. The relationship block is
+  // reattached (Phase C) so the ambiguity / resolved-history
+  // detectors see the same metadata they did before this phase.
+  const selectedIds = new Set(depthResult.selected.map((c) => c.id));
+  const topSummaries: SafeMemorySummaryWithRelationship[] = depthResult.selected.map((c) => {
+    const original = candidatePool.find((s) => s.id === c.id);
+    // original is guaranteed present: selectedIds came from
+    // rankedWithText, which came from candidatePool. Defensive
+    // fall-through keeps the projection total in the impossible
+    // race condition where the storage layer mutates between
+    // steps.
+    if (!original) {
+      return {
+        id: c.id,
+        kind: "fact",
+        state: "active",
+        memoryContent: c.text,
+        tags: c.tags ?? [],
+        classification: null,
+        confidence: null,
+      };
+    }
+    return original;
+  });
+  logger.debug(
+    `recall: adaptive-depth kept ${topSummaries.length}/${candidatePool.length} candidate(s) (${depthResult.trace.selector.reason})`
+  );
 
   // -- Phase 3A trace: selected candidates -----------------------------
   emitSelectedCandidatesStage(options.trace, topSummaries);
