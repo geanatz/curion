@@ -105,6 +105,8 @@
     "benchmark:retrieval:hybrid-dense:bge-m3": "tsx src/benchmark/retrieval-runner.ts --variant hybrid-dense --embedder bge-m3",
     "benchmark:retrieval:all-dense:bge-m3": "tsx src/benchmark/retrieval-runner.ts --variant all-dense --embedder bge-m3",
     "benchmark:retrieval:held-out:hybrid-dense:bge-m3": "tsx src/benchmark/held-out-runner.ts --variant hybrid-dense --embedder bge-m3",
+    "benchmark:retrieval:adaptive-depth": "tsx src/benchmark/adaptive-depth-evaluation-runner.ts",
+    "test:adaptive-depth-evaluation": "node --import tsx --test tests/adaptive-depth-evaluation.test.ts",
     "benchmark:retrieval:vector-dense:bge-m3:skip": "tsx src/benchmark/retrieval-runner.ts --variant vector-dense --embedder bge-m3 --dense-skip",
     "benchmark:retrieval:hybrid-dense:bge-m3:skip": "tsx src/benchmark/retrieval-runner.ts --variant hybrid-dense --embedder bge-m3 --dense-skip",
     "benchmark:retrieval:false-abstention-damage": "tsx src/benchmark/false-abstention-damage-runner.ts",

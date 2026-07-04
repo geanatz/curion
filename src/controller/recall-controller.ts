@@ -45,7 +45,11 @@ import {
   type RecallSynthesisResult,
   synthesizeRecallWithFallback,
 } from "../providers/recall-synthesis.js";
-import { type AdaptiveCandidateWithText, runAdaptiveDepth } from "../retrieval/adaptive-depth.js";
+import {
+  type AdaptiveCandidateWithText,
+  type AdaptiveDepthPipelineConfig,
+  runAdaptiveDepth,
+} from "../retrieval/adaptive-depth.js";
 import {
   type AmbiguitySignal,
   type SafeMemorySummaryWithRelationship,
@@ -245,6 +249,37 @@ export interface RecallControllerOptions {
    *   - A CLI / export / purge surface.
    */
   trace?: RecallTraceContext;
+  /**
+   * INTERNAL / TEST-ONLY. Overrides the production adaptive-depth
+   * pipeline config (selector + diversity + budget). When
+   * omitted (the default), the controller uses
+   * `DEFAULT_ADAPTIVE_DEPTH_PIPELINE_CONFIG` (elbow, minK=3,
+   * maxK=15, relativeFraction=0.5, no diversity, totalCharBudget=6000,
+   * perMemoryCharCap=500). This field is reserved for the
+   * benchmark-only adaptive-depth evaluation helper
+   * (`src/benchmark/adaptive-depth-evaluation.ts`) and its
+   * companion test suite (`tests/adaptive-depth-evaluation.test.ts`)
+   * — both of which need to compare the production adaptive
+   * selector against a legacy fixed-topK cap on the same
+   * controller path.
+   *
+   * Safety:
+   *   - The public MCP tool surface in `src/tools/recall.ts`
+   *     does NOT pass this field; the tool layer relies on the
+   *     default.
+   *   - The contract test `tests/contracts.test.ts` pins the
+   *     public MCP tool surface to exactly `remember` + `recall`
+   *     with the existing single `text` parameter, so a future
+   *     reviewer who tries to expose this knob on the wire is
+   *     stopped at the contract test.
+   *   - The field is on the internal `RecallControllerOptions`
+   *     interface, NOT on `RecallMemoryInput` /
+   *     `RecallResult` / the MCP tool schema, so the wire shape
+   *     is unchanged.
+   *   - The field is never logged, never echoed into the
+   *     synthesis prompt, and never persisted to the trace.
+   */
+  adaptiveDepth?: AdaptiveDepthPipelineConfig;
 }
 
 /**
@@ -324,6 +359,23 @@ const ADAPTIVE_DEPTH_BUDGET_CONFIG = {
   perMemoryCharCap: 500,
   dropLowestWhenOverBudget: true,
 };
+
+/**
+ * The default adaptive-depth pipeline config. Combines the
+ * selector / diversity / budget constants above into a single
+ * bundle the controller passes to `runAdaptiveDepth`.
+ *
+ * Exported (read-only) so the benchmark-only adaptive-depth
+ * evaluation helper can resolve the production defaults
+ * without re-declaring them. The constant is the source of
+ * truth; tests that need a different value pass an
+ * `adaptiveDepth` option into the controller.
+ */
+export const DEFAULT_ADAPTIVE_DEPTH_PIPELINE_CONFIG = Object.freeze({
+  selector: ADAPTIVE_DEPTH_SELECTOR_CONFIG,
+  diversity: ADAPTIVE_DEPTH_DIVERSITY_CONFIG,
+  budget: ADAPTIVE_DEPTH_BUDGET_CONFIG,
+});
 
 // ---------------------------------------------------------------------------
 // Controller
@@ -650,11 +702,10 @@ export async function runRecallController(
       ...(Array.isArray(s.tags) && s.tags.length > 0 ? { tags: s.tags } : {}),
     };
   });
-  const depthResult = runAdaptiveDepth(rankedWithText, {
-    selector: ADAPTIVE_DEPTH_SELECTOR_CONFIG,
-    diversity: ADAPTIVE_DEPTH_DIVERSITY_CONFIG,
-    budget: ADAPTIVE_DEPTH_BUDGET_CONFIG,
-  });
+  const depthResult = runAdaptiveDepth(
+    rankedWithText,
+    options.adaptiveDepth ?? DEFAULT_ADAPTIVE_DEPTH_PIPELINE_CONFIG
+  );
   // Project the kept candidates back to SafeMemorySummaryWithRelationship.
   // Preserve score-desc order so the synthesis prompt sees the
   // highest-scoring memories first. The relationship block is
