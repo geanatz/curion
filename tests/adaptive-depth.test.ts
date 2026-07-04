@@ -45,6 +45,7 @@ import {
   applyPromptBudget,
   compareAdaptiveStrategies,
   resolveAdaptiveDepthConfig,
+  resolveAdaptivePromptBudgetConfig,
   runAdaptiveDepth,
   selectAdaptiveCandidates,
 } from "../src/retrieval/adaptive-depth.ts";
