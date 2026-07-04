@@ -618,6 +618,36 @@ test("structuredContent (recall): every status passes strict schema and leaks no
         !serialized.includes(String(sampleId)),
         `${c.label} structuredContent must not mention memory id ${sampleId}; got ${serialized}`
       );
+      // 3e. The `source` field is propagated by the projection
+      // for `answered` results when the internal result
+      // carries it. The `answered (cross_project source)`
+      // case is the load-bearing regression for the
+      // `no_memory` + strong external -> promoted
+      // `answered` / `source: "cross_project"` path. The
+      // two other `answered` cases intentionally omit
+      // `source` (the input is built without it) and the
+      // projection must NOT invent it.
+      if (c.label === "answered (cross_project source)") {
+        assert.equal(
+          sc.source,
+          "cross_project",
+          `answered (cross_project source) must surface source='cross_project' on the wire; got ${JSON.stringify(sc)}`
+        );
+      } else if (c.label === "answered (with notes)" || c.label === "answered (no notes)") {
+        assert.equal(
+          "source" in sc,
+          false,
+          `${c.label} (no source on input) must omit source on the wire; got ${JSON.stringify(sc)}`
+        );
+      } else {
+        // Non-answered statuses: `source` is never set on
+        // the input and must never appear on the wire.
+        assert.equal(
+          "source" in sc,
+          false,
+          `${c.label} structuredContent must not include 'source'; got ${JSON.stringify(sc)}`
+        );
+      }
     }
   } finally {
     rmStorage(tmp, handle);

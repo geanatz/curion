@@ -55,14 +55,22 @@ public `text` content block for that recall is prefixed with the
 literal line `Based on cross-project memory:` and is followed by a
 `---` separator and a `From other projects:` section listing the
 contributing project summaries. Local-memory `answered` responses
-do **not** carry that prefix, so the prefix is the only current
-signal — visible in the displayed text, not on the wire — that a
-cross-project promotion has occurred. The
-`structuredContent.source` discriminator (`"local" | "cross_project"`)
-is declared in `RECALL_STRUCTURED_CONTENT_SCHEMA` but is **not yet
-populated** by `buildRecallStructuredContent`; clients must treat
-it as a reserved field and must not switch on it. See
-[API reference → Known limitations](reference.md#known-limitations).
+do **not** carry that prefix, so the prefix is the human-visible
+signal that a cross-project promotion has occurred.
+
+For the stable machine-readable discriminator, the
+`structuredContent.source` field is populated on
+`recall.answered`: `"local"` when the answer was synthesized from
+the current project's own memory (the default for an `answered`
+outcome); `"cross_project"` when the outcome was promoted from
+`no_memory` based on a strong non-private cross-project recall.
+The field is omitted when the internal result does not set it and
+is never set on `weak_match`, `no_memory`, `rejected`, or
+`provider_error` (the field is only meaningful on `answered`).
+Clients may safely switch on `structuredContent.source` to
+distinguish a local-memory answer from a cross-project promotion
+on `recall.answered`. See
+[API reference → `structuredContent` — `recall`](reference.md#structuredcontent--recall).
 
 ## Semantic cache
 

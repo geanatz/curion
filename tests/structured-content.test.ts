@@ -891,6 +891,141 @@ test("recall structuredContent: answered without notes -> { status: 'answered', 
 });
 
 // ---------------------------------------------------------------------------
+// 6b. recall.answered.source projection: local vs cross_project
+// ---------------------------------------------------------------------------
+
+test("recall structuredContent: answered exposes source='local' when the internal result carries it", async () => {
+  // The projection helper MUST copy the internal
+  // `RecallResult.source` value into the `structuredContent`
+  // payload when present. The projection is a pure function
+  // that reads the `RecallResult`; we feed it a result that
+  // already carries `source: "local"` (the value the tool
+  // layer sets for local-memory answers) and assert the
+  // field surfaces on the wire.
+  const { buildRecallStructuredContent } = await import("../src/tools/recall-projection.ts");
+  const sc = buildRecallStructuredContent({
+    status: "answered",
+    message: "Postgres 16 is the primary store.",
+    answer: "Postgres 16 is the primary store.",
+    sourceIds: [101, 102],
+    source: "local",
+  });
+  assert.equal(sc.status, "answered");
+  assert.equal(sc.source, "local", "answered structuredContent must surface source='local'");
+  // No memory-id leakage: the projection drops `sourceIds`
+  // and `memoryId` even when the internal record carries
+  // them.
+  assert.equal("sourceIds" in sc, false);
+  assert.equal("memoryId" in sc, false);
+  assert.equal("message" in sc, false);
+  // Strict schema validation passes.
+  const parsed = RECALL_STRUCTURED_CONTENT_SCHEMA.safeParse(sc);
+  assert.ok(
+    parsed.success,
+    `answered structuredContent with source='local' must pass strict schema; got ${parsed.error}`
+  );
+});
+
+test("recall structuredContent: answered exposes source='cross_project' for promoted answers", async () => {
+  // The same projection, fed a result with
+  // `source: "cross_project"` (the value the tool layer
+  // sets when it promotes a `no_memory` outcome to
+  // `answered` based on strong cross-project recall),
+  // must surface `source: "cross_project"` on the wire.
+  const { buildRecallStructuredContent } = await import("../src/tools/recall-projection.ts");
+  const sc = buildRecallStructuredContent({
+    status: "answered",
+    message:
+      "Based on cross-project memory:\n\n---\nFrom other projects:\n[Other]\n- Postgres 16 is the primary store.",
+    answer:
+      "Based on cross-project memory:\n\n---\nFrom other projects:\n[Other]\n- Postgres 16 is the primary store.",
+    source: "cross_project",
+  });
+  assert.equal(
+    sc.source,
+    "cross_project",
+    "answered structuredContent must surface source='cross_project' for promoted answers"
+  );
+  // No id / internal leakage.
+  assert.equal("sourceIds" in sc, false);
+  assert.equal("memoryId" in sc, false);
+  assert.equal("message" in sc, false);
+  // Strict schema validation passes.
+  const parsed = RECALL_STRUCTURED_CONTENT_SCHEMA.safeParse(sc);
+  assert.ok(
+    parsed.success,
+    `answered structuredContent with source='cross_project' must pass strict schema; got ${parsed.error}`
+  );
+});
+
+test("recall structuredContent: answered omits source when the internal result does not carry it (defensive)", async () => {
+  // Defensive: when the internal `RecallResult` does not
+  // carry `source` (an internal code path that does not set
+  // it), the projection must OMIT the field rather than
+  // invent a default. The schema declares `source` as
+  // optional, so omission is a valid wire shape.
+  const { buildRecallStructuredContent } = await import("../src/tools/recall-projection.ts");
+  const sc = buildRecallStructuredContent({
+    status: "answered",
+    message: "Postgres 16 is the primary store.",
+    answer: "Postgres 16 is the primary store.",
+    sourceIds: [101],
+    // Note: no `source` field.
+  });
+  assert.equal(sc.status, "answered");
+  assert.equal("source" in sc, false, "answered structuredContent must omit source when unset");
+  const parsed = RECALL_STRUCTURED_CONTENT_SCHEMA.safeParse(sc);
+  assert.ok(
+    parsed.success,
+    `answered structuredContent without source must pass strict schema; got ${parsed.error}`
+  );
+});
+
+test("recall structuredContent: non-answered statuses do not carry source", async () => {
+  // The `source` field is only relevant for `answered`. For
+  // `weak_match` / `no_memory` / `rejected` /
+  // `provider_error`, the field is never set on the
+  // internal `RecallResult` (the schema / contract does not
+  // require it on these statuses), and the projection must
+  // never invent it.
+  const { buildRecallStructuredContent } = await import("../src/tools/recall-projection.ts");
+  const cases = [
+    {
+      status: "weak_match" as const,
+      input: {
+        status: "weak_match" as const,
+        message: "I found relevant memories but could not synthesize a confident answer.",
+        summaries: ["Some summary"],
+        coverage: { topScore: 0.5, supportingCount: 2 },
+      },
+    },
+    {
+      status: "no_memory" as const,
+      input: { status: "no_memory" as const, message: "No relevant memory found." },
+    },
+    {
+      status: "rejected" as const,
+      input: {
+        status: "rejected" as const,
+        message: "Rejected: query contains a secret-shaped fragment",
+      },
+    },
+    {
+      status: "provider_error" as const,
+      input: { status: "provider_error" as const, message: "Provider error: timed out" },
+    },
+  ];
+  for (const c of cases) {
+    const sc = buildRecallStructuredContent(c.input);
+    assert.equal(
+      "source" in sc,
+      false,
+      `${c.status} structuredContent must not carry source; got ${JSON.stringify(sc)}`
+    );
+  }
+});
+
+// ---------------------------------------------------------------------------
 // 7. remember: each status's structuredContent shape (driven via the server)
 // ---------------------------------------------------------------------------
 

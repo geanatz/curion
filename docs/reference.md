@@ -68,12 +68,7 @@ parse.
 
 ```typescript
 // status: "answered"
-// `source?: "local" | "cross_project"` is declared in
-// RECALL_STRUCTURED_CONTENT_SCHEMA but is NOT currently populated
-// by `buildRecallStructuredContent`. Treat it as a reserved
-// field / known limitation until the projection carries it
-// (see "Known limitations" below).
-{ status: "answered", answer: string, notes?: string[] }
+{ status: "answered", answer: string, notes?: string[], source?: "local" | "cross_project" }
 
 // status: "weak_match"
 { status: "weak_match", summaries: string[], coverage: { topScore: number, supportingCount: number }, clarification_needed?: Clarification }
@@ -94,15 +89,21 @@ Field semantics:
 - **`notes`** (answered, optional): an array of plain strings, one per
   auxiliary note. No `Note:` prefix, no note `type` / `severity`, no
   memory ids.
-- **`source`** (answered, optional, **reserved — not yet populated
-  on the wire**): declared in `RECALL_STRUCTURED_CONTENT_SCHEMA`
-  as `"local"` when the answer came from the current project's own
-  memory (the default) or `"cross_project"` when the answer was
-  promoted from a non-private cross-project match. The current
-  `buildRecallStructuredContent` helper does **not** populate
-  this field, so it is absent from every wire payload today.
-  Clients must not switch on `structuredContent.source`; see
-  [Known limitations](#known-limitations).
+- **`source`** (answered, optional): indicates where the
+  synthesized answer came from. `"local"` means the answer
+  was synthesized from the current project's own memory (the
+  default for `answered` outcomes); `"cross_project"` means
+  the outcome was promoted to `answered` from a `no_memory`
+  result based on a strong non-private cross-project recall.
+  The field is populated by `buildRecallStructuredContent`
+  whenever the internal `RecallResult` carries it; it is
+  omitted (not surfaced) when the internal result does not
+  set it. Clients may safely switch on this field on
+  `recall.answered` to distinguish a local-memory answer
+  from a cross-project promotion. The field is only present
+  on the `answered` status; `weak_match`, `no_memory`,
+  `rejected`, and `provider_error` never carry `source` on
+  the wire.
 - **`summaries`** (weak_match): up to three curator-voice summaries
   (plain strings, no memory-id reference).
 - **`coverage`** (weak_match): `topScore` is the lexical score of the
@@ -207,7 +208,7 @@ are display-only — the agent should not switch on their content.
 | Status           | Tools       | Meaning (what the agent should do) |
 |------------------|-------------|-------------------------------------|
 | `saved`          | `remember`  | A normalized row was persisted. The `summary` / `kind` reflect what was stored. |
-| `answered`       | `recall`    | A synthesized answer was produced. Display the `answer`; optionally surface `notes`. Cross-project promotion is currently signaled only via the public-text prefix `Based on cross-project memory:` (followed by a `From other projects:` section); `structuredContent.source` is reserved but not populated on the wire yet — see [Known limitations](#known-limitations). |
+| `answered`       | `recall`    | A synthesized answer was produced. Display the `answer`; optionally surface `notes`. When `source` is present, `"local"` indicates the answer was synthesized from the current project's own memory (the default); `"cross_project"` indicates the outcome was promoted from `no_memory` based on a strong non-private cross-project recall. Cross-project promotion is also visible to humans in the public `text` content block via the prefix `Based on cross-project memory:` followed by a `From other projects:` section; the `structuredContent.source` field is the stable machine-readable discriminator. |
 | `weak_match`     | `recall`    | The lexical ranker surfaced relevant stored memories, but the synthesis LLM declined to produce a confident answer. Surface the `summaries`; if `clarification_needed` is present, ask the user the `question`. |
 | `no_memory`      | `recall`    | Nothing relevant was found. If `clarification_needed` is present, ask the user the `question`; otherwise the agent may either rephrase and retry or tell the user it has no relevant memory. |
 | `rejected`       | both        | The input was rejected (safety / low-confidence / self-conflict on `remember`; safety on `recall`). The `reason` is the agent-facing explanation; if `clarification_needed` is present, ask the user the `question`. |
@@ -215,48 +216,6 @@ are display-only — the agent should not switch on their content.
 
 `clarification_needed` only ever appears on `rejected`, `no_memory`, and
 `weak_match`. `provider_error` and `saved` / `answered` never carry it.
-
----
-
-## Known limitations
-
-This section calls out gaps between the **declared schema** and the
-**actual wire shape** so clients do not pin behavior the projection
-does not yet implement. None of these are bugs; they are forward-
-declared fields the current `buildRecallStructuredContent` projection
-has not yet been updated to carry. The on-the-wire contract is the
-projection output today, and the schema will be aligned to it (or the
-projection will be aligned to the schema) in a future pass — both
-directions are tracked here as known limitations, not source behavior
-changes.
-
-- **`recall.answered.source` is reserved in the schema but not
-  populated on the wire.** `RECALL_STRUCTURED_CONTENT_SCHEMA`
-  declares `source?: "local" | "cross_project"` and the tool-layer
-  `RecallResult` records it (`"local"` for answers drawn from the
-  current project's own memory; `"cross_project"` for answers
-  promoted from a non-private cross-project recall). However,
-  `buildRecallStructuredContent` (`src/tools/recall-projection.ts`)
-  does **not** copy `result.source` into the `structuredContent`
-  payload today, so `source` is absent from every wire response.
-  Clients must treat `structuredContent.source` as a reserved
-  field and must not switch on it.
-
-  As a temporary signal, cross-project promotion **is** visible to
-  humans in the public `text` content block for the affected
-  `answered` recall: when local recall returns `no_memory` and a
-  cross-project match is strong enough to promote the status to
-  `answered`, the public `text` is prefixed with the literal line
-  `Based on cross-project memory:` and is followed by a `---
-  From other projects:` section listing the contributing project
-  summaries. Local-memory `answered` responses do **not** carry
-  that prefix. This signal is human-facing (display text only);
-  it is not a stable machine-readable discriminator and clients
-  should not parse it.
-
-  The intent is for `structuredContent.source` to be carried by
-  the projection in a future alignment pass; until then, treat
-  this entry as a known limitation / future-alignment note.
 
 ---
 

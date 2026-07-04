@@ -7,12 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Documentation-only polish for public adoption (Phase 3). No source-code,
-runtime, controller, projection, MCP-surface, or release-engineering
-change. The two tools, their strict input schemas, the
+Public-adoption polish (Phase 3) plus a narrow
+`recall.answered.source` projection alignment. The schema, the
+tool names, the strict input schemas, the
 `text` / `structuredContent` surfaces, the `clarification_needed`
-contract, the storage layout, and the `.curion/config.json` semantics
-are unchanged.
+contract, the storage layout, the `.curion/config.json`
+semantics, the controller behavior, the ranking thresholds, the
+provider prompts, the `weak_match` public message, and the
+memory storage behavior are unchanged. The only source-code
+change is a narrow projection update that populates the
+already-declared `source` field on `recall.answered`
+`structuredContent`; the schema was already carrying it, and
+the internal `RecallResult` already recorded it. The on-the-
+wire shape is now aligned with the declared schema.
 
 ### Added
 
@@ -90,6 +97,25 @@ are unchanged.
 
 ### Changed
 
+- **`recall.answered` `structuredContent.source` is now
+  populated by `buildRecallStructuredContent`.** The declared
+  `source?: "local" | "cross_project"` field on
+  `RECALL_STRUCTURED_CONTENT_SCHEMA` is now actually carried
+  by the projection on the wire. The internal `RecallResult`
+  already recorded the value (`"local"` for answers drawn
+  from the current project's own memory; `"cross_project"`
+  for outcomes promoted from `no_memory` based on strong
+  non-private cross-project recall), but the projection
+  helper was dropping it. The projection now copies
+  `result.source` into the `structuredContent` payload for
+  `answered` results when the internal result carries it;
+  the field is omitted (not invented) when the internal
+  result does not set it. The `weak_match` / `no_memory` /
+  `rejected` / `provider_error` statuses never carry
+  `source` (the schema and contract do not require it on
+  these statuses, and the projection does not introduce it).
+  The strict Zod schema validation, the no-IDs rule, and
+  every other contract guarantee are preserved unchanged.
 - **`README.md` → Storage layout diagram.** The `.curion/`
   directory listing now mentions `trace.sqlite`,
   `transformers-cache/`, and `config.json` alongside the memory
@@ -102,10 +128,27 @@ are unchanged.
   `string?` and the `source?: "local" | "cross_project"` field was
   missing. The shape now matches the actual `RECALL_STRUCTURED_CONTENT_SCHEMA`
   (`notes?: string[]`, `source?: "local" | "cross_project"`).
+- **`docs/reference.md` → `recall.answered.source` documented as
+  populated.** The `source` field semantics were previously
+  marked as "reserved — not yet populated on the wire"; the
+  reference now documents the field as populated and describes
+  when it is present, what `"local"` vs `"cross_project"` mean,
+  and that clients may safely switch on it on
+  `recall.answered`. The "Known limitations" section that
+  pinned the gap is removed (the gap is closed by the
+  projection change above).
 - **`docs/reference.md` → Field semantics.** The reference now
   documents `answer`, `notes`, `source`, `summaries`, `coverage`,
   and `reason` field-by-field, instead of only listing the status
   variants.
+- **`docs/privacy-storage.md` → Cross-project semantic search
+  signal updated.** The cross-project promotion section no
+  longer describes `structuredContent.source` as "not yet
+  populated"; the section now documents `source` as the
+  stable machine-readable discriminator on
+  `recall.answered` and points to the API reference for the
+  full semantics. The `text`-prefix human signal is retained
+  as a display-only signal.
 - **`CONTRIBUTING.md` → Frozen public API version.** The
   "public MCP surface is frozen at v0.2.x" reference has been
   updated to `v0.3.x` to match the current shipped version

@@ -116,6 +116,17 @@ export function buildRecallPublicText(result: RecallResult): string {
  * explanation for WHY `clarification_needed` is set; the
  * `clarification_needed.question` is the user-facing prompt
  * the agent asks the user verbatim.
+ *
+ * The `source` field appears on `answered` only and reflects
+ * the internal `RecallResult.source` value set by the
+ * controller / tool layer: `"local"` when the answer was
+ * synthesized from the current project's own memory;
+ * `"cross_project"` when the outcome was promoted to
+ * `answered` based on a strong non-private cross-project
+ * recall. The field is omitted (not surfaced) when the
+ * internal result does not carry it; it is never invented
+ * by this projection. The schema declares `source` as
+ * optional so omission is a valid wire shape.
  */
 export function buildRecallStructuredContent(result: RecallResult): RecallStructuredContent {
   switch (result.status) {
@@ -129,6 +140,14 @@ export function buildRecallStructuredContent(result: RecallResult): RecallStruct
       };
       if (notes.length > 0) {
         out.notes = notes;
+      }
+      // Populate `source` for answered results when the
+      // internal result carries it. The schema accepts the
+      // declared `"local" | "cross_project"` enum; defensive
+      // omission preserves the previous wire shape for any
+      // path that does not set the field.
+      if (result.source === "local" || result.source === "cross_project") {
+        out.source = result.source;
       }
       return out;
     }
