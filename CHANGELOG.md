@@ -97,6 +97,24 @@ wire shape is now aligned with the declared schema.
 
 ### Changed
 
+- **Recall-synthesis default `max_tokens` raised from `512` to
+  `4096` (experiment on `experiment/adaptive-recall-depth`).**
+  The `RECALL_DEFAULT_MAX_TOKENS` constant in
+  `src/providers/recall-synthesis.ts` is now `4096`; the
+  `RecallSynthesisOptions.maxTokens` doc comment, the
+  default-pinning test, and a new wire-body test (asserting
+  that the value sent to providers equals
+  `RECALL_DEFAULT_MAX_TOKENS`) are updated to match. Explicit
+  per-call `maxTokens` overrides and the shared
+  `CURION_ADAPTER_MAX_TOKENS` env var continue to win, and the
+  memory-analysis role default is unchanged at `1024`. The
+  public MCP surface, the controller, the adaptive-depth
+  selection, the prompt budgets, the provider routing, and the
+  retry / repair behavior are all unchanged. The
+  `docs/configuration.md` row for `CURION_ADAPTER_MAX_TOKENS`
+  now notes that the per-role defaults differ
+  (`1024` for memory-analysis, `4096` for recall-synthesis) and
+  that setting the env var overrides both.
 - **`recall.answered` `structuredContent.source` is now
   populated by `buildRecallStructuredContent`.** The declared
   `source?: "local" | "cross_project"` field on

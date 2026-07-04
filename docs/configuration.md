@@ -168,7 +168,7 @@ both primary and fallback providers in the same way.
 | Variable                        | Default | Description |
 |---------------------------------|---------|---|
 | `CURION_ADAPTER_TIMEOUT_MS`     | `30000` | Per-request timeout in milliseconds for provider HTTP calls. |
-| `CURION_ADAPTER_MAX_TOKENS`     | `1024`  | Max output tokens for the memory-analysis / synthesis calls. |
+| `CURION_ADAPTER_MAX_TOKENS`     | (see below) | Max output tokens for the memory-analysis / synthesis calls. When unset, each role falls back to its own default: `1024` for memory-analysis and `4096` for recall-synthesis. |
 
 Lower `CURION_ADAPTER_TIMEOUT_MS` makes hung connections fail faster;
 raise it if your provider is consistently slow. Raising

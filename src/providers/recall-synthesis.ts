@@ -74,7 +74,7 @@ import { type ChatMessage, type ProviderError, chatCompletion } from "./http-cli
 /** Default per-request timeout in ms. */
 export const RECALL_DEFAULT_TIMEOUT_MS = 30_000;
 /** Default per-request max output tokens. */
-export const RECALL_DEFAULT_MAX_TOKENS = 512;
+export const RECALL_DEFAULT_MAX_TOKENS = 4096;
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -148,7 +148,7 @@ export interface RecallSynthesisOptions {
   fallbackModel?: string;
   /** Per-request timeout in ms. Default 30s. */
   timeoutMs?: number;
-  /** Per-request max output tokens. Default 512. */
+  /** Per-request max output tokens. Default 4096. */
   maxTokens?: number;
   /** Optional fetch override for tests. */
   fetchImpl?: typeof fetch;
