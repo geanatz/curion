@@ -40,7 +40,7 @@ If the bug is a security issue, **do not** open a public issue — see
 Open a GitHub issue with the `enhancement` label. Explain the
 motivation, the desired behaviour, and why the change belongs in
 Curion (versus a separate project). Remember that the public MCP
-surface is frozen at v0.2.x, so changes that affect the two tools'
+surface is frozen at v0.3.x, so changes that affect the two tools'
 input schemas, status set, or output shapes need a major-version
 discussion.
 
@@ -160,6 +160,32 @@ of the public MCP surface.
 - **No secrets in source.** Real API keys come from the operator's
   environment. Test code uses the constants in
   `tests/shared-test-provider.ts` (which are obviously fake).
+
+## Documentation scope
+
+Curion ships user-facing docs in two places:
+
+- `README.md` — package landing page on npm and the repo root. New
+  features that are visible to a first-time user should be reflected
+  here.
+- `docs/` — operator + contributor reference:
+  - `configuration.md` for env vars and provider setup,
+  - `mcp-clients.md` for per-client wiring,
+  - `privacy-storage.md` for the storage and security model,
+  - `reference.md` for the public MCP surface (tools, statuses,
+    `clarification_needed`, `structuredContent` shape).
+
+When you change a user-visible behavior, update the corresponding
+doc in the same PR. The `docs/` markdown files are not linted by the
+Biome configuration (which covers `src tests`), but the docs are
+included in the PR review — broken links, stale version references,
+incorrect `structuredContent` shape examples, and missing
+troubleshooting entries are review blockers.
+
+The README links to `docs/*.md` as GitHub blob URLs because npm's
+package page renders the README verbatim and resolves relative paths
+back to GitHub; this keeps both surfaces working with a single source
+of truth.
 
 ## Pull request process
 

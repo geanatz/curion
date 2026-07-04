@@ -7,7 +7,131 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Nothing yet.
+Documentation-only polish for public adoption (Phase 3). No source-code,
+runtime, controller, projection, MCP-surface, or release-engineering
+change. The two tools, their strict input schemas, the
+`text` / `structuredContent` surfaces, the `clarification_needed`
+contract, the storage layout, and the `.curion/config.json` semantics
+are unchanged.
+
+### Added
+
+- **CI and provenance badges in the README.** Adds a CI build badge
+  (`github/actions/workflow/status/geanatz/curion/ci.yml`) and a
+  provenance-verified badge to the README header so the package
+  landing page signals reproducibility out of the box.
+- **README → Example prompts section.** Adds a short block of
+  concrete `remember` / `recall` examples (store a design decision,
+  store a convention, recall later) so first-time users can see what
+  the public MCP surface looks like in practice.
+- **README → Troubleshooting section.** Adds a six-entry troubleshooting
+  block covering the most common operator failures (host cannot see
+  the tools, "no relevant memory found" despite a remembered row,
+  `provider_error`, MCP Inspector use, stdout-corruption warning, and
+  Windows / `npx` / absolute-path gotchas). The Inspector section
+  references the official `@modelcontextprotocol/inspector` tool.
+- **`docs/privacy-storage.md` → Security model section.** Adds an
+  explicit security model section that consolidates the existing
+  per-area threat notes (MCP stdio-only transport, no secrets in
+  code, SQL injection safety, path safety, `.env` files are not loaded
+  by the server runtime, structured-output projection) and links out
+  to `SECURITY.md` for the recent CVE work.
+- **`docs/privacy-storage.md` → Local trace section.** Adds a
+  dedicated section for `.curion/trace.sqlite` covering the default
+  on-state, the `CURION_TRACE_ENABLED=0` off switch, the redaction
+  contract (raw input never written; sensitive keys stripped; `Note:`
+  / `message:` wrappers stripped), and the fact that the trace is
+  internal — never part of the public MCP surface and never surfaced
+  to agents.
+- **`docs/privacy-storage.md` → Semantic cache section.** Adds a
+  section covering the on-device embedder default, the Hugging Face
+  CDN model download, the `CURION_SEMANTIC_ALLOW_REMOTE=0` opt-out,
+  and the `0700` cache-directory permissions.
+- **`docs/mcp-clients.md` → Common pitfalls section.** Adds a
+  "Common pitfalls" section with four entries: absolute paths beat
+  shell resolution (with `which curion` / `where curion` guidance),
+  the Windows `cmd /c npx -y @geanatz/curion` wrapper (plus a
+  PowerShell `npx.cmd` variant), provider env vars must be in the
+  spawn environment, and an MCP Inspector pointer for ad-hoc debugging.
+- **`docs/mcp-clients.md` → stdio transport notice.** Adds an
+  explicit "stdio is the only transport" section, including the
+  "anything written to stdout corrupts the protocol" warning.
+- **`docs/configuration.md` → Local trace, per-request adapter knobs,
+  project root, operator checklist.** Adds new env-var sections for
+  the trace toggle (`CURION_TRACE_ENABLED`) and the adapter knobs
+  (`CURION_ADAPTER_TIMEOUT_MS`, `CURION_ADAPTER_MAX_TOKENS`); adds a
+  project-root section covering `CURION_PROJECT_ROOT` and the
+  `.curion/config.json` field set; and adds an operator checklist that
+  walks a new user through the minimum configuration.
+- **`docs/configuration.md` → `.env` caveat.** Adds an explicit note
+  that `.env` loading is wired only into the prototype runner and
+  benchmark harness, never into the MCP server runtime.
+- **`docs/reference.md` → Inputs and outputs at a glance table.**
+  Adds a summary table mapping each tool to its statuses and side
+  effects, so the reader does not have to read the full schema to
+  know the contract.
+- **`docs/reference.md` → Contract guarantees section.** Adds an
+  explicit section listing the strict-Zod input/output guarantees
+  (no leakage), the no-internal-IDs rule, the no-raw-input rule, the
+  no model / provider metadata rule, and the "notes are plain
+  strings" rule.
+- **`docs/reference.md` → Status semantics table.** Adds a per-status
+  table that explains what each status means and what the agent
+  should do with it (in particular, that `provider_error` never
+  carries `clarification_needed`).
+- **`docs/reference.md` → Local trace layer (background) section.**
+  Adds a short background note pointing to the dedicated
+  `privacy-storage.md` section and clarifying that the trace is not
+  part of the public MCP surface.
+- **`CONTRIBUTING.md` → Documentation scope section.** Adds a
+  short "Documentation scope" section so contributors know which
+  user-facing doc owns which topic and that broken links / stale
+  shape examples are review blockers.
+
+### Changed
+
+- **`README.md` → Storage layout diagram.** The `.curion/`
+  directory listing now mentions `trace.sqlite`,
+  `transformers-cache/`, and `config.json` alongside the memory
+  store, instead of only the SQLite DB.
+- **`README.md` → Quality / provenance signal.** The README now
+  advertises the Trusted Publishing / OIDC provenance path
+  (`publishConfig.provenance: true`) as a key feature.
+- **`docs/reference.md` → `recall.answered` shape.** The shape
+  documentation was incomplete: `notes?` was documented as a single
+  `string?` and the `source?: "local" | "cross_project"` field was
+  missing. The shape now matches the actual `RECALL_STRUCTURED_CONTENT_SCHEMA`
+  (`notes?: string[]`, `source?: "local" | "cross_project"`).
+- **`docs/reference.md` → Field semantics.** The reference now
+  documents `answer`, `notes`, `source`, `summaries`, `coverage`,
+  and `reason` field-by-field, instead of only listing the status
+  variants.
+- **`CONTRIBUTING.md` → Frozen public API version.** The
+  "public MCP surface is frozen at v0.2.x" reference has been
+  updated to `v0.3.x` to match the current shipped version
+  (`0.3.6`).
+
+### Fixed
+
+- **`README.md` → Table of contents anchor.** The README's table of
+  contents referenced a `#license` anchor that did not match any
+  heading; the entry was removed (the license is now linked from
+  the bottom-line list only, not as a TOC entry).
+
+### Deprecated
+
+- Nothing in this release.
+
+### Removed
+
+- Nothing in this release.
+
+### Security
+
+- Nothing in this release. The threat model, the redaction contract,
+  the prepared-statement SQL layer, and the `.env`-not-loaded-by-the-
+  server-runtime policy are unchanged; the new docs only describe
+  what was already true.
 
 ## [0.3.6] - 2026-06-30
 
