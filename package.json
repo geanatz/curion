@@ -2,6 +2,7 @@
   "name": "@geanatz/curion",
   "version": "0.3.6",
   "description": "Curion — project-local memory layer for AI agents",
+  "mcpName": "io.github.geanatz/curion",
   "type": "module",
   "license": "Apache-2.0",
   "repository": {
