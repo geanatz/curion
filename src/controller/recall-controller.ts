@@ -1085,6 +1085,19 @@ function stripReasoningBlocks(answer: string): string {
 // guard test that exercises a substantive answer containing the new noun
 // or qualifier.
 //
+// Noun-list policy (refined narrow): `details`, `information`,
+// `record`, and `records` are the four nouns that count as refusal
+// triggers. `memory` and `memories` are EXCLUDED from the first-
+// person-have and article-gap families because they are domain
+// language ("the stored memory", "memory of the previous session")
+// that legitimately appears in substantive caveated answers
+// ("I don't have memory of the previous session, but I can infer
+// ..."). Pattern 1 (first-person-have-no-noun) and Pattern 6
+// (article-gap-have-no-noun) both had `memory|memories` in their
+// noun list; both were updated. The other patterns (search,
+// of-about, unable-to-search, third-person) are unchanged in
+// this refinement per the approved scope.
+//
 // The patterns are extracted into a `REFUSAL_PATTERNS` table so a
 // trace-only diagnostic helper (`matchRefusalPatterns`) can report
 // WHICH pattern fired and at what position, without changing the
@@ -1129,11 +1142,15 @@ interface RefusalPattern {
  */
 const REFUSAL_PATTERNS: ReadonlyArray<RefusalPattern> = [
   // Pattern 1: first-person "I don't have (any |specific |relevant )?N".
+  // Noun list intentionally excludes `memory|memories` — see the
+  // "Noun-list policy" comment above the table. `details`,
+  // `information`, `record`, `records` remain the four nouns that
+  // count as a refusal trigger here.
   {
     id: "first-person-have-no-noun",
     category: "first-person",
     regex:
-      /\bI (?:do not|don't|did not|didn't) have (?:any |specific |relevant )?(?:details|information|memory|memories|record|records)\b/i,
+      /\bI (?:do not|don't|did not|didn't) have (?:any |specific |relevant )?(?:details|information|record|records)\b/i,
   },
   // Pattern 2: first-person "I don't (see|find|recall) ...N".
   {
@@ -1168,11 +1185,18 @@ const REFUSAL_PATTERNS: ReadonlyArray<RefusalPattern> = [
   // quantifier. This pattern addresses the live failure phrase "I
   // don't have a specific summary for session 2 in the available
   // memories."
+  //
+  // Noun list intentionally excludes `memory|memories` — see the
+  // "Noun-list policy" comment above the table. The four core
+  // refusal nouns (`details`, `information`, `record`, `records`)
+  // are preserved, along with the article-gap-specific nouns
+  // (`summary|summaries`, `entry|entries`, `note|notes`) so the
+  // existing live-failure phrase still routes correctly.
   {
     id: "article-gap-have-no-noun",
     category: "article-gap",
     regex:
-      /\bI (?:do not|don't|did not|didn't) have (?:a |an |any |the |specific |relevant )*(?:details|information|memory|memories|record|records|summary|summaries|entry|entries|note|notes)\b/i,
+      /\bI (?:do not|don't|did not|didn't) have (?:a |an |any |the |specific |relevant )*(?:details|information|record|records|summary|summaries|entry|entries|note|notes)\b/i,
   },
 ];
 

@@ -1153,6 +1153,362 @@ test("recall.synthesis: diagnostic fields are absent on the success path (regres
 });
 
 // ---------------------------------------------------------------------------
+// 12b. Refusal-pattern refinement: narrow noun-list update
+//      (`memory|memories` removed from Pattern 1 and Pattern 6)
+// ---------------------------------------------------------------------------
+//
+// Refined behavior:
+//   - Pattern 1 (first-person-have-no-noun) and Pattern 6
+//     (article-gap-have-no-noun) no longer carry `memory|memories`
+//     in their noun lists. The four core refusal nouns
+//     (`details`, `information`, `record`, `records`) are
+//     preserved on Pattern 1; Pattern 6 retains those four plus
+//     the article-gap-specific nouns (`summary|summaries`,
+//     `entry|entries`, `note|notes`).
+//   - Patterns 2 / 3 / 4 / 5 are unchanged in this refinement.
+//   - No position gating; no prompt / adaptive-depth / max_tokens /
+//     public-API / storage / provider-behavior change.
+//
+// These tests pin the four user-visible invariants of the
+// refinement:
+//   (a) true refusal ("I don't have specific information about
+//       that") still routes to `weak_match` via Pattern 1.
+//   (b) substantive answer with a caveat involving
+//       "I don't have memory... but ..." remains `answered` —
+//       the detector MUST NOT trip on the domain word `memory`.
+//   (c) existing article-gap failure phrase ("I don't have a
+//       summary for that topic") still routes to `weak_match`
+//       via Pattern 6, and the diagnostic still attributes the
+//       match to `article-gap-have-no-noun`.
+//   (d) the diagnostic pattern-id and category strings remain
+//       the same stable values for both Pattern 1 and
+//       Pattern 6 firings — the refinement must not rename or
+//       reclassify patterns.
+
+test("recall (refined refusal pattern): true refusal 'I don't have specific information about that' still routes to weak_match (Pattern 1 — information)", async () => {
+  const tmp = mkTraceDir();
+  const { memHandle, cleanup } = setupBothStores(tmp);
+  try {
+    setRecallStorageProvider(() => ({
+      handle: memHandle,
+      ownsHandle: false,
+    }));
+    try {
+      insertMemoryRecord(memHandle, {
+        kind: "fact",
+        state: "active",
+        memoryContent: "The project uses Postgres 16 for the primary data store.",
+        providerId: "test",
+        modelId: "test-model",
+        confidence: 0.9,
+        safetyFlags: ["controller-normalized"],
+        metadata: { tags: ["postgres", "database"] },
+      });
+      // True refusal via `information` (Pattern 1 noun). The
+      // refinement removes `memory|memories` from Pattern 1 but
+      // leaves `information` intact, so this phrase MUST still
+      // trip the detector and route to `weak_match`.
+      const phrase = "I don't have specific information about that.";
+      const { fetchImpl } = scriptFetch(() => okChatResponse(phrase));
+
+      const out = await runRecallWithTrace(memHandle, {
+        text: "What database does the project use?",
+        fetchImpl,
+      });
+      assert.equal(
+        out.status,
+        "weak_match",
+        "true refusal (information) must still route to weak_match"
+      );
+      if (out.status !== "weak_match") throw new Error("unreachable");
+
+      // The trace diagnostic must still attribute the match to
+      // the first-person-have-no-noun pattern + first-person
+      // category. The refinement MUST NOT rename Pattern 1.
+      const events = listTraceEventsForRun(listTraceRuns()[0]!.id);
+      const synth = events.find((e) => e.kind === RECALL_SYNTHESIS_KIND);
+      assert.ok(synth);
+      const p = synth.payload as {
+        refusalDetected: boolean;
+        refusalPatternId?: string;
+        refusalCategory?: string;
+        refusalMatchIndex?: number;
+        visibleAnswerLength?: number;
+      };
+      assert.equal(p.refusalDetected, true);
+      assert.equal(p.refusalPatternId, "first-person-have-no-noun");
+      assert.equal(p.refusalCategory, "first-person");
+      assert.equal(typeof p.refusalMatchIndex, "number");
+      assert.ok((p.refusalMatchIndex ?? -1) >= 0);
+      assert.ok((p.visibleAnswerLength ?? 0) > 0);
+      // No raw refusal substring in the persisted payload.
+      const persistedJson = JSON.stringify({ payload: synth.payload });
+      assert.ok(
+        !persistedJson.includes("specific information"),
+        `refusal substring must not leak into the payload; got: ${persistedJson}`
+      );
+    } finally {
+      resetRecallStorageProvider();
+    }
+  } finally {
+    cleanup();
+    rmTraceDir(tmp);
+  }
+});
+
+test("recall (refined refusal pattern): substantive caveat 'I don't have memory... but ...' remains answered (Pattern 1 + Pattern 6 — memory excluded)", async () => {
+  // The load-bearing test for the noun-list refinement. The
+  // model returns a substantive answer that LEGITIMATELY uses
+  // the word "memory" in a caveated way. Before the refinement,
+  // Pattern 1 (and Pattern 6, because of its 0+ determiner
+  // quantifier) would have matched `I don't have memory` and
+  // rerouted the substantive answer to `weak_match`. After the
+  // refinement, both Pattern 1 and Pattern 6 have `memory|memories`
+  // removed from their noun lists, so the detector MUST NOT fire
+  // and the answer MUST remain `answered` on the wire.
+  const tmp = mkTraceDir();
+  const { memHandle, cleanup } = setupBothStores(tmp);
+  try {
+    setRecallStorageProvider(() => ({
+      handle: memHandle,
+      ownsHandle: false,
+    }));
+    try {
+      insertMemoryRecord(memHandle, {
+        kind: "fact",
+        state: "active",
+        memoryContent: "The project uses Postgres 16 for the primary data store.",
+        providerId: "test",
+        modelId: "test-model",
+        confidence: 0.9,
+        safetyFlags: ["controller-normalized"],
+        metadata: { tags: ["postgres", "database"] },
+      });
+      const answer =
+        "I don't have memory of the previous session, but I can tell you that the project uses TypeScript and Node 20 for the runtime.";
+      const { fetchImpl, calls } = scriptFetch(() => okChatResponse(answer));
+
+      const out = await runRecallWithTrace(memHandle, {
+        text: "What runtime does the project use?",
+        fetchImpl,
+      });
+      assert.equal(calls.length, 1, "provider must be called exactly once");
+      // Public outcome: substantive, NOT rerouted.
+      assert.equal(
+        out.status,
+        "answered",
+        `substantive caveated answer must remain answered after refinement; got status=${out.status}`
+      );
+      if (out.status !== "answered") throw new Error("unreachable");
+      assert.equal(out.answer, answer);
+      assert.equal(out.summaries, undefined, "weak_match summaries must not appear");
+      assert.equal(out.coverage, undefined, "weak_match coverage must not appear");
+
+      // The trace diagnostic MUST NOT appear on the success
+      // path. The refinement is scoped to the noun list — the
+      // over-emission guard from the previous test still holds.
+      const events = listTraceEventsForRun(listTraceRuns()[0]!.id);
+      const synth = events.find((e) => e.kind === RECALL_SYNTHESIS_KIND);
+      assert.ok(synth);
+      const p = synth.payload as Record<string, unknown>;
+      assert.equal(p.refusalDetected, false);
+      assert.equal(
+        "refusalPatternId" in p,
+        false,
+        "no refusalPatternId on substantive caveated path"
+      );
+      assert.equal(
+        "refusalCategory" in p,
+        false,
+        "no refusalCategory on substantive caveated path"
+      );
+      assert.equal(
+        "refusalMatchIndex" in p,
+        false,
+        "no refusalMatchIndex on substantive caveated path"
+      );
+      assert.equal(
+        "visibleAnswerLength" in p,
+        false,
+        "no visibleAnswerLength on substantive caveated path"
+      );
+    } finally {
+      resetRecallStorageProvider();
+    }
+  } finally {
+    cleanup();
+    rmTraceDir(tmp);
+  }
+});
+
+test("recall (refined refusal pattern): article-gap 'I don't have a summary for that topic' still routes to weak_match (Pattern 6 — summary preserved)", async () => {
+  // The article-gap failure phrase. Pattern 6 still carries
+  // `summary|summaries` in its noun list (and the article-gap
+  // determiners `a |an |any |the |specific |relevant` are
+  // unchanged), so the failure phrase MUST still trip the
+  // detector and route to `weak_match`. The diagnostic MUST
+  // still attribute the match to `article-gap-have-no-noun`.
+  const tmp = mkTraceDir();
+  const { memHandle, cleanup } = setupBothStores(tmp);
+  try {
+    setRecallStorageProvider(() => ({
+      handle: memHandle,
+      ownsHandle: false,
+    }));
+    try {
+      insertMemoryRecord(memHandle, {
+        kind: "fact",
+        state: "active",
+        memoryContent: "The project uses Postgres 16 for the primary data store.",
+        providerId: "test",
+        modelId: "test-model",
+        confidence: 0.9,
+        safetyFlags: ["controller-normalized"],
+        metadata: { tags: ["postgres", "database"] },
+      });
+      const phrase = "I don't have a summary for that topic.";
+      const { fetchImpl } = scriptFetch(() => okChatResponse(phrase));
+
+      const out = await runRecallWithTrace(memHandle, {
+        text: "What database does the project use?",
+        fetchImpl,
+      });
+      assert.equal(
+        out.status,
+        "weak_match",
+        "article-gap summary refusal must still route to weak_match after refinement"
+      );
+      if (out.status !== "weak_match") throw new Error("unreachable");
+
+      // Diagnostic still attributes to article-gap-have-no-noun.
+      const events = listTraceEventsForRun(listTraceRuns()[0]!.id);
+      const synth = events.find((e) => e.kind === RECALL_SYNTHESIS_KIND);
+      assert.ok(synth);
+      const p = synth.payload as {
+        refusalDetected: boolean;
+        refusalPatternId?: string;
+        refusalCategory?: string;
+        refusalMatchIndex?: number;
+        visibleAnswerLength?: number;
+      };
+      assert.equal(p.refusalDetected, true);
+      assert.equal(p.refusalPatternId, "article-gap-have-no-noun");
+      assert.equal(p.refusalCategory, "article-gap");
+      assert.equal(typeof p.refusalMatchIndex, "number");
+      assert.ok((p.refusalMatchIndex ?? -1) >= 0);
+      assert.ok((p.visibleAnswerLength ?? 0) > 0);
+      const persistedJson = JSON.stringify({ payload: synth.payload });
+      assert.ok(
+        !persistedJson.includes("a summary"),
+        `article-gap substring must not leak into the payload; got: ${persistedJson}`
+      );
+    } finally {
+      resetRecallStorageProvider();
+    }
+  } finally {
+    cleanup();
+    rmTraceDir(tmp);
+  }
+});
+
+test("recall (refined refusal pattern): diagnostic pattern-id + category set remains sane (Pattern 1 + Pattern 6 unchanged)", async () => {
+  // The refinement must NOT rename or reclassify any pattern.
+  // This test exercises both Pattern 1 (information) and
+  // Pattern 6 (summary) on the same fixture and asserts the
+  // exact pattern-id / category strings an operator would
+  // expect to see in traces.
+  //
+  //   Pattern 1  -> first-person-have-no-noun + first-person
+  //   Pattern 6  -> article-gap-have-no-noun + article-gap
+  //
+  // If a future edit accidentally renames a pattern or merges
+  // categories, this test fails.
+  const cases: ReadonlyArray<{
+    label: string;
+    phrase: string;
+    expectedPatternId: string;
+    expectedCategory: string;
+    expectedSubstringInPayload: string;
+  }> = [
+    {
+      label: "Pattern 1 (information)",
+      phrase: "I don't have specific information about that.",
+      expectedPatternId: "first-person-have-no-noun",
+      expectedCategory: "first-person",
+      expectedSubstringInPayload: "specific information",
+    },
+    {
+      label: "Pattern 6 (article-gap summary)",
+      phrase: "I don't have a summary for that topic.",
+      expectedPatternId: "article-gap-have-no-noun",
+      expectedCategory: "article-gap",
+      expectedSubstringInPayload: "a summary",
+    },
+  ];
+
+  for (const c of cases) {
+    const tmp = mkTraceDir();
+    const { memHandle, cleanup } = setupBothStores(tmp);
+    try {
+      setRecallStorageProvider(() => ({
+        handle: memHandle,
+        ownsHandle: false,
+      }));
+      try {
+        insertMemoryRecord(memHandle, {
+          kind: "fact",
+          state: "active",
+          memoryContent: "The project uses Postgres 16 for the primary data store.",
+          providerId: "test",
+          modelId: "test-model",
+          confidence: 0.9,
+          safetyFlags: ["controller-normalized"],
+          metadata: { tags: ["postgres", "database"] },
+        });
+        const { fetchImpl } = scriptFetch(() => okChatResponse(c.phrase));
+
+        const out = await runRecallWithTrace(memHandle, {
+          text: "What database does the project use?",
+          fetchImpl,
+        });
+        assert.equal(out.status, "weak_match", `${c.label}: must still route to weak_match`);
+        if (out.status !== "weak_match") throw new Error("unreachable");
+
+        const events = listTraceEventsForRun(listTraceRuns()[0]!.id);
+        const synth = events.find((e) => e.kind === RECALL_SYNTHESIS_KIND);
+        assert.ok(synth, `${c.label}: recall.synthesis event must be emitted`);
+        const p = synth.payload as {
+          refusalDetected: boolean;
+          refusalPatternId?: string;
+          refusalCategory?: string;
+          refusalMatchIndex?: number;
+          visibleAnswerLength?: number;
+        };
+        assert.equal(p.refusalDetected, true, `${c.label}: refusalDetected must be true`);
+        assert.equal(p.refusalPatternId, c.expectedPatternId, `${c.label}: patternId`);
+        assert.equal(p.refusalCategory, c.expectedCategory, `${c.label}: category`);
+        assert.equal(typeof p.refusalMatchIndex, "number", `${c.label}: matchIndex numeric`);
+        assert.ok((p.refusalMatchIndex ?? -1) >= 0, `${c.label}: matchIndex >= 0`);
+        assert.ok((p.visibleAnswerLength ?? 0) > 0, `${c.label}: visibleAnswerLength > 0`);
+        // The persisted payload MUST NOT contain the raw refusal
+        // substring. The trace only carries the pattern id +
+        // category + numeric measurements.
+        const persistedJson = JSON.stringify({ payload: synth.payload });
+        assert.ok(
+          !persistedJson.includes(c.expectedSubstringInPayload),
+          `${c.label}: raw refusal substring must not leak into payload; got: ${persistedJson}`
+        );
+      } finally {
+        resetRecallStorageProvider();
+      }
+    } finally {
+      cleanup();
+      rmTraceDir(tmp);
+    }
+  }
+});
+
+// ---------------------------------------------------------------------------
 // 7. Memory DB is untouched beyond normal remember / recall; trace DB
 //    is separate.
 // ---------------------------------------------------------------------------
