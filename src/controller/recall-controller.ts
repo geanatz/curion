@@ -936,9 +936,48 @@ interface AnswerOk {
   answer: string;
 }
 
+/**
+ * Trace-only refusal diagnostic. Carries the safe metadata an
+ * operator needs to know WHICH pattern / category / position
+ * fired without leaking raw matched text or provider answer
+ * content.
+ *
+ * Populated by `validateAnswer` ONLY on the `refusal_detected`
+ * branch. The trace helper (`emitSynthesisStage`) places the
+ * four fields on the `recall.synthesis` payload when
+ * `refusalDetected=true`. The matched text itself is NEVER
+ * surfaced; the position is enough to know "where in the answer
+ * the refusal shape started" for an operator triaging traces.
+ */
+interface RefusalDiagnostic {
+  /** Stable pattern id (e.g. `first-person-have-no-noun`). */
+  patternId: string;
+  /** Category group (e.g. `first-person`, `third-person`, `article-gap`). */
+  category: string;
+  /** 0-based byte index of the match in the (trimmed, post-trailing-punct-strip) text. */
+  matchIndex: number;
+  /**
+   * Length of the post-reasoning-strip visible answer (numeric
+   * only). Useful to tell "this was a long visible answer that
+   * happened to contain a refusal shape" from "this was an
+   * almost-empty answer that tripped the detector".
+   */
+  visibleAnswerLength: number;
+}
+
 interface AnswerFail {
   ok: false;
   reason: string;
+  /**
+   * Optional refusal diagnostic. Populated only on the
+   * `refusal_detected` branch; `undefined` on every other
+   * validator rejection (empty, reasoning-only,
+   * secret-redaction, short-after-redaction, raw-dump). The
+   * dispatch helper reads this field when surfacing the
+   * `weak_match` / `no_memory` reroute so the trace event can
+   * carry the safe diagnostic metadata.
+   */
+  diagnostic?: RefusalDiagnostic;
 }
 
 /**
@@ -1045,41 +1084,168 @@ function stripReasoningBlocks(answer: string): string {
 // detector. Operating rule: each new pattern needs its own false-positive
 // guard test that exercises a substantive answer containing the new noun
 // or qualifier.
-function isProviderRefusal(text: string): boolean {
-  if (typeof text !== "string") return false;
+//
+// The patterns are extracted into a `REFUSAL_PATTERNS` table so a
+// trace-only diagnostic helper (`matchRefusalPatterns`) can report
+// WHICH pattern fired and at what position, without changing the
+// public boolean behavior (`isProviderRefusal`). The boolean helper
+// is byte-equivalent to the previous implementation: it joins the
+// same regex strings, applies them in the same order, against the
+// same two candidate strings (the trimmed text, and the trimmed
+// text with a single trailing punctuation character stripped).
+//
+// The diagnostic shape surfaced to the trace event is restricted
+// to safe metadata: a stable short `patternId`, a `category` group,
+// and a numeric `matchIndex`. NO raw matched text, NO provider
+// answer content, NO memory ids ever flow out of this helper into
+// the trace payload.
+
+/**
+ * A single refusal-shape pattern, with a stable short id used in
+ * the trace event and a category used to group related patterns.
+ *
+ * The id is intended to be a stable, hand-curated, human-readable
+ * string (not derived from the regex). The category is a small
+ * fixed set: `first-person`, `third-person`, `article-gap`.
+ */
+interface RefusalPattern {
+  /** Stable id for the trace event (e.g. `first-person-have-no-noun`). */
+  id: string;
+  /** Category group (e.g. `first-person`, `third-person`, `article-gap`). */
+  category: string;
+  /** Pattern regex (case-insensitive; `\b` word-boundary anchored). */
+  regex: RegExp;
+}
+
+/**
+ * Refusal-shape pattern table.
+ *
+ * Order matters: the first matching pattern wins (so a phrase that
+ * could match multiple patterns is attributed to the most specific
+ * one in this list). The regex strings are byte-identical to the
+ * `String.raw` literals used by the previous `isProviderRefusal`
+ * implementation; this is a structural refactor that extracts them
+ * into a typed table so the trace helper can attribute the match.
+ */
+const REFUSAL_PATTERNS: ReadonlyArray<RefusalPattern> = [
+  // Pattern 1: first-person "I don't have (any |specific |relevant )?N".
+  {
+    id: "first-person-have-no-noun",
+    category: "first-person",
+    regex:
+      /\bI (?:do not|don't|did not|didn't) have (?:any |specific |relevant )?(?:details|information|memory|memories|record|records)\b/i,
+  },
+  // Pattern 2: first-person "I don't (see|find|recall) ...N".
+  {
+    id: "first-person-search-no-noun",
+    category: "first-person",
+    regex:
+      /\bI (?:do not|don't|did not|didn't) (?:see|find|recall) (?:any |specific |relevant )?(?:information|details|records?|memories?)\b/i,
+  },
+  // Pattern 3: first-person "I have no N of/about/on/regarding".
+  {
+    id: "first-person-have-no-noun-of-about",
+    category: "first-person",
+    regex: /\bI have no (?:record|information|details) (?:of|about|on|regarding)\b/i,
+  },
+  // Pattern 4: first-person "I'm not able to (recall|find|determine) ...N".
+  {
+    id: "first-person-unable-to-search",
+    category: "first-person",
+    regex:
+      /\bI'm not able to (?:recall|find|determine) (?:any |specific |relevant )?(?:information|details|records?)\b/i,
+  },
+  // Pattern 5: third-person "no X were/are/was/is found/available/on file/recorded/stored".
+  {
+    id: "third-person-no-noun-found",
+    category: "third-person",
+    regex:
+      /\bno (?:relevant |specific )?(?:details|information|memory|memories|record|records) (?:were |are |was |is )?(?:found|available|on file|recorded|stored)\b/i,
+  },
+  // Pattern 6: first-person article-gap "I don't have a/an/any/the/specific/relevant N".
+  // The determiner group accepts 0+ stacked determiners in a sequence
+  // (e.g. "a specific summary", "the relevant notes") via the `*`
+  // quantifier. This pattern addresses the live failure phrase "I
+  // don't have a specific summary for session 2 in the available
+  // memories."
+  {
+    id: "article-gap-have-no-noun",
+    category: "article-gap",
+    regex:
+      /\bI (?:do not|don't|did not|didn't) have (?:a |an |any |the |specific |relevant )*(?:details|information|memory|memories|record|records|summary|summaries|entry|entries|note|notes)\b/i,
+  },
+];
+
+/**
+ * A single refusal-shape match. The `matchedText` field is for
+ * in-process reasoning only; it MUST NOT be placed in any trace
+ * payload, log line, or public projection. The trace-bound view
+ * (`RefusalDiagnostic`) drops it.
+ */
+interface RefusalMatch {
+  /** Stable pattern id (e.g. `first-person-have-no-noun`). */
+  patternId: string;
+  /** Category group (e.g. `first-person`, `third-person`, `article-gap`). */
+  category: string;
+  /** 0-based byte index of the match in the (trimmed, post-trailing-punct-strip) text. */
+  matchIndex: number;
+  /** Matched substring. INTERNAL ONLY; do not surface to trace / logs / wire. */
+  matchedText: string;
+}
+
+/**
+ * Internal refusal-shape matcher. Returns the first matching
+ * pattern (by table order), or `null` when no pattern matches.
+ *
+ * The helper exists to support the trace-only refusal diagnostic.
+ * It is byte-equivalent to `isProviderRefusal` in the sense that
+ * `isProviderRefusal(t) === (matchRefusalPatterns(t) !== null)` for
+ * any input `t`; the public boolean helper delegates here so the
+ * two stay in lockstep.
+ *
+ * Order of evaluation mirrors the previous implementation exactly:
+ *   1. Trim the input. Empty -> no match.
+ *   2. Build two candidate strings: the trimmed text, and the
+ *      trimmed text with a single trailing `[.,!?]` stripped
+ *      ("I don't have specific details." still matches when the
+ *      trailing period is stripped).
+ *   3. For each candidate, scan the pattern table in order; the
+ *      first matching pattern wins.
+ */
+function matchRefusalPatterns(text: string): RefusalMatch | null {
+  if (typeof text !== "string") return null;
   const trimmed = text.trim();
-  if (trimmed.length === 0) return false;
-  // Test the trimmed text as-is, and again with a single trailing
-  // punctuation character stripped, so "I don't have specific details."
-  // matches even with the trailing period.
+  if (trimmed.length === 0) return null;
   const candidates = [trimmed, trimmed.replace(/[.,!?]$/, "")];
-  const pattern = new RegExp(
-    [
-      // Patterns 1-4: original first-person anchored patterns. Noun
-      // alternation is unified to the same memory-record noun list.
-      // Each allows an optional (any |specific |relevant ) qualifier
-      // between "have/see/find/recall" and the noun.
-      String.raw`\bI (?:do not|don't|did not|didn't) have (?:any |specific |relevant )?(?:details|information|memory|memories|record|records)\b`,
-      String.raw`\bI (?:do not|don't|did not|didn't) (?:see|find|recall) (?:any |specific |relevant )?(?:information|details|records?|memories?)\b`,
-      String.raw`\bI have no (?:record|information|details) (?:of|about|on|regarding)\b`,
-      String.raw`\bI'm not able to (?:recall|find|determine) (?:any |specific |relevant )?(?:information|details|records?)\b`,
-      // Pattern 5: no "I" anchor; matches third-person "no X were/are/was/is found/available/on file/recorded/stored" form.
-      String.raw`\bno (?:relevant |specific )?(?:details|information|memory|memories|record|records) (?:were |are |was |is )?(?:found|available|on file|recorded|stored)\b`,
-      // Pattern 6 (new in this revision): article-gap pattern. The
-      // determiners a, an, the, any, specific, relevant are all accepted
-      // in a single flat alternation, so the model can phrase the
-      // refusal with an article ("a specific summary", "an entry", "the
-      // relevant notes") and the detector still matches. The
-      // determiner group accepts 0+ stacked determiners in a sequence
-      // (e.g. "a specific summary", "the relevant notes") via the `*`
-      // quantifier, so multi-determiner refusal phrasings also match.
-      // This pattern addresses the live failure phrase "I don't have a
-      // specific summary for session 2 in the available memories."
-      String.raw`\bI (?:do not|don't|did not|didn't) have (?:a |an |any |the |specific |relevant )*(?:details|information|memory|memories|record|records|summary|summaries|entry|entries|note|notes)\b`,
-    ].join("|"),
-    "i"
-  );
-  return candidates.some((c) => pattern.test(c));
+  for (const candidate of candidates) {
+    for (const p of REFUSAL_PATTERNS) {
+      const m = p.regex.exec(candidate);
+      if (m && typeof m.index === "number") {
+        return {
+          patternId: p.id,
+          category: p.category,
+          matchIndex: m.index,
+          matchedText: m[0],
+        };
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Public refusal-shape detector. Returns `true` iff the input
+ * matches one of the patterns in `REFUSAL_PATTERNS`.
+ *
+ * Behavior is byte-equivalent to the pre-refactor implementation
+ * (same regex strings, same candidate-text strategy, same match
+ * semantics). The diagnostic surface (which pattern fired, at
+ * what position) is exposed via `matchRefusalPatterns` for the
+ * trace-only refusal diagnostic; this function returns just the
+ * boolean.
+ */
+function isProviderRefusal(text: string): boolean {
+  return matchRefusalPatterns(text) !== null;
 }
 
 /**
@@ -1176,8 +1342,34 @@ function validateAnswer(answer: string): AnswerOk | AnswerFail {
   // text that also contains a secret fragment is still caught by
   // the redaction step first; the refusal check then reclassifies
   // a thin-overlap refusal into `no_memory` at the call site.
+  //
+  // Trace-only refusal diagnostic: when the boolean detector
+  // fires we also re-run the matcher (`matchRefusalPatterns`) to
+  // capture the safe metadata (pattern id, category, match index,
+  // visible answer length) that the dispatcher surfaces on the
+  // `recall.synthesis` trace event. The diagnostic carries NO raw
+  // matched text and NO provider answer content; only short
+  // stable ids, a category label, and numeric measurements. The
+  // `isProviderRefusal` boolean check above is preserved
+  // byte-equivalent — the diagnostic is purely additive for
+  // instrumentation.
   if (isProviderRefusal(noIds)) {
-    return { ok: false, reason: "refusal_detected" };
+    const refusalMatch = matchRefusalPatterns(noIds);
+    return {
+      ok: false,
+      reason: "refusal_detected",
+      diagnostic: {
+        patternId: refusalMatch?.patternId ?? "unknown",
+        category: refusalMatch?.category ?? "unknown",
+        matchIndex: refusalMatch?.matchIndex ?? -1,
+        // `stripped0` is the post-reasoning-strip, post-trim
+        // visible answer. This is the length of the user-facing
+        // text after hidden reasoning blocks have been removed
+        // but BEFORE secret-redaction and memory-id-strip have
+        // run. Numeric only; safe to expose.
+        visibleAnswerLength: stripped0.length,
+      },
+    };
   }
   return { ok: true, answer: noIds };
 }
@@ -1352,6 +1544,13 @@ function dispatchSynthesisOutcome(args: {
             errorKind: validation.reason,
             errorMessage: validation.reason,
             httpCalls: result.httpCalls,
+            // Trace-only refusal diagnostic. Carries safe
+            // metadata (pattern id, category, match index,
+            // visible answer length) — NO raw matched text and
+            // NO provider answer content. Populated by
+            // `validateAnswer` on the refusal_detected branch
+            // only.
+            ...(validation.diagnostic ? { refusalDiagnostic: validation.diagnostic } : {}),
           },
         });
         const out: RecallOutcome = {
@@ -1386,6 +1585,11 @@ function dispatchSynthesisOutcome(args: {
           errorKind: validation.reason,
           errorMessage: validation.reason,
           httpCalls: result.httpCalls,
+          // Same trace-only refusal diagnostic as the
+          // weak_match branch above. The dispatcher carries
+          // the safe metadata through to the trace event so a
+          // reader can attribute which pattern fired.
+          ...(validation.diagnostic ? { refusalDiagnostic: validation.diagnostic } : {}),
         },
       });
       // Also check if the query is vague for the no_memory fallback.
@@ -1522,6 +1726,16 @@ function emitSynthesisStage(
       errorKind?: string;
       errorMessage?: string;
       httpCalls: number;
+      /**
+       * Optional refusal diagnostic. Populated ONLY when
+       * `refusalDetected=true`. When present, the four safe
+       * fields below are placed on the trace payload
+       * (patternId / category / matchIndex / visibleAnswerLength).
+       * NO raw matched text and NO provider answer content are
+       * ever placed in the payload — only short stable ids, a
+       * category label, and numeric measurements.
+       */
+      refusalDiagnostic?: RefusalDiagnostic;
     };
   }
 ): void {
@@ -1565,6 +1779,22 @@ function emitSynthesisStage(
     // Classification flags.
     refusalDetected: classification.refusalDetected,
     errorReasoningOnly: classification.errorReasoningOnly,
+    // Refusal-shape diagnostic. Present ONLY when
+    // `refusalDetected=true`. Carries safe metadata: a stable
+    // pattern id, a category label, the byte index where the
+    // match started, and the post-reasoning-strip visible
+    // answer length. NO raw matched text and NO provider answer
+    // content are ever placed here — the position + ids are
+    // enough for an operator to know which detector fired and
+    // where, without leaking the refusal prose itself.
+    ...(classification.refusalDetected && classification.refusalDiagnostic
+      ? {
+          refusalPatternId: classification.refusalDiagnostic.patternId,
+          refusalCategory: classification.refusalDiagnostic.category,
+          refusalMatchIndex: classification.refusalDiagnostic.matchIndex,
+          visibleAnswerLength: classification.refusalDiagnostic.visibleAnswerLength,
+        }
+      : {}),
     // Error metadata (sanitized + truncated).
     ...(classification.errorKind !== undefined ? { errorKind: classification.errorKind } : {}),
     ...(errorMessage !== undefined ? { errorMessage } : {}),
