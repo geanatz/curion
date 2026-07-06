@@ -510,6 +510,7 @@ The report covers three Balanced Score pillars:
 - `evaluationMode: "shadow-comparison"` label.
 - `meta`: total scenarios, production saved/rejected/provider-error counts, shadow engine reached/not-reached counts, mutation check pass/fail counts.
 - `runs`: per-scenario captured data — production outcome, shadow decision (action/reason/confidence/id arrays), mutation check result, shadow decision matches script flag.
+- `balancedScore`: v1 Balanced Score block (Safety / Cleaner Memory / Recall Quality pillars). v1 is partial — Recall Quality is `unavailable` because the v1 scenario set has no recall scenarios; `promotionEligible` is `false` until recall scenarios exist.
 - `limitations`: research-only disclosure block.
 
 ### CLI flags
