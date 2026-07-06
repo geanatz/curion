@@ -269,6 +269,16 @@ export interface BenchmarkQuery {
   labels?: string[];
   /** Short human description of what the query is testing. */
   note: string;
+  /**
+   * Scenario version stamp. The field is surfaced on the
+   * held-out artifact so a reviewer can audit which
+   * scenario set version produced the numbers. The value
+   * is a human-readable string (e.g. `"1.0"`); the
+   * format is not machine-enforced. Omitting the field
+   * is valid for queries that predate the versioning
+   * scheme.
+   */
+  scenarioVersion?: string;
 }
 
 export const BENCHMARK_QUERIES: BenchmarkQuery[] = [
@@ -581,7 +591,7 @@ export const BENCHMARK_QUERIES: BenchmarkQuery[] = [
     query: "What kind of things can we save to memory?",
     expectedIds: [45, 46, 47, 48],
     currentTruthIds: [45, 46, 47, 48],
-    note: "Paraphrase of the memory record kinds / states / confidence / safety flags surface. Records use 'kind' / 'state' / 'confidence' / 'safety flags', not 'things' / 'save'.",
+    note: "Paraphrase of the memory record kinds / states / confidence / relationship surface. Records use 'kind' / 'state' / 'confidence' / 'relationship', not 'things' / 'save'.",
   },
   {
     id: "para-incident-comms",
@@ -680,7 +690,7 @@ export const BENCHMARK_QUERIES: BenchmarkQuery[] = [
     query: "What fields and shapes do memory records carry?",
     expectedIds: [45, 46, 47, 48],
     currentTruthIds: [45, 46, 47, 48],
-    note: "Needs kind enum (45) + state enum (46) + confidence range (47) + safety flags (48). Four-slot query.",
+    note: "Needs kind enum (45) + state enum (46) + confidence range (47) + relationship block (48). Four-slot query.",
   },
   {
     id: "multi-test-policy",
@@ -797,7 +807,7 @@ export const BENCHMARK_QUERIES: BenchmarkQuery[] = [
     query: "What does a memory record look like?",
     expectedIds: [45, 46, 47, 48],
     currentTruthIds: [45, 46, 47, 48],
-    note: "Status: kind enum + state enum + confidence range + safety flags. Four-slot query — gives the orientation metrics a fourth-shape slot (4 ids) beyond the 2- and 3-id queries the original family had.",
+    note: "Status: kind enum + state enum + confidence range + relationship block. Four-slot query — gives the orientation metrics a fourth-shape slot (4 ids) beyond the 2- and 3-id queries the original family had.",
   },
 
   // -------------------------------------------------------------------------

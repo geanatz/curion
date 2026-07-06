@@ -186,7 +186,6 @@ test("storage: different projects have isolated SQLite files", () => {
       providerId: "test",
       modelId: "test",
       confidence: 0.9,
-      safetyFlags: [],
       metadata: { tags: ["proj1", "postgres"] },
     });
     insertMemoryRecord(handle1, {
@@ -196,7 +195,6 @@ test("storage: different projects have isolated SQLite files", () => {
       providerId: "test",
       modelId: "test",
       confidence: 0.9,
-      safetyFlags: [],
       metadata: { tags: ["proj1", "redis"] },
     });
 
@@ -208,7 +206,6 @@ test("storage: different projects have isolated SQLite files", () => {
       providerId: "test",
       modelId: "test",
       confidence: 0.9,
-      safetyFlags: [],
       metadata: { tags: ["proj2", "k8s"] },
     });
     insertMemoryRecord(handle2, {
@@ -218,7 +215,6 @@ test("storage: different projects have isolated SQLite files", () => {
       providerId: "test",
       modelId: "test",
       confidence: 0.9,
-      safetyFlags: [],
       metadata: { tags: ["proj2", "docker"] },
     });
 
@@ -278,7 +274,6 @@ test("privacy: private project config is not readable by other projects", () => 
       providerId: "test",
       modelId: "test",
       confidence: 0.9,
-      safetyFlags: [],
       metadata: {},
     });
     insertMemoryRecord(handle2, {
@@ -288,7 +283,6 @@ test("privacy: private project config is not readable by other projects", () => 
       providerId: "test",
       modelId: "test",
       confidence: 0.9,
-      safetyFlags: [],
       metadata: {},
     });
 
@@ -317,7 +311,6 @@ test("lexical: rankLexical is deterministic and threshold-based", async () => {
       providerId: "test",
       modelId: "test",
       confidence: 0.9,
-      safetyFlags: [],
       metadata: { tags: ["postgres", "storage"] },
     });
     insertMemoryRecord(handle, {
@@ -327,7 +320,6 @@ test("lexical: rankLexical is deterministic and threshold-based", async () => {
       providerId: "test",
       modelId: "test",
       confidence: 0.9,
-      safetyFlags: [],
       metadata: { tags: ["redis", "cache"] },
     });
     insertMemoryRecord(handle, {
@@ -337,7 +329,6 @@ test("lexical: rankLexical is deterministic and threshold-based", async () => {
       providerId: "test",
       modelId: "test",
       confidence: 0.9,
-      safetyFlags: [],
       metadata: { tags: ["ui"] },
     });
 

@@ -147,10 +147,10 @@ function seedMemories(handle: StorageHandle, n: number): void {
   const stmt = handle.db.prepare(`
     INSERT INTO memories (
       kind, created_at, updated_at, summary, state,
-      provider_id, model_id, confidence, safety_flags, metadata
+      provider_id, model_id, confidence, metadata
     ) VALUES (
       @kind, @created_at, @updated_at, @summary, @state,
-      @provider_id, @model_id, @confidence, @safety_flags, @metadata
+      @provider_id, @model_id, @confidence, @metadata
     )
   `);
   const now = Date.now();
@@ -171,7 +171,6 @@ function seedMemories(handle: StorageHandle, n: number): void {
         provider_id: "test",
         model_id: "test",
         confidence: 0.9,
-        safety_flags: "[]",
         metadata: JSON.stringify({
           tags: isRelevant ? ["postgres", "storage"] : ["decoy"],
         }),
@@ -259,7 +258,6 @@ test("timing: insertMemoryRecord batched 100 inserts (median < 25ms)", async () 
       providerId: "test",
       modelId: "test",
       confidence: 0.9,
-      safetyFlags: [],
       metadata: { tags: ["postgres", "storage"] },
     };
 

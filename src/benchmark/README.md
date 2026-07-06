@@ -26,6 +26,10 @@ npm run benchmark:retrieval:abstention-audit
 
 # Run the calibration experiment
 npm run benchmark:retrieval:calibrate
+
+# Run the long-horizon memory evaluation (scripted, no-network,
+# temp-storage isolated; drives the storage lifecycle seams)
+npm run benchmark:long-horizon-memory-evaluation
 ```
 
 ---
@@ -131,6 +135,10 @@ All artifacts are written under `.curion/benchmark/` (gitignored). Each report c
 | `retrieval-abstention-audit-*.json` | Abstention-signal audit |
 | `retrieval-abstention-policy-*.json` | Multi-signal policy evaluation |
 | `retrieval-no-answer-abstention-*.json` | No-answer calibration experiment |
+| `retrieval-adaptive-depth-evaluation-*.json` | Adaptive-depth evaluation |
+| `decision-policy-evaluation-*.json` | Decision-policy evaluation (memory side) |
+| `recall-policy-evaluation-*.json` | Recall-policy evaluation (recall side, scripted) |
+| `long-horizon-memory-evaluation-*.json` | Long-horizon memory evaluation (storage lifecycle, scripted, temp storage) |
 
 The `formatRetrievalReport` helper in `src/benchmark/retrieval-runner.ts` produces a human-readable summary for each artifact.
 
@@ -234,3 +242,230 @@ The `bootstrapCi` helper in `src/benchmark/metrics.ts` computes 95% confidence i
 2. Register it in `src/benchmark/retrieval-runner.ts` CLI parsing and `runRetrievalBenchmark` / `runDenseRetrievalBenchmark`.
 3. Add source-tree guards in the appropriate test file.
 4. Do NOT import it from production code (`src/controller/`, `src/server.ts`).
+
+---
+
+## Decision-policy evaluation (`benchmark:decision-policy-evaluation`)
+
+A self-contained, deterministic, no-network harness that runs the real `decideRememberPolicyWithFallback` adapter against the curated v2 scenario set (26 scenarios across `normal-memory-decisions` / `safety-privacy` / `lifecycle-time` / `robustness-traps`) and writes a JSON artifact under `.curion/benchmark/` (prefix `decision-policy-evaluation-`).
+
+The harness is benchmark-only / research-only:
+- It does NOT touch the production storage, the public MCP API, the controller's behavior, or the `remember(text)` flow.
+- It does NOT activate decision actions. The captured `DecisionAdapterSuccess.value` is recorded on the report but NEVER applied to persisted memory or any controller state.
+- It does NOT use real credentials; the scripted fetch returns canned responses in-process and the harness wires fake API keys through the test-only `fetchImpl` seam.
+
+### Quick start (scripted, default)
+
+```sh
+# Default scripted run — no network, no cost, deterministic.
+npm run benchmark:decision-policy-evaluation
+```
+
+### Live evaluation mode (manual opt-in, real provider)
+
+Live mode is a **manual, opt-in, cost-bearing research probe** that invokes the real configured provider/model against the same curated scenario set. It is impossible to reach accidentally: it requires **BOTH** the env opt-in flag AND the `--live` CLI flag.
+
+```sh
+# Set your provider config (e.g. OpenAI-compatible, Anthropic, etc.) via the
+# existing CURION_PRIMARY_* / CURION_FALLBACK_* env vars. Example:
+export CURION_PRIMARY_BASE_URL="https://api.openai.com/v1"
+export CURION_PRIMARY_MODEL="gpt-4o-mini"
+export CURION_PRIMARY_API_KEY="sk-..."
+
+# Then enable live mode. BOTH signals are required:
+export CURION_DECISION_EVAL_LIVE=1
+npm run benchmark:decision-policy-evaluation -- --live
+```
+
+The runner also ships a convenience script that wires both signals in one command:
+
+```sh
+npm run benchmark:decision-policy-evaluation:live
+```
+
+> ⚠️ **Live mode is a manual, opt-in research probe.** Each HTTP call is billed to the API key in your environment. The harness does **not** activate the production decision engine and the captured structured decision is **never** applied to persisted memory or any controller state. Inspect the live `report.live` metadata block on the artifact before trusting any pass rate.
+
+### Misconfig gating
+
+Live mode refuses to run unless BOTH signals are present. A user who passes `--live` without the env flag (or vice versa) gets a clear notice on stderr and the run stays in scripted mode:
+
+```sh
+# --live without env flag → scripted + notice.
+npm run benchmark:decision-policy-evaluation -- --live
+
+# env flag without --live → scripted + notice.
+CURION_DECISION_EVAL_LIVE=1 npm run benchmark:decision-policy-evaluation
+```
+
+### Live-mode report shape
+
+In live mode, the JSON artifact carries a top-level `live` metadata block in addition to the standard v2 metrics:
+
+- `optInEnvPresent` — whether `CURION_DECISION_EVAL_LIVE=1` was set at run start.
+- `optInCliArgs` — the `--live` CLI args the runner saw.
+- `providerConfigSnapshot` — resolved base URL / model / apiFormat / timeoutMs / maxTokens, plus boolean `hasPrimaryApiKey` / `hasFallbackApiKey` presence flags. **API key values are never recorded.**
+- `providerUsedCounts` / `modelUsedCounts` — aggregate counts over successful scenarios.
+- `liveCallCount` — total HTTP calls across all live scenarios.
+- `warnings` — reviewer-must-read-first caveats (cost, provider policy, latency, etc.).
+
+In scripted mode, the `live` block is absent (the scripted artifact stays byte-equal to the v2 baseline apart from the new `evaluationMode` label).
+
+### CLI flags
+
+```
+--artifacts <path>      override the artifact directory (default: .curion/benchmark)
+--no-write              suppress the JSON artifact
+--no-stdout             suppress the human report on stdout
+--live                  opt in to live evaluation mode (requires CURION_DECISION_EVAL_LIVE=1)
+```
+
+Unknown flags are a hard error so a misspelled flag surfaces clearly.
+
+---
+
+## Recall-policy evaluation (`benchmark:recall-policy-evaluation`)
+
+A self-contained, deterministic, **scripted / no-network** benchmark harness for the recall-side decision vocabulary — the recall-side counterpart of the decision-policy evaluation above. The benchmark runs a **benchmark-only** recall-policy adapter (NOT a production adapter — the production recall-policy decision engine does not yet exist) against a curated **v1 scenario set** of 16 scenarios across 5 categories (`answerable` / `no-memory-weak-match` / `ambiguity` / `lifecycle` / `robustness`) and writes a JSON artifact under `.curion/benchmark/` (prefix `recall-policy-evaluation-`).
+
+The harness is benchmark-only / research-only:
+- It does **not** touch production storage, the public MCP API, the production `recall(text)` controller, or any controller state.
+- It does **not** install / activate a production recall-policy decision engine. The captured structured decision is recorded on the report but never applied to persisted memory, public output, public `structuredContent`, or any controller state.
+- It does **not** use real credentials; the scripted fetch returns canned responses in-process and the harness wires fake API keys through the test-only `fetchImpl` seam.
+- v1 ships **scripted mode only**; the `--live` flag is deliberately not exposed because there is no production recall-policy adapter to drive live.
+
+### Quick start (scripted, default)
+
+```sh
+# Default scripted run — no network, no cost, deterministic.
+npm run benchmark:recall-policy-evaluation
+```
+
+### What the report carries
+
+- `scenarioSetVersion: "v1"` stamp.
+- `meta`: scenario count, passed / failed counts, adapter-ok / adapter-failed counts, total HTTP calls, abstention-critical and scope counters.
+- `categories`: per-category summary table across the 5 recall-side categories; each row shows total / passed / failed and abstention-critical (p/total).
+- `scopes`: per-scope summary (`model-quality` vs `provider-path`).
+- `statusHistogram` + `reasonHistogram`: full vocabulary coverage, count of zero when not observed.
+- `perStatusAccuracy` + `perReasonAccuracy`: per-vocabulary-slot accuracy over scenarios that set the expectation.
+- `statusConfusionMatrix`: rows = expected status (or `<failed:kind>`), cols = actual status.
+- `targetMemoryMatch`: aggregate Jaccard (= IoU over id sets) over scenarios that set an `expected*Ids` block.
+- `providerCallStats`: total calls, repair / fallback attempt counts, adapter-failure count.
+- `abstentionGate`: strict pass-100% gate on every `abstentionCritical` scenario.
+- `safetyGate`: pass-only-safety-critical gate (informational in v1; no `safety` category scenarios in v1).
+- `modelQualityGate` + `providerPathGate` + `gates.overallPassed`: full v1 gate stack.
+- `runs`: per-scenario captured data (id / label / description / query / relatedCount / httpCalls / repairAttempted / fallbackAttempted / status / reason / confidence / sourceIds / conflictIds / supersededIds / olderVariantIds / capturedTargetIds / targetMemoryJaccard / assertions / pass / decisionQualityPass / providerPathPass / category / abstentionCritical / evaluationScope).
+- `limitations`: the research-only disclosure block (no-network, benchmark-only adapter, frozen scenario set, public-API guards).
+
+### CLI flags
+
+```
+--artifacts <path>      override the artifact directory (default: .curion/benchmark)
+--no-write              suppress the JSON artifact
+--no-stdout             suppress the human report on stdout
+```
+
+Unknown flags are a hard error so a misspelled flag surfaces clearly. The runner deliberately does **not** expose `--live` in v1 (the production recall-policy adapter does not yet exist).
+
+### Limitations
+
+The full limitations block lives on `report.limitations`. The headline items:
+
+- **Synthetic-scenario evaluation** (v1 scenario set, 16 scenarios). The scenarios are hand-curated and exercise the benchmark-only adapter against small, deterministic evidence packets. A reviewer who reads a scenario-pass rate as "the recall-policy decision engine generalises to production traffic" is over-reading the result; the right reading is "the benchmark-only adapter produces the expected structured decision on the v1 scenario set".
+- **No-network (scripted mode)** — the harness never makes a real provider call.
+- **Benchmark-only adapter, not a production adapter** — the recall-policy decision vocabulary does not yet exist as a production code path; v1 ships a benchmark-only adapter that consumes canned JSON decisions via a scripted fetch. A future Phase that adds a production recall-policy adapter can lift these schemas into a server-internal module without changing the v1 scenario expectations.
+- **Adapter-driven, not controller-driven** — the harness exercises a benchmark-only adapter directly with constructed evidence packets. The production recall controller's lexical ranker, adaptive-depth selector, and synthesis-validation reroute are NOT exercised by this harness. The companion adaptive-depth evaluation (`benchmark:retrieval:adaptive-depth`) and the recall-mvp controller test suite cover those paths.
+- **Public MCP API unchanged** — exactly two tools (`remember`, `recall`); no MCP tool / resource / input schema change.
+- **Frozen scenario set** (version `v1`). A future v2 that adds new categories, axes, or replaces existing scenarios is a deliberate, visible change.
+- **Target-memory IDs** in `expectedSourceIds` / `sourceIdInAnswer` / `sourceIdNotInAnswer` are the stable storage ids the production recall controller would emit (NOT positional indices).
+- **Safety gate is currently informational** — the v1 set does not exercise a `safety` category (the recall-policy adapter is benchmark-only and does not process user-supplied input through a safety pre-check). The `safetyGate` passes vacuously when 0 safety-critical scenarios are present; a future v2 that adds `secret` / `prompt-injection`-style recall scenarios can populate the gate.
+
+---
+
+## Long-horizon memory evaluation (`benchmark:long-horizon-memory-evaluation`)
+
+A self-contained, deterministic, **scripted / no-network** benchmark harness that drives the production storage lifecycle seams (`insertMemoryRecord`, `transitionMemoryState`, `addSupersededByToMemory`, `updateMemoryMetadata`, `listActiveMemorySummaries`, `listMemoryTransitions`) against a curated v1 scenario set of **8 multi-step lifecycle stories** and emits a JSON artifact under `.curion/benchmark/` (prefix `long-horizon-memory-evaluation-`).
+
+The benchmark is benchmark-only / research-only:
+- It does NOT touch production storage (every scenario runs against a fresh temp `initStorage` handle in `os.tmpdir()`; the harness closes the DB and removes the temp dir at the end of every scenario).
+- It does NOT call any provider, any network endpoint, or any external service.
+- It does NOT mutate the public MCP `remember` / `recall` tool behavior, the public tool input schema, or the public `structuredContent` shape.
+- It does NOT exercise the production `recall(text)` controller — the benchmark is a storage-lifecycle probe, not a controller probe.
+- It does NOT activate decision engine actions or recall-controller behavior; it exercises the audit-backed storage seams directly.
+
+### Quick start (scripted, default)
+
+```sh
+# Default scripted run — no network, no cost, deterministic.
+npm run benchmark:long-horizon-memory-evaluation
+```
+
+### What it measures
+
+The benchmark evaluates whether the storage lifecycle seams preserve the correct **final state** and the correct **current truth** after a scripted multi-step evolution. The scenarios cover the brief's required multi-step lifecycle axes:
+
+- **Supersession chain** — `A → B → C` (3-step chain); recall returns C.
+- **Multi-update recall** — same shape with a different topic; recall returns the chain winner.
+- **Invalidation / retraction** — `active → invalidated`; recall excludes the row.
+- **Invalidate-after-supersede** — supersede then invalidate the new row; recall is empty (covers the "both paths can hide a memory" contract).
+- **Conflict preserved active** — `conflictsWith` pointer added; BOTH memories remain `active` (the pointer is a soft relationship, NOT an auto-invalidation).
+- **Redundancy linked** — `olderVariantsOf` pointer added; BOTH memories remain `active` (the pointer is a soft relationship, NOT a state transition).
+- **False premise about a stale memory** — recall about a stale memory returns the CURRENT truth, NOT the stale record.
+- **Multi-topic / project-like separation** — two parallel lifecycle chains in different domains; recall returns both current truths.
+
+### Headline metrics
+
+| Metric | What it measures |
+|---|---|
+| `lifecycleStateAccuracy` | Per-memory final state matches the expected state (active / superseded / invalidated) after the multi-step evolution. |
+| `currentTruthAccuracy` | The final active-memory id set matches the expected current truth (set match; order-independent). |
+| `staleExclusionAccuracy` | Every superseded / invalidated memory is excluded from the final active-memory id set. |
+| `conflictPreservationAccuracy` | Every conflict-pointer scenario's two conflicting labels remain `active` after the pointer is added (no auto-invalidation). |
+| `auditAccuracy` | Every scenario's `memory_transitions` audit-row count matches the expected count. |
+
+### Gates
+
+The benchmark reports five headline gates plus a top-level `overallPassed` verdict:
+
+- `lifecycleStateGate` — every tracked memory's final state matches the expected state.
+- `currentTruthGate` — every `currentTruthCritical` scenario's final active-memory set matches the expected current truth.
+- `staleExclusionGate` — every `staleExclusionCritical` scenario's final active-memory set excludes every expected stale id.
+- `conflictPreservationGate` — every `conflictCritical` scenario's two conflicting labels remain `active`.
+- `auditGate` — every scenario's audit-row count matches.
+- `gates.overallPassed` — conjunction of every gate.
+
+### What the report carries
+
+- `generatedAt` ISO timestamp.
+- `scenarioSetVersion: "v1"` stamp.
+- `evaluationMode: "scripted"` label.
+- `meta`: scenario count, passed / failed counts, lifecycle-state check counters, current-truth / stale-exclusion / conflict-preservation / audit-critical counters, total audit rows.
+- `categories`: per-category summary table (8 categories, one row each); each row shows total / passed / failed and the current-truth-critical + conflict-critical sub-counts.
+- `aggregateMetrics`: the 5 headline metrics (lifecycleStateAccuracy, currentTruthAccuracy, staleExclusionAccuracy, conflictPreservationAccuracy, auditAccuracy).
+- `lifecycleStateGate` + `currentTruthGate` + `staleExclusionGate` + `conflictPreservationGate` + `auditGate`: per-gate counts, pass/fail, and failed-scenario id lists.
+- `gates`: structured overall-pass verdict plus a human-readable `summary` line.
+- `runs`: per-scenario captured data — per-tracked-memory final states (label / id / state / relationship block / audit history), per-recall snapshots, per-expectation assertion rows, per-gate pass attribution.
+- `limitations`: research-only disclosure block (12 items: synthetic-scenario evaluation, no-network, temp-storage isolated, public-API unchanged, controller-driven lifecycle out of scope, frozen scenario set, etc.).
+
+### CLI flags
+
+```
+--artifacts <path>      override the artifact directory (default: .curion/benchmark)
+--no-write              suppress the JSON artifact (the runner still prints the human report)
+--no-stdout             suppress the human report on stdout (the runner still writes the artifact)
+```
+
+Unknown flags are a hard error. The runner deliberately does NOT expose `--live` in v1 (the benchmark is scripted / no-network by design; there is no live mode to opt into).
+
+### Limitations
+
+The full limitations block lives on `report.limitations`. The headline items:
+
+- **Storage-lifecycle probe, not a controller probe.** The harness drives the internal storage seams directly. The production `remember(text)` controller's supersession-driven state transitions are NOT exercised by this benchmark; the recall controller's behavior is unchanged and is covered by the recall-mvp controller test surface. A reviewer who reads a scenario-pass rate as "the controller correctly handles multi-step lifecycle in production traffic" is over-reading the result.
+- **Synthetic-scenario evaluation** (v1 scenario set, 8 scenarios). The scenarios are hand-curated and exercise the production storage seams against small, deterministic evidence packets.
+- **No-network.** The harness never makes a real provider call.
+- **Temp-storage isolated.** Each scenario creates a fresh storage handle in `os.tmpdir()` via `mkdtempSync` + `initStorage`. The harness closes the DB and removes the temp dir at the end of every scenario. Production `.curion/curion.sqlite` is NEVER touched.
+- **Public MCP API unchanged.** The harness exercises the internal storage seams directly, NOT through the public `remember(text)` or `recall(text)` controller. The public MCP API, the public tool input schemas, and the public `structuredContent` shapes are unchanged. Exactly two tools (`remember`, `recall`) remain on the wire.
+- **Frozen scenario set** (version `v1`). A future v2 that adds new categories, axes, or replaces existing scenarios is a deliberate, visible change.
+- **Memory-content payloads are safe.** Every scenario's `memoryContent` is a short, safe English sentence (no secrets, no raw input fields, no PII).
+- **Conflict pointer is a soft relationship, not an auto-invalidation.** A scenario that fails the `conflictPreservationGate` check indicates the conflict pointer accidentally triggered an auto-invalidation; the storage contract is that a `conflictsWith` pointer NEVER triggers a state transition.

@@ -74,7 +74,6 @@ function insertTestMemory(
     providerId: "test",
     modelId: "test-model",
     confidence: 0.9,
-    safetyFlags: [],
     metadata: {},
   });
   return record.id;

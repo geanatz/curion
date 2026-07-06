@@ -156,7 +156,6 @@ function seedScenarioRows(handle: StorageHandle, scenario: Scenario): MemoryReco
       providerId: "minimax",
       modelId: "MiniMax-M3",
       confidence: 0.9,
-      safetyFlags: ["controller-normalized"],
       metadata: {
         tags: row.tags ?? [],
         classification: null,

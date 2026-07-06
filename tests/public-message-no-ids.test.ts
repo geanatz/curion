@@ -130,7 +130,6 @@ function insertWithRelationship(
     providerId: "minimax",
     modelId: "MiniMax-M3",
     confidence: 0.9,
-    safetyFlags: ["controller-normalized"],
     metadata,
   });
 }

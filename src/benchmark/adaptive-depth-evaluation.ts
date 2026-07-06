@@ -149,9 +149,11 @@ import {
   type RecallOutcome,
   runRecallController,
 } from "../controller/recall-controller.js";
+import { writeTimestampedJsonArtifact } from "./_artifact.js";
+import { buildRecordingScriptedFetch, okChatResponse } from "./_scripted-fetch.js";
 
 // ---------------------------------------------------------------------------
-// Inlined test-only helpers
+// Scripted fetch + canned response shapes
 // ---------------------------------------------------------------------------
 //
 // The benchmark module needs a small scripted `fetch` and a
@@ -160,45 +162,16 @@ import {
 // and the test provider config in `tests/shared-test-provider.ts`.
 // The benchmark files live under `src/`, which has a
 // `rootDir` of `src` in `tsconfig.json`, so we cannot
-// import from `tests/`. We inline the minimal helpers here
-// to keep the benchmark self-contained.
+// import from `tests/`. The shared `_scripted-fetch.ts`
+// helper is the benchmark-side mirror: it produces
+// byte-equivalent shapes (same JSON, same headers, same
+// status codes) so a reviewer reading either file sees
+// the same contract.
 //
-// The shapes are byte-equivalent to the canonical test
-// helpers so a reviewer reading both files sees the same
-// contract: a scripted fetch that records every call's
-// body, a minimal chat-completions response, and a
-// placeholder primary/fallback provider config the
-// controller consumes.
-
-interface ScriptedFetch {
-  fetchImpl: typeof fetch;
-  calls: Array<{ url: string; body: string }>;
-}
-
-function scriptFetch(responder: () => Response): ScriptedFetch {
-  const calls: Array<{ url: string; body: string }> = [];
-  const fetchImpl: typeof fetch = async (input, init) => {
-    const url = typeof input === "string" ? input : (input as URL).toString();
-    let body = "";
-    if (init && typeof init === "object" && "body" in init && init.body) {
-      body = String(init.body);
-    }
-    calls.push({ url, body });
-    return responder();
-  };
-  return { fetchImpl, calls };
-}
-
-function okChatResponse(content: string): Response {
-  return new Response(
-    JSON.stringify({
-      id: "x",
-      model: "m",
-      choices: [{ message: { role: "assistant", content } }],
-    }),
-    { status: 200, headers: { "content-type": "application/json" } }
-  );
-}
+// The recorder scaffolding (`buildRecordingScriptedFetch`)
+// is shared with the decision-policy harness; the
+// per-scenario state machine (which canned response to
+// return per call) is private to each harness.
 
 // Placeholder test provider config. The controller never
 // makes a real HTTP call under the scripted fetch; the
@@ -323,6 +296,14 @@ export interface EvaluationScenario {
    * report.
    */
   expect: ScenarioExpectations;
+  /**
+   * Scenario version stamp. The field is surfaced on the
+   * report so a reviewer can audit which scenario set
+   * version produced the artifact. The value is a
+   * human-readable string (e.g. `"1.0"`); the format
+   * is not machine-enforced.
+   */
+  scenarioVersion?: string;
 }
 
 /**
@@ -531,6 +512,7 @@ export const BUILT_IN_SCENARIOS: ReadonlyArray<EvaluationScenario> = [
       adaptive: { minSelectedCount: 6, maxSelectedCount: 15 },
       legacy: { minSelectedCount: 5, maxSelectedCount: 5 },
     },
+    scenarioVersion: "1.0",
   },
   // -----------------------------------------------------------------------
   // 2. Narrow precise query
@@ -575,6 +557,7 @@ export const BUILT_IN_SCENARIOS: ReadonlyArray<EvaluationScenario> = [
       adaptive: { minSelectedCount: 1, maxSelectedCount: 5 },
       legacy: { minSelectedCount: 1, maxSelectedCount: 5 },
     },
+    scenarioVersion: "1.0",
   },
   // -----------------------------------------------------------------------
   // 3. Noisy tail
@@ -622,6 +605,7 @@ export const BUILT_IN_SCENARIOS: ReadonlyArray<EvaluationScenario> = [
       adaptive: { minSelectedCount: 1, maxSelectedCount: 5 },
       legacy: { minSelectedCount: 1, maxSelectedCount: 5 },
     },
+    scenarioVersion: "1.0",
   },
   // -----------------------------------------------------------------------
   // 4. Prompt budget: 20 long memories
@@ -659,6 +643,7 @@ export const BUILT_IN_SCENARIOS: ReadonlyArray<EvaluationScenario> = [
         maxSelectedCount: 5,
       },
     },
+    scenarioVersion: "1.0",
   },
   // -----------------------------------------------------------------------
   // 5. Provider refusal -> weak_match
@@ -699,6 +684,7 @@ export const BUILT_IN_SCENARIOS: ReadonlyArray<EvaluationScenario> = [
       adaptive: { minSelectedCount: 1, maxSelectedCount: 15 },
       legacy: { minSelectedCount: 1, maxSelectedCount: 5 },
     },
+    scenarioVersion: "1.0",
   },
   // -----------------------------------------------------------------------
   // 6. Superseded pair
@@ -733,6 +719,7 @@ export const BUILT_IN_SCENARIOS: ReadonlyArray<EvaluationScenario> = [
       adaptive: { minSelectedCount: 2, maxSelectedCount: 15 },
       legacy: { minSelectedCount: 2, maxSelectedCount: 5 },
     },
+    scenarioVersion: "1.0",
   },
 ];
 
@@ -875,7 +862,6 @@ async function runSingleScenarioConfig(
         providerId: "test",
         modelId: "test-model",
         confidence: 0.9,
-        safetyFlags: ["controller-normalized"],
         metadata: {
           tags: m.tags ?? [],
           classification: null,
@@ -939,7 +925,7 @@ async function runSingleScenarioConfig(
       synthesisCalls += 1;
       return okChatResponse(scenario.providerResponse ?? "ok");
     };
-    const { fetchImpl, calls } = scriptFetch(responder);
+    const { fetchImpl, calls } = buildRecordingScriptedFetch(responder);
     void calls; // keep eslint happy; calls array is the canonical record but we use synthesisBody.
     // The scripted fetch captures the body into `calls[0].body`.
     // To keep the captured body in a stable local, the
@@ -1282,22 +1268,19 @@ const ARTIFACT_FILE_PREFIX = "retrieval-adaptive-depth-evaluation";
  * (distinct from the existing audit / calibration /
  * policy / held-out prefixes) so a reviewer can find the
  * evaluation artifact next to the regular reports without
- * confusing them. The timestamp is the current ISO
- * timestamp with `:` / `.` replaced by `-` so the
- * filename is safe across shells.
+ * confusing them.
+ *
+ * The on-disk steps (mkdir, ISO-stamp filename, JSON
+ * stringify, writeFileSync, return full path) are shared
+ * with the decision-policy writer via
+ * `writeTimestampedJsonArtifact` so both runners produce
+ * byte-equivalent artifacts under the same convention.
  */
 export function writeAdaptiveDepthEvaluationReport(
   report: AdaptiveDepthEvaluationReport,
   dir: string
 ): string {
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-  }
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const filename = `${ARTIFACT_FILE_PREFIX}-${stamp}.json`;
-  const full = path.join(dir, filename);
-  fs.writeFileSync(full, JSON.stringify(report, null, 2), "utf8");
-  return full;
+  return writeTimestampedJsonArtifact(report, dir, ARTIFACT_FILE_PREFIX);
 }
 
 // ---------------------------------------------------------------------------

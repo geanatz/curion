@@ -57,6 +57,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { parseBenchmarkArtifactCli } from "./_cli.js";
 import {
   formatAdaptiveDepthEvaluationReport,
   runAdaptiveDepthEvaluation,
@@ -65,27 +66,35 @@ import {
 
 /**
  * Parse the adaptive-depth evaluation CLI args. The
- * parser is a minimal hand-rolled loop that mirrors the
- * held-out / dev-set runner's flag style. A flag not
- * recognised is a hard error; the brief is explicit that
- * the adaptive-depth evaluation CLI is a narrow tool,
- * not a general benchmark runner.
+ * runner's CLI surface is intentionally narrow:
+ * `--artifacts <path>` and nothing else. `--no-write` and
+ * `--no-stdout` are not supported (the adaptive-depth
+ * runner is a one-shot benchmark tool; the JSON artifact
+ * + human report are both its primary output).
+ *
+ * The parser is a thin wrapper over the shared
+ * `parseBenchmarkArtifactCli` helper so the runner, the
+ * decision-policy runner, and any future benchmark runner
+ * share the same parsing semantics. The per-runner label
+ * (`"adaptive-depth evaluation"`) is preserved verbatim
+ * from the inline implementation so the existing tests'
+ * error-message regex assertion (`/unknown adaptive-depth
+ * evaluation cli flag/`) keeps passing.
  */
 export function parseAdaptiveDepthEvaluationCli(argv: ReadonlyArray<string>): {
   artifactsDir: string;
 } {
-  const opts = {
-    artifactsDir: path.join(process.cwd(), ".curion", "benchmark"),
-  };
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === "--artifacts" && argv[i + 1] !== undefined) {
-      opts.artifactsDir = argv[++i]!;
-    } else {
-      throw new Error(`unknown adaptive-depth evaluation cli flag: "${a}"`);
-    }
-  }
-  return opts;
+  const parsed = parseBenchmarkArtifactCli(argv, {
+    // `--no-write` and `--no-stdout` are deliberately NOT
+    // supported: the adaptive-depth runner's only flag
+    // is `--artifacts <path>`. Passing them through would
+    // silently broaden the runner's CLI surface, which the
+    // brief explicitly forbids.
+    supportNoWrite: false,
+    supportNoStdout: false,
+    contextLabel: "adaptive-depth evaluation",
+  });
+  return { artifactsDir: parsed.artifactsDir };
 }
 
 // ---------------------------------------------------------------------------

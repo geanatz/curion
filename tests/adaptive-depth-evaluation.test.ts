@@ -395,6 +395,20 @@ test("adaptive-depth evaluation: CLI parser accepts --artifacts and rejects unkn
     () => parseAdaptiveDepthEvaluationCli(["--unknown-flag"]),
     /unknown adaptive-depth evaluation cli flag/
   );
+  // The adaptive-depth runner's CLI surface is intentionally
+  // narrower than the decision-policy runner's. `--no-write`
+  // and `--no-stdout` are NOT supported; passing them through
+  // would silently broaden the runner's CLI surface, which the
+  // shared `parseBenchmarkArtifactCli` helper enforces via
+  // `supportNoWrite: false` / `supportNoStdout: false`.
+  assert.throws(
+    () => parseAdaptiveDepthEvaluationCli(["--no-write"]),
+    /unknown adaptive-depth evaluation cli flag: "--no-write"/
+  );
+  assert.throws(
+    () => parseAdaptiveDepthEvaluationCli(["--no-stdout"]),
+    /unknown adaptive-depth evaluation cli flag: "--no-stdout"/
+  );
 });
 
 test("adaptive-depth evaluation: CLI parser with no args uses a safe default", () => {

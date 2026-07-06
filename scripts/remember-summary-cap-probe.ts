@@ -299,7 +299,7 @@ const INPUTS: ProbeInput[] = [
     text:
       "Curion's storage layer uses a single SQLite file at `.curion/curion.sqlite` inside the " +
       "project root. The schema has one primary table `memories(id, kind, created_at, summary, " +
-      "state, provider_id, model_id, confidence, safety_flags, metadata, updated_at)` plus an " +
+      "state, provider_id, model_id, confidence, metadata, updated_at)` plus an " +
       "FTS5 virtual table `memories_fts` indexed on the `summary` column. " +
       "Triggers keep `memories_fts` in sync with `memories` on every insert/update/delete. " +
       "The `summary` column is TEXT, unbounded — there is no DB-level cap. " +

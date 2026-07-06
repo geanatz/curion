@@ -409,7 +409,6 @@ test("structuredContent: never includes a memory id or model/provider metadata f
         providerId: "minimax",
         modelId: "MiniMax-M3",
         confidence: 0.9,
-        safetyFlags: ["controller-normalized"],
         metadata: { tags: [], classification: null },
       });
       insertedIds.push(rec.id);
@@ -498,7 +497,6 @@ test("structuredContent.notes: plain strings, no Note: prefix, no type/severity,
       providerId: "minimax",
       modelId: "MiniMax-M3",
       confidence: 0.9,
-      safetyFlags: ["controller-normalized"],
       metadata: { tags: [], classification: null },
     });
     const r2 = insertMemoryRecord(handle, {
@@ -508,7 +506,6 @@ test("structuredContent.notes: plain strings, no Note: prefix, no type/severity,
       providerId: "minimax",
       modelId: "MiniMax-M3",
       confidence: 0.9,
-      safetyFlags: ["controller-normalized"],
       metadata: { tags: [], classification: null },
     });
     const blockA = {
@@ -620,7 +617,6 @@ test("structuredContent.notes (resolved-history): plain strings, no Note: prefix
       providerId: "minimax",
       modelId: "MiniMax-M3",
       confidence: 0.9,
-      safetyFlags: ["controller-normalized"],
       metadata: { tags: [], classification: null },
     });
     insertMemoryRecord(handle, {
@@ -630,7 +626,6 @@ test("structuredContent.notes (resolved-history): plain strings, no Note: prefix
       providerId: "minimax",
       modelId: "MiniMax-M3",
       confidence: 0.9,
-      safetyFlags: ["controller-normalized"],
       metadata: { tags: [], classification: null },
     });
     const { fetchImpl } = scriptFetch(() =>
@@ -688,7 +683,6 @@ test("on-the-wire text fallback (recall.answered with notes): no Note: prefix, n
       providerId: "minimax",
       modelId: "MiniMax-M3",
       confidence: 0.9,
-      safetyFlags: ["controller-normalized"],
       metadata: { tags: [], classification: null },
     });
     const r2 = insertMemoryRecord(handle, {
@@ -698,7 +692,6 @@ test("on-the-wire text fallback (recall.answered with notes): no Note: prefix, n
       providerId: "minimax",
       modelId: "MiniMax-M3",
       confidence: 0.9,
-      safetyFlags: ["controller-normalized"],
       metadata: { tags: [], classification: null },
     });
     const blockA = {
@@ -767,7 +760,6 @@ test("on-the-wire text fallback (recall.answered without notes): just the answer
       providerId: "minimax",
       modelId: "MiniMax-M3",
       confidence: 0.9,
-      safetyFlags: ["controller-normalized"],
       metadata: { tags: [], classification: null },
     });
     const { fetchImpl } = scriptFetch(() => okChatResponse("Postgres 16 is the primary store."));
@@ -862,7 +854,6 @@ test("recall structuredContent: answered without notes -> { status: 'answered', 
       providerId: "minimax",
       modelId: "MiniMax-M3",
       confidence: 0.9,
-      safetyFlags: ["controller-normalized"],
       metadata: { tags: [], classification: null },
     });
     const { fetchImpl } = scriptFetch(() => okChatResponse("Postgres 16 is the primary store."));

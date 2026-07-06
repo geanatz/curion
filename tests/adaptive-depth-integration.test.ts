@@ -79,7 +79,6 @@ function insertSummary(
     providerId: "minimax",
     modelId: "MiniMax-M3",
     confidence: 0.9,
-    safetyFlags: ["controller-normalized"],
     metadata: {
       tags: opts.tags ?? [],
       classification: null,
@@ -340,8 +339,8 @@ test("adaptive-depth integration: superseded memories stay demoted and do not su
       .prepare(
         `INSERT INTO memories
             (kind, created_at, updated_at, summary, state,
-             provider_id, model_id, confidence, safety_flags, metadata)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+             provider_id, model_id, confidence, metadata)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         "fact",
@@ -352,7 +351,6 @@ test("adaptive-depth integration: superseded memories stay demoted and do not su
         "test",
         "test-model",
         0.9,
-        JSON.stringify(["controller-normalized"]),
         JSON.stringify({
           tags: ["postgres", "previous"],
           classification: "fact",
@@ -362,8 +360,8 @@ test("adaptive-depth integration: superseded memories stay demoted and do not su
       .prepare(
         `INSERT INTO memories
           (kind, created_at, updated_at, summary, state,
-           provider_id, model_id, confidence, safety_flags, metadata)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           provider_id, model_id, confidence, metadata)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         "fact",
@@ -374,7 +372,6 @@ test("adaptive-depth integration: superseded memories stay demoted and do not su
         "test",
         "test-model",
         0.9,
-        JSON.stringify(["controller-normalized"]),
         JSON.stringify({
           tags: ["postgres", "current"],
           classification: "fact",

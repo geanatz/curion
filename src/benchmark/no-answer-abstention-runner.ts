@@ -46,9 +46,7 @@
  *   artifact, not a deployment policy.
  */
 
-import fs from "node:fs";
-import path from "node:path";
-
+import { writeTimestampedJsonArtifact } from "./_artifact.js";
 import type { AbstentionSignals, QueryEval } from "./metrics.js";
 import {
   type NoAnswerPolicyConfig,
@@ -121,17 +119,14 @@ const ARTIFACT_FILE_PREFIX = "retrieval-no-answer-abstention";
  * diagnostic / benchmark / calibration prefixes)
  * so a reviewer can find the experiment
  * artifacts next to the regular reports without
- * confusing them. The timestamp is the current
- * ISO timestamp with `:` / `.` replaced by `-` so
- * the filename is safe across shells.
+ * confusing them.
+ *
+ * The on-disk steps (mkdir, ISO-stamp filename, JSON
+ * stringify, writeFileSync, return full path) are
+ * delegated to `writeTimestampedJsonArtifact` so
+ * the runner produces byte-equivalent artifacts
+ * under the same convention as the other runners.
  */
 export function writeNoAnswerAbstentionReport(report: NoAnswerPolicyReport, dir: string): string {
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-  }
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const filename = `${ARTIFACT_FILE_PREFIX}-${stamp}.json`;
-  const full = path.join(dir, filename);
-  fs.writeFileSync(full, JSON.stringify(report, null, 2), "utf8");
-  return full;
+  return writeTimestampedJsonArtifact(report, dir, ARTIFACT_FILE_PREFIX);
 }

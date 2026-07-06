@@ -31,7 +31,8 @@ controller validation → persistence.
 **Side effects:** writes one normalized row to the local SQLite store
 (`.curion/curion.sqlite`). **Raw input text is never persisted** —
 only controller-normalized summaries and metadata (kind, confidence,
-safety flags, timestamps).
+state, timestamps, soft `relationship` pointers in the metadata
+JSON).
 
 **Statuses:** `saved` | `rejected` | `provider_error`
 

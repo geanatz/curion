@@ -15,6 +15,7 @@ For client-specific wiring (where these env vars go in `.mcp.json`,
 - [Logging](#logging)
 - [Local trace](#local-trace)
 - [Per-request adapter knobs](#per-request-adapter-knobs)
+- [Memory Decision Engine (shadow mode)](#memory-decision-engine-shadow-mode)
 - [Project root and `.curion/config.json`](#project-root-and-curionconfigjson)
 - [Operator checklist](#operator-checklist)
 
@@ -130,6 +131,53 @@ synthesis-decision trace — useful for "I stored it but `recall` says
 > corrupts the MCP JSON-RPC frame stream. If you need to suppress or
 > capture logs, redirect stderr (`2>/dev/null`, `2>curion.log`, or the
 > client's per-server stderr-capture hook), not stdout.
+
+---
+
+## Memory Decision Engine (shadow mode)
+
+The Memory Decision Engine is the unified semantic decision system that
+will eventually consolidate Curion's family of feature-specific LLM
+classifiers (retraction detection, supersession classification, conflict
+flagging, etc.) behind one structured decision schema.
+
+| Variable                            | Default | Description |
+|-------------------------------------|---------|---|
+| `CURION_REMEMBER_DECISION_MODE`     | `off`   | Activation mode for the remember-policy decision engine. `off` (default) skips the engine entirely; `shadow` enables the engine and observes its structured decision but does not alter persisted memory, public output, or the MCP tool schema. The `active` value is reserved for a future release and is currently downgraded to `shadow`. |
+
+When the mode is `off` (the default), the engine is not invoked at all:
+no evidence packet is built, no HTTP call is made, no decision is
+recorded. Existing behavior is byte-equal to pre-engine releases.
+
+When the mode is `shadow`, the controller builds a compact, privacy-
+conscious evidence packet (raw input length + stable hash, coarse
+safety class, bounded related-memory excerpts with id tokens stripped
+from the prompt header) and calls the configured decision adapter
+(primary → fallback → same-provider repair). The structured decision
+is logged at `debug` level (`remember shadow decision: action=...
+reason=... confidence=... supersededIds=...`) but never alters
+persisted memory, public output, public `structuredContent`, or the
+MCP tool schema. A provider hard failure or an invalid structured
+response is logged and swallowed; the controller proceeds with the
+existing deterministic path unchanged.
+
+The engine reuses the same role-based provider config as the memory-
+analysis adapter (`CURION_PRIMARY_*`, `CURION_FALLBACK_*`). When the
+mode is `off`, no provider call is made and the provider config is
+irrelevant.
+
+---
+
+## Benchmark-only: decision-policy evaluation live mode
+
+| Variable                          | Default | Description |
+|-----------------------------------|---------|---|
+| `CURION_DECISION_EVAL_LIVE`       | unset   | Opt-in flag for the benchmark-only decision-policy evaluation's live mode. Set to `1` AND pass `--live` to the runner to enable live evaluation against the real configured provider/model. The harness refuses to enable live mode unless BOTH signals are present, so the live path is impossible to reach accidentally. See `src/benchmark/README.md` for the full command and a reviewer-must-read-first list of caveats. |
+
+The scripted default mode (no env var, no `--live` flag) is byte-equal
+to the v2 scripted baseline: no network, no cost, deterministic.
+This env var is read ONLY by the benchmark runner; the production
+server and the MCP `remember` / `recall` tools ignore it.
 
 ---
 

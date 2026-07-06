@@ -88,7 +88,6 @@ function insertSummary(
     providerId: "minimax",
     modelId: "MiniMax-M3",
     confidence: 0.9,
-    safetyFlags: ["controller-normalized"],
     metadata: {
       tags: opts.tags ?? [],
       classification: opts.classification ?? null,

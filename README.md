@@ -173,8 +173,8 @@ discriminated shape on `structuredContent`. Discriminate with
   memory; `recall(text)` retrieves the relevant pieces. Each takes a single
   `text` parameter — no kinds, states, filters, or knobs on the public API.
 - **Raw input is never persisted.** Only controller-normalized summaries
-  and metadata (kind, confidence, safety flags, timestamps) land in the
-  local SQLite store.
+  and metadata (kind, confidence, state, timestamps, soft `relationship`
+  pointers) land in the local SQLite store.
 - **Project-local by default.** Memory lives in `.curion/` inside the
   project. Memories are never sent to a shared backend.
 - **Pluggable providers.** OpenAI-compatible (default) or Anthropic.

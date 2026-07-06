@@ -920,7 +920,6 @@ test("recall.synthesis: refusal diagnostic fields appear on the weak_match path 
         providerId: "test",
         modelId: "test-model",
         confidence: 0.9,
-        safetyFlags: ["controller-normalized"],
         metadata: { tags: ["session", "controller"] },
       });
       const { fetchImpl } = scriptFetch(() => okChatResponse(DISTINCTIVE_REFUSAL_PHRASE));
@@ -1044,7 +1043,6 @@ test("recall.synthesis: refusal diagnostic surfaces the correct category for fir
         providerId: "test",
         modelId: "test-model",
         confidence: 0.9,
-        safetyFlags: ["controller-normalized"],
         metadata: { tags: ["postgres", "database"] },
       });
       // The original failure paraphrase: "I don't have specific
@@ -1114,7 +1112,6 @@ test("recall.synthesis: diagnostic fields are absent on the success path (regres
         providerId: "test",
         modelId: "test-model",
         confidence: 0.9,
-        safetyFlags: ["controller-normalized"],
         metadata: { tags: ["postgres", "database"] },
       });
       // Substantive answer containing the word "details" in a
@@ -1201,7 +1198,6 @@ test("recall (refined refusal pattern): true refusal 'I don't have specific info
         providerId: "test",
         modelId: "test-model",
         confidence: 0.9,
-        safetyFlags: ["controller-normalized"],
         metadata: { tags: ["postgres", "database"] },
       });
       // True refusal via `information` (Pattern 1 noun). The
@@ -1281,7 +1277,6 @@ test("recall (refined refusal pattern): substantive caveat 'I don't have memory.
         providerId: "test",
         modelId: "test-model",
         confidence: 0.9,
-        safetyFlags: ["controller-normalized"],
         metadata: { tags: ["postgres", "database"] },
       });
       const answer =
@@ -1363,7 +1358,6 @@ test("recall (refined refusal pattern): article-gap 'I don't have a summary for 
         providerId: "test",
         modelId: "test-model",
         confidence: 0.9,
-        safetyFlags: ["controller-normalized"],
         metadata: { tags: ["postgres", "database"] },
       });
       const phrase = "I don't have a summary for that topic.";
@@ -1462,7 +1456,6 @@ test("recall (refined refusal pattern): diagnostic pattern-id + category set rem
           providerId: "test",
           modelId: "test-model",
           confidence: 0.9,
-          safetyFlags: ["controller-normalized"],
           metadata: { tags: ["postgres", "database"] },
         });
         const { fetchImpl } = scriptFetch(() => okChatResponse(c.phrase));
@@ -1713,7 +1706,6 @@ test("recall Phase 3A: populated store emits all three stage events before provi
         providerId: "test",
         modelId: "test-model",
         confidence: 0.9,
-        safetyFlags: ["controller-normalized"],
         metadata: { tags: ["postgres", "database"] },
       });
       insertMemoryRecord(memHandle, {
@@ -1723,7 +1715,6 @@ test("recall Phase 3A: populated store emits all three stage events before provi
         providerId: "test",
         modelId: "test-model",
         confidence: 0.8,
-        safetyFlags: ["controller-normalized"],
         metadata: { tags: ["plants", "office"] },
       });
 
@@ -1931,7 +1922,6 @@ test("recall Phase 3A: stage event payloads are sufficient to diagnose considere
         providerId: "test",
         modelId: "test-model",
         confidence: 0.9,
-        safetyFlags: ["controller-normalized"],
         metadata: { tags: ["postgres", "database"] },
       });
       const mem2 = insertMemoryRecord(memHandle, {
@@ -1941,7 +1931,6 @@ test("recall Phase 3A: stage event payloads are sufficient to diagnose considere
         providerId: "test",
         modelId: "test-model",
         confidence: 0.85,
-        safetyFlags: ["controller-normalized"],
         metadata: { tags: ["database", "pool"] },
       });
       insertMemoryRecord(memHandle, {
@@ -1951,7 +1940,6 @@ test("recall Phase 3A: stage event payloads are sufficient to diagnose considere
         providerId: "test",
         modelId: "test-model",
         confidence: 0.8,
-        safetyFlags: ["controller-normalized"],
         metadata: { tags: ["plants", "office"] },
       });
 
@@ -2042,7 +2030,6 @@ test("recall Phase 3A: CURION_TRACE_ENABLED=0 prevents all recall stage event wr
           providerId: "test",
           modelId: "test-model",
           confidence: 0.9,
-          safetyFlags: [],
           metadata: { tags: ["postgres"] },
         });
         setRecallStorageProvider(() => ({
@@ -2093,7 +2080,6 @@ test("recall Phase 3A: trace writer failure does not change recall result with p
           providerId: "test",
           modelId: "test-model",
           confidence: 0.9,
-          safetyFlags: ["controller-normalized"],
           metadata: { tags: ["postgres", "database"] },
         });
         setRecallStorageProvider(() => ({
@@ -2221,7 +2207,6 @@ test("recall adaptive-depth + prompt-budget: events fire in the right order on p
         providerId: "test",
         modelId: "test-model",
         confidence: 0.9,
-        safetyFlags: ["controller-normalized"],
         metadata: { tags: ["postgres", "database"] },
       });
       insertMemoryRecord(memHandle, {
@@ -2231,7 +2216,6 @@ test("recall adaptive-depth + prompt-budget: events fire in the right order on p
         providerId: "test",
         modelId: "test-model",
         confidence: 0.85,
-        safetyFlags: ["controller-normalized"],
         metadata: { tags: ["database", "pool"] },
       });
 
@@ -2301,7 +2285,6 @@ test("recall adaptive-depth: payload is sufficient to debug what the selector di
           providerId: "test",
           modelId: "test-model",
           confidence: 0.9,
-          safetyFlags: ["controller-normalized"],
           metadata: { tags: ["theme", "project"] },
         });
       }
@@ -2320,7 +2303,6 @@ test("recall adaptive-depth: payload is sufficient to debug what the selector di
           providerId: "test",
           modelId: "test-model",
           confidence: 0.8,
-          safetyFlags: ["controller-normalized"],
           metadata: { tags: ["unrelated"] },
         });
       }
@@ -2435,7 +2417,6 @@ test("recall prompt-budget: payload exposes truncation + drop when memories are 
           providerId: "test",
           modelId: "test-model",
           confidence: 0.9,
-          safetyFlags: ["controller-normalized"],
           metadata: { tags: ["project", "theme"] },
         });
       }
@@ -2519,7 +2500,6 @@ test("recall adaptive-depth + prompt-budget: payloads never include raw memory t
         providerId: "test",
         modelId: "test-model",
         confidence: 0.9,
-        safetyFlags: ["controller-normalized"],
         metadata: { tags: ["postgres", "database"] },
       });
       // Add a long memory that would force truncation so the
@@ -2536,7 +2516,6 @@ test("recall adaptive-depth + prompt-budget: payloads never include raw memory t
         providerId: "test",
         modelId: "test-model",
         confidence: 0.9,
-        safetyFlags: ["controller-normalized"],
         metadata: { tags: ["long"] },
       });
 
@@ -2637,7 +2616,6 @@ test("recall adaptive-depth + prompt-budget: events are skipped when CURION_TRAC
           providerId: "test",
           modelId: "test-model",
           confidence: 0.9,
-          safetyFlags: ["controller-normalized"],
           metadata: { tags: ["postgres", "database"] },
         });
         setRecallStorageProvider(() => ({
@@ -2687,7 +2665,6 @@ test("recall adaptive-depth + prompt-budget: events are skipped when the trace w
           providerId: "test",
           modelId: "test-model",
           confidence: 0.9,
-          safetyFlags: ["controller-normalized"],
           metadata: { tags: ["postgres", "database"] },
         });
         setRecallStorageProvider(() => ({
@@ -2789,7 +2766,6 @@ test("recall.synthesis: fires on the success path with provider/model labels and
         providerId: "test",
         modelId: "test-model",
         confidence: 0.9,
-        safetyFlags: ["controller-normalized"],
         metadata: { tags: ["postgres", "database"] },
       });
       const { fetchImpl } = scriptFetch(() =>
@@ -2868,7 +2844,6 @@ test("recall.synthesis: fires on the reasoning-only provider_error path with err
         providerId: "test",
         modelId: "test-model",
         confidence: 0.9,
-        safetyFlags: ["controller-normalized"],
         metadata: { tags: ["postgres", "database"] },
       });
       // The provider returns ONLY a <think>...</think> block —
@@ -2947,7 +2922,6 @@ test("recall.synthesis: event order is strictly after recall.selected-candidates
         providerId: "test",
         modelId: "test-model",
         confidence: 0.9,
-        safetyFlags: ["controller-normalized"],
         metadata: { tags: ["postgres", "database"] },
       });
       const { fetchImpl } = scriptFetch(() =>
@@ -3006,7 +2980,6 @@ test("recall.synthesis: payload NEVER includes raw answer text, raw reasoning te
         providerId: "test",
         modelId: "test-model",
         confidence: 0.9,
-        safetyFlags: ["controller-normalized"],
         metadata: { tags: ["postgres", "database"] },
       });
       // Distinctive phrases for each leak surface we want to
@@ -3032,7 +3005,6 @@ test("recall.synthesis: payload NEVER includes raw answer text, raw reasoning te
         providerId: "test",
         modelId: "test-model",
         confidence: 0.5,
-        safetyFlags: ["controller-normalized"],
         metadata: { tags: ["unrelated"] },
       });
       const { fetchImpl } = scriptFetch(() => okChatResponse(answerWithEverything));
@@ -3107,7 +3079,6 @@ test("recall.synthesis: error message on the surface is truncated to the bounded
         providerId: "test",
         modelId: "test-model",
         confidence: 0.9,
-        safetyFlags: ["controller-normalized"],
         metadata: { tags: ["postgres", "database"] },
       });
       // The primary returns an error response with a long body.
