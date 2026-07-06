@@ -234,7 +234,7 @@ separate workstreams:
    engine-driven mutation wiring with guardrails are required before any
    active rollout.
 
-3. **Fresh benchmark run before activation** — run the full benchmark
+4. **Fresh benchmark run before activation** — run the full benchmark
    suite (`decision-policy`, `recall-policy`, `adaptive-depth`,
    `long-horizon-memory`) in the target environment before any stage
    advance. Use the artifacts as evidence for the approval gate.
