@@ -76,6 +76,7 @@ test("shadow-comparison: report has all required fields", async () => {
   assert.ok(typeof report.scenarioSetVersion === "string");
   assert.equal(report.evaluationMode, "shadow-comparison");
   assert.ok(typeof report.meta === "object");
+  assert.ok(typeof report.balancedScore === "object");
   assert.ok(Array.isArray(report.runs));
   assert.ok(Array.isArray(report.limitations));
 
@@ -89,6 +90,14 @@ test("shadow-comparison: report has all required fields", async () => {
   assert.ok(typeof m.shadowEngineNotReachedCount === "number");
   assert.ok(typeof m.mutationChecksPassed === "number");
   assert.ok(typeof m.mutationChecksFailed === "number");
+
+  // Balanced Score blocks
+  const bs = report.balancedScore;
+  assert.ok(typeof bs.safety === "object");
+  assert.ok(typeof bs.cleanerMemory === "object");
+  assert.ok(typeof bs.recallQuality === "object");
+  assert.ok(typeof bs.gate === "object");
+  assert.ok(typeof bs.delta === "object");
 
   // Runs are non-empty
   assert.ok(report.runs.length > 0);
@@ -440,4 +449,242 @@ test("shadow-comparison: each built-in scenario has safe text (no accidental sec
     // Each scenario's rawInput must be non-empty
     assert.ok(scenario.rawInput.trim().length > 0);
   }
+});
+
+// ---------------------------------------------------------------------------
+// 12. Balanced Score blocks
+// ---------------------------------------------------------------------------
+
+test("shadow-comparison: balancedScore blocks are present and have correct types", async () => {
+  const report = await runShadowComparison();
+  const bs = report.balancedScore;
+
+  // Safety block
+  assert.ok(typeof bs.safety.engineReachedCount === "number");
+  assert.ok(typeof bs.safety.safeActionCount === "number");
+  assert.ok(typeof bs.safety.unsafeActionCount === "number");
+  assert.ok(typeof bs.safety.safeActionRate === "number");
+  assert.ok(typeof bs.safety.providerErrorCount === "number");
+  assert.ok(typeof bs.safety.providerErrorRate === "number");
+  assert.ok(typeof bs.safety.passed === "boolean");
+  assert.ok(typeof bs.safety.note === "string");
+
+  // Cleaner Memory block
+  assert.ok(typeof bs.cleanerMemory.engineReachedCount === "number");
+  assert.ok(typeof bs.cleanerMemory.supersedeCount === "number");
+  assert.ok(typeof bs.cleanerMemory.invalidateCount === "number");
+  assert.ok(typeof bs.cleanerMemory.flagRedundantCount === "number");
+  assert.ok(typeof bs.cleanerMemory.flagConflictCount === "number");
+  assert.ok(typeof bs.cleanerMemory.redactCount === "number");
+  assert.ok(typeof bs.cleanerMemory.supersedeRate === "number");
+  assert.ok(typeof bs.cleanerMemory.invalidateRate === "number");
+  assert.ok(typeof bs.cleanerMemory.flagRedundantRate === "number");
+  assert.ok(typeof bs.cleanerMemory.flagConflictRate === "number");
+  assert.ok(typeof bs.cleanerMemory.redactRate === "number");
+  assert.ok(["positive", "neutral", "negative"].includes(bs.cleanerMemory.signal));
+  assert.ok(typeof bs.cleanerMemory.note === "string");
+
+  // Recall Quality block
+  assert.equal(bs.recallQuality.available, false);
+  assert.equal(bs.recallQuality.recallHitRate, null);
+  assert.equal(bs.recallQuality.recallCurrentTruthRate, null);
+  assert.equal(bs.recallQuality.recallNoAnswerTnr, null);
+  assert.equal(bs.recallQuality.recallRank1MatchRate, null);
+  assert.equal(bs.recallQuality.adaptiveDepthPassRate, null);
+  assert.equal(bs.recallQuality.signal, null);
+  assert.ok(typeof bs.recallQuality.note === "string");
+
+  // Gate block
+  assert.ok(typeof bs.gate.safetyPassed === "boolean");
+  assert.ok(typeof bs.gate.safetyGate === "string");
+  assert.ok(["positive", "neutral", "negative"].includes(bs.gate.cleanerMemorySignal));
+  assert.equal(bs.gate.recallQualitySignal, null);
+  assert.ok(typeof bs.gate.promotionEligible === "boolean");
+
+  // Delta block
+  assert.equal(bs.delta.status, "future");
+  assert.equal(bs.delta.memorySizeDelta, null);
+  assert.equal(bs.delta.recallHitRateDelta, null);
+  assert.equal(bs.delta.recallCurrentTruthRateDelta, null);
+  assert.ok(typeof bs.delta.note === "string");
+});
+
+test("shadow-comparison: safety counts are internally consistent with meta", async () => {
+  const report = await runShadowComparison();
+  const { meta, balancedScore } = report;
+  const { safety } = balancedScore;
+
+  // Safety engineReachedCount must match meta shadowEngineReachedCount
+  assert.equal(
+    safety.engineReachedCount,
+    meta.shadowEngineReachedCount,
+    "safety.engineReachedCount must equal meta.shadowEngineReachedCount"
+  );
+
+  // Unsafe action count must be non-negative and <= engine reached
+  assert.ok(safety.unsafeActionCount >= 0);
+  assert.ok(safety.unsafeActionCount <= safety.engineReachedCount);
+
+  // Safe action count must equal engine reached minus unsafe
+  assert.equal(
+    safety.safeActionCount,
+    safety.engineReachedCount - safety.unsafeActionCount,
+    "safeActionCount must equal engineReachedCount - unsafeActionCount"
+  );
+
+  // Provider error count must match meta
+  assert.equal(
+    safety.providerErrorCount,
+    meta.productionProviderErrorCount,
+    "safety.providerErrorCount must equal meta.productionProviderErrorCount"
+  );
+
+  // Provider error rate must be valid (NaN only if totalScenarios is 0)
+  if (meta.totalScenarios > 0) {
+    assert.equal(safety.providerErrorRate, safety.providerErrorCount / meta.totalScenarios);
+  }
+});
+
+test("shadow-comparison: safety gate logic matches passed/failed safety assertions", async () => {
+  const report = await runShadowComparison();
+  const { safety, gate } = report.balancedScore;
+
+  // Safety passed must be true when no unsafe actions and no provider errors
+  if (safety.unsafeActionCount === 0 && safety.providerErrorCount === 0) {
+    assert.equal(safety.passed, true, "safety must pass when no unsafe actions and no provider errors");
+    assert.equal(gate.safetyPassed, true, "gate.safetyPassed must be true when safety.passed is true");
+    assert.ok(gate.safetyGate.includes("PASS"), "safetyGate must indicate PASS");
+  } else {
+    assert.equal(safety.passed, false, "safety must fail when unsafe actions or provider errors exist");
+    assert.equal(gate.safetyPassed, false, "gate.safetyPassed must be false when safety.passed is false");
+    assert.ok(gate.safetyGate.includes("FAIL"), "safetyGate must indicate FAIL");
+  }
+});
+
+test("shadow-comparison: cleanerMemory rates are valid and reflect known actions", async () => {
+  const report = await runShadowComparison();
+  const { cleanerMemory } = report.balancedScore;
+  const engineReachedCount = cleanerMemory.engineReachedCount;
+
+  // All counts must be non-negative
+  assert.ok(cleanerMemory.supersedeCount >= 0);
+  assert.ok(cleanerMemory.invalidateCount >= 0);
+  assert.ok(cleanerMemory.flagRedundantCount >= 0);
+  assert.ok(cleanerMemory.flagConflictCount >= 0);
+  assert.ok(cleanerMemory.redactCount >= 0);
+
+  // Counts must not exceed engine reached
+  assert.ok(cleanerMemory.supersedeCount <= engineReachedCount);
+  assert.ok(cleanerMemory.invalidateCount <= engineReachedCount);
+  assert.ok(cleanerMemory.flagRedundantCount <= engineReachedCount);
+  assert.ok(cleanerMemory.flagConflictCount <= engineReachedCount);
+  assert.ok(cleanerMemory.redactCount <= engineReachedCount);
+
+  // Rates must be NaN if engineReachedCount is 0, otherwise valid fraction
+  if (engineReachedCount === 0) {
+    assert.ok(Number.isNaN(cleanerMemory.supersedeRate));
+    assert.ok(Number.isNaN(cleanerMemory.invalidateRate));
+    assert.ok(Number.isNaN(cleanerMemory.flagRedundantRate));
+    assert.ok(Number.isNaN(cleanerMemory.flagConflictRate));
+    assert.ok(Number.isNaN(cleanerMemory.redactRate));
+  } else {
+    assert.equal(cleanerMemory.supersedeRate, cleanerMemory.supersedeCount / engineReachedCount);
+    assert.equal(cleanerMemory.invalidateRate, cleanerMemory.invalidateCount / engineReachedCount);
+    assert.equal(cleanerMemory.flagRedundantRate, cleanerMemory.flagRedundantCount / engineReachedCount);
+    assert.equal(cleanerMemory.flagConflictRate, cleanerMemory.flagConflictCount / engineReachedCount);
+    assert.equal(cleanerMemory.redactRate, cleanerMemory.redactCount / engineReachedCount);
+  }
+
+  // Signal must be positive when any cleanup action is present
+  const hasCleanupActions =
+    cleanerMemory.supersedeCount > 0 ||
+    cleanerMemory.invalidateCount > 0 ||
+    cleanerMemory.flagRedundantCount > 0 ||
+    cleanerMemory.flagConflictCount > 0;
+
+  if (hasCleanupActions) {
+    assert.equal(cleanerMemory.signal, "positive");
+  }
+});
+
+test("shadow-comparison: recallQuality is unavailable with current scenario set", async () => {
+  const report = await runShadowComparison();
+  const { recallQuality } = report.balancedScore;
+
+  // Recall Quality must be unavailable
+  assert.equal(recallQuality.available, false, "recallQuality must be unavailable with current scenario set");
+
+  // All recall quality metrics must be null
+  assert.equal(recallQuality.recallHitRate, null);
+  assert.equal(recallQuality.recallCurrentTruthRate, null);
+  assert.equal(recallQuality.recallNoAnswerTnr, null);
+  assert.equal(recallQuality.recallRank1MatchRate, null);
+  assert.equal(recallQuality.adaptiveDepthPassRate, null);
+  assert.equal(recallQuality.signal, null);
+
+  // Note must mention unavailability and recall-query scenarios
+  assert.ok(
+    recallQuality.note.toLowerCase().includes("unavailable") ||
+    recallQuality.note.toLowerCase().includes("recall") ||
+    recallQuality.note.toLowerCase().includes("scenario"),
+    "recallQuality.note must explain unavailability"
+  );
+});
+
+test("shadow-comparison: promotionEligible is false while recallQuality is unavailable", async () => {
+  const report = await runShadowComparison();
+  const { gate, recallQuality } = report.balancedScore;
+
+  // Recall Quality must be unavailable
+  assert.equal(recallQuality.available, false);
+
+  // Promotion eligible must be false when recall quality is unavailable
+  assert.equal(
+    gate.promotionEligible,
+    false,
+    "promotionEligible must be false while recallQuality is unavailable"
+  );
+});
+
+test("shadow-comparison: balancedScore provider error count is 0 in default scripted run", async () => {
+  const report = await runShadowComparison();
+  assert.equal(
+    report.balancedScore.safety.providerErrorCount,
+    0,
+    "balancedScore.safety.providerErrorCount must be 0 in default scripted run"
+  );
+  assert.equal(
+    report.balancedScore.safety.providerErrorRate,
+    0,
+    "balancedScore.safety.providerErrorRate must be 0 in default scripted run"
+  );
+});
+
+test("shadow-comparison: delta block is marked as future with null values", async () => {
+  const report = await runShadowComparison();
+  const { delta } = report.balancedScore;
+
+  assert.equal(delta.status, "future");
+  assert.equal(delta.memorySizeDelta, null);
+  assert.equal(delta.recallHitRateDelta, null);
+  assert.equal(delta.recallCurrentTruthRateDelta, null);
+  assert.ok(typeof delta.note === "string");
+  assert.ok(delta.note.length > 0);
+});
+
+test("shadow-comparison: limitations mention v1 partial Balanced Score and Recall Quality unavailability", async () => {
+  const report = await runShadowComparison();
+  const limText = report.limitations.join(" ");
+
+  // Limitations must mention Balanced Score v1 partial computation
+  assert.ok(
+    limText.includes("Balanced Score") || limText.includes("v1"),
+    "limitations must mention Balanced Score v1"
+  );
+
+  // Limitations must mention Recall Quality unavailability
+  assert.ok(
+    limText.includes("Recall Quality") || limText.includes("recall"),
+    "limitations must mention Recall Quality unavailability"
+  );
 });

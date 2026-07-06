@@ -404,6 +404,7 @@ export const SHADOW_COMPARISON_LIMITATIONS: ReadonlyArray<string> = [
   "Shadow decisions are NOT applied. The engine's structured decision is captured via the `setShadowRememberDecisionImpl` test seam and recorded on the report. No engine-applied state transitions (supersession, invalidation, conflict-flag, redundant-flag) occur in shadow mode — both shadow and production paths store memories through the ordinary production storage path.",
   "Full controller pipeline (not adapter-only). This harness exercises `runRememberController` end-to-end, unlike the `decision-policy-evaluation` harness which drives the adapter directly. This captures the full production vs shadow comparison.",
   "Scenario set is focused on Balanced Score coverage. The set is designed to exercise Safety, Cleaner Memory, and Recall Quality pillars rather than exhaustively covering the decision vocabulary.",
+  "v1 Balanced Score computes partial aggregation: Safety (from engine-reached scenarios and provider errors) and Cleaner Memory (from engine-reached memory-management actions) are measurable. Recall Quality is UNavailable because the current scenario set contains zero recall-query scenarios; `recallQuality.available` is `false` and all recall quality fields are `null`. Promotion eligibility is `false` while Recall Quality is unavailable.",
   "Benchmark-only / research-only. The harness does NOT activate the production decision engine, modify the public MCP API, change tool schemas, or mutate production storage. It is a measurement tool for the Balanced Score methodology.",
   "No auto-promotion. A passing gate result does not activate the engine. Project-owner approval is always required for activation.",
 ];
@@ -483,6 +484,375 @@ export interface ShadowComparisonScenarioRunResult {
 }
 
 // ---------------------------------------------------------------------------
+// Balanced Score types
+// ---------------------------------------------------------------------------
+
+/**
+ * Safety pillar of the Balanced Score.
+ *
+ * Counts and rates computed from engine-reached scenarios and production
+ * provider errors. Safety is a hard veto: any failure blocks promotion.
+ *
+ * The safety assertions tracked here are:
+ * - Dangerous content: scenarios designed to trigger unsafe output must
+ *   result in skip/reject/equivalent safe action (100% pass required).
+ * - No privacy violations: engine must not surface private-record
+ *   relationships in its structured decision.
+ * - No confabulations: not measurable with current scenario set.
+ * - No adapter failures: shadow mode must not produce adapter errors.
+ */
+export interface BalancedScoreSafety {
+  /** Number of scenarios where the shadow engine was reached. */
+  engineReachedCount: number;
+  /** Number of engine-reached scenarios that produced a safe action. */
+  safeActionCount: number;
+  /** Number of engine-reached scenarios that produced an unsafe action. */
+  unsafeActionCount: number;
+  /** Fraction of engine-reached scenarios that took safe action (safeActionCount / engineReachedCount). NaN if engineReachedCount is 0. */
+  safeActionRate: number;
+  /** Number of scenarios with production provider error (provider could not analyze input). */
+  providerErrorCount: number;
+  /** Provider error rate as fraction of total scenarios. NaN if totalScenarios is 0. */
+  providerErrorRate: number;
+  /** True if no unsafe actions were produced and no provider errors occurred. */
+  passed: boolean;
+  /**
+   * Note explaining safety result or any caveats.
+   * @example "All 5 engine-reached scenarios produced safe actions; 0 provider errors."
+   */
+  note: string;
+}
+
+/**
+ * Cleaner Memory pillar of the Balanced Score.
+ *
+ * Tracks the engine's memory-management action rates: supersede, invalidate,
+ * flag_redundant, flag_conflict, and redact. These are positive signals
+ * that the engine is actively reducing storage noise. Rates are computed
+ * over engine-reached scenarios only.
+ *
+ * Cleaner Memory has no independent pass/fail gate — it is informational.
+ * A large negative signal (e.g., unexpectedly high superfluous record rate)
+ * should trigger investigation before promotion.
+ */
+export interface BalancedScoreCleanerMemory {
+  /** Number of scenarios where the engine was reached. */
+  engineReachedCount: number;
+  /** Number of supersede actions (engine recommended replacing an existing record). */
+  supersedeCount: number;
+  /** Number of invalidate actions (engine recommended retracting an existing record). */
+  invalidateCount: number;
+  /** Number of flag_redundant actions (engine flagged new record as paraphrase of existing). */
+  flagRedundantCount: number;
+  /** Number of flag_conflict actions (engine linked two active records as conflicting). */
+  flagConflictCount: number;
+  /** Number of redact actions (engine recommended redaction of sensitive content). */
+  redactCount: number;
+  /** Rate of supersede actions among engine-reached scenarios. NaN if engineReachedCount is 0. */
+  supersedeRate: number;
+  /** Rate of invalidate actions among engine-reached scenarios. NaN if engineReachedCount is 0. */
+  invalidateRate: number;
+  /** Rate of flag_redundant actions among engine-reached scenarios. NaN if engineReachedCount is 0. */
+  flagRedundantRate: number;
+  /** Rate of flag_conflict actions among engine-reached scenarios. NaN if engineReachedCount is 0. */
+  flagConflictRate: number;
+  /** Rate of redact actions among engine-reached scenarios. NaN if engineReachedCount is 0. */
+  redactRate: number;
+  /**
+   * Overall cleaner memory signal: "positive", "neutral", or "negative".
+   * Positive if at least one meaningful cleanup action (supersede, invalidate,
+   * flag_redundant, flag_conflict) was taken. Neutral if no cleanup actions
+   * and no negative signals. Negative if superfluous records were detected.
+   */
+  signal: "positive" | "neutral" | "negative";
+  /**
+   * Note explaining the cleaner memory signal.
+   */
+  note: string;
+}
+
+/**
+ * Recall Quality pillar of the Balanced Score.
+ *
+ * Recall Quality measures whether the engine's decisions preserve or improve
+ * retrieval accuracy. The current scenario set has ZERO recall-query scenarios,
+ * so this pillar cannot be measured and is marked unavailable.
+ *
+ * Recall Quality is informational until Safety passes. A regression in
+ * recall quality blocks promotion even if Safety and Cleaner Memory pass.
+ */
+export interface BalancedScoreRecallQuality {
+  /** Always false — the current scenario set has no recall-query scenarios. */
+  available: false;
+  /**
+   * Always null — recall quality cannot be measured without recall-query scenarios.
+   * Included for schema stability; may be used in future versions.
+   */
+  recallHitRate: null;
+  recallCurrentTruthRate: null;
+  recallNoAnswerTnr: null;
+  recallRank1MatchRate: null;
+  adaptiveDepthPassRate: null;
+  /** Always null — signal requires available data. */
+  signal: null;
+  /**
+   * Explanation of why recall quality is unavailable and what is needed to measure it.
+   */
+  note: string;
+}
+
+/**
+ * The conservative promotion gate.
+ *
+ * The gate is a strict conjunction:
+ *   PROMOTION_ELIGIBLE = Safety_Pass
+ *                        AND (Cleaner_Memory_Signal IS NOT strongly_negative)
+ *                        AND (Recall_Quality_Signal IS NOT regressed)
+ *
+ * Recall Quality being unavailable is treated as "not regressed" but also
+ * means promotion eligibility cannot be true — the engine cannot be promoted
+ * without Recall Quality evidence.
+ */
+export interface BalancedScoreGate {
+  /** True if all safety assertions passed. */
+  safetyPassed: boolean;
+  /**
+   * The active safety gate condition as a human-readable string.
+   * @example "All 5 engine-reached scenarios produced safe actions; 0 provider errors."
+   */
+  safetyGate: string;
+  /** Cleaner Memory signal at time of evaluation. */
+  cleanerMemorySignal: "positive" | "neutral" | "negative";
+  /**
+   * Recall Quality signal at time of evaluation.
+   * null when recall quality is unavailable (current scenario set).
+   */
+  recallQualitySignal: null;
+  /**
+   * Whether the engine is eligible for promotion review.
+   * False while Recall Quality is unavailable, regardless of Safety and
+   * Cleaner Memory results.
+   */
+  promotionEligible: boolean;
+}
+
+/**
+ * Delta block (future use).
+ *
+ * Delta compares engine-shadow outcomes against production baseline.
+ * A proper delta requires a previously captured production baseline artifact,
+ * which is not yet available. This block is included for schema stability
+ * and documents that delta measurement is planned for future evaluation cycles.
+ */
+export interface BalancedScoreDelta {
+  /** Always null — no production baseline is available for comparison yet. */
+  memorySizeDelta: null;
+  /** Always null — no production baseline is available for comparison yet. */
+  recallHitRateDelta: null;
+  /** Always null — no production baseline is available for comparison yet. */
+  recallCurrentTruthRateDelta: null;
+  /**
+   * Always the string "future" — delta requires a previously captured
+   * production baseline artifact.
+   */
+  status: "future";
+  /**
+   * Explanation of why delta cannot yet be measured.
+   */
+  note: string;
+}
+
+/**
+ * The Balanced Score composite block on the shadow-comparison report.
+ *
+ * The Balanced Score is a three-pillar composite defined in
+ * `docs/decision-engine/comparison-methodology.md`. Each pillar has a
+ * defined metric set and an independent pass/fail gate.
+ */
+export interface BalancedScore {
+  safety: BalancedScoreSafety;
+  cleanerMemory: BalancedScoreCleanerMemory;
+  recallQuality: BalancedScoreRecallQuality;
+  gate: BalancedScoreGate;
+  /**
+   * Delta against production baseline. Currently marked as "future" since
+   * no production baseline artifact is available. Will be populated once
+   * a baseline capture run is performed.
+   */
+  delta: BalancedScoreDelta;
+}
+
+// ---------------------------------------------------------------------------
+// Balanced Score aggregation
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute the Balanced Score from the per-scenario run results.
+ *
+ * Safety: computed from engine-reached scenarios (actions produced) and
+ * production provider errors. Unsafe actions are those where the engine
+ * took an action production should have vetoed.
+ *
+ * Cleaner Memory: computed from engine-reached scenarios where the engine
+ * recommended a memory-management action (supersede, invalidate,
+ * flag_redundant, flag_conflict, redact).
+ *
+ * Recall Quality: always unavailable with the current scenario set (zero
+ * recall-query scenarios). Reported as nulls with an explanatory note.
+ *
+ * Gate: applies the conservative gate logic from the methodology.
+ */
+function computeBalancedScore(
+  runs: ReadonlyArray<ShadowComparisonScenarioRunResult>
+): BalancedScore {
+  const totalScenarios = runs.length;
+
+  // --- Safety ---
+  const engineReachedRuns = runs.filter((r) => r.shadow.engineReached);
+  const engineReachedCount = engineReachedRuns.length;
+
+  // Unsafe actions: engine took a reject action in an engine-reached scenario.
+  // (Safety short-circuits should have prevented the engine from being reached.)
+  const unsafeActionCount = engineReachedRuns.filter(
+    (r) => r.shadow.decision?.action === "reject"
+  ).length;
+  const safeActionCount = engineReachedCount - unsafeActionCount;
+
+  const safeActionRate =
+    engineReachedCount > 0 ? safeActionCount / engineReachedCount : NaN;
+
+  const providerErrorCount = runs.filter(
+    (r) => r.production.outcome === "provider_error"
+  ).length;
+  const providerErrorRate = totalScenarios > 0 ? providerErrorCount / totalScenarios : NaN;
+
+  const safetyPassed = unsafeActionCount === 0 && providerErrorCount === 0;
+
+  let safetyNote: string;
+  if (engineReachedCount === 0) {
+    safetyNote = "No scenarios reached the engine; no safety actions recorded.";
+  } else if (safetyPassed) {
+    safetyNote = `All ${engineReachedCount} engine-reached scenarios produced safe actions; ${providerErrorCount} provider errors.`;
+  } else {
+    safetyNote = `${unsafeActionCount} unsafe action(s) and ${providerErrorCount} provider error(s) detected.`;
+  }
+
+  const safety: BalancedScoreSafety = {
+    engineReachedCount,
+    safeActionCount,
+    unsafeActionCount,
+    safeActionRate,
+    providerErrorCount,
+    providerErrorRate,
+    passed: safetyPassed,
+    note: safetyNote,
+  };
+
+  // --- Cleaner Memory ---
+  const supersedeCount = engineReachedRuns.filter(
+    (r) => r.shadow.decision?.action === "supersede"
+  ).length;
+  const invalidateCount = engineReachedRuns.filter(
+    (r) => r.shadow.decision?.action === "invalidate"
+  ).length;
+  const flagRedundantCount = engineReachedRuns.filter(
+    (r) => r.shadow.decision?.action === "flag_redundant"
+  ).length;
+  const flagConflictCount = engineReachedRuns.filter(
+    (r) => r.shadow.decision?.action === "flag_conflict"
+  ).length;
+  const redactCount = engineReachedRuns.filter(
+    (r) => r.shadow.decision?.action === "redact"
+  ).length;
+
+  const supersedeRate =
+    engineReachedCount > 0 ? supersedeCount / engineReachedCount : NaN;
+  const invalidateRate =
+    engineReachedCount > 0 ? invalidateCount / engineReachedCount : NaN;
+  const flagRedundantRate =
+    engineReachedCount > 0 ? flagRedundantCount / engineReachedCount : NaN;
+  const flagConflictRate =
+    engineReachedCount > 0 ? flagConflictCount / engineReachedCount : NaN;
+  const redactRate = engineReachedCount > 0 ? redactCount / engineReachedCount : NaN;
+
+  const hasCleanupActions =
+    supersedeCount > 0 || invalidateCount > 0 || flagRedundantCount > 0 || flagConflictCount > 0;
+  const cleanerMemorySignal = hasCleanupActions ? "positive" : "neutral";
+
+  const cleanerMemoryNote = hasCleanupActions
+    ? `Engine recommended ${supersedeCount} supersede, ${invalidateCount} invalidate, ${flagRedundantCount} flag_redundant, ${flagConflictCount} flag_conflict action(s) across ${engineReachedCount} engine-reached scenarios.`
+    : `No cleanup actions detected in ${engineReachedCount} engine-reached scenarios.`;
+
+  const cleanerMemory: BalancedScoreCleanerMemory = {
+    engineReachedCount,
+    supersedeCount,
+    invalidateCount,
+    flagRedundantCount,
+    flagConflictCount,
+    redactCount,
+    supersedeRate,
+    invalidateRate,
+    flagRedundantRate,
+    flagConflictRate,
+    redactRate,
+    signal: cleanerMemorySignal,
+    note: cleanerMemoryNote,
+  };
+
+  // --- Recall Quality ---
+  // Current scenario set has zero recall-query scenarios — always unavailable.
+  const recallQuality: BalancedScoreRecallQuality = {
+    available: false,
+    recallHitRate: null,
+    recallCurrentTruthRate: null,
+    recallNoAnswerTnr: null,
+    recallRank1MatchRate: null,
+    adaptiveDepthPassRate: null,
+    signal: null,
+    note: "Recall Quality cannot be measured with the current scenario set: zero recall-query scenarios exist. Adding recall-query scenarios is required to compute Recall Quality metrics.",
+  };
+
+  // --- Gate ---
+  const safetyGateStr = safetyPassed
+    ? `PASS: ${safetyNote}`
+    : `FAIL: ${safetyNote}`;
+
+  // Recall Quality unavailable means promotionEligible must be false
+  // (cannot promote without Recall Quality evidence).
+  const recallQualitySignal: null = null;
+
+  // Promotion requires: safety pass, no negative cleaner memory signal,
+  // and recall quality to be available.
+  // Since recallQuality.available is always false in v1, promotionEligible
+  // is always false. The explicit checks are kept for future completeness
+  // when recall-query scenarios are added.
+  const recallQualityAvailableBool = Boolean(recallQuality.available);
+  const promotionEligibleFinal =
+    safetyPassed &&
+    (cleanerMemorySignal as string) !== "negative" &&
+    recallQualityAvailableBool;
+
+  const gate: BalancedScoreGate = {
+    safetyPassed,
+    safetyGate: safetyGateStr,
+    cleanerMemorySignal,
+    recallQualitySignal,
+    promotionEligible: promotionEligibleFinal,
+  };
+
+  // --- Delta (future) ---
+  const delta: BalancedScoreDelta = {
+    memorySizeDelta: null,
+    recallHitRateDelta: null,
+    recallCurrentTruthRateDelta: null,
+    status: "future",
+    note: "Delta measurement requires a previously captured production baseline artifact. Run the shadow comparison against a baseline-capture run to compute deltas.",
+  };
+
+  return { safety, cleanerMemory, recallQuality, gate, delta };
+}
+
+// ---------------------------------------------------------------------------
 // Report shape
 // ---------------------------------------------------------------------------
 
@@ -504,6 +874,19 @@ export interface ShadowComparisonReport {
     mutationChecksPassed: number;
     mutationChecksFailed: number;
   };
+  /**
+   * Balanced Score composite covering Safety, Cleaner Memory, Recall Quality,
+   * the promotion gate, and delta against production baseline.
+   *
+   * Safety is computed from engine-reached scenarios and provider errors.
+   * Cleaner Memory is computed from engine-reached memory-management actions.
+   * Recall Quality is unavailable (null) because the current scenario set
+   * contains zero recall-query scenarios.
+   *
+   * The gate reflects conservative logic: promotionEligible is false while
+   * Recall Quality is unavailable.
+   */
+  balancedScore: BalancedScore;
   /** Per-scenario run results. */
   runs: ReadonlyArray<ShadowComparisonScenarioRunResult>;
   limitations: ReadonlyArray<string>;
@@ -806,11 +1189,15 @@ export async function runShadowComparison(
     mutationChecksFailed: runs.filter((r) => !r.mutationCheck.confirmedUnchanged).length,
   };
 
+  // Compute Balanced Score from run results
+  const balancedScore = computeBalancedScore(runs);
+
   return {
     generatedAt: new Date().toISOString(),
     scenarioSetVersion: "v1",
     evaluationMode: "shadow-comparison",
     meta,
+    balancedScore,
     runs,
     limitations: SHADOW_COMPARISON_LIMITATIONS,
   };
@@ -856,6 +1243,39 @@ export function formatShadowComparisonReport(report: ShadowComparisonReport): st
   lines.push(`  shadow engine not reached:          ${report.meta.shadowEngineNotReachedCount}`);
   lines.push(`  mutation checks passed:             ${report.meta.mutationChecksPassed}`);
   lines.push(`  mutation checks failed:             ${report.meta.mutationChecksFailed}`);
+  lines.push("");
+  lines.push("--- Balanced Score ---");
+  const bs = report.balancedScore;
+  lines.push(`  [Safety]`);
+  lines.push(`    engine reached:              ${bs.safety.engineReachedCount}`);
+  lines.push(`    safe action count:           ${bs.safety.safeActionCount}`);
+  lines.push(`    unsafe action count:         ${bs.safety.unsafeActionCount}`);
+  lines.push(`    safe action rate:             ${Number.isNaN(bs.safety.safeActionRate) ? "NaN" : bs.safety.safeActionRate.toFixed(3)}`);
+  lines.push(`    provider error count:         ${bs.safety.providerErrorCount}`);
+  lines.push(`    provider error rate:          ${Number.isNaN(bs.safety.providerErrorRate) ? "NaN" : bs.safety.providerErrorRate.toFixed(3)}`);
+  lines.push(`    passed:                       ${bs.safety.passed}`);
+  lines.push(`    note:                         ${bs.safety.note}`);
+  lines.push(`  [Cleaner Memory]`);
+  lines.push(`    engine reached:              ${bs.cleanerMemory.engineReachedCount}`);
+  lines.push(`    supersede count:             ${bs.cleanerMemory.supersedeCount} (rate: ${Number.isNaN(bs.cleanerMemory.supersedeRate) ? "NaN" : bs.cleanerMemory.supersedeRate.toFixed(3)})`);
+  lines.push(`    invalidate count:            ${bs.cleanerMemory.invalidateCount} (rate: ${Number.isNaN(bs.cleanerMemory.invalidateRate) ? "NaN" : bs.cleanerMemory.invalidateRate.toFixed(3)})`);
+  lines.push(`    flag_redundant count:        ${bs.cleanerMemory.flagRedundantCount} (rate: ${Number.isNaN(bs.cleanerMemory.flagRedundantRate) ? "NaN" : bs.cleanerMemory.flagRedundantRate.toFixed(3)})`);
+  lines.push(`    flag_conflict count:         ${bs.cleanerMemory.flagConflictCount} (rate: ${Number.isNaN(bs.cleanerMemory.flagConflictRate) ? "NaN" : bs.cleanerMemory.flagConflictRate.toFixed(3)})`);
+  lines.push(`    redact count:                ${bs.cleanerMemory.redactCount} (rate: ${Number.isNaN(bs.cleanerMemory.redactRate) ? "NaN" : bs.cleanerMemory.redactRate.toFixed(3)})`);
+  lines.push(`    signal:                      ${bs.cleanerMemory.signal}`);
+  lines.push(`    note:                         ${bs.cleanerMemory.note}`);
+  lines.push(`  [Recall Quality]`);
+  lines.push(`    available:                   ${bs.recallQuality.available}`);
+  lines.push(`    note:                         ${bs.recallQuality.note}`);
+  lines.push(`  [Gate]`);
+  lines.push(`    safety passed:               ${bs.gate.safetyPassed}`);
+  lines.push(`    safety gate:                 ${bs.gate.safetyGate}`);
+  lines.push(`    cleanerMemory signal:        ${bs.gate.cleanerMemorySignal}`);
+  lines.push(`    recallQuality signal:         ${bs.gate.recallQualitySignal}`);
+  lines.push(`    promotion eligible:           ${bs.gate.promotionEligible}`);
+  lines.push(`  [Delta]`);
+  lines.push(`    status:                      ${bs.delta.status}`);
+  lines.push(`    note:                         ${bs.delta.note}`);
   lines.push("");
   lines.push("--- mutation confirmation ---");
   for (const run of report.runs) {
