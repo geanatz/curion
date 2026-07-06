@@ -16,6 +16,7 @@ For client-specific wiring (where these env vars go in `.mcp.json`,
 - [Local trace](#local-trace)
 - [Per-request adapter knobs](#per-request-adapter-knobs)
 - [Memory Decision Engine (shadow mode)](#memory-decision-engine-shadow-mode)
+- [Activation plan (shadow → active)](#activation-plan)
 - [Project root and `.curion/config.json`](#project-root-and-curionconfigjson)
 - [Operator checklist](#operator-checklist)
 
@@ -165,6 +166,9 @@ The engine reuses the same role-based provider config as the memory-
 analysis adapter (`CURION_PRIMARY_*`, `CURION_FALLBACK_*`). When the
 mode is `off`, no provider call is made and the provider config is
 irrelevant.
+
+For the safe activation path from `shadow` to `active`, see the
+[Activation plan](activation-plan.md).
 
 ---
 
