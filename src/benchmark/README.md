@@ -139,6 +139,7 @@ All artifacts are written under `.curion/benchmark/` (gitignored). Each report c
 | `decision-policy-evaluation-*.json` | Decision-policy evaluation (memory side) |
 | `recall-policy-evaluation-*.json` | Recall-policy evaluation (recall side, scripted) |
 | `long-horizon-memory-evaluation-*.json` | Long-horizon memory evaluation (storage lifecycle, scripted, temp storage) |
+| `shadow-comparison-*.json` | Shadow-comparison evaluation (production vs shadow, scripted, temp storage, no activation) |
 
 The `formatRetrievalReport` helper in `src/benchmark/retrieval-runner.ts` produces a human-readable summary for each artifact.
 
@@ -469,3 +470,63 @@ The full limitations block lives on `report.limitations`. The headline items:
 - **Frozen scenario set** (version `v1`). A future v2 that adds new categories, axes, or replaces existing scenarios is a deliberate, visible change.
 - **Memory-content payloads are safe.** Every scenario's `memoryContent` is a short, safe English sentence (no secrets, no raw input fields, no PII).
 - **Conflict pointer is a soft relationship, not an auto-invalidation.** A scenario that fails the `conflictPreservationGate` check indicates the conflict pointer accidentally triggered an auto-invalidation; the storage contract is that a `conflictsWith` pointer NEVER triggers a state transition.
+
+---
+
+## Shadow-comparison evaluation (`benchmark:shadow-comparison`)
+
+A self-contained, deterministic, **scripted / no-network** benchmark harness that implements the shadow-comparison methodology defined in `docs/decision-engine/comparison-methodology.md`. It runs synthetic scenarios through BOTH the production controller path (`decisionMode=off`) and the shadow engine path (`decisionMode=shadow`), captures the structured shadow decision, and produces a comparison artifact.
+
+This harness exercises the **full controller pipeline end-to-end** (via `runRememberController`) rather than calling the decision adapter directly (unlike `benchmark:decision-policy-evaluation`). This enables the production memory state and the shadow decision to be compared per scenario.
+
+The harness is a **measurement tool, NOT a claim that the smart librarian is production-ready**. It does NOT activate engine actions, modify the public MCP API, or touch production storage.
+
+### Quick start
+
+```sh
+# Default scripted run — no network, no cost, deterministic.
+npm run benchmark:shadow-comparison
+```
+
+### What it measures
+
+The harness implements the Balanced Score methodology:
+
+1. **Production baseline** — runs `runRememberController` with `decisionMode=off` on each scenario, capturing what the production controller actually stored.
+2. **Shadow engine** — runs the same scenario with `decisionMode=shadow`, capturing the engine's structured decision via `setShadowRememberDecisionImpl`.
+3. **Mutation confirmation** — verifies that shadow decisions do NOT mutate the production memory state (isolated temp DBs).
+4. **Comparative evaluation** — pairs production and shadow outcomes per scenario and reports the delta.
+
+The report covers three Balanced Score pillars:
+
+- **Safety** — confirms that shadow decisions do not produce unsafe outcomes and that safety-classified inputs short-circuit before the engine runs.
+- **Cleaner Memory** — captures the shadow engine's supersession / invalidation / redundancy / conflict-flag recommendations.
+- **Recall Quality** — confirms production recall is unchanged (shadow does not mutate stored state).
+
+### What the report carries
+
+- `generatedAt` ISO timestamp.
+- `scenarioSetVersion: "v1"` stamp.
+- `evaluationMode: "shadow-comparison"` label.
+- `meta`: total scenarios, production saved/rejected/provider-error counts, shadow engine reached/not-reached counts, mutation check pass/fail counts.
+- `runs`: per-scenario captured data — production outcome, shadow decision (action/reason/confidence/id arrays), mutation check result, shadow decision matches script flag.
+- `limitations`: research-only disclosure block.
+
+### CLI flags
+
+```
+--artifacts <path>      override the artifact directory (default: .curion/benchmark)
+--no-write              suppress the JSON artifact
+--no-stdout             suppress the human report on stdout
+```
+
+### Limitations
+
+The full limitations block lives on `report.limitations`. The headline items:
+
+- **Synthetic-scenario evaluation** (v1 scenario set, 8 scenarios). The scenarios are hand-curated and exercise the full controller pipeline with seeded temp storage.
+- **No-network (scripted mode)** — the harness wires scripted fetch implementations for both the memory-analysis provider and the decision engine.
+- **Temp-storage isolated** — each scenario uses a fresh temp storage handle; two isolated temp handles per scenario (one for production, one for shadow). Production `.curion/curion.sqlite` is NEVER touched.
+- **Shadow decisions are NOT applied** — the engine's structured decision is captured via `setShadowRememberDecisionImpl` and recorded on the report. No engine-applied state transitions (supersession, invalidation, conflict-flag, redundant-flag) occur in shadow mode — both shadow and production paths store memories through the ordinary production storage path.
+- **Benchmark-only / research-only** — the harness does NOT activate the production decision engine, modify the public MCP API, or mutate production storage.
+- **No auto-promotion** — a passing gate does not activate the engine. Project-owner approval is always required.

@@ -111,6 +111,8 @@
     "benchmark:decision-policy-evaluation": "tsx src/benchmark/decision-policy-evaluation-runner.ts",
     "benchmark:decision-policy-evaluation:live": "CURION_DECISION_EVAL_LIVE=1 tsx src/benchmark/decision-policy-evaluation-runner.ts --live",
     "test:decision-policy-evaluation": "node --import tsx --test tests/decision-policy-evaluation.test.ts",
+    "benchmark:shadow-comparison": "tsx src/benchmark/shadow-comparison-runner.ts",
+    "test:shadow-comparison": "node --import tsx --test tests/shadow-comparison.test.ts",
     "benchmark:recall-policy-evaluation": "tsx src/benchmark/recall-policy-evaluation-runner.ts",
     "benchmark:recall-policy-evaluation:no-write": "tsx src/benchmark/recall-policy-evaluation-runner.ts --no-write",
     "test:recall-policy-evaluation": "node --import tsx --test tests/recall-policy-evaluation.test.ts",
