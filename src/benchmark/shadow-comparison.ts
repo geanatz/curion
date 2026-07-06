@@ -49,6 +49,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { runAdaptiveDepthEvaluation } from "./adaptive-depth-evaluation.js";
 import {
   type RememberOutcome,
   resetShadowRememberDecisionImpl,
@@ -398,13 +399,14 @@ export const BUILT_IN_SHADOW_COMPARISON_SCENARIOS: ReadonlyArray<ShadowCompariso
  * Surfaced on `report.limitations` and on the human report.
  */
 export const SHADOW_COMPARISON_LIMITATIONS: ReadonlyArray<string> = [
-  `Synthetic-scenario evaluation (${BUILT_IN_SHADOW_COMPARISON_SCENARIOS.length} scenarios). The scenarios are hand-curated and exercise the full controller pipeline end-to-end with seeded temp storage. A reviewer who reads a pass rate as 'the decision engine is production-ready' is over-reading the result. The right reading is 'the shadow engine produces the expected structured decision on the curated scenario set and does not mutate production memory state'.`,
+  `Synthetic-scenario evaluation (${BUILT_IN_SHADOW_COMPARISON_SCENARIOS.length} scenarios for Safety/Cleaner Memory + 6 adaptive-depth scenarios for Recall Quality). The scenarios are hand-curated and exercise the full controller pipeline end-to-end with seeded temp storage. A reviewer who reads a pass rate as 'the decision engine is production-ready' is over-reading the result. The right reading is 'the shadow engine produces the expected structured decision on the curated scenario set and does not mutate production memory state'.`,
   "No-network (scripted mode). The harness wires scripted fetch implementations for both the memory-analysis provider and the decision engine. No live HTTP calls are made.",
   "Temp-storage isolated. Each scenario run uses a fresh temp storage handle. Two isolated temp handles are used per scenario (one for production, one for shadow). Production `.curion/curion.sqlite` is NEVER touched.",
   "Shadow decisions are NOT applied. The engine's structured decision is captured via the `setShadowRememberDecisionImpl` test seam and recorded on the report. No engine-applied state transitions (supersession, invalidation, conflict-flag, redundant-flag) occur in shadow mode — both shadow and production paths store memories through the ordinary production storage path.",
   "Full controller pipeline (not adapter-only). This harness exercises `runRememberController` end-to-end, unlike the `decision-policy-evaluation` harness which drives the adapter directly. This captures the full production vs shadow comparison.",
   "Scenario set is focused on Balanced Score coverage. The set is designed to exercise Safety, Cleaner Memory, and Recall Quality pillars rather than exhaustively covering the decision vocabulary.",
-  "v1 Balanced Score computes partial aggregation: Safety (from engine-reached scenarios and provider errors) and Cleaner Memory (from engine-reached memory-management actions) are measurable. Recall Quality is UNavailable because the current scenario set contains zero recall-query scenarios; `recallQuality.available` is `false` and all recall quality fields are `null`. Promotion eligibility is `false` while Recall Quality is unavailable.",
+  "Recall Quality is derived from the adaptive-depth evaluation's 6 synthetic recall scenarios run through `runRecallController` with the production adaptive-depth config. The metrics (recallHitRate, adaptiveDepthPassRate) are honest signals from the small scenario set and are NOT claims of production-ready retrieval quality. recallRank1MatchRate and recallCurrentTruthRate are null because the v1 scenario set has no explicit rank-1 or current-truth ground truth labels. recallNoAnswerTnr is null because the v1 scenario set has no no-answer scenarios. The Recall Quality signal is informational only — do not interpret it as a deployment-grade benchmark. coverageComplete is false because all three recall coverage metrics are null.",
+  "v1 Balanced Score: Safety (from engine-reached scenarios and provider errors) and Cleaner Memory (from engine-reached memory-management actions) are measurable. Recall Quality (from adaptive-depth evaluation) is available but partial — coverageComplete is false because rank-1, current-truth, and no-answer coverage metrics are null. Recall Quality signal is partial; promotion eligibility remains false until fuller recall coverage exists. Even when all gate conditions pass, project-owner approval is always required. No auto-promotion.",
   "Benchmark-only / research-only. The harness does NOT activate the production decision engine, modify the public MCP API, change tool schemas, or mutate production storage. It is a measurement tool for the Balanced Score methodology.",
   "No auto-promotion. A passing gate result does not activate the engine. Project-owner approval is always required for activation.",
 ];
@@ -575,30 +577,81 @@ export interface BalancedScoreCleanerMemory {
  * Recall Quality pillar of the Balanced Score.
  *
  * Recall Quality measures whether the engine's decisions preserve or improve
- * retrieval accuracy. The current scenario set has ZERO recall-query scenarios,
- * so this pillar cannot be measured and is marked unavailable.
+ * retrieval accuracy. It is derived from the adaptive-depth evaluation's
+ * synthetic scenario set (6 scenarios run through `runRecallController` with
+ * adaptive depth config).
+ *
+ * The derived metrics are honest signals from the small scenario set and are
+ * NOT claims of production-ready retrieval quality. The scenario set is
+ * hand-curated, deterministic, and no-network.
  *
  * Recall Quality is informational until Safety passes. A regression in
  * recall quality blocks promotion even if Safety and Cleaner Memory pass.
  */
 export interface BalancedScoreRecallQuality {
-  /** Always false — the current scenario set has no recall-query scenarios. */
-  available: false;
   /**
-   * Always null — recall quality cannot be measured without recall-query scenarios.
-   * Included for schema stability; may be used in future versions.
+   * True when recall quality metrics are available from the adaptive-depth
+   * evaluation. False when the evaluation could not be run or produced no data.
    */
-  recallHitRate: null;
-  recallCurrentTruthRate: null;
-  recallNoAnswerTnr: null;
-  recallRank1MatchRate: null;
-  adaptiveDepthPassRate: null;
-  /** Always null — signal requires available data. */
-  signal: null;
+  available: boolean;
   /**
-   * Explanation of why recall quality is unavailable and what is needed to measure it.
+   * Fraction of adaptive-depth scenarios where the controller returned
+   * `status === "answered"`. Derived signal only — not a general hit rate.
+   * NaN when `available` is false or no scenarios were run.
+   */
+  recallHitRate: number | null;
+  /**
+   * Fraction of scenarios where the top-ranked memory matched the expected
+   * rank-1. Null when the scenario set has no explicit rank-1 ground truth
+   * labels (current v1 scenario set does not include rank-1 expectations).
+   * NaN when `available` is false.
+   */
+  recallRank1MatchRate: number | null;
+  /**
+   * Fraction of scenarios where the current-truth memory ranked at position 1.
+   * Null when the scenario set has no explicit current-truth labels
+   * (current v1 scenario set does not include current-truth expectations).
+   * NaN when `available` is false.
+   */
+  recallCurrentTruthRate: number | null;
+  /**
+   * True-negative rate for no-answer scenarios. Null when the scenario set
+   * has no no-answer scenarios (current v1 scenario set has zero no-answer
+   * scenarios); `recallNoAnswerTnr` remains null to honestly signal that
+   * this metric is not yet supported.
+   */
+  recallNoAnswerTnr: null;
+  /**
+   * Fraction of adaptive-depth scenario assertions that passed (under the
+   * production adaptive-depth config). Pass rate across both adaptive and
+   * legacy configs is tracked separately in the adaptive-depth report meta.
+   * NaN when `available` is false or no scenarios were run.
+   */
+  adaptiveDepthPassRate: number | null;
+  /**
+   * Recall quality signal: "positive", "neutral", "negative", or null.
+   * null when recall quality is unavailable. Informational signal derived
+   * from the computed metrics — not a production readiness claim.
+   */
+  signal: "positive" | "neutral" | "negative" | null;
+  /**
+   * Scenario set version stamp from the adaptive-depth evaluation.
+   * Undefined when `available` is false.
+   */
+  recallQualityScenarioSetVersion: string | undefined;
+  /**
+   * Explanation of the recall quality metrics, their derivation from the
+   * adaptive-depth scenario set, and any known limitations.
    */
   note: string;
+  /**
+   * True when the recall coverage metrics (rank-1 match rate, current-truth
+   * rate, no-answer TNR) are fully populated — i.e., the scenario set includes
+   * explicit ground truth for all three recall dimension. False when any of
+   * these metrics is null because the scenario set lacks coverage for that
+   * dimension. Promotion eligibility requires `coverageComplete === true`.
+   */
+  coverageComplete: boolean;
 }
 
 /**
@@ -606,12 +659,15 @@ export interface BalancedScoreRecallQuality {
  *
  * The gate is a strict conjunction:
  *   PROMOTION_ELIGIBLE = Safety_Pass
- *                        AND (Cleaner_Memory_Signal IS NOT strongly_negative)
- *                        AND (Recall_Quality_Signal IS NOT regressed)
+ *                        AND (Cleaner_Memory_Signal IS NOT "negative")
+ *                        AND (Recall_Quality_Signal IS NOT "negative")
  *
- * Recall Quality being unavailable is treated as "not regressed" but also
- * means promotion eligibility cannot be true — the engine cannot be promoted
- * without Recall Quality evidence.
+ * Recall Quality being unavailable blocks promotion — the engine cannot be
+ * promoted without Recall Quality evidence. When available, a "negative"
+ * signal also blocks promotion.
+ *
+ * IMPORTANT: Even when all gate conditions pass, promotion requires
+ * project-owner approval. A passing gate does NOT auto-promote the engine.
  */
 export interface BalancedScoreGate {
   /** True if all safety assertions passed. */
@@ -625,13 +681,18 @@ export interface BalancedScoreGate {
   cleanerMemorySignal: "positive" | "neutral" | "negative";
   /**
    * Recall Quality signal at time of evaluation.
-   * null when recall quality is unavailable (current scenario set).
+   * null when recall quality is unavailable.
+   * "positive", "neutral", or "negative" when derived from adaptive-depth evaluation.
    */
-  recallQualitySignal: null;
+  recallQualitySignal: "positive" | "neutral" | "negative" | null;
   /**
    * Whether the engine is eligible for promotion review.
-   * False while Recall Quality is unavailable, regardless of Safety and
-   * Cleaner Memory results.
+   * False when Recall Quality is unavailable, coverage is incomplete
+   * (coverageComplete is false), or the recall quality signal is "negative",
+   * regardless of Safety and Cleaner Memory results.
+   *
+   * Even when true, project-owner approval is always required.
+   * No auto-promotion.
    */
   promotionEligible: boolean;
 }
@@ -697,13 +758,18 @@ export interface BalancedScore {
  * recommended a memory-management action (supersede, invalidate,
  * flag_redundant, flag_conflict, redact).
  *
- * Recall Quality: always unavailable with the current scenario set (zero
- * recall-query scenarios). Reported as nulls with an explanatory note.
+ * Recall Quality: derived from the adaptive-depth evaluation's synthetic
+ * scenario set (6 scenarios run through `runRecallController` with adaptive
+ * depth config). Metrics include recall hit rate (answered / total) and
+ * adaptive-depth assertion pass rate. Rank-1 match rate and current-truth
+ * rate are null because the v1 scenario set does not include explicit
+ * rank-1 ground truth labels.
  *
  * Gate: applies the conservative gate logic from the methodology.
  */
 function computeBalancedScore(
-  runs: ReadonlyArray<ShadowComparisonScenarioRunResult>
+  runs: ReadonlyArray<ShadowComparisonScenarioRunResult>,
+  adaptiveDepthReport?: import("./adaptive-depth-evaluation.js").AdaptiveDepthEvaluationReport
 ): BalancedScore {
   const totalScenarios = runs.length;
 
@@ -800,37 +866,125 @@ function computeBalancedScore(
   };
 
   // --- Recall Quality ---
-  // Current scenario set has zero recall-query scenarios — always unavailable.
-  const recallQuality: BalancedScoreRecallQuality = {
-    available: false,
-    recallHitRate: null,
-    recallCurrentTruthRate: null,
-    recallNoAnswerTnr: null,
-    recallRank1MatchRate: null,
-    adaptiveDepthPassRate: null,
-    signal: null,
-    note: "Recall Quality cannot be measured with the current scenario set: zero recall-query scenarios exist. Adding recall-query scenarios is required to compute Recall Quality metrics.",
-  };
+  // Derived from the adaptive-depth evaluation's 6 synthetic scenarios.
+  // Each scenario runs through runRecallController with the production
+  // adaptive-depth config and scripted fetch. The v1 scenario set does
+  // not include explicit rank-1 ground truth labels, so recallRank1MatchRate
+  // and recallCurrentTruthRate are null. recallNoAnswerTnr is null because
+  // the v1 scenario set has no no-answer scenarios.
+  let recallQuality: BalancedScoreRecallQuality;
+  let recallQualitySignalVal: "positive" | "neutral" | "negative" | null = null;
+
+  if (adaptiveDepthReport) {
+    const { meta, runs: adRuns } = adaptiveDepthReport;
+    const scenarioCount = meta.scenarioCount;
+
+    // recallHitRate: answered scenarios / total scenarios (from adaptive config)
+    const answeredCount = adRuns.filter((r) => r.adaptive.status === "answered").length;
+    const recallHitRate = scenarioCount > 0 ? answeredCount / scenarioCount : NaN;
+
+    // recallRank1MatchRate: null (v1 scenario set has no explicit rank-1 ground truth)
+    const recallRank1MatchRate: null = null;
+
+    // recallCurrentTruthRate: null (v1 scenario set has no current-truth labels)
+    const recallCurrentTruthRate: null = null;
+
+    // recallNoAnswerTnr: null (v1 scenario set has no no-answer scenarios)
+    const recallNoAnswerTnr: null = null;
+
+    // adaptiveDepthPassRate: (passedBoth + passedAdaptiveOnly) / scenarioCount
+    const passedAdaptiveCount =
+      meta.passedBothCount + meta.passedAdaptiveOnlyCount;
+    const adaptiveDepthPassRate =
+      scenarioCount > 0 ? passedAdaptiveCount / scenarioCount : NaN;
+
+    // Signal: informational only — derived from adaptive depth pass rate.
+    // A negative signal means the adaptive depth stage is not behaving
+    // as expected on the synthetic scenario set. This is NOT a claim
+    // about production retrieval quality.
+    let signal: "positive" | "neutral" | "negative" | null;
+    if (adaptiveDepthPassRate >= 0.83) {
+      signal = "positive";
+    } else if (adaptiveDepthPassRate >= 0.5) {
+      signal = "neutral";
+    } else if (Number.isNaN(adaptiveDepthPassRate)) {
+      signal = null;
+    } else {
+      signal = "negative";
+    }
+    recallQualitySignalVal = signal;
+
+    // coverageComplete is true only when all three recall coverage dimensions
+    // have non-null metrics. This means the scenario set includes explicit
+    // ground truth for rank-1 match, current-truth ranking, and no-answer TNR.
+    // v1 has null for all three, so coverageComplete is false.
+    const coverageComplete =
+      recallRank1MatchRate !== null &&
+      recallCurrentTruthRate !== null &&
+      recallNoAnswerTnr !== null;
+
+    recallQuality = {
+      available: true,
+      recallHitRate,
+      recallRank1MatchRate,
+      recallCurrentTruthRate,
+      recallNoAnswerTnr,
+      adaptiveDepthPassRate,
+      signal,
+      recallQualityScenarioSetVersion: undefined,
+      coverageComplete,
+      note:
+        `Recall Quality derived from adaptive-depth evaluation (${scenarioCount} synthetic scenarios). ` +
+        `recallHitRate=${recallHitRate.toFixed(3)} (${answeredCount}/${scenarioCount} answered). ` +
+        `adaptiveDepthPassRate=${adaptiveDepthPassRate.toFixed(3)} (${passedAdaptiveCount}/${scenarioCount} passed adaptive config). ` +
+        `recallRank1MatchRate and recallCurrentTruthRate are null — v1 scenario set has no explicit rank-1 or current-truth ground truth labels. ` +
+        `recallNoAnswerTnr is null — v1 scenario set has no no-answer scenarios. ` +
+        `coverageComplete=${coverageComplete} — promotionEligible requires full recall coverage (all three metrics non-null). ` +
+        `This is NOT a production-ready retrieval metric; it is an honest signal from the small synthetic scenario set.`,
+    };
+  } else {
+    recallQuality = {
+      available: false,
+      recallHitRate: null,
+      recallRank1MatchRate: null,
+      recallCurrentTruthRate: null,
+      recallNoAnswerTnr: null,
+      adaptiveDepthPassRate: null,
+      signal: null,
+      recallQualityScenarioSetVersion: undefined,
+      coverageComplete: false,
+      note: "Recall Quality unavailable: adaptive-depth evaluation did not run or produced no data.",
+    };
+  }
 
   // --- Gate ---
   const safetyGateStr = safetyPassed
     ? `PASS: ${safetyNote}`
     : `FAIL: ${safetyNote}`;
 
-  // Recall Quality unavailable means promotionEligible must be false
-  // (cannot promote without Recall Quality evidence).
-  const recallQualitySignal: null = null;
+  // Recall Quality signal from adaptive-depth evaluation (null if unavailable).
+  const recallQualitySignal = recallQualitySignalVal;
 
   // Promotion requires: safety pass, no negative cleaner memory signal,
-  // and recall quality to be available.
-  // Since recallQuality.available is always false in v1, promotionEligible
-  // is always false. The explicit checks are kept for future completeness
-  // when recall-query scenarios are added.
-  const recallQualityAvailableBool = Boolean(recallQuality.available);
+  // recall quality available, full recall coverage (coverageComplete), and
+  // recall quality signal not negative.
+  //
+  // coverageComplete is false when rank-1 match rate, current-truth rate, or
+  // no-answer TNR are null — meaning the scenario set lacks explicit ground
+  // truth for that recall dimension. v1 has null for all three, so even
+  // though recallQuality.available is true, coverageComplete is false and
+  // promotionEligible remains false.
+  //
+  // Even when all conditions pass, project-owner approval is always required.
+  // No auto-promotion.
+  const recallNotNegative =
+    recallQualitySignal === null || recallQualitySignal !== "negative";
   const promotionEligibleFinal =
     safetyPassed &&
     (cleanerMemorySignal as string) !== "negative" &&
-    recallQualityAvailableBool;
+    recallQuality.available &&
+    recallQuality.coverageComplete &&
+    recallNotNegative;
 
   const gate: BalancedScoreGate = {
     safetyPassed,
@@ -1138,6 +1292,14 @@ function shadowDecisionMatchesScript(
 export async function runShadowComparison(
   scenarios: ReadonlyArray<ShadowComparisonScenario> = BUILT_IN_SHADOW_COMPARISON_SCENARIOS
 ): Promise<ShadowComparisonReport> {
+  // Run adaptive-depth evaluation in parallel with shadow comparison.
+  // Both are no-network, temp-storage-only, deterministic synthetic runs.
+  // The adaptive-depth evaluation provides Recall Quality signals derived
+  // from 6 synthetic recall scenarios run through runRecallController.
+  const [adaptiveDepthReport] = await Promise.all([
+    runAdaptiveDepthEvaluation(),
+  ]);
+
   const runs: ShadowComparisonScenarioRunResult[] = [];
 
   for (const scenario of scenarios) {
@@ -1189,8 +1351,8 @@ export async function runShadowComparison(
     mutationChecksFailed: runs.filter((r) => !r.mutationCheck.confirmedUnchanged).length,
   };
 
-  // Compute Balanced Score from run results
-  const balancedScore = computeBalancedScore(runs);
+  // Compute Balanced Score from run results, enriching with adaptive-depth Recall Quality
+  const balancedScore = computeBalancedScore(runs, adaptiveDepthReport);
 
   return {
     generatedAt: new Date().toISOString(),
@@ -1266,6 +1428,16 @@ export function formatShadowComparisonReport(report: ShadowComparisonReport): st
   lines.push(`    note:                         ${bs.cleanerMemory.note}`);
   lines.push(`  [Recall Quality]`);
   lines.push(`    available:                   ${bs.recallQuality.available}`);
+  if (bs.recallQuality.available) {
+    lines.push(`    recallHitRate:               ${Number.isNaN(bs.recallQuality.recallHitRate!) ? "NaN" : bs.recallQuality.recallHitRate!.toFixed(3)}`);
+    lines.push(`    recallRank1MatchRate:         ${bs.recallQuality.recallRank1MatchRate === null ? "null (no rank-1 ground truth)" : (Number.isNaN(bs.recallQuality.recallRank1MatchRate) ? "NaN" : bs.recallQuality.recallRank1MatchRate.toFixed(3))}`);
+    lines.push(`    recallCurrentTruthRate:       ${bs.recallQuality.recallCurrentTruthRate === null ? "null (no current-truth labels)" : (Number.isNaN(bs.recallQuality.recallCurrentTruthRate) ? "NaN" : bs.recallQuality.recallCurrentTruthRate.toFixed(3))}`);
+    lines.push(`    recallNoAnswerTnr:            ${bs.recallQuality.recallNoAnswerTnr === null ? "null (no no-answer scenarios)" : String(bs.recallQuality.recallNoAnswerTnr)}`);
+    lines.push(`    adaptiveDepthPassRate:        ${Number.isNaN(bs.recallQuality.adaptiveDepthPassRate!) ? "NaN" : bs.recallQuality.adaptiveDepthPassRate!.toFixed(3)}`);
+    lines.push(`    coverageComplete:            ${bs.recallQuality.coverageComplete} (requires rank1+currentTruth+noAnswer non-null)`);
+    lines.push(`    signal:                      ${bs.recallQuality.signal}`);
+    lines.push(`    scenarioSetVersion:           ${bs.recallQuality.recallQualityScenarioSetVersion ?? "n/a"}`);
+  }
   lines.push(`    note:                         ${bs.recallQuality.note}`);
   lines.push(`  [Gate]`);
   lines.push(`    safety passed:               ${bs.gate.safetyPassed}`);

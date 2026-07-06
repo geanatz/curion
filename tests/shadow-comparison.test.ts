@@ -485,20 +485,21 @@ test("shadow-comparison: balancedScore blocks are present and have correct types
   assert.ok(typeof bs.cleanerMemory.note === "string");
 
   // Recall Quality block
-  assert.equal(bs.recallQuality.available, false);
-  assert.equal(bs.recallQuality.recallHitRate, null);
-  assert.equal(bs.recallQuality.recallCurrentTruthRate, null);
-  assert.equal(bs.recallQuality.recallNoAnswerTnr, null);
-  assert.equal(bs.recallQuality.recallRank1MatchRate, null);
-  assert.equal(bs.recallQuality.adaptiveDepthPassRate, null);
-  assert.equal(bs.recallQuality.signal, null);
+  assert.equal(bs.recallQuality.available, true);
+  assert.ok(typeof bs.recallQuality.recallHitRate === "number" || Number.isNaN(bs.recallQuality.recallHitRate!));
+  assert.equal(bs.recallQuality.recallRank1MatchRate, null); // v1 has no rank-1 ground truth
+  assert.equal(bs.recallQuality.recallCurrentTruthRate, null); // v1 has no current-truth labels
+  assert.equal(bs.recallQuality.recallNoAnswerTnr, null); // v1 has no no-answer scenarios
+  assert.ok(typeof bs.recallQuality.adaptiveDepthPassRate === "number" || Number.isNaN(bs.recallQuality.adaptiveDepthPassRate!));
+  assert.ok(bs.recallQuality.signal === "positive" || bs.recallQuality.signal === "neutral" || bs.recallQuality.signal === "negative");
+  assert.equal(bs.recallQuality.coverageComplete, false); // v1 has null for all coverage metrics
   assert.ok(typeof bs.recallQuality.note === "string");
 
   // Gate block
   assert.ok(typeof bs.gate.safetyPassed === "boolean");
   assert.ok(typeof bs.gate.safetyGate === "string");
   assert.ok(["positive", "neutral", "negative"].includes(bs.gate.cleanerMemorySignal));
-  assert.equal(bs.gate.recallQualitySignal, null);
+  assert.ok(bs.gate.recallQualitySignal === "positive" || bs.gate.recallQualitySignal === "neutral" || bs.gate.recallQualitySignal === "negative" || bs.gate.recallQualitySignal === null);
   assert.ok(typeof bs.gate.promotionEligible === "boolean");
 
   // Delta block
@@ -607,43 +608,84 @@ test("shadow-comparison: cleanerMemory rates are valid and reflect known actions
   }
 });
 
-test("shadow-comparison: recallQuality is unavailable with current scenario set", async () => {
+test("shadow-comparison: recallQuality is available and derived from adaptive-depth evaluation", async () => {
   const report = await runShadowComparison();
   const { recallQuality } = report.balancedScore;
 
-  // Recall Quality must be unavailable
-  assert.equal(recallQuality.available, false, "recallQuality must be unavailable with current scenario set");
+  // Recall Quality must be available (derived from adaptive-depth evaluation)
+  assert.equal(recallQuality.available, true, "recallQuality must be available from adaptive-depth evaluation");
 
-  // All recall quality metrics must be null
-  assert.equal(recallQuality.recallHitRate, null);
-  assert.equal(recallQuality.recallCurrentTruthRate, null);
-  assert.equal(recallQuality.recallNoAnswerTnr, null);
+  // recallHitRate must be a valid number or NaN
+  assert.ok(typeof recallQuality.recallHitRate === "number" || Number.isNaN(recallQuality.recallHitRate!));
+
+  // recallRank1MatchRate and recallCurrentTruthRate are null (v1 has no ground truth labels)
   assert.equal(recallQuality.recallRank1MatchRate, null);
-  assert.equal(recallQuality.adaptiveDepthPassRate, null);
-  assert.equal(recallQuality.signal, null);
+  assert.equal(recallQuality.recallCurrentTruthRate, null);
 
-  // Note must mention unavailability and recall-query scenarios
+  // recallNoAnswerTnr is null (v1 has no no-answer scenarios)
+  assert.equal(recallQuality.recallNoAnswerTnr, null);
+
+  // adaptiveDepthPassRate must be a valid number or NaN
+  assert.ok(typeof recallQuality.adaptiveDepthPassRate === "number" || Number.isNaN(recallQuality.adaptiveDepthPassRate!));
+
+  // Signal must be one of the defined values
   assert.ok(
-    recallQuality.note.toLowerCase().includes("unavailable") ||
-    recallQuality.note.toLowerCase().includes("recall") ||
+    recallQuality.signal === "positive" ||
+    recallQuality.signal === "neutral" ||
+    recallQuality.signal === "negative" ||
+    recallQuality.signal === null
+  );
+
+  // coverageComplete must be false (v1 has null for all coverage metrics)
+  assert.equal(recallQuality.coverageComplete, false, "coverageComplete must be false because v1 has null for rank1/currentTruth/noAnswer");
+
+  // Note must mention adaptive-depth derivation and synthetic scenario set
+  assert.ok(
+    recallQuality.note.toLowerCase().includes("adaptive") ||
+    recallQuality.note.toLowerCase().includes("synthetic") ||
     recallQuality.note.toLowerCase().includes("scenario"),
-    "recallQuality.note must explain unavailability"
+    "recallQuality.note must explain adaptive-depth derivation"
   );
 });
 
-test("shadow-comparison: promotionEligible is false while recallQuality is unavailable", async () => {
+test("shadow-comparison: promotionEligible gate logic is conservative", async () => {
   const report = await runShadowComparison();
   const { gate, recallQuality } = report.balancedScore;
 
-  // Recall Quality must be unavailable
-  assert.equal(recallQuality.available, false);
+  // Recall Quality must be available
+  assert.equal(recallQuality.available, true, "recallQuality must be available from adaptive-depth evaluation");
 
-  // Promotion eligible must be false when recall quality is unavailable
-  assert.equal(
-    gate.promotionEligible,
-    false,
-    "promotionEligible must be false while recallQuality is unavailable"
-  );
+  // Recall coverage is incomplete (v1 has null for rank1, currentTruth, noAnswer)
+  assert.equal(recallQuality.coverageComplete, false, "coverageComplete must be false because v1 has null for all coverage metrics");
+
+  // promotionEligible must be false because coverage is incomplete.
+  // Even if safety passed and cleanerMemory signal is positive, incomplete recall
+  // coverage overrides and blocks promotionEligible.
+  assert.equal(gate.promotionEligible, false, "promotionEligible must be false because recall coverage is incomplete");
+
+  // Verify that safety/cleanerMemory signals do not override incomplete recall coverage.
+  // In v1 default run, safety typically passes and cleanerMemory may be positive/neutral,
+  // but coverageComplete is false, so promotionEligible remains false regardless.
+  if (gate.safetyPassed && gate.cleanerMemorySignal !== "negative") {
+    // Safety passed and cleanerMemory is not negative — but recall coverage is incomplete
+    assert.equal(recallQuality.coverageComplete, false, "coverageComplete is false blocks promotion even when safety/cleanerMemory pass");
+    assert.equal(gate.promotionEligible, false, "promotionEligible is false when coverageComplete is false, regardless of safety/cleanerMemory");
+  }
+
+  // promotionEligible is true only when:
+  // - safety passed
+  // - cleanerMemory signal is not "negative"
+  // - recallQuality is available
+  // - recallQuality coverageComplete is true (NEW: rank1/currentTruth/noAnswer non-null)
+  // - recallQuality signal is not "negative"
+  // Even when all conditions pass, owner approval is always required (no auto-promotion)
+  if (gate.promotionEligible) {
+    assert.equal(gate.safetyPassed, true, "promotionEligible requires safetyPassed");
+    assert.notEqual(gate.cleanerMemorySignal, "negative", "promotionEligible requires cleanerMemory not negative");
+    assert.equal(recallQuality.available, true, "promotionEligible requires recallQuality available");
+    assert.equal(recallQuality.coverageComplete, true, "promotionEligible requires coverageComplete true");
+    assert.notEqual(gate.recallQualitySignal, "negative", "promotionEligible requires recallQuality signal not negative");
+  }
 });
 
 test("shadow-comparison: balancedScore provider error count is 0 in default scripted run", async () => {
@@ -672,7 +714,7 @@ test("shadow-comparison: delta block is marked as future with null values", asyn
   assert.ok(delta.note.length > 0);
 });
 
-test("shadow-comparison: limitations mention v1 partial Balanced Score and Recall Quality unavailability", async () => {
+test("shadow-comparison: limitations mention v1 partial Balanced Score and Recall Quality partial coverage", async () => {
   const report = await runShadowComparison();
   const limText = report.limitations.join(" ");
 
@@ -682,9 +724,17 @@ test("shadow-comparison: limitations mention v1 partial Balanced Score and Recal
     "limitations must mention Balanced Score v1"
   );
 
-  // Limitations must mention Recall Quality unavailability
+  // Limitations must mention Recall Quality partial coverage (not full unavailability)
   assert.ok(
     limText.includes("Recall Quality") || limText.includes("recall"),
-    "limitations must mention Recall Quality unavailability"
+    "limitations must mention Recall Quality"
+  );
+
+  // Limitations should mention partial/coverageComplete in context of recall
+  assert.ok(
+    limText.toLowerCase().includes("partial") ||
+    limText.toLowerCase().includes("coverage") ||
+    limText.toLowerCase().includes("coveragecomplete"),
+    "limitations must mention Recall Quality partial coverage or coverageComplete"
   );
 });
