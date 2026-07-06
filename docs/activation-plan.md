@@ -217,7 +217,15 @@ separate workstreams:
    hygiene work deferred. Keep this separate from the activation
    playbook; it does not gate any stage.
 
-2. **Active-mode controller-side mutation wiring** — when `active` mode
+2. **Balanced-Score comparison methodology** — the shadow-comparison
+   methodology that defines "better than production" is documented in
+   [docs/decision-engine/comparison-methodology.md](decision-engine/comparison-methodology.md).
+   It is complementary to this activation plan: the activation plan
+   describes the staged rollout, while the comparison methodology
+   describes how to evaluate whether the engine is safe and beneficial
+   to promote. It does not activate any mode or change any code.
+
+3. **Active-mode controller-side mutation wiring** — when `active` mode
    is approved, the controller must be extended to apply engine decisions
    as state transitions. This requires guardrails (rollback, audit table
    visibility, kill switch) and is not yet implemented. Additionally,
