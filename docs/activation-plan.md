@@ -217,10 +217,14 @@ separate workstreams:
    hygiene work deferred. Keep this separate from the activation
    playbook; it does not gate any stage.
 
-2. **Active-mode code gate change** — when `active` mode is approved,
+2. **Active-mode controller-side mutation wiring** — when `active` mode
+   is approved, the controller must be extended to apply engine decisions
+   as state transitions. This requires guardrails (rollback, audit table
+   visibility, kill switch) and is not yet implemented. Additionally,
    `src/decision/policy.ts` must be updated to allow `mode: "active"`
-   instead of downgrading to `shadow`. The controller already has the
-   mutation wiring; the gate in the policy module is the only blocker.
+   instead of downgrading to `shadow`. Both the policy gate and the
+   engine-driven mutation wiring with guardrails are required before any
+   active rollout.
 
 3. **Fresh benchmark run before activation** — run the full benchmark
    suite (`decision-policy`, `recall-policy`, `adaptive-depth`,

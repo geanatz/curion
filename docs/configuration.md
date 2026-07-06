@@ -16,7 +16,7 @@ For client-specific wiring (where these env vars go in `.mcp.json`,
 - [Local trace](#local-trace)
 - [Per-request adapter knobs](#per-request-adapter-knobs)
 - [Memory Decision Engine (shadow mode)](#memory-decision-engine-shadow-mode)
-- [Activation plan (shadow → active)](#activation-plan)
+- [Activation plan (shadow → active)](activation-plan.md)
 - [Project root and `.curion/config.json`](#project-root-and-curionconfigjson)
 - [Operator checklist](#operator-checklist)
 
