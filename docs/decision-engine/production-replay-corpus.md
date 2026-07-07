@@ -466,7 +466,7 @@ promotion review. The report must include:
    expected action.
 5. **Limitations statement** — explicit confirmation that the corpus is
    proof-of-feasibility only, not statistically representative, and that
-   recall quality metrics are pending Phase 3.
+   recall quality metrics are computed as offline scripted measurement infrastructure; production-quality/live retrieval conclusions remain out of scope.
 
 ---
 

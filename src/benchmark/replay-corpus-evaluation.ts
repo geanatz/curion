@@ -159,7 +159,7 @@ export interface ReplayCorpusEvaluationReport {
   safety: ReplaySafetyMetrics;
   /** Memory lifecycle metrics. */
   memoryLifecycle: ReplayMemoryLifecycleMetrics;
-  /** Recall quality metrics (deferred to Phase 3). */
+  /** Recall quality metrics — computed from scripted engine responses and labeled ground truth. Full/live retrieval quality evaluation remains out of scope pending Phase 3-style/live infrastructure. */
   recallQuality: ReplayRecallQualityMetrics;
   /** Delta comparison metrics. */
   deltaComparison: ReplayDeltaComparisonMetrics;
