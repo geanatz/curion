@@ -487,12 +487,12 @@ test("shadow-comparison: balancedScore blocks are present and have correct types
   // Recall Quality block
   assert.equal(bs.recallQuality.available, true);
   assert.ok(typeof bs.recallQuality.recallHitRate === "number" || Number.isNaN(bs.recallQuality.recallHitRate!));
-  assert.equal(bs.recallQuality.recallRank1MatchRate, null); // v1 has no rank-1 ground truth
-  assert.equal(bs.recallQuality.recallCurrentTruthRate, null); // v1 has no current-truth labels
-  assert.equal(bs.recallQuality.recallNoAnswerTnr, null); // v1 has no no-answer scenarios
+  assert.ok(typeof bs.recallQuality.recallRank1MatchRate === "number" && !Number.isNaN(bs.recallQuality.recallRank1MatchRate), "recallRank1MatchRate must be numeric/non-null (adaptive-depth provides ground-truth labels)");
+  assert.ok(typeof bs.recallQuality.recallCurrentTruthRate === "number" && !Number.isNaN(bs.recallQuality.recallCurrentTruthRate), "recallCurrentTruthRate must be numeric/non-null (adaptive-depth provides ground-truth labels)");
+  assert.ok(typeof bs.recallQuality.recallNoAnswerTnr === "number" && !Number.isNaN(bs.recallQuality.recallNoAnswerTnr), "recallNoAnswerTnr must be numeric/non-null (adaptive-depth provides no-answer scenarios)");
   assert.ok(typeof bs.recallQuality.adaptiveDepthPassRate === "number" || Number.isNaN(bs.recallQuality.adaptiveDepthPassRate!));
   assert.ok(bs.recallQuality.signal === "positive" || bs.recallQuality.signal === "neutral" || bs.recallQuality.signal === "negative");
-  assert.equal(bs.recallQuality.coverageComplete, false); // v1 has null for all coverage metrics
+  assert.equal(bs.recallQuality.coverageComplete, true); // adaptive-depth provides ground-truth labels for rank1, currentTruth, and noAnswer
   assert.ok(typeof bs.recallQuality.note === "string");
 
   // Gate block
@@ -633,12 +633,10 @@ test("shadow-comparison: recallQuality is available and derived from adaptive-de
   // recallHitRate must be a valid number or NaN
   assert.ok(typeof recallQuality.recallHitRate === "number" || Number.isNaN(recallQuality.recallHitRate!));
 
-  // recallRank1MatchRate and recallCurrentTruthRate are null (v1 has no ground truth labels)
-  assert.equal(recallQuality.recallRank1MatchRate, null);
-  assert.equal(recallQuality.recallCurrentTruthRate, null);
-
-  // recallNoAnswerTnr is null (v1 has no no-answer scenarios)
-  assert.equal(recallQuality.recallNoAnswerTnr, null);
+  // recallRank1MatchRate, recallCurrentTruthRate, and recallNoAnswerTnr are numeric (adaptive-depth provides ground-truth labels)
+  assert.ok(typeof recallQuality.recallRank1MatchRate === "number" && !Number.isNaN(recallQuality.recallRank1MatchRate), "recallRank1MatchRate must be numeric/non-null");
+  assert.ok(typeof recallQuality.recallCurrentTruthRate === "number" && !Number.isNaN(recallQuality.recallCurrentTruthRate), "recallCurrentTruthRate must be numeric/non-null");
+  assert.ok(typeof recallQuality.recallNoAnswerTnr === "number" && !Number.isNaN(recallQuality.recallNoAnswerTnr), "recallNoAnswerTnr must be numeric/non-null");
 
   // adaptiveDepthPassRate must be a valid number or NaN
   assert.ok(typeof recallQuality.adaptiveDepthPassRate === "number" || Number.isNaN(recallQuality.adaptiveDepthPassRate!));
@@ -651,8 +649,8 @@ test("shadow-comparison: recallQuality is available and derived from adaptive-de
     recallQuality.signal === null
   );
 
-  // coverageComplete must be false (v1 has null for all coverage metrics)
-  assert.equal(recallQuality.coverageComplete, false, "coverageComplete must be false because v1 has null for rank1/currentTruth/noAnswer");
+  // coverageComplete is true (adaptive-depth provides ground-truth labels for rank1, currentTruth, and noAnswer)
+  assert.equal(recallQuality.coverageComplete, true, "coverageComplete must be true because adaptive-depth provides ground-truth labels");
 
   // Note must mention adaptive-depth derivation and synthetic scenario set
   assert.ok(
@@ -670,28 +668,35 @@ test("shadow-comparison: promotionEligible gate logic is conservative", async ()
   // Recall Quality must be available
   assert.equal(recallQuality.available, true, "recallQuality must be available from adaptive-depth evaluation");
 
-  // Recall coverage is incomplete (v1 has null for rank1, currentTruth, noAnswer)
-  assert.equal(recallQuality.coverageComplete, false, "coverageComplete must be false because v1 has null for all coverage metrics");
+  // Recall coverage is now complete (adaptive-depth provides ground-truth labels for rank1, currentTruth, noAnswer)
+  assert.equal(recallQuality.coverageComplete, true, "coverageComplete must be true because adaptive-depth provides ground-truth labels");
 
-  // promotionEligible must be false because coverage is incomplete.
-  // Even if safety passed and cleanerMemory signal is positive, incomplete recall
-  // coverage overrides and blocks promotionEligible.
-  assert.equal(gate.promotionEligible, false, "promotionEligible must be false because recall coverage is incomplete");
+  // When coverage is complete, promotionEligible reflects owner-review-only semantics:
+  // - promotionEligible=true means eligible for owner review, not auto-activation
+  // - promotionEligible=false means blocked by safety/cleanerMemory/recallQuality signals
+  // The exact value depends on overall gate evaluation.
 
-  // Verify that safety/cleanerMemory signals do not override incomplete recall coverage.
-  // In v1 default run, safety typically passes and cleanerMemory may be positive/neutral,
-  // but coverageComplete is false, so promotionEligible remains false regardless.
-  if (gate.safetyPassed && gate.cleanerMemorySignal !== "negative") {
-    // Safety passed and cleanerMemory is not negative — but recall coverage is incomplete
-    assert.equal(recallQuality.coverageComplete, false, "coverageComplete is false blocks promotion even when safety/cleanerMemory pass");
-    assert.equal(gate.promotionEligible, false, "promotionEligible is false when coverageComplete is false, regardless of safety/cleanerMemory");
+  // Verify conservative promotion logic:
+  // When safety/cleanerMemory pass and coverage is complete, promotionEligible can be true
+  // but owner approval is always required (no auto-promotion to activation).
+  if (gate.safetyPassed && gate.cleanerMemorySignal !== "negative" && recallQuality.coverageComplete) {
+    // With complete coverage and positive safety/cleanerMemory, promotionEligible may be true
+    // (owner-review-required semantics, not auto-activation)
+    if (gate.promotionEligible) {
+      // If promotionEligible is true, verify the enabling conditions
+      assert.notEqual(gate.recallQualitySignal, "negative", "recallQuality signal not negative is required for promotionEligible");
+    }
+    // If recallQuality signal is negative, promotionEligible must be false
+    if (gate.recallQualitySignal === "negative") {
+      assert.equal(gate.promotionEligible, false, "promotionEligible must be false when recallQuality signal is negative");
+    }
   }
 
   // promotionEligible is true only when:
   // - safety passed
   // - cleanerMemory signal is not "negative"
   // - recallQuality is available
-  // - recallQuality coverageComplete is true (NEW: rank1/currentTruth/noAnswer non-null)
+  // - recallQuality coverageComplete is true
   // - recallQuality signal is not "negative"
   // Even when all conditions pass, owner approval is always required (no auto-promotion)
   if (gate.promotionEligible) {
