@@ -39,18 +39,26 @@ review, not a substitute for it.
 
 ### Current synthetic benchmark result
 
-The Phase 2 counterfactual projection produces per-scenario classifications as
-`better | same | worse | inconclusive`. These are **benchmark-internal
-synthetic classifications only** — they do not represent real-world production
-outcomes, do not measure live traffic, and do not constitute evidence of
-production superiority.
+Phase 2 is a counterfactual projection — it compares the production-path
+outcome against the engine's shadow decision without applying engine decisions
+to any store. Phase 2 emits `same | inconclusive | null` per-scenario
+classifications only; it cannot emit `better` or `worse` because it does not
+apply engine decisions to a store and therefore cannot measure recall impact.
 
-**Current result: better: 8, same: 6, worse: 0**
+**Current Phase 3 applied-simulation result: better: 8, same: 6, worse: 0.**
+Phase 3 is an offline applied simulation run in a cloned temp store — engine
+decisions **are** applied to a cloned store and recall quality is measured
+against a baseline. These are **benchmark-internal synthetic classifications
+only** — they do not represent real-world production outcomes, do not measure
+live traffic, and do not constitute evidence of production superiority.
 
-The `recallHitRateDelta` field remains `null` in the Phase 2 artifact because
-the counterfactual projection does not apply engine decisions to storage.
-Measured recall quality delta requires Phase 3 applied simulation (offline, in
-cloned temp storage), which has not yet produced a measured quality verdict.
+The `recallHitRateDelta` field remains `null` in the current artifact because
+the measured aggregate recall quality delta has not yet been populated, even
+though Phase 3 applied simulation has produced per-scenario classifications
+on the 9 adaptive-depth scenarios. Phase 3 per-scenario classifications are
+based on benchmark-internal applied-simulation recall measurement; the
+aggregate `recallHitRateDelta` field awaits population from the full Phase 3
+harness.
 
 ### Gate benchmarks
 
@@ -151,15 +159,18 @@ controller-side mutation wiring and guardrail implementation.
 No project owner has reviewed a shadow-comparison report and issued explicit,
 documented approval for any stage beyond `shadow`.
 
-### 6. `recallHitRateDelta` is null
+### 6. `recallHitRateDelta` is null (aggregate not yet populated)
 
-The Phase 2 artifact does not populate `recallHitRateDelta` because the
-counterfactual projection does not apply engine decisions to storage. The
-measured recall quality delta requires Phase 3 applied simulation, which has
-not yet been completed.
+Phase 3 applied simulation has produced per-scenario `better | same | worse`
+classifications on the 9 adaptive-depth scenarios via benchmark-internal
+applied-simulation recall measurement. However, the aggregate `recallHitRateDelta`
+field in the artifact remains `null` pending population from the full Phase 3
+harness output. Per-scenario Phase 3 classifications exist; the aggregate
+recall delta field does not yet reflect them.
 
-**Impact**: The Phase 2 projection cannot distinguish between scenarios where
-the engine would improve recall from scenarios where it would degrade it.
+**Impact**: The aggregate recall quality delta is not yet available in the
+artifact, even though per-scenario Phase 3 applied-simulation classifications
+have been produced.
 
 ---
 
@@ -268,7 +279,7 @@ today and what choices the owner faces.
 | Are Recall Quality denominators live traffic? | No. They are 9 hand-curated synthetic adaptive-depth scenarios. |
 | Can the engine be activated today? | No. No owner approval has been issued. Active-mode controller wiring is not implemented. |
 | What is the next owner decision? | Choose: remain in shadow, collect stronger evidence, or plan a Stage 2 canary. |
-| What is the current Phase 2 benchmark result? | better: 8, same: 6, worse: 0 (benchmark-internal synthetic classifications only; not production evidence). |
-| Is `recallHitRateDelta` populated? | No. It remains `null` in Phase 2. Measured recall quality delta requires Phase 3 applied simulation. |
-| What is Phase 2? | Counterfactual projection — comparing production outcome vs. engine decision without applying engine decisions to any store. |
+| What is the current Phase 3 applied-simulation result? | better: 8, same: 6, worse: 0 — per-scenario benchmark-internal classifications from offline applied simulation in cloned temp storage; not production evidence. Phase 2 emits only same/inconclusive/null. |
+| Is `recallHitRateDelta` populated? | No. Aggregate `recallHitRateDelta` remains `null` in the current artifact. Phase 3 applied simulation has produced per-scenario classifications (better/same/worse) via benchmark-internal recall measurement; the aggregate field awaits population from the full Phase 3 harness. |
+| What is Phase 2? | Counterfactual projection — comparing production outcome vs. engine decision without applying engine decisions to any store. Emits `same | inconclusive | null` per-scenario; cannot emit `better | worse` because no decisions are applied to a store. |
 | What is Phase 3? | Offline applied simulation in cloned temp storage — engine decisions ARE applied to a cloned store and recall quality is measured against a baseline. |
