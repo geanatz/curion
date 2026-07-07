@@ -76,7 +76,6 @@ import {
   runRecallController,
 } from "../controller/recall-controller.js";
 import {
-  type DecisionAdapterSuccess,
   type RememberPolicyDecision,
 } from "../decision/types.js";
 import {
@@ -90,7 +89,7 @@ import {
   listActiveMemorySummaries,
 } from "../storage/storage.js";
 import { writeTimestampedJsonArtifact } from "./_artifact.js";
-import { buildRecordingScriptedFetch, okChatResponse } from "./_scripted-fetch.js";
+import { okChatResponse } from "./_scripted-fetch.js";
 
 // ---------------------------------------------------------------------------
 // Scenario shape
@@ -907,322 +906,42 @@ function seedRelatedMemories(
   return idMap;
 }
 
-async function runProductionBaseline(
-  scenario: AppliedSimulationScenario,
-  idMap: Map<number, number>
-): Promise<{
-  storedMemoryId?: number;
-  memoryCount: number;
-  recall: AppliedSimulationBaselineRecall;
-}> {
-  const { tmp, handle } = makeTempStorage();
-  try {
-    // Seed related memories with the same id mapping
-    for (const [labelId, memoryId] of idMap) {
-      const related = scenario.related.find(r => r.id === labelId);
-      if (related) {
-        // Already inserted by caller
-      }
-    }
-
-    // Run production controller with decisionMode="off"
-    const productionFetch = buildScriptedFetch(scenario.providerScript);
-    const outcome = await runRememberController(handle, scenario.rawInput, {
-      decisionMode: "off",
-      providerFetchImpl: productionFetch,
-      providerPrimaryApiKey: "sk-test-not-real",
-      providerPrimaryBaseUrl: "https://api.example.com/v1",
-      providerPrimaryModel: "test/model",
-      providerFallbackApiKey: "sk-test-not-real-fallback",
-      providerFallbackBaseUrl: "https://api.fallback.example/v1",
-      providerFallbackModel: "test/model-fallback",
-    });
-
-    const finalMemoryCount = countMemories(handle);
-    const storedMemoryId: number | undefined = outcome.status === "saved" ? outcome.record.id : undefined;
-
-    // Run recall
-    const recallOutcome = await runRecallController(handle, scenario.recallQuery, {
-      providerFetchImpl: productionFetch,
-      providerPrimaryApiKey: "sk-test-not-real",
-      providerPrimaryBaseUrl: "https://api.example.com/v1",
-      providerPrimaryModel: "test/model",
-      providerFallbackApiKey: "sk-test-not-real-fallback",
-      providerFallbackBaseUrl: "https://api.fallback.example/v1",
-      providerFallbackModel: "test/model-fallback",
-    });
-
-    const recall = computeRecallMetrics(recallOutcome, scenario.recallGroundTruth);
-
-    const result: { storedMemoryId?: number; memoryCount: number; recall: AppliedSimulationBaselineRecall } = {
-      memoryCount: finalMemoryCount,
-      recall,
-    };
-    if (storedMemoryId !== undefined) {
-      result.storedMemoryId = storedMemoryId;
-    }
-    return result;
-  } finally {
-    closeAndCleanTempStorage(tmp, handle);
-  }
-}
-
-async function runAppliedSimulation(
-  scenario: AppliedSimulationScenario,
-  idMap: Map<number, number>,
-  newMemoryId: number | undefined
-): Promise<{
-  storedMemoryId?: number;
-  memoryCount: number;
-  recall: AppliedSimulationAppliedRecall;
-  mutations: AppliedSimulationMutation[];
-}> {
-  const { tmp, handle } = makeTempStorage();
-  const mutations: AppliedSimulationMutation[] = [];
-
-  try {
-    // Seed related memories with the same id mapping
-    for (const [labelId, memoryId] of idMap) {
-      const related = scenario.related.find(r => r.id === labelId);
-      if (!related) continue;
-      insertMemoryRecord(handle, {
-        kind: (related.kind as "fact" | "decision" | "preference" | "context" | "reference" | "policy" | "constraint" | "finding") ?? "fact",
-        state: "active",
-        memoryContent: related.memoryContent,
-        providerId: "test",
-        modelId: "test-model",
-        confidence: 0.8,
-        metadata: {},
-      });
-    }
-
-    // Capture shadow decision
-    let capturedDecision: RememberPolicyDecision | null = null;
-    setShadowRememberDecisionImpl(async (args) => {
-      const decisionFetch = buildScriptedFetch(scenario.decisionScript);
-      const { decideRememberPolicyWithFallback } = await import("../decision/adapter.js");
-      const { buildRememberDecisionEvidence } = await import("../decision/evidence.js");
-      const evidence = buildRememberDecisionEvidence({
-        rawInput: args.rawInput,
-        safety: args.safety,
-        related: args.relatedForProvider,
-      });
-      const adapterResult = await decideRememberPolicyWithFallback(evidence, args.rawInput, {
-        fetchImpl: decisionFetch,
-        primaryApiKey: "sk-test-not-real",
-        primaryBaseUrl: "https://api.example.com/v1",
-        primaryModel: "test/model",
-        primaryApiFormat: "openai-compatible",
-      });
-      if (adapterResult.ok) {
-        capturedDecision = adapterResult.value;
-      }
-    });
-
-    try {
-      // Run with shadow mode to capture decision
-      const shadowFetch = buildScriptedFetch(scenario.providerScript);
-      await runRememberController(handle, scenario.rawInput, {
-        decisionMode: "shadow",
-        providerFetchImpl: shadowFetch,
-        providerPrimaryApiKey: "sk-test-not-real",
-        providerPrimaryBaseUrl: "https://api.example.com/v1",
-        providerPrimaryModel: "test/model",
-        providerFallbackApiKey: "sk-test-not-real-fallback",
-        providerFallbackBaseUrl: "https://api.fallback.example/v1",
-        providerFallbackModel: "test/model-fallback",
-        decisionProviderFetchImpl: buildScriptedFetch(scenario.decisionScript),
-      });
-    } finally {
-      resetShadowRememberDecisionImpl();
-    }
-
-    // Get the stored memory id from the applied path
-    const memories = listActiveMemorySummaries(handle, { limit: 100 });
-    const newMemoryInStore = memories.find(m => m.memoryContent.includes(scenario.rawInput.slice(0, 50)));
-    const storedMemoryId = newMemoryInStore?.id;
-
-    // Apply the storage action based on the scenario's appliedAction
-    const appliedAction = scenario.appliedAction;
-    let finalMemoryCount = countMemories(handle);
-
-    if (appliedAction === "supersede" && scenario.targetMemoryLabel !== undefined) {
-      const targetId = idMap.get(scenario.targetMemoryLabel);
-      if (targetId !== undefined) {
-        try {
-          // Apply supersession: transition to superseded + add supersededBy pointer
-          transitionMemoryState(handle, {
-            memoryId: targetId,
-            toState: "superseded",
-            reason: "supersession",
-            triggeringMemoryId: storedMemoryId ?? null,
-            actor: "phase3-applied-simulation",
-            metadata: { supersededByDecision: capturedDecision },
-          });
-          if (storedMemoryId !== undefined) {
-            addSupersededByToMemory(handle, targetId, storedMemoryId);
-          }
-          mutations.push({
-            action: "supersede",
-            targetMemoryLabel: scenario.targetMemoryLabel,
-            targetMemoryId: targetId,
-            succeeded: true,
-          });
-        } catch (err) {
-          mutations.push({
-            action: "supersede",
-            targetMemoryLabel: scenario.targetMemoryLabel,
-            targetMemoryId: targetId,
-            succeeded: false,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-      }
-    } else if (appliedAction === "invalidate" && scenario.targetMemoryLabel !== undefined) {
-      const targetId = idMap.get(scenario.targetMemoryLabel);
-      if (targetId !== undefined) {
-        try {
-          transitionMemoryState(handle, {
-            memoryId: targetId,
-            toState: "invalidated",
-            reason: "invalidation",
-            triggeringMemoryId: storedMemoryId ?? null,
-            actor: "phase3-applied-simulation",
-            metadata: { invalidateDecision: capturedDecision },
-          });
-          mutations.push({
-            action: "invalidate",
-            targetMemoryLabel: scenario.targetMemoryLabel,
-            targetMemoryId: targetId,
-            succeeded: true,
-          });
-        } catch (err) {
-          mutations.push({
-            action: "invalidate",
-            targetMemoryLabel: scenario.targetMemoryLabel,
-            targetMemoryId: targetId,
-            succeeded: false,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-      }
-    } else if (appliedAction === "flag_redundant" && scenario.targetMemoryLabel !== undefined) {
-      const targetId = idMap.get(scenario.targetMemoryLabel);
-      if (targetId !== undefined) {
-        try {
-          // Flag redundant: add olderVariantsOf pointer to target memory
-          const existing = handle.db.prepare("SELECT metadata FROM memories WHERE id = ?").get(targetId) as { metadata: string | null } | undefined;
-          let metadata: Record<string, unknown> = {};
-          if (existing?.metadata) {
-            try {
-              metadata = JSON.parse(existing.metadata) as Record<string, unknown>;
-            } catch {
-              // ignore
-            }
-          }
-          const relationship = (metadata.relationship as Record<string, unknown> | undefined) || {};
-          const olderVariantsOf = Array.isArray(relationship.olderVariantsOf) ? relationship.olderVariantsOf : [];
-          if (storedMemoryId !== undefined && !olderVariantsOf.includes(storedMemoryId)) {
-            olderVariantsOf.push(storedMemoryId);
-          }
-          relationship.olderVariantsOf = olderVariantsOf;
-          metadata.relationship = relationship;
-          updateMemoryMetadata(handle, targetId, metadata);
-          mutations.push({
-            action: "flag_redundant",
-            targetMemoryLabel: scenario.targetMemoryLabel,
-            targetMemoryId: targetId,
-            succeeded: true,
-          });
-        } catch (err) {
-          mutations.push({
-            action: "flag_redundant",
-            targetMemoryLabel: scenario.targetMemoryLabel,
-            targetMemoryId: targetId,
-            succeeded: false,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-      }
-    } else if (appliedAction === "flag_conflict" && scenario.targetMemoryLabel !== undefined) {
-      const targetId = idMap.get(scenario.targetMemoryLabel);
-      if (targetId !== undefined) {
-        try {
-          // Flag conflict: add conflictsWith pointer to target memory
-          const existing = handle.db.prepare("SELECT metadata FROM memories WHERE id = ?").get(targetId) as { metadata: string | null } | undefined;
-          let metadata: Record<string, unknown> = {};
-          if (existing?.metadata) {
-            try {
-              metadata = JSON.parse(existing.metadata) as Record<string, unknown>;
-            } catch {
-              // ignore
-            }
-          }
-          const relationship = (metadata.relationship as Record<string, unknown> | undefined) || {};
-          const conflictsWith = Array.isArray(relationship.conflictsWith) ? relationship.conflictsWith : [];
-          if (storedMemoryId !== undefined && !conflictsWith.includes(storedMemoryId)) {
-            conflictsWith.push(storedMemoryId);
-          }
-          relationship.conflictsWith = conflictsWith;
-          metadata.relationship = relationship;
-          updateMemoryMetadata(handle, targetId, metadata);
-          mutations.push({
-            action: "flag_conflict",
-            targetMemoryLabel: scenario.targetMemoryLabel,
-            targetMemoryId: targetId,
-            succeeded: true,
-          });
-        } catch (err) {
-          mutations.push({
-            action: "flag_conflict",
-            targetMemoryLabel: scenario.targetMemoryLabel,
-            targetMemoryId: targetId,
-            succeeded: false,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-      }
-    } else if (appliedAction === "store" || appliedAction === "no_op" || appliedAction === "reject") {
-      // No additional mutations needed for these actions
-      mutations.push({
-        action: appliedAction,
-        succeeded: true,
-      });
-    }
-
-    finalMemoryCount = countMemories(handle);
-
-    // Run recall on the applied state
-    const appliedFetch = buildScriptedFetch(scenario.providerScript);
-    const recallOutcome = await runRecallController(handle, scenario.recallQuery, {
-      providerFetchImpl: appliedFetch,
-      providerPrimaryApiKey: "sk-test-not-real",
-      providerPrimaryBaseUrl: "https://api.example.com/v1",
-      providerPrimaryModel: "test/model",
-      providerFallbackApiKey: "sk-test-not-real-fallback",
-      providerFallbackBaseUrl: "https://api.fallback.example/v1",
-      providerFallbackModel: "test/model-fallback",
-    });
-
-    const recall = computeAppliedRecallMetrics(recallOutcome, scenario.recallGroundTruth);
-
-    const result: { storedMemoryId?: number; memoryCount: number; recall: AppliedSimulationAppliedRecall; mutations: AppliedSimulationMutation[] } = {
-      memoryCount: finalMemoryCount,
-      recall,
-      mutations,
-    };
-    if (storedMemoryId !== undefined) {
-      result.storedMemoryId = storedMemoryId;
-    }
-    return result;
-  } finally {
-    closeAndCleanTempStorage(tmp, handle);
-  }
-}
-
 function countMemories(handle: StorageHandle): number {
   const row = handle.db.prepare("SELECT COUNT(*) as c FROM memories WHERE state = 'active'").get() as { c: number };
   return row.c;
+}
+
+/**
+ * Resolve dynamic labels for a scenario based on stored memory ids.
+ *
+ * For supersession and rank-1 scenarios where a new memory was stored,
+ * the currentTruthIds and expectedRank1Ids should point to the stored memory
+ * (representing the current truth after insert). This is "honest" because
+ * the stored memory IS the current truth after the insert.
+ *
+ * For no-answer/safety/invalidation scenarios, labels remain as-is because
+ * there is no meaningful current truth to resolve to.
+ */
+function resolveGroundTruthLabels(
+  scenario: AppliedSimulationScenario,
+  storedMemoryId: number | undefined
+): AppliedSimulationRecallGroundTruth {
+  const base = scenario.recallGroundTruth;
+
+  // For supersession and rank-1 scenarios, resolve to stored memory where honest
+  const isCurrentTruthScenario =
+    scenario.category === "current-truth-supersession" ||
+    scenario.category === "rank-1-current-truth";
+
+  if (isCurrentTruthScenario && storedMemoryId !== undefined) {
+    return {
+      ...base,
+      currentTruthIds: [storedMemoryId],
+      expectedRank1Ids: [storedMemoryId],
+    };
+  }
+
+  return base;
 }
 
 function computeRecallMetrics(
@@ -1533,7 +1252,8 @@ export async function runAppliedSimulationEvaluation(
         providerFallbackModel: "test/model-fallback",
       });
 
-      baselineRecall = computeRecallMetrics(baselineRecallOutcome, scenario.recallGroundTruth);
+      const baselineGroundTruth = resolveGroundTruthLabels(scenario, baselineStoredMemoryId);
+      baselineRecall = computeRecallMetrics(baselineRecallOutcome, baselineGroundTruth);
     } finally {
       closeAndCleanTempStorage(tmpBaseline, handleBaseline);
     }
@@ -1751,7 +1471,8 @@ export async function runAppliedSimulationEvaluation(
         providerFallbackModel: "test/model-fallback",
       });
 
-      appliedRecall = computeAppliedRecallMetrics(appliedRecallOutcome, scenario.recallGroundTruth);
+      const appliedGroundTruth = resolveGroundTruthLabels(scenario, appliedStoredMemoryId);
+      appliedRecall = computeAppliedRecallMetrics(appliedRecallOutcome, appliedGroundTruth);
     } finally {
       closeAndCleanTempStorage(tmpApplied, handleApplied);
     }

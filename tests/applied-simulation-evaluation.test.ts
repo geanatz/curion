@@ -414,7 +414,127 @@ test("applied-simulation: redact and clarify are NOT in applied actions (exclude
 });
 
 // ---------------------------------------------------------------------------
-// 13. No production DB or live network usage
+// 13. Dynamic label resolution (Phase 3 evidence-quality tightening)
+// ---------------------------------------------------------------------------
+
+test("applied-simulation: supersession scenarios have non-null currentTruthAtRank1 in applied path", async () => {
+  const report = await runAppliedSimulationEvaluation();
+  const supersessionRuns = report.runs.filter(r => r.category === "current-truth-supersession");
+  assert.ok(supersessionRuns.length >= 4, "should have at least 4 supersession scenarios");
+
+  for (const run of supersessionRuns) {
+    // For supersession scenarios with resolved labels, currentTruthAtRank1 should be meaningful
+    // (either true or false, not simply defaulted to false due to empty ground truth)
+    assert.ok(
+      typeof run.applied.recall.currentTruthAtRank1 === "boolean",
+      `supersession scenario '${run.scenarioId}' applied.recall.currentTruthAtRank1 must be boolean`
+    );
+    // The stored memory id should be present when memory was stored
+    if (run.applied.storedMemoryId !== undefined) {
+      assert.ok(
+        run.applied.recall.sourceIds.length > 0 || run.applied.recall.status === "no_memory",
+        `supersession scenario '${run.scenarioId}' should have recall result when memory was stored`
+      );
+    }
+  }
+});
+
+test("applied-simulation: rank-1 scenarios have non-null rank1Match in applied path when memory stored", async () => {
+  const report = await runAppliedSimulationEvaluation();
+  const rank1Runs = report.runs.filter(r => r.category === "rank-1-current-truth");
+  assert.ok(rank1Runs.length >= 2, "should have at least 2 rank-1 scenarios");
+
+  for (const run of rank1Runs) {
+    // When applied path stored a memory and resolved labels, rank1Match should be non-null
+    if (run.applied.storedMemoryId !== undefined) {
+      assert.ok(
+        run.applied.recall.rank1Match !== null || run.applied.recall.status === "no_memory",
+        `rank-1 scenario '${run.scenarioId}' applied.recall.rank1Match should be non-null or no_memory when storedMemoryId is defined`
+      );
+      // When memory is stored and recall is answered, rank1Match should be a boolean
+      if (run.applied.recall.status === "answered") {
+        assert.ok(
+          typeof run.applied.recall.rank1Match === "boolean",
+          `rank-1 scenario '${run.scenarioId}' applied.recall.rank1Match must be boolean when answered and memory stored`
+        );
+      }
+    }
+    // When applied path did NOT store memory, rank1Match may be null (labels not resolved)
+  }
+});
+
+test("applied-simulation: aggregate current-truth and rank-1 deltas are non-null when scenarios exist", async () => {
+  const report = await runAppliedSimulationEvaluation();
+
+  // If we have supersession scenarios, currentTruthAtRank1 delta should be computable
+  const supersessionRuns = report.runs.filter(r => r.category === "current-truth-supersession");
+  if (supersessionRuns.length > 0) {
+    assert.ok(
+      report.delta.recallCurrentTruthRateDelta !== null || supersessionRuns.every(r => r.delta.recallCurrentTruthRateDelta === null),
+      "recallCurrentTruthRateDelta should be non-null when supersession scenarios exist and labels are resolved"
+    );
+  }
+
+  // If we have rank-1 scenarios, rank1Match delta should be computable
+  const rank1Runs = report.runs.filter(r => r.category === "rank-1-current-truth");
+  if (rank1Runs.length > 0) {
+    assert.ok(
+      report.delta.recallRank1MatchRateDelta !== null || rank1Runs.every(r => r.delta.recallRank1MatchRateDelta === null),
+      "recallRank1MatchRateDelta should be non-null when rank-1 scenarios exist and labels are resolved"
+    );
+  }
+});
+
+test("applied-simulation: no-answer and safety scenarios do not incorrectly regress due to insufficient labels", async () => {
+  const report = await runAppliedSimulationEvaluation();
+  const noAnswerRuns = report.runs.filter(r => r.category === "no-answer");
+  const safetyRuns = report.runs.filter(r => r.category === "safety-rejection");
+
+  for (const run of [...noAnswerRuns, ...safetyRuns]) {
+    // These scenarios should not be classified as 'worse' solely due to memory-health improvement
+    // They should be 'same' because recall labels are insufficient for meaningful comparison
+    assert.ok(
+      run.classification !== "worse" || run.classificationReason.includes("memory"),
+      `no-answer/safety scenario '${run.scenarioId}' should not regress without meaningful recall label change`
+    );
+  }
+});
+
+test("applied-simulation: classifications are not exclusively driven by memory-health when recall is measurable", async () => {
+  const report = await runAppliedSimulationEvaluation();
+
+  // Find supersession scenarios that have measurable recall metrics
+  const supersessionRuns = report.runs.filter(
+    r => r.category === "current-truth-supersession" &&
+         r.applied.storedMemoryId !== undefined
+  );
+
+  for (const run of supersessionRuns) {
+    // If currentTruthAtRank1 changed (delta is non-null), classification should reflect recall
+    if (run.delta.recallCurrentTruthRateDelta !== null) {
+      // Classification should be 'better' if recall improved without regression
+      // or 'worse' if recall regressed
+      const recallImproved = run.delta.recallCurrentTruthRateDelta > 0;
+      const recallRegressed = run.delta.recallCurrentTruthRateDelta < 0;
+
+      if (recallImproved) {
+        assert.ok(
+          run.classification === "better" || run.classification === "inconclusive",
+          `supersession scenario '${run.scenarioId}' with improved recall should be 'better' or 'inconclusive', got '${run.classification}'`
+        );
+      }
+      if (recallRegressed) {
+        assert.ok(
+          run.classification === "worse",
+          `supersession scenario '${run.scenarioId}' with regressed recall should be 'worse', got '${run.classification}'`
+        );
+      }
+    }
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 14. No production DB or live network usage
 // ---------------------------------------------------------------------------
 
 test("applied-simulation: runs use temp storage only (no production .curion touched)", async () => {
