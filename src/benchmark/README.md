@@ -614,3 +614,76 @@ The full limitations block lives on `report.limitations`. The headline items:
 - **Path A (storage lifecycle seams)** — smart-librarian decisions are captured via shadow seam and applied using `transitionMemoryState`, `addSupersededByToMemory`, `updateMemoryMetadata`. This is NOT production active-mode wiring.
 - **Benchmark-only / research-only** — the harness does NOT activate the production decision engine in active mode, modify the public MCP API, or mutate production storage.
 - **Minimum scenario gate required** — classification as `better`/`worse` requires minimum 12 scenarios with full category coverage.
+
+---
+
+## Production Replay Corpus Evaluation (`benchmark:replay-corpus`)
+
+A self-contained, deterministic, **no-network** evaluation harness that processes corpus items through the Memory Decision Engine in replay mode and produces a JSON artifact + human-readable report.
+
+Design source: `docs/decision-engine/production-replay-corpus.md`
+
+### Quick start
+
+```sh
+# Default scripted run — no network, no cost, deterministic.
+npm run benchmark:replay-corpus
+
+# Dry-run (no artifact write)
+npm run benchmark:replay-corpus -- --no-write
+
+# Override artifact directory
+npm run benchmark:replay-corpus -- --artifacts /tmp/my-artifacts
+```
+
+### What the report carries
+
+- `generatedAt` ISO timestamp
+- `corpusVersion` stamp
+- `evaluationMode: "replay-corpus"` label
+- `corpusSize` and `corpusBreakdown` (synthetic-proxy / manual-curated / sanitized-production counts)
+- **Safety metrics**: `safetyAssertionPassRate`, `dangerousContentHandledRate`, `privacyViolationRate`, `rejectedItemCount`, `safetyAdapterFailureRate`
+- **Memory lifecycle metrics**: `actionDistribution`, `actionMatchesGroundTruthRate`, `lowConfidenceActionRate`, `noOpRate`
+- **Recall quality metrics** (deferred to Phase 3): `topKMatchRate`, `currentTruthMatchRate`, `noAnswerTnr` — all `null` in replay pipeline
+- **Delta comparison metrics**: `decisionDivergenceRate`, `deltaClassificationRate` (matches / diverges), `inconclusiveRate`
+- Per-item replay results with schema validation, safety class, ground-truth comparison, and replay status
+- Limitations block (research-only disclosure)
+
+### Minimum initial corpus (proof-of-feasibility set)
+
+| Dimension | Target |
+|---|---|
+| Total items | 20 |
+| `remember` items | ≥ 10 |
+| `recall-query` items | ≥ 10 |
+| Synthetic-proxy items | ≥ 10 |
+| Manual-curated items | ≥ 5 |
+| Sanitised-production items | 0 (deferred) |
+| Items with ground truth | 100 % |
+| Safety-relevant items | ≥ 3 |
+| Topic categories | ≥ 5 |
+
+### What the harness does NOT do
+
+- No live network — scripted responses only
+- No production storage access
+- No engine activation — decisions are captured but NOT applied to persistent memory
+- No MCP API changes
+- No sanitised-production data (initial corpus uses synthetic-proxy and manual-curated only)
+
+### CLI flags
+
+```
+--artifacts <path>      override the artifact directory (default: .curion/benchmark)
+--no-write             suppress the JSON artifact
+--no-stdout            suppress the human report on stdout
+```
+
+### Limitations
+
+The full limitations block lives on `report.limitations`. The headline items:
+
+- **Proof-of-feasibility set only** — minimum diversity targets are met but this is NOT a statistically representative production sample.
+- **Recall quality deferred to Phase 3** — `topKMatchRate`, `currentTruthMatchRate`, `noAnswerTnr` are `null` in the replay pipeline.
+- **Synthetic-proxy and manual-curated only** — sanitised-production is deferred until the privacy/redaction approval process exists.
+- **Offline evidence only** — replay remains offline evidence; it does NOT constitute proof of production activation fitness.
