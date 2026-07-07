@@ -225,7 +225,16 @@ separate workstreams:
    describes how to evaluate whether the engine is safe and beneficial
    to promote. It does not activate any mode or change any code.
 
-3. **Active-mode controller-side mutation wiring** — when `active` mode
+3. **Promotion readiness briefing** — before any Stage 2 approval, the
+   project owner should review the current evidence state documented in
+   [docs/decision-engine/promotion-readiness.md](decision-engine/promotion-readiness.md).
+   Key open gaps for Stage 2 readiness: `delta.status="future"` (no
+   production baseline comparative delta), `coverageComplete` requirements
+   for Recall Quality, and the absence of active-mode controller wiring.
+   The readiness briefing does not approve activation; it summarises what
+   evidence exists and what choices the owner faces.
+
+4. **Active-mode controller-side mutation wiring** — when `active` mode
    is approved, the controller must be extended to apply engine decisions
    as state transitions. This requires guardrails (rollback, audit table
    visibility, kill switch) and is not yet implemented. Additionally,
@@ -234,7 +243,7 @@ separate workstreams:
    engine-driven mutation wiring with guardrails are required before any
    active rollout.
 
-4. **Fresh benchmark run before activation** — run the full benchmark
+5. **Fresh benchmark run before activation** — run the full benchmark
    suite (`decision-policy`, `recall-policy`, `adaptive-depth`,
    `long-horizon-memory`) in the target environment before any stage
    advance. Use the artifacts as evidence for the approval gate.

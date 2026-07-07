@@ -199,10 +199,10 @@ promotion review.
 
 ---
 
-## Expected Future Artifact and Report Shape
+## Artifact Shape
 
 The shadow comparison report is written to `.curion/benchmark/` following the
-existing `writeTimestampedJsonArtifact` convention. Expected prefix:
+existing `writeTimestampedJsonArtifact` convention. Artifact prefix:
 `shadow-comparison-<timestamp>.json`.
 
 ```json
@@ -231,6 +231,7 @@ existing `writeTimestampedJsonArtifact` convention. Expected prefix:
     "recallCurrentTruthRate": 0.0
   },
   "delta": {
+    "status": "future",
     "safetyDelta": 0,
     "memorySizeDelta": 0,
     "recallHitRateDelta": 0.0,
@@ -242,17 +243,43 @@ existing `writeTimestampedJsonArtifact` convention. Expected prefix:
     "recallQualitySignal": "positive|neutral|regressed",
     "promotionEligible": false
   },
+  "balancedScore": {
+    "safety": { "passed": false, "details": {} },
+    "cleanerMemory": { "signal": "neutral", "details": {} },
+    "recallQuality": {
+      "signal": "neutral",
+      "coverageComplete": false,
+      "details": {}
+    }
+  },
   "limitations": [
     "Shadow comparison uses synthetic scenarios, not live production traffic.",
     "The engine's shadow decisions are not applied to persistent storage.",
-    "No auto-promotion: project-owner approval is required regardless of gate result."
+    "No auto-promotion: project-owner approval is required regardless of gate result.",
+    "Delta is synthetic-only; a production baseline comparative delta requires a production storage capture and is marked status: future.",
+    "Recall Quality denominators are synthetic (9 adaptive-depth scenarios); they do not represent live production traffic distribution."
   ]
 }
 ```
 
-**Note:** The `shadow-comparison` artifact shape is a future target. It does not
-yet exist in the codebase and is documented here as a methodology specification
-for future implementation.
+**Note on `delta.status`:** The comparative delta is currently derived from two
+shadow-side runs against isolated temp storage. A true production baseline delta
+requires running the production controller path against a representative
+production storage snapshot. Until that capture exists, `delta.status` is
+`"future"` and the delta fields are a synthetic proxy, not a production
+measurement.
+
+**Note on `coverageComplete`:** The Recall Quality pillar sets
+`coverageComplete: true` only when all three labelled coverage metrics
+(`rank1`, `currentTruth`, `noAnswer` TNR) are non-null across the 9
+adaptive-depth scenarios. A `coverageComplete: false` signal indicates
+incomplete metric capture and should be investigated before the report is
+used for promotion review.
+
+**Note on `promotionEligible`:** When `gate.promotionEligible: true`, the
+engine is eligible for project-owner review. It is **not** approved,
+activated, or authorised to mutate memory. Explicit owner approval covering
+the specific target stage is always required.
 
 ---
 
@@ -364,6 +391,8 @@ This document does **not** include or authorize:
 | Does Recall Quality have an independent gate? | No. A regression blocks promotion, but the gate is part of the composite logic. |
 | Does a passing gate auto-activate the engine? | No. Project-owner approval is always required. |
 | Does this use live production traffic? | No. Shadow comparison uses synthetic scenarios only. |
-| What is the expected artifact? | `shadow-comparison-<timestamp>.json` in `.curion/benchmark/` — not yet implemented |
+| What is the expected artifact? | `shadow-comparison-<timestamp>.json` in `.curion/benchmark/` — implemented; `delta.status` is `"future"` until a production baseline capture exists |
 | Does this replace existing benchmarks? | No. It complements them. All four existing benchmarks must pass before shadow comparison. |
+| What does `coverageComplete` mean? | Recall Quality metrics are fully captured (all three labelled coverage metrics non-null). Incomplete coverage should be investigated before promotion review. |
+| What does `delta.status=future` mean? | The comparative delta is synthetic-only. A production baseline delta requires a production storage capture and is not yet available. |
 | What is the adapter-only benchmark insufficient? | It exercises only the adapter in isolation; it does not measure end-to-end outcomes or downstream recall impact. |
