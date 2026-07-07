@@ -8,7 +8,7 @@ and does not authorize a mode flip.
 
 ## Status
 
-**The Memory Decision Engine is not approved for activation.**
+**The Memory Decision Engine is not approved for activation. Activation remains blocked.**
 
 This document summarises the current state of evidence from the Balanced Score
 shadow-comparison benchmark run and states the remaining gaps that must be
@@ -36,6 +36,21 @@ Balanced Score across three independent pillars:
 A passing shadow-comparison report proves the engine is **safe to evaluate in
 shadow mode**, not safe to activate. The gate is a precondition for owner
 review, not a substitute for it.
+
+### Current synthetic benchmark result
+
+The Phase 2 counterfactual projection produces per-scenario classifications as
+`better | same | worse | inconclusive`. These are **benchmark-internal
+synthetic classifications only** — they do not represent real-world production
+outcomes, do not measure live traffic, and do not constitute evidence of
+production superiority.
+
+**Current result: better: 8, same: 6, worse: 0**
+
+The `recallHitRateDelta` field remains `null` in the Phase 2 artifact because
+the counterfactual projection does not apply engine decisions to storage.
+Measured recall quality delta requires Phase 3 applied simulation (offline, in
+cloned temp storage), which has not yet produced a measured quality verdict.
 
 ### Gate benchmarks
 
@@ -136,6 +151,35 @@ controller-side mutation wiring and guardrail implementation.
 No project owner has reviewed a shadow-comparison report and issued explicit,
 documented approval for any stage beyond `shadow`.
 
+### 6. `recallHitRateDelta` is null
+
+The Phase 2 artifact does not populate `recallHitRateDelta` because the
+counterfactual projection does not apply engine decisions to storage. The
+measured recall quality delta requires Phase 3 applied simulation, which has
+not yet been completed.
+
+**Impact**: The Phase 2 projection cannot distinguish between scenarios where
+the engine would improve recall from scenarios where it would degrade it.
+
+---
+
+## Next Evidence Gates
+
+The following must be satisfied before any activation decision can be made:
+
+1. **Production replay corpus** — a representative set of real production
+   traffic scenarios captured, sanitised, and incorporated into the scenario
+   set.
+2. **Shadow telemetry review process** — a documented, periodic review
+   process for shadow-mode decision telemetry (distribution, confidence,
+   non-skip action rate).
+3. **Rollback design** — a written, tested rollback procedure that covers
+   the active-mode window and preserves audit visibility.
+4. **Active-mode controller design** — a technical design for the controller
+   mutation wiring including rollback, audit table visibility, and kill switch.
+5. **Owner approval before any activation** — explicit, documented project-owner
+   approval covering the specific target stage and acceptance criteria.
+
 ---
 
 ## Required Next Choices
@@ -224,3 +268,7 @@ today and what choices the owner faces.
 | Are Recall Quality denominators live traffic? | No. They are 9 hand-curated synthetic adaptive-depth scenarios. |
 | Can the engine be activated today? | No. No owner approval has been issued. Active-mode controller wiring is not implemented. |
 | What is the next owner decision? | Choose: remain in shadow, collect stronger evidence, or plan a Stage 2 canary. |
+| What is the current Phase 2 benchmark result? | better: 8, same: 6, worse: 0 (benchmark-internal synthetic classifications only; not production evidence). |
+| Is `recallHitRateDelta` populated? | No. It remains `null` in Phase 2. Measured recall quality delta requires Phase 3 applied simulation. |
+| What is Phase 2? | Counterfactual projection — comparing production outcome vs. engine decision without applying engine decisions to any store. |
+| What is Phase 3? | Offline applied simulation in cloned temp storage — engine decisions ARE applied to a cloned store and recall quality is measured against a baseline. |

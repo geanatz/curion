@@ -187,6 +187,33 @@ gate fails, document the failure reason and return to shadow-mode observation.
 If the gate passes, the report is evidence that the engine is eligible for
 promotion review.
 
+### Phase 3 — Applied Simulation (Offline, Cloned Temp Storage)
+
+Phase 3 extends the shadow-comparison methodology by actually applying engine
+decisions to a **cloned temp store** and measuring the resulting recall quality
+delta. Unlike Phase 2 (counterfactual projection), Phase 3 produces measured
+quality-impact evidence:
+
+1. **Clone the temp store** — seed an identical temp storage alongside the
+   production-path temp store.
+2. **Apply engine decisions** — use storage lifecycle seams
+   (`transitionMemoryState`, `addSupersededByToMemory`,
+   `updateMemoryMetadata`) to apply the engine's recommended state transitions.
+3. **Measure recall quality** — run `runRecallController` on the post-apply
+   clone and compare recall metrics against the Phase 2 baseline.
+4. **Classify per scenario** — `better | same | worse | inconclusive` based
+   on measured recall impact.
+
+**Current Phase 3 result: better: 8, same: 6, worse: 0** — these are
+**benchmark-internal synthetic classifications only**. They do not represent
+production outcomes, live traffic results, or real-world superiority. The
+`recallHitRateDelta` field remains null pending completion of the recall
+measurement phase.
+
+Phase 3 is **offline and temp-storage-isolated** — no production store is
+touched, no live traffic is used, and no engine mutations are applied to
+persistent state.
+
 ### Constraints
 
 - **No live production traffic.** The replay uses synthetic scenarios only.
@@ -425,3 +452,7 @@ identifies the owner's decision choices.
 | What does `coverageComplete` mean? | Recall Quality metrics are fully captured (all three labelled coverage metrics non-null). Incomplete coverage should be investigated before promotion review. |
 | What does `delta.status=counterfactual` mean? | Phase 2 counterfactual projection is populated — `memorySizeDelta`, `decisionDivergenceRate`, `counterfactualClassification`, and `projectedMemoryDeltaPerScenario` are derived from comparing production outcome vs. engine decision without applying engine decisions. Measured recall quality delta (recallHitRateDelta, recallCurrentTruthRateDelta) remains null until Phase 3 applied simulation. |
 | What is the adapter-only benchmark insufficient? | It exercises only the adapter in isolation; it does not measure end-to-end outcomes or downstream recall impact. |
+| What is Phase 2? | Counterfactual projection — comparing production outcome vs. engine decision without applying engine decisions to any store. `counterfactualClassification` emits only "same" or "inconclusive" (never "better"/"worse"). |
+| What is Phase 3? | Offline applied simulation in cloned temp storage — engine decisions ARE applied to a cloned store and recall quality is measured against a baseline. |
+| What are the current Phase 3 applied-simulation results? | better: 8, same: 6, worse: 0. These are benchmark-internal synthetic classifications from the Phase 3 applied-simulation harness. They do not represent production outcomes or live traffic results. |
+| Is `recallHitRateDelta` populated after Phase 3? | It remains null in the current artifact. Phase 3 applied simulation has produced classification counts but the measured recall quality delta has not yet been populated. |
