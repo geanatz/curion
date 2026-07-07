@@ -228,8 +228,8 @@ separate workstreams:
 3. **Promotion readiness briefing** — before any Stage 2 approval, the
    project owner should review the current evidence state documented in
    [docs/decision-engine/promotion-readiness.md](decision-engine/promotion-readiness.md).
-   Key open gaps for Stage 2 readiness: `delta.status="future"` (no
-   production baseline comparative delta), `coverageComplete` requirements
+   Key open gaps for Stage 2 readiness: `delta.status="counterfactual"` (Phase 2
+   counterfactual projection; no production baseline comparative delta), `coverageComplete` requirements
    for Recall Quality, and the absence of active-mode controller wiring.
    The readiness briefing does not approve activation; it summarises what
    evidence exists and what choices the owner faces.

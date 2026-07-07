@@ -93,7 +93,7 @@ activation decision, not a criticism of current implementation quality.
 ### 1. No production baseline comparative delta
 
 The `delta` block in the shadow-comparison artifact currently reports
-`status: "future"`. A true comparative delta requires a production baseline
+`status: "counterfactual"` (Phase 2 projection only). A true comparative delta requires a production baseline
 run — the same scenario set processed through the production `decisionMode=off`
 path with production storage capturing the actual memory state. The current
 delta is derived from comparing two shadow-side runs (production path vs.
@@ -204,7 +204,7 @@ This document does not include, and this work does not authorize:
 | Document | Role |
 |---|---|
 | [comparison-methodology.md](./comparison-methodology.md) | Defines the Balanced Score methodology and what "better than production" means |
-| [delta-criteria.md](./delta-criteria.md) | Defines the delta classification criteria (better/same/worse/inconclusive) and why `delta.status="future"` is correct until Phase 2 and Phase 3 gates are passed |
+| [delta-criteria.md](./delta-criteria.md) | Defines the delta classification criteria (better/same/worse/inconclusive) and why `delta.status="counterfactual"` is the correct Phase 2 standing until Phase 3 measured quality-impact gates are passed |
 | [activation-plan.md](../activation-plan.md) | Describes the staged rollout path from `off` → `shadow` → `active` |
 | This document | Current evidence summary and owner decision briefing |
 
@@ -220,7 +220,7 @@ today and what choices the owner faces.
 |---|---|
 | What does `promotionEligible=true` mean? | The evidence package is complete and the engine is eligible for owner review — not approved, not activated. |
 | Does a passing shadow comparison activate the engine? | No. Active mode requires explicit project-owner approval. |
-| What is the biggest evidence gap? | No production baseline comparative delta — `delta.status="future"` — means the comparative evidence is synthetic-only. |
+| What is the biggest evidence gap? | No production baseline comparative delta — `delta.status="counterfactual"` (Phase 2 projection only) — means the comparative evidence is synthetic-only. |
 | Are Recall Quality denominators live traffic? | No. They are 9 hand-curated synthetic adaptive-depth scenarios. |
 | Can the engine be activated today? | No. No owner approval has been issued. Active-mode controller wiring is not implemented. |
 | What is the next owner decision? | Choose: remain in shadow, collect stronger evidence, or plan a Stage 2 canary. |

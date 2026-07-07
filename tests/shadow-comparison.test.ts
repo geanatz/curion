@@ -30,6 +30,7 @@ import {
   writeShadowComparisonReport,
   BUILT_IN_SHADOW_COMPARISON_SCENARIOS,
   SHADOW_COMPARISON_LIMITATIONS,
+  type ShadowComparisonScenario,
 } from "../src/benchmark/shadow-comparison.ts";
 import { DEFAULT_CONFIDENCE_THRESHOLD } from "../src/controller/remember-controller.ts";
 import { PUBLIC_TOOL_NAMES } from "../src/server.ts";
@@ -813,6 +814,57 @@ test("shadow-comparison: delta classification is conservative (same/inconclusive
   if (delta.counterfactualClassification === "same") {
     assert.ok(delta.decisionDivergenceRate === 0 || delta.decisionDivergenceRate === null);
   }
+});
+
+test("shadow-comparison: saved+reject divergence produces projectedDelta=-1", async () => {
+  // This test verifies the Phase 2 counterfactual projection for the
+  // prodOutcome="saved" + engineAction="reject" divergence branch.
+  // When production stores a memory but the engine recommends reject,
+  // applying the reject would prevent storage → projectedDelta = -1.
+  const customScenario: ShadowComparisonScenario = {
+    id: "saved-then-reject",
+    label: "Production stores, engine recommends reject",
+    description:
+      "Production stores the memory. Shadow engine recommends reject. " +
+      "This exercises the saved+reject divergence branch in the delta projection.",
+    rawInput: "The project uses a custom linting rule for TypeScript files.",
+    related: [],
+    providerScript: JSON.stringify({
+      summary: "The project uses a custom linting rule for TypeScript files.",
+      confidence: 0.85,
+      tags: ["typescript", "linting"],
+      entities: [{ name: "custom linting rule", kind: "tool" }],
+      classification: "fact",
+    }),
+    // Engine recommends reject — divergence from production's stored outcome
+    decisionScript: JSON.stringify({
+      action: "reject",
+      reason: "policy_violation",
+      supersededIds: [],
+      conflictsWithIds: [],
+      redundantWithIds: [],
+      confidence: 0.92,
+    }),
+    expectedProductionOutcome: "saved",
+  };
+
+  const report = await runShadowComparison([customScenario]);
+  const run = report.runs.find((r) => r.scenarioId === "saved-then-reject");
+  assert.ok(run, "custom saved-then-reject scenario must appear in report");
+  assert.equal(run!.production.outcome, "saved");
+  assert.equal(run!.shadow.engineReached, true);
+  assert.equal(run!.shadow.decision!.action, "reject");
+
+  // Find the corresponding projected memory delta item
+  const deltaItem = report.balancedScore.delta.projectedMemoryDeltaPerScenario.find(
+    (item) => item.scenarioId === "saved-then-reject"
+  );
+  assert.ok(deltaItem, "projectedMemoryDeltaPerScenario must contain item for saved-then-reject");
+  assert.equal(deltaItem!.projectedDelta, -1, "saved+reject divergence must have projectedDelta=-1");
+  assert.ok(
+    deltaItem!.rationale.includes("reject") && deltaItem!.rationale.includes("-1"),
+    "rationale must mention reject and -1 projected impact"
+  );
 });
 
 test("shadow-comparison: limitations mention v1 partial Balanced Score and Recall Quality partial coverage", async () => {
