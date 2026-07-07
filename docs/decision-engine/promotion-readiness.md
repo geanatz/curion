@@ -204,6 +204,7 @@ This document does not include, and this work does not authorize:
 | Document | Role |
 |---|---|
 | [comparison-methodology.md](./comparison-methodology.md) | Defines the Balanced Score methodology and what "better than production" means |
+| [delta-criteria.md](./delta-criteria.md) | Defines the delta classification criteria (better/same/worse/inconclusive) and why `delta.status="future"` is correct until Phase 2 and Phase 3 gates are passed |
 | [activation-plan.md](../activation-plan.md) | Describes the staged rollout path from `off` → `shadow` → `active` |
 | This document | Current evidence summary and owner decision briefing |
 

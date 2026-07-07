@@ -381,6 +381,22 @@ This document does **not** include or authorize:
 
 ---
 
+## Document Relationship
+
+| Document | Role |
+|---|---|
+| [comparison-methodology.md](./comparison-methodology.md) | Defines the Balanced Score methodology and what "better than production" means |
+| [delta-criteria.md](./delta-criteria.md) | Defines the delta classification criteria (better/same/worse/inconclusive) and the required gates before Phase 2 counterfactual fields and Phase 3 applied simulation can produce a quality verdict |
+| [promotion-readiness.md](./promotion-readiness.md) | Summarises current evidence gaps and owner decision options |
+| [activation-plan.md](../activation-plan.md) | Describes the staged rollout path from `off` → `shadow` → `active` |
+
+This document establishes the Balanced Score framework. The delta-criteria
+document defines the classification rules within that framework. The
+promotion-readiness document applies those criteria to the current evidence and
+identifies the owner's decision choices.
+
+---
+
 ## Quick Reference
 
 | Question | Answer |
