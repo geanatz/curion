@@ -1292,9 +1292,10 @@ export async function runAppliedSimulationEvaluation(
         }
       });
 
+      let appliedRememberOutcome: RememberOutcome | undefined;
       try {
         const shadowFetch = buildScriptedFetch(scenario.providerScript);
-        await runRememberController(handleApplied, scenario.rawInput, {
+        appliedRememberOutcome = await runRememberController(handleApplied, scenario.rawInput, {
           decisionMode: "shadow",
           providerFetchImpl: shadowFetch,
           providerPrimaryApiKey: "sk-test-not-real",
@@ -1309,10 +1310,11 @@ export async function runAppliedSimulationEvaluation(
         resetShadowRememberDecisionImpl();
       }
 
-      // Get the stored memory id
-      const memories = listActiveMemorySummaries(handleApplied, { limit: 100 });
-      const newMemoryInStore = memories.find(m => m.memoryContent.includes(scenario.rawInput.slice(0, 50)));
-      appliedStoredMemoryId = newMemoryInStore?.id;
+      // Capture the stored memory id directly from the outcome (mirrors baseline path)
+      // This avoids brittle substring lookup which fails when provider summary differs from rawInput
+      if (appliedRememberOutcome?.status === "saved") {
+        appliedStoredMemoryId = appliedRememberOutcome.record.id;
+      }
 
       // Apply the storage action
       const appliedAction = scenario.appliedAction;
