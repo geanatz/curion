@@ -322,8 +322,7 @@ no MCP tool schema is altered, and no production system is contacted.
 6. **Produce replay report** — Write the replay report artifact (see
    Artifact and Report Expectations).
 7. **No production mutation** — The replay run leaves all production systems
-   untouched. It operates entirely in isolated temp storage or read-only
-  影子.
+   untouched. It operates entirely in isolated temp storage or read-only.
 
 ### Replay vs Shadow-Comparison Harness
 
