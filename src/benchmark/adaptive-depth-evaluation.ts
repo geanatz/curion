@@ -304,6 +304,33 @@ export interface EvaluationScenario {
    * is not machine-enforced.
    */
   scenarioVersion?: string;
+  /**
+   * Ground-truth rank-1 memory ids for Recall Quality
+   * `recallRank1MatchRate`. When set, the harness records
+   * whether the synthesis prompt's top-ranked memory is
+   * in this set. Null when no rank-1 ground truth is
+   * defined for this scenario.
+   */
+  expectedRank1Ids?: ReadonlyArray<number>;
+  /**
+   * Ground-truth current-truth memory ids for Recall
+   * Quality `recallCurrentTruthRate`. The current-truth
+   * memory is the memory that should be ranked at
+   * position 1 because it supersedes or replaces older
+   * variants. When set, the harness records whether any
+   * current-truth memory appears at rank 1. Null when
+   * no current-truth ground truth is defined.
+   */
+  currentTruthIds?: ReadonlyArray<number>;
+  /**
+   * Whether the scenario expects a no-answer outcome
+   * (`status === "no_memory"`). Used for Recall Quality
+   * `recallNoAnswerTnr` (true-negative rate). When true,
+   * the harness records whether the controller correctly
+   * returned no_memory. Undefined is treated as false for
+   * metric computation purposes.
+   */
+  noAnswerExpected?: boolean;
 }
 
 /**
@@ -383,6 +410,23 @@ export interface ScenarioRunResult {
     /** Did the assertions all pass? */
     pass: boolean;
   };
+  /**
+   * Ground-truth rank-1 memory ids for this scenario.
+   * Copied from the scenario at run time so the report
+   * carries the labels without needing to look them up
+   * from the scenario set.
+   */
+  expectedRank1Ids?: ReadonlyArray<number>;
+  /**
+   * Ground-truth current-truth memory ids for this
+   * scenario. Copied from the scenario at run time.
+   */
+  currentTruthIds?: ReadonlyArray<number>;
+  /**
+   * Whether the scenario expects a no-answer outcome.
+   * Copied from the scenario at run time.
+   */
+  noAnswerExpected?: boolean;
 }
 
 /**
@@ -463,13 +507,16 @@ export interface AdaptiveDepthEvaluationReport {
  * set; a future v2 may add new scenarios (e.g. semantic
  * fusion) without invalidating the v1 contract.
  *
- * Family distribution (6 scenarios):
+ * Family distribution (9 scenarios):
  *   - broad-cluster       : many relevant memories
  *   - narrow-precise      : tight top-1
  *   - noisy-tail          : cluster + long noisy tail
  *   - prompt-budget       : many long memories
  *   - provider-refusal    : refusal -> weak_match
- *   - superseded-pair     : current vs previous version
+ *   - superseded-pair     : current vs previous version (postgres topic)
+ *   - no-answer           : no relevant memories
+ *   - superseded-pair-2   : current vs previous version (embedder topic)
+ *   - no-answer-2         : second no-answer scenario (unrelated domain)
  */
 export const BUILT_IN_SCENARIOS: ReadonlyArray<EvaluationScenario> = [
   // -----------------------------------------------------------------------
@@ -719,7 +766,124 @@ export const BUILT_IN_SCENARIOS: ReadonlyArray<EvaluationScenario> = [
       adaptive: { minSelectedCount: 2, maxSelectedCount: 15 },
       legacy: { minSelectedCount: 2, maxSelectedCount: 5 },
     },
-    scenarioVersion: "1.0",
+    scenarioVersion: "1.1",
+    // Ground-truth labels for Recall Quality metrics.
+    // Memories are seeded in declaration order: previous (id=1), current (id=2).
+    // The current memory (id=2) should rank at position 1.
+    currentTruthIds: [2],
+    expectedRank1Ids: [2],
+    noAnswerExpected: false,
+  },
+  // -----------------------------------------------------------------------
+  // 7. No-answer scenario
+  // -----------------------------------------------------------------------
+  {
+    id: "no-answer",
+    label: "No relevant memories: controller must return no_memory",
+    description:
+      "The query has no relevant memories in the corpus. The controller " +
+      "must return no_memory under both configs. This scenario enables " +
+      "recallNoAnswerTnr computation (true-negative rate for no-answer cases).",
+    memories: [
+      {
+        text: "Office plants are watered on a biweekly rotation.",
+        kind: "context",
+        tags: ["plants"],
+      },
+      {
+        text: "Conference room chairs are restocked monthly.",
+        kind: "context",
+        tags: ["furniture"],
+      },
+    ],
+    query: "What programming languages does the project use?",
+    providerResponse: "I don't have information about that.",
+    expect: {
+      common: { status: "no_memory" },
+    },
+    scenarioVersion: "1.1",
+    // No relevant memories exist for this query, so no rank-1 match is possible.
+    // The scenario correctly produces no_memory (true negative for no-answer case).
+    expectedRank1Ids: [],
+    currentTruthIds: [],
+    noAnswerExpected: true,
+  },
+  // -----------------------------------------------------------------------
+  // 8. Second supersession pair (different topic)
+  // -----------------------------------------------------------------------
+  {
+    id: "superseded-pair-2",
+    label: "Current memory supersedes a previous version (embedder topic)",
+    description:
+      "A current memory about the embedder supersedes a previous version. " +
+      "The current must rank above the previous; the previous must remain in sourceIds.",
+    memories: [
+      {
+        text: "The project used bge-m3 as the default embedder in the previous release.",
+        kind: "fact",
+        tags: ["embedder", "previous"],
+      },
+      {
+        text: "The project uses MiniMax as the default embedder in the current release.",
+        kind: "fact",
+        tags: ["embedder", "current"],
+      },
+    ],
+    query: "What is the default embedder for offline evaluation?",
+    providerResponse: "The default embedder for offline evaluation is MiniMax.",
+    expect: {
+      common: { status: "answered" },
+      adaptive: { minSelectedCount: 2, maxSelectedCount: 15 },
+      legacy: { minSelectedCount: 2, maxSelectedCount: 5 },
+    },
+    scenarioVersion: "1.2",
+    // Ground-truth labels for Recall Quality metrics.
+    // Memories are seeded in declaration order: previous (id=1), current (id=2).
+    // The current memory (id=2) should rank at position 1.
+    currentTruthIds: [2],
+    expectedRank1Ids: [2],
+    noAnswerExpected: false,
+  },
+  // -----------------------------------------------------------------------
+  // 9. Second no-answer scenario with unrelated domain
+  // -----------------------------------------------------------------------
+  {
+    id: "no-answer-2",
+    label: "Second no-answer: memories about office operations, query asks about unrelated programming topics",
+    description:
+      "The memories cover office, plants, and furniture topics. The query asks about " +
+      "programming language topics which are not covered by any memory. " +
+      "The controller must return no_memory under both configs. " +
+      "This is a second no-answer scenario with a different topic cluster from the " +
+      "first no-answer scenario, providing a stronger denominator for no-answer TNR.",
+    memories: [
+      {
+        text: "Office plants are watered on a biweekly rotation.",
+        kind: "context",
+        tags: ["office", "plants"],
+      },
+      {
+        text: "Conference room chairs are restocked monthly.",
+        kind: "context",
+        tags: ["office", "furniture"],
+      },
+      {
+        text: "The kitchen snack bar is refilled on Mondays.",
+        kind: "context",
+        tags: ["office", "kitchen"],
+      },
+    ],
+    query: "What programming languages does the project use?",
+    providerResponse: "I don't have information about that.",
+    expect: {
+      common: { status: "no_memory" },
+    },
+    scenarioVersion: "1.2",
+    // No memory in this scenario covers programming languages.
+    // The memories are about office operations, completely unrelated to the query.
+    expectedRank1Ids: [],
+    currentTruthIds: [],
+    noAnswerExpected: true,
   },
 ];
 
@@ -736,7 +900,7 @@ export const BUILT_IN_SCENARIOS: ReadonlyArray<EvaluationScenario> = [
  * benchmark.
  */
 export const ADAPTIVE_DEPTH_EVALUATION_LIMITATIONS: ReadonlyArray<string> = [
-  "Synthetic-scenario evaluation. The six built-in scenarios are hand-curated; they exercise the controller on small, deterministic corpora. A reviewer who reads a scenario-pass rate as 'the adaptive depth stage generalises to production' is over-reading the result. The right reading is 'the adaptive depth stage behaves as expected on the v1 scenario set'.",
+  "Synthetic-scenario evaluation. The nine built-in scenarios are hand-curated; they exercise the controller on small, deterministic corpora. A reviewer who reads a scenario-pass rate as 'the adaptive depth stage generalises to production' is over-reading the result. The right reading is 'the adaptive depth stage behaves as expected on the v1 scenario set'.",
   "No-network. The harness never makes a real provider call; the scripted fetch returns the canned response in-process. A future experiment that adds a real provider call would invalidate the determinism contract.",
   "Legacy fixed-topK is expressed as an adaptive-depth config, not as a controller change. The legacy path is the canonical adaptive-depth pipeline with `selector.minK=maxK=5, relativeFraction=0, plateauTolerance=1.0, budget=Infinity`. The shape is identical to the production path; the only difference is the config. A reviewer who wants to compare against a true 'no adaptive depth' path would need a separate code change to the controller.",
   "Frozen config. The production adaptive-depth config is `DEFAULT_ADAPTIVE_DEPTH_PIPELINE_CONFIG`. The legacy config is `LEGACY_FIXED_TOPK_PIPELINE_CONFIG`. Neither is re-tuned on the evaluation results. A future experiment that re-tunes them would invalidate the v1 contract.",
@@ -1025,6 +1189,20 @@ async function runSingleScenarioConfig(
     // populated).
     const cfgForResolved = configValue.selector ?? {};
     const resolvedSelector = resolveAdaptiveDepthConfig(cfgForResolved);
+
+    // Build the ground-truth labels object, omitting undefined fields
+    // to satisfy exactOptionalPropertyTypes.
+    const groundTruthLabels: Pick<ScenarioRunResult, "expectedRank1Ids" | "currentTruthIds" | "noAnswerExpected"> = {};
+    if (scenario.expectedRank1Ids !== undefined) {
+      groundTruthLabels.expectedRank1Ids = scenario.expectedRank1Ids;
+    }
+    if (scenario.currentTruthIds !== undefined) {
+      groundTruthLabels.currentTruthIds = scenario.currentTruthIds;
+    }
+    if (scenario.noAnswerExpected !== undefined) {
+      groundTruthLabels.noAnswerExpected = scenario.noAnswerExpected;
+    }
+
     return {
       config,
       resolvedSelector,
@@ -1040,6 +1218,7 @@ async function runSingleScenarioConfig(
         configSpecific: assertionRows.configSpecific,
         pass: [...assertionRows.common, ...assertionRows.configSpecific].every((r) => r.pass),
       },
+      ...groundTruthLabels,
     };
   } finally {
     try {

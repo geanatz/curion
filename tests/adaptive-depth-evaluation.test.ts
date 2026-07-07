@@ -87,13 +87,13 @@ import {
 
 test("adaptive-depth evaluation: all built-in scenarios pass under both adaptive and legacy configs", async () => {
   const report = await runAdaptiveDepthEvaluation();
-  // All 6 built-in scenarios must pass under both
+  // All 9 built-in scenarios must pass under both
   // configs. A future scenario that fails on a known
   // limitation should be marked expected-fail or be
   // removed from the v1 scenario set; the harness
   // should not silently ship a failing scenario.
-  assert.equal(report.meta.scenarioCount, 6);
-  assert.equal(report.meta.passedBothCount, 6);
+  assert.equal(report.meta.scenarioCount, 9);
+  assert.equal(report.meta.passedBothCount, 9);
   assert.equal(report.meta.passedAdaptiveOnlyCount, 0);
   assert.equal(report.meta.passedLegacyOnlyCount, 0);
   assert.equal(report.meta.failedBothCount, 0);
@@ -225,6 +225,57 @@ test("adaptive-depth evaluation: superseded-pair keeps the demoted memory in sou
   // The synthesis prompt must carry both memories.
   assert.deepEqual(pair.adaptive.synthesisMemoryIds, [2, 1]);
   assert.deepEqual(pair.legacy.synthesisMemoryIds, [2, 1]);
+});
+
+// ---------------------------------------------------------------------------
+// 4b. No-answer scenario: controller returns no_memory
+// ---------------------------------------------------------------------------
+
+test("adaptive-depth evaluation: no-answer scenario returns no_memory under both configs", async () => {
+  const report = await runAdaptiveDepthEvaluation();
+  const noAnswer = report.runs.find((r) => r.scenarioId === "no-answer");
+  assert.ok(noAnswer, "no-answer scenario must be in the report");
+  // Both configs must return no_memory (no relevant memories for this query).
+  assert.equal(noAnswer.adaptive.status, "no_memory");
+  assert.equal(noAnswer.legacy.status, "no_memory");
+  // No synthesis calls should be made (no_memory short-circuits before synthesis).
+  assert.equal(noAnswer.adaptive.synthesisCalls, 0);
+  assert.equal(noAnswer.legacy.synthesisCalls, 0);
+  // Synthesis memory ids should be empty.
+  assert.deepEqual(noAnswer.adaptive.synthesisMemoryIds, []);
+  assert.deepEqual(noAnswer.legacy.synthesisMemoryIds, []);
+});
+
+// ---------------------------------------------------------------------------
+// 4c. Ground-truth labels are threaded through the report
+// ---------------------------------------------------------------------------
+
+test("adaptive-depth evaluation: superseded-pair carries current-truth and rank-1 ground truth through to report", async () => {
+  const report = await runAdaptiveDepthEvaluation();
+  const pair = report.runs.find((r) => r.scenarioId === "superseded-pair");
+  assert.ok(pair, "superseded-pair scenario must be in the report");
+  // The scenario's ground-truth labels must be threaded through
+  // to both adaptive and legacy run results.
+  assert.deepEqual(pair.adaptive.currentTruthIds, [2]);
+  assert.deepEqual(pair.legacy.currentTruthIds, [2]);
+  assert.deepEqual(pair.adaptive.expectedRank1Ids, [2]);
+  assert.deepEqual(pair.legacy.expectedRank1Ids, [2]);
+  // noAnswerExpected should be false for superseded-pair.
+  assert.equal(pair.adaptive.noAnswerExpected, false);
+  assert.equal(pair.legacy.noAnswerExpected, false);
+});
+
+test("adaptive-depth evaluation: no-answer scenario carries noAnswerExpected ground truth through to report", async () => {
+  const report = await runAdaptiveDepthEvaluation();
+  const noAnswer = report.runs.find((r) => r.scenarioId === "no-answer");
+  assert.ok(noAnswer, "no-answer scenario must be in the report");
+  // The no-answer scenario's labels must be threaded through.
+  assert.deepEqual(noAnswer.adaptive.expectedRank1Ids, []);
+  assert.deepEqual(noAnswer.legacy.expectedRank1Ids, []);
+  assert.deepEqual(noAnswer.adaptive.currentTruthIds, []);
+  assert.deepEqual(noAnswer.legacy.currentTruthIds, []);
+  assert.equal(noAnswer.adaptive.noAnswerExpected, true);
+  assert.equal(noAnswer.legacy.noAnswerExpected, true);
 });
 
 // ---------------------------------------------------------------------------
@@ -502,7 +553,10 @@ test("adaptive-depth evaluation: BUILT_IN_SCENARIOS has unique ids and covers th
   //   - noisy tail
   //   - prompt budget
   //   - provider refusal/weak_match unchanged
-  //   - superseded demotion still preserved
+  //   - superseded demotion still preserved (postgres topic)
+  //   - no-answer case for recallNoAnswerTnr
+  //   - second superseded pair (embedder topic) for stronger denominator
+  //   - harder no-answer with token overlap for stronger denominator
   const required = [
     "broad-cluster",
     "narrow-precise",
@@ -510,6 +564,9 @@ test("adaptive-depth evaluation: BUILT_IN_SCENARIOS has unique ids and covers th
     "prompt-budget",
     "provider-refusal",
     "superseded-pair",
+    "no-answer",
+    "superseded-pair-2",
+    "no-answer-2",
   ];
   for (const id of required) {
     assert.ok(ids.includes(id), `BUILT_IN_SCENARIOS must include scenario id '${id}'`);

@@ -399,14 +399,14 @@ export const BUILT_IN_SHADOW_COMPARISON_SCENARIOS: ReadonlyArray<ShadowCompariso
  * Surfaced on `report.limitations` and on the human report.
  */
 export const SHADOW_COMPARISON_LIMITATIONS: ReadonlyArray<string> = [
-  `Synthetic-scenario evaluation (${BUILT_IN_SHADOW_COMPARISON_SCENARIOS.length} scenarios for Safety/Cleaner Memory + 7 adaptive-depth scenarios for Recall Quality, including 1 no-answer scenario). The scenarios are hand-curated and exercise the full controller pipeline end-to-end with seeded temp storage. A reviewer who reads a pass rate as 'the decision engine is production-ready' is over-reading the result. The right reading is 'the shadow engine produces the expected structured decision on the curated scenario set and does not mutate production memory state'.`,
+  `Synthetic-scenario evaluation (${BUILT_IN_SHADOW_COMPARISON_SCENARIOS.length} scenarios for Safety/Cleaner Memory + 9 adaptive-depth scenarios for Recall Quality, including 2 no-answer scenarios). The scenarios are hand-curated and exercise the full controller pipeline end-to-end with seeded temp storage. A reviewer who reads a pass rate as 'the decision engine is production-ready' is over-reading the result. The right reading is 'the shadow engine produces the expected structured decision on the curated scenario set and does not mutate production memory state'.`,
   "No-network (scripted mode). The harness wires scripted fetch implementations for both the memory-analysis provider and the decision engine. No live HTTP calls are made.",
   "Temp-storage isolated. Each scenario run uses a fresh temp storage handle. Two isolated temp handles are used per scenario (one for production, one for shadow). Production `.curion/curion.sqlite` is NEVER touched.",
   "Shadow decisions are NOT applied. The engine's structured decision is captured via the `setShadowRememberDecisionImpl` test seam and recorded on the report. No engine-applied state transitions (supersession, invalidation, conflict-flag, redundant-flag) occur in shadow mode — both shadow and production paths store memories through the ordinary production storage path.",
   "Full controller pipeline (not adapter-only). This harness exercises `runRememberController` end-to-end, unlike the `decision-policy-evaluation` harness which drives the adapter directly. This captures the full production vs shadow comparison.",
   "Scenario set is focused on Balanced Score coverage. The set is designed to exercise Safety, Cleaner Memory, and Recall Quality pillars rather than exhaustively covering the decision vocabulary.",
-  "Recall Quality is derived from the adaptive-depth evaluation's 7 synthetic recall scenarios (including 1 no-answer scenario) run through `runRecallController` with the production adaptive-depth config. Ground-truth labels (expectedRank1Ids, currentTruthIds, noAnswerExpected) are defined for a subset of scenarios: superseded-pair (current-truth + rank-1), no-answer (no-answer TNR). The remaining scenarios do not yet have ground truth labels. Recall Quality metrics are honest signals from the labeled subset — they reflect small, deterministic, synthetic coverage and are NOT claims of production-ready retrieval quality. coverageComplete requires all three recall coverage metrics (rank-1 match, current-truth, no-answer TNR) to be non-null, which depends on the scenario set having ground truth for each dimension.",
-  "Recall coverage is small but complete for its labeled subset. The superseded-pair scenario provides the only current-truth ground truth; the no-answer scenario provides the only no-answer TNR signal; rank-1 match is measured only on scenarios with expectedRank1Ids labels. A reviewer who interprets this as comprehensive recall coverage is over-reading the result. The right interpretation is 'the adaptive-depth stage behaves as expected on the labeled synthetic scenarios'.",
+  "Recall Quality is derived from the adaptive-depth evaluation's 9 synthetic recall scenarios (including 2 no-answer scenarios) run through `runRecallController` with the production adaptive-depth config. Ground-truth labels (expectedRank1Ids, currentTruthIds, noAnswerExpected) are defined for a subset of scenarios: superseded-pair and superseded-pair-2 (current-truth + rank-1 each), no-answer and no-answer-2 (no-answer TNR each). The remaining scenarios do not yet have ground truth labels. Recall Quality metrics are honest signals from the labeled subset — they reflect small, deterministic, synthetic coverage and are NOT claims of production-ready retrieval quality. coverageComplete requires all three recall coverage metrics (rank-1 match, current-truth, no-answer TNR) to be non-null, which depends on the scenario set having ground truth for each dimension.",
+  "Recall coverage is small but complete for its labeled subset. The superseded-pair and superseded-pair-2 scenarios provide current-truth ground truth (2 scenarios); the no-answer and no-answer-2 scenarios provide no-answer TNR signal (2 scenarios); rank-1 match is measured on the same labeled scenarios. A reviewer who interprets this as comprehensive recall coverage is over-reading the result. The right interpretation is 'the adaptive-depth stage behaves as expected on the labeled synthetic scenarios'.",
   "v1 Balanced Score: Safety (from engine-reached scenarios and provider errors) and Cleaner Memory (from engine-reached memory-management actions) are measurable. Recall Quality (from adaptive-depth evaluation) is available and coverageComplete is true when all three recall coverage metrics are non-null. Even when all gate conditions pass, project-owner approval is always required. No auto-promotion.",
   "Benchmark-only / research-only. The harness does NOT activate the production decision engine, modify the public MCP API, change tool schemas, or mutate production storage. It is a measurement tool for the Balanced Score methodology.",
   "No auto-promotion. A passing gate result does not activate the engine. Project-owner approval is always required for activation.",
@@ -579,7 +579,7 @@ export interface BalancedScoreCleanerMemory {
  *
  * Recall Quality measures whether the engine's decisions preserve or improve
  * retrieval accuracy. It is derived from the adaptive-depth evaluation's
- * synthetic scenario set (6 scenarios run through `runRecallController` with
+ * synthetic scenario set (9 scenarios run through `runRecallController` with
  * adaptive depth config).
  *
  * The derived metrics are honest signals from the small scenario set and are
@@ -757,11 +757,10 @@ export interface BalancedScore {
  * flag_redundant, flag_conflict, redact).
  *
  * Recall Quality: derived from the adaptive-depth evaluation's synthetic
- * scenario set (6 scenarios run through `runRecallController` with adaptive
+ * scenario set (9 scenarios run through `runRecallController` with adaptive
  * depth config). Metrics include recall hit rate (answered / total) and
  * adaptive-depth assertion pass rate. Rank-1 match rate and current-truth
- * rate are null because the v1 scenario set does not include explicit
- * rank-1 ground truth labels.
+ * rate are non-null when the labeled subset includes explicit ground truth.
  *
  * Gate: applies the conservative gate logic from the methodology.
  */
@@ -865,7 +864,7 @@ function computeBalancedScore(
 
   // --- Recall Quality ---
   // Derived from the adaptive-depth evaluation's synthetic scenarios
-  // (now 7 scenarios including the no-answer case). Each scenario runs
+  // (9 scenarios). Each scenario runs
   // through runRecallController with the production adaptive-depth config
   // and scripted fetch. Metrics are computed from scenario ground-truth
   // labels when present.
@@ -1002,11 +1001,11 @@ function computeBalancedScore(
   // recall quality available, full recall coverage (coverageComplete), and
   // recall quality signal not negative.
   //
-  // coverageComplete is false when rank-1 match rate, current-truth rate, or
-  // no-answer TNR are null — meaning the scenario set lacks explicit ground
-  // truth for that recall dimension. v1 has null for all three, so even
-  // though recallQuality.available is true, coverageComplete is false and
-  // promotionEligible remains false.
+  // coverageComplete is true only when all three recall coverage metrics
+  // (rank-1 match rate, current-truth rate, no-answer TNR) are non-null —
+  // meaning the scenario set has explicit ground truth for each dimension.
+  // When coverageComplete is false, promotionEligible is false regardless
+  // of other gate results.
   //
   // Even when all conditions pass, project-owner approval is always required.
   // No auto-promotion.
@@ -1328,7 +1327,7 @@ export async function runShadowComparison(
   // Run adaptive-depth evaluation in parallel with shadow comparison.
   // Both are no-network, temp-storage-only, deterministic synthetic runs.
   // The adaptive-depth evaluation provides Recall Quality signals derived
-  // from 6 synthetic recall scenarios run through runRecallController.
+  // from 9 synthetic recall scenarios run through runRecallController.
   const [adaptiveDepthReport] = await Promise.all([
     runAdaptiveDepthEvaluation(),
   ]);
