@@ -231,11 +231,21 @@ existing `writeTimestampedJsonArtifact` convention. Artifact prefix:
     "recallCurrentTruthRate": 0.0
   },
   "delta": {
-    "status": "future",
-    "safetyDelta": 0,
+    "status": "counterfactual",
     "memorySizeDelta": 0,
-    "recallHitRateDelta": 0.0,
-    "recallCurrentTruthRateDelta": 0.0
+    "decisionDivergenceRate": 0.0,
+    "counterfactualClassification": "inconclusive",
+    "projectedMemoryDeltaPerScenario": [
+      {
+        "scenarioId": "string",
+        "action": "supersede",
+        "projectedDelta": -1,
+        "rationale": "engine recommends supersede; projected memory count -1 if applied"
+      }
+    ],
+    "recallHitRateDelta": null,
+    "recallCurrentTruthRateDelta": null,
+    "note": "Phase 2 counterfactual projection: ... (see Phase 2 definition)"
   },
   "gate": {
     "safetyPassed": false,
@@ -256,18 +266,19 @@ existing `writeTimestampedJsonArtifact` convention. Artifact prefix:
     "Shadow comparison uses synthetic scenarios, not live production traffic.",
     "The engine's shadow decisions are not applied to persistent storage.",
     "No auto-promotion: project-owner approval is required regardless of gate result.",
-    "Delta is synthetic-only; a production baseline comparative delta requires a production storage capture and is marked status: future.",
+    "Delta is synthetic-only and projection-only (status: counterfactual); measured quality impact remains future pending Phase 3 applied simulation.",
     "Recall Quality denominators are synthetic (9 adaptive-depth scenarios); they do not represent live production traffic distribution."
   ]
 }
 ```
 
-**Note on `delta.status`:** The comparative delta is currently derived from two
-shadow-side runs against isolated temp storage. A true production baseline delta
-requires running the production controller path against a representative
-production storage snapshot. Until that capture exists, `delta.status` is
-`"future"` and the delta fields are a synthetic proxy, not a production
-measurement.
+**Note on `delta.status`:** `"counterfactual"` means Phase 2 counterfactual projection
+fields are populated — `memorySizeDelta`, `decisionDivergenceRate`,
+`counterfactualClassification`, and `projectedMemoryDeltaPerScenario`. This is
+**projection only**, not measured production quality improvement. Phase 2 derives
+these fields from comparing production outcome vs shadow decision without applying
+engine decisions to any store. `"future"` means delta fields are not yet available.
+A true measured delta requires Phase 3 applied simulation.
 
 **Note on `coverageComplete`:** The Recall Quality pillar sets
 `coverageComplete: true` only when all three labelled coverage metrics
@@ -407,8 +418,8 @@ identifies the owner's decision choices.
 | Does Recall Quality have an independent gate? | No. A regression blocks promotion, but the gate is part of the composite logic. |
 | Does a passing gate auto-activate the engine? | No. Project-owner approval is always required. |
 | Does this use live production traffic? | No. Shadow comparison uses synthetic scenarios only. |
-| What is the expected artifact? | `shadow-comparison-<timestamp>.json` in `.curion/benchmark/` — implemented; `delta.status` is `"future"` until a production baseline capture exists |
+| What is the expected artifact? | `shadow-comparison-<timestamp>.json` in `.curion/benchmark/` — implemented; `delta.status` is `"counterfactual"` for Phase 2 projection; `delta.status="measured"` requires Phase 3 applied simulation. |
 | Does this replace existing benchmarks? | No. It complements them. All four existing benchmarks must pass before shadow comparison. |
 | What does `coverageComplete` mean? | Recall Quality metrics are fully captured (all three labelled coverage metrics non-null). Incomplete coverage should be investigated before promotion review. |
-| What does `delta.status=future` mean? | The comparative delta is synthetic-only. A production baseline delta requires a production storage capture and is not yet available. |
+| What does `delta.status=counterfactual` mean? | Phase 2 counterfactual projection is populated — `memorySizeDelta`, `decisionDivergenceRate`, `counterfactualClassification`, and `projectedMemoryDeltaPerScenario` are derived from comparing production outcome vs. engine decision without applying engine decisions. Measured recall quality delta remains future. |
 | What is the adapter-only benchmark insufficient? | It exercises only the adapter in isolation; it does not measure end-to-end outcomes or downstream recall impact. |
