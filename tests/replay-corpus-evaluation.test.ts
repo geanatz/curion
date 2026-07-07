@@ -809,4 +809,119 @@ test("replay-corpus: repeated runs produce identical recall quality metrics", ()
     report2.recallQuality.currentTruthMatchRate,
     "Current truth match rate must be identical"
   );
+  assert.equal(
+    report1.recallQuality.noAnswerTnr,
+    report2.recallQuality.noAnswerTnr,
+    "noAnswerTnr must be identical"
+  );
+});
+
+// ---------------------------------------------------------------------------
+// 24. No-answer TNR is computed correctly
+// ---------------------------------------------------------------------------
+
+test("replay-corpus: noAnswerExpectedCount is greater than zero", () => {
+  const report = runReplayCorpusEvaluation();
+  assert.ok(
+    report.recallQuality.noAnswerExpectedCount > 0,
+    `Expected noAnswerExpectedCount > 0, got ${report.recallQuality.noAnswerExpectedCount}`
+  );
+});
+
+test("replay-corpus: noAnswerTnr is non-null when no-answer items exist", () => {
+  const report = runReplayCorpusEvaluation();
+  assert.ok(
+    report.recallQuality.noAnswerTnr !== null,
+    "noAnswerTnr should be non-null when no-answer items exist"
+  );
+});
+
+test("replay-corpus: noAnswerTnr is 1.0 (perfect) in scripted replay", () => {
+  const report = runReplayCorpusEvaluation();
+  // The scripted engine returns null rankedMemoryLabels for no-answer queries,
+  // which means correct abstention. So TNR should be 1.0 (100%).
+  assert.equal(
+    report.recallQuality.noAnswerTnr,
+    1.0,
+    `Expected noAnswerTnr to be 1.0, got ${report.recallQuality.noAnswerTnr}`
+  );
+});
+
+test("replay-corpus: no-answer items have correct privacy validation", () => {
+  const report = runReplayCorpusEvaluation();
+  const noAnswerItems = report.items.filter(
+    (i) => i.inputType === "recall-query" && i.recallQuality?.noAnswerExpected === true
+  );
+  assert.ok(noAnswerItems.length > 0, "Should have no-answer items in report");
+  for (const item of noAnswerItems) {
+    assert.ok(
+      item.recallQuality!.privacyValidationPassed,
+      `No-answer item ${item.corpusItemId} should pass privacy validation`
+    );
+  }
+});
+
+test("replay-corpus: no-answer items have empty expected labels", () => {
+  const noAnswerItems = REPLAY_CORPUS_ITEMS.filter(
+    (i) => i.input.type === "recall-query" && i.recallQuality?.noAnswerExpected === true
+  );
+  assert.ok(noAnswerItems.length > 0, "Should have no-answer items in corpus");
+  for (const item of noAnswerItems) {
+    assert.deepEqual(
+      item.recallQuality!.expectedSourceLabels,
+      [],
+      `No-answer item ${item.corpusItemId} should have empty expectedSourceLabels`
+    );
+    assert.deepEqual(
+      item.recallQuality!.expectedRank1Labels,
+      [],
+      `No-answer item ${item.corpusItemId} should have empty expectedRank1Labels`
+    );
+    assert.deepEqual(
+      item.recallQuality!.currentTruthLabels,
+      [],
+      `No-answer item ${item.corpusItemId} should have empty currentTruthLabels`
+    );
+  }
+});
+
+test("replay-corpus: no-answer items pass recall query privacy checks", () => {
+  const noAnswerItems = REPLAY_CORPUS_ITEMS.filter(
+    (i) => i.input.type === "recall-query" && i.recallQuality?.noAnswerExpected === true
+  );
+  assert.ok(noAnswerItems.length > 0, "Should have no-answer items in corpus");
+  for (const item of noAnswerItems) {
+    const forbidden = detectForbiddenPatternsInRecallQuery(item.recallQuality!.recallQuery);
+    assert.deepEqual(
+      forbidden,
+      [],
+      `No-answer item ${item.corpusItemId} should have no forbidden patterns`
+    );
+    const cleanPII = recallQueryAppearsCleanOfPII(item.recallQuality!.recallQuery);
+    assert.ok(
+      cleanPII,
+      `No-answer item ${item.corpusItemId} should appear clean of PII`
+    );
+  }
+});
+
+test("replay-corpus: repeated runs produce identical noAnswerTnr", () => {
+  const report1 = runReplayCorpusEvaluation();
+  const report2 = runReplayCorpusEvaluation();
+  assert.equal(
+    report1.recallQuality.noAnswerTnr,
+    report2.recallQuality.noAnswerTnr,
+    "noAnswerTnr must be identical across runs"
+  );
+});
+
+test("replay-corpus: no sanitised-production recall-query items exist", () => {
+  const sanitizedRecallQueries = REPLAY_CORPUS_ITEMS.filter(
+    (i) => i.input.type === "recall-query" && i.source === "sanitized-production"
+  );
+  assert.equal(
+    sanitizedRecallQueries.length,
+    0,
+    `Should have 0 sanitized-production recall-query items, got ${sanitizedRecallQueries.length}`
+  );
 });

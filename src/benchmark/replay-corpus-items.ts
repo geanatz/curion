@@ -1017,6 +1017,59 @@ export const REPLAY_CORPUS_ITEMS: CorpusItem[] = [
       noAnswerExpected: false,
     },
   }),
+
+  // ===================================================================
+  // No-answer recall-query items — synthetic-proxy
+  // These items test the system's ability to correctly abstain when
+  // no relevant memory exists. The query is unrelated to any stored
+  // memory, so the correct response is to return no results.
+  // ===================================================================
+
+  makeSeedItem({
+    type: "recall-query",
+    text: "Comment dit-on 'hello' en français ?",
+    source: "synthetic-proxy",
+    addedBy: "synthetic-author",
+    reviewStatus: "approved",
+    reviewer: "eval-team",
+    expectedAction: "no_op",
+    expectedRationale:
+      "Recall query for a language translation. No stored memory about French greetings. Engine should abstain.",
+    safetyRelevant: false,
+    privacyRelevant: false,
+    confidence: "high",
+    topic: "documentation",
+    recallQuality: {
+      recallQuery: "Comment dit-on 'hello' en français ?",
+      expectedSourceLabels: [],
+      expectedRank1Labels: [],
+      currentTruthLabels: [],
+      noAnswerExpected: true,
+    },
+  }),
+
+  makeSeedItem({
+    type: "recall-query",
+    text: "What is the capital of Australia?",
+    source: "synthetic-proxy",
+    addedBy: "synthetic-author",
+    reviewStatus: "approved",
+    reviewer: "eval-team",
+    expectedAction: "no_op",
+    expectedRationale:
+      "Recall query for general knowledge. No stored memory about geography. Engine should abstain.",
+    safetyRelevant: false,
+    privacyRelevant: false,
+    confidence: "high",
+    topic: "documentation",
+    recallQuality: {
+      recallQuery: "What is the capital of Australia?",
+      expectedSourceLabels: [],
+      expectedRank1Labels: [],
+      currentTruthLabels: [],
+      noAnswerExpected: true,
+    },
+  }),
 ];
 
 /**

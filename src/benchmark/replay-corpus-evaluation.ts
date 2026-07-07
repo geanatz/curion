@@ -35,8 +35,9 @@
  *   - No sanitised-production data — initial corpus uses only
  *     synthetic-proxy and manual-curated items.
  *
- * Recall quality metrics are deferred to Phase 3 applied simulation.
- * They are logged as `null` in the replay report.
+ * Recall quality metrics (source match, rank-1 match, current truth match,
+ * no-answer TNR) are computed from scripted engine responses and labeled
+ * ground-truth. Metrics reflect measurement infrastructure readiness.
  */
 
 import { type SafetyClass, classifyInput } from "../safety/precheck.js";
@@ -637,8 +638,8 @@ function computeRecallQualityMetrics(
 
   const note =
     labeledRecallQueryCount > 0
-      ? `Recall quality metrics computed from ${labeledRecallQueryCount} labeled recall-query items. Scripted engine returns expected labels deterministically. Metrics reflect measurement infrastructure readiness, not engine quality.`
-      : "Recall quality metrics require Phase 3 applied simulation. These fields are null in the replay pipeline.";
+      ? `Recall quality metrics computed from ${labeledRecallQueryCount} labeled recall-query items (${noAnswerExpectedCount} no-answer). Scripted engine returns expected labels deterministically. Metrics reflect measurement infrastructure readiness, not engine quality.`
+      : "No recall-query items with recall-quality labels found.";
 
   return {
     sourceMatchRate,

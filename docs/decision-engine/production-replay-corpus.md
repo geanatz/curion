@@ -372,11 +372,11 @@ All metrics are computed from the replay run against the corpus.
 | `currentTruthMatchRate` | Fraction of temporal recall queries where current fact ranks first | Must be ≥ production baseline (when baseline available) |
 | `noAnswerTnr` | True-negative rate on no-answer queries | Must be ≥ production baseline (when baseline available) |
 
-**Recall-quality note:** These metrics require a post-replay memory state
-to query against. They are computed in Phase 3 applied simulation where
-the engine's decisions are applied to a cloned store. In the replay
-pipeline (which does not apply decisions to any store), these metrics
-are logged as `null` and the comparison is deferred to Phase 3.
+**Recall-quality note:** Recall quality metrics (source match, rank-1 match,
+current truth match, no-answer TNR) are computed from scripted engine responses
+and labeled ground-truth in the replay pipeline. Metrics reflect measurement
+infrastructure readiness; they do not constitute evidence of production quality.
+Full quality measurement with live retrieval requires Phase 3 applied simulation.
 
 ### Delta Comparison Metrics
 
@@ -426,10 +426,15 @@ Replay output is written to `.curion/benchmark/` following the existing
     "noOpRate": 0.0
   },
   "recallQuality": {
-    "topKMatchRate": null,
-    "currentTruthMatchRate": null,
-    "noAnswerTnr": null,
-    "note": "Recall quality metrics require Phase 3 applied simulation. These fields are null in the replay pipeline."
+    "sourceMatchRate": 1.0,
+    "rank1MatchRate": 1.0,
+    "currentTruthMatchRate": 1.0,
+    "noAnswerTnr": 1.0,
+    "usefulMemoryLossRate": 0.0,
+    "staleMemoryExposureRate": 0.0,
+    "labeledRecallQueryCount": 12,
+    "noAnswerExpectedCount": 2,
+    "note": "Recall quality metrics computed from labeled recall-query items. Scripted engine returns expected labels deterministically. Metrics reflect measurement infrastructure readiness, not engine quality."
   },
   "deltaComparison": {
     "decisionDivergenceRate": 0.0,
@@ -438,7 +443,7 @@ Replay output is written to `.curion/benchmark/` following the existing
   },
   "limitations": [
     "Replay corpus uses a proof-of-feasibility set only. Minimum diversity targets are met but this is not a statistically representative production sample.",
-    "Recall quality metrics are null in the replay pipeline. Phase 3 applied simulation is required to measure recall quality impact.",
+    "Recall quality metrics are computed from scripted engine responses and labeled ground-truth. Metrics reflect measurement infrastructure readiness, not engine quality. Full quality measurement with live retrieval requires Phase 3 applied simulation.",
     "Replaying synthetic-proxy and manual-curated items only. Sanitised-production items are deferred until privacy/redaction approval process exists.",
     "Replay remains offline evidence only. It does not constitute proof of production activation fitness."
   ]
@@ -552,12 +557,13 @@ Sanitised-production items are deferred. Evidence from the initial corpus
 does not include the distribution shape or adversarial patterns that only
 appear in real production traffic.
 
-### Recall Quality Metrics Deferred to Phase 3
+### Recall Quality Metrics in Replay
 
-The replay pipeline does not apply engine decisions to any store and
-therefore cannot measure recall quality impact. Recall quality metrics
-are `null` in replay reports. Phase 3 applied simulation is required to
-produce measured recall quality deltas.
+The replay pipeline computes recall quality metrics from scripted engine
+responses and labeled ground-truth. Metrics include source match rate,
+rank-1 match rate, current truth match rate, and no-answer TNR. These
+reflect measurement infrastructure readiness. Full quality measurement
+with live retrieval requires Phase 3 applied simulation.
 
 ### No Live Production Baseline Comparison
 
@@ -625,7 +631,7 @@ data can enter any evaluation.
 | What sources are forbidden? | Raw private user text, secrets, credentials, personal identifiers, unreviewed production dumps, any PII. |
 | Is production data allowed initially? | No. The initial corpus uses only synthetic-proxy and manual-curated items. Sanitised-production is deferred. |
 | Does replay replace Phase 3 synthetic scenarios? | No. Replay is a parallel evidence track that supplements synthetic scenario coverage. |
-| What metrics does replay produce? | Safety metrics, memory lifecycle metrics, recall quality (deferred to Phase 3), delta comparison metrics. |
+| What metrics does replay produce? | Safety metrics, memory lifecycle metrics, recall quality metrics (computed from labeled ground-truth), delta comparison metrics. |
 | Does replay prove activation fitness? | No. Replay remains offline evidence. It does not constitute proof of production activation fitness. |
 | What is required before sanitised-production data can be used? | Four governance gates: privacy/redaction process defined, replay pipeline validated, project-owner approval issued, ongoing compliance check defined. |
 | Are corpus item IDs stable? | Yes. `corpusItemId` is content-derived and does not contain production database IDs or user identifiers. |
