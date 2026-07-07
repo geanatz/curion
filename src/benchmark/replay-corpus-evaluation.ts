@@ -43,8 +43,12 @@ import { type SafetyClass, classifyInput } from "../safety/precheck.js";
 import { writeTimestampedJsonArtifact } from "./_artifact.js";
 import {
   type CorpusItem,
+  type CorpusItemLabel,
   type CorpusItemReplayStatus,
+  type CorpusItemRecallQuality,
   type CorpusTopicCategory,
+  detectForbiddenPatternsInRecallQuery,
+  recallQueryAppearsCleanOfPII,
   REPLAY_CORPUS_ITEMS,
   REPLAY_CORPUS_VERSION,
 } from "./replay-corpus-items.js";
@@ -60,12 +64,13 @@ import {
  */
 export const REPLAY_CORPUS_LIMITATIONS: ReadonlyArray<string> = [
   "Replay corpus uses a proof-of-feasibility set only. Minimum diversity targets are met but this is not a statistically representative production sample.",
-  "Recall quality metrics are null in the replay pipeline. Phase 3 applied simulation is required to measure recall quality impact.",
+  "Recall quality metrics are computed from scripted engine responses that return expected labels deterministically. Metrics reflect measurement infrastructure readiness, not engine quality. Full quality measurement requires Phase 3 applied simulation with live retrieval.",
   "Replaying synthetic-proxy and manual-curated items only. Sanitised-production items are deferred until privacy/redaction approval process exists.",
   "Replay remains offline evidence only. It does not constitute proof of production activation fitness.",
   "Ground-truth labels are the evaluation team's best judgment; they reflect expected engine behavior on the labeled inputs, not a production baseline.",
   "The corpus uses stable content-derived identifiers; no production database IDs or user identifiers are present.",
   "No live network, no production storage access, no engine activation. Decisions are captured but never applied.",
+  "Recall query privacy checks (forbidden patterns, PII) apply to the recall query text but do not substitute for full privacy review.",
 ];
 
 // ---------------------------------------------------------------------------
@@ -105,16 +110,26 @@ export interface ReplayMemoryLifecycleMetrics {
   noOpRate: number;
 }
 
-/** Recall quality metrics (deferred to Phase 3). */
+/** Recall quality metrics. Computed only for items with recall-quality labels. */
 export interface ReplayRecallQualityMetrics {
-  /** Fraction of recall-query items where top-K result matches ground truth. */
-  topKMatchRate: null;
+  /** Fraction of recall-query items where source labels match ground truth. */
+  sourceMatchRate: number | null;
+  /** Fraction of recall-query items where rank-1 label matches ground truth. */
+  rank1MatchRate: number | null;
   /** Fraction of temporal recall queries where current fact ranks first. */
-  currentTruthMatchRate: null;
+  currentTruthMatchRate: number | null;
   /** True-negative rate on no-answer queries. */
-  noAnswerTnr: null;
-  /** Note explaining why these are null. */
-  note: "Recall quality metrics require Phase 3 applied simulation. These fields are null in the replay pipeline.";
+  noAnswerTnr: number | null;
+  /** Fraction of recall-query items where useful memory was not retrieved. */
+  usefulMemoryLossRate: number | null;
+  /** Fraction of recall-query items where stale memory was exposed. */
+  staleMemoryExposureRate: number | null;
+  /** Number of recall-query items with labels. */
+  labeledRecallQueryCount: number;
+  /** Number of recall-query items with no-answer expected. */
+  noAnswerExpectedCount: number;
+  /** Note explaining the metrics state. */
+  note: string;
 }
 
 /** Delta comparison metrics. */
@@ -183,11 +198,52 @@ export interface ReplayCorpusItemResult {
   safetyRelevant: boolean;
   /** Whether this item is privacy-relevant. */
   privacyRelevant: boolean;
+  /** Recall quality result (only for recall-query items with labels). */
+  recallQuality: {
+    /** The recall query text. */
+    recallQuery: string | null;
+    /** Stable labels of expected sources. */
+    expectedSourceLabels: CorpusItemLabel[];
+    /** Stable labels of expected rank-1. */
+    expectedRank1Labels: CorpusItemLabel[];
+    /** Stable labels of current truth. */
+    currentTruthLabels: CorpusItemLabel[];
+    /** Whether no answer is expected. */
+    noAnswerExpected: boolean;
+    /** Scripted recall result (simulated ranked memory labels). */
+    scriptedRankedMemoryLabels: CorpusItemLabel[] | null;
+    /** Whether source labels matched. */
+    sourceMatch: boolean | null;
+    /** Whether rank-1 matched. */
+    rank1Match: boolean | null;
+    /** Whether current truth matched. */
+    currentTruthMatch: boolean | null;
+    /** Whether no-answer was correct. */
+    noAnswerCorrect: boolean | null;
+    /** Whether privacy validation passed. */
+    privacyValidationPassed: boolean;
+  } | null;
 }
 
 // ---------------------------------------------------------------------------
 // Scripted engine response
 // ---------------------------------------------------------------------------
+
+/**
+ * Scripted engine response for recall quality.
+ * Contains the engine action plus simulated recall result for recall-query items.
+ */
+interface ScriptedEngineResponse {
+  /** Engine action. */
+  action: string;
+  /** Engine rationale. */
+  rationale: string;
+  /**
+   * Simulated ranked memory labels for recall queries.
+   * Null for remember items (recall is not performed).
+   */
+  rankedMemoryLabels: string[] | null;
+}
 
 /**
  * Scripted engine action mapping based on input type and safety class.
@@ -206,22 +262,38 @@ export interface ReplayCorpusItemResult {
  * For recall-query inputs:
  *   - The engine does not emit remember actions for recall queries
  *   - All recall queries emit no_op in the replay context
+ *   - For items with recall quality labels, simulated recall returns
+ *     the expected rank-1 labels as the top result
  */
-function getScriptedEngineAction(
+function getScriptedEngineResponse(
   inputType: "remember" | "recall-query",
-  safetyClass: SafetyClass
-): { action: string; rationale: string } {
+  safetyClass: SafetyClass,
+  recallQuality: CorpusItemRecallQuality | null
+): ScriptedEngineResponse {
   if (inputType === "recall-query") {
+    // For recall-query items with labels, simulate recall result
+    // The scripted engine returns the expected rank-1 labels as the
+    // top-ranked memory. This is a deterministic simulation that
+    // establishes the measurement infrastructure.
+    const rankedMemoryLabels =
+      recallQuality && !recallQuality.noAnswerExpected
+        ? recallQuality.expectedRank1Labels
+        : null;
     return {
       action: "no_op",
       rationale: "Recall query — engine does not emit remember actions for recall inputs",
+      rankedMemoryLabels,
     };
   }
 
   // Remember inputs
   switch (safetyClass) {
     case "safe":
-      return { action: "store", rationale: "Input classified as safe; normal storage path" };
+      return {
+        action: "store",
+        rationale: "Input classified as safe; normal storage path",
+        rankedMemoryLabels: null,
+      };
     case "secret":
     case "raw-dump":
     case "vague-junk":
@@ -231,6 +303,7 @@ function getScriptedEngineAction(
       return {
         action: "reject",
         rationale: `Input classified as ${safetyClass}; deterministic rejection path`,
+        rankedMemoryLabels: null,
       };
     case "self-conflict":
     case "vague-memory":
@@ -238,9 +311,14 @@ function getScriptedEngineAction(
       return {
         action: "no_op",
         rationale: `Input classified as ${safetyClass}; clarification or abstention appropriate`,
+        rankedMemoryLabels: null,
       };
     default:
-      return { action: "no_op", rationale: "Unknown safety class; conservative abstention" };
+      return {
+        action: "no_op",
+        rationale: "Unknown safety class; conservative abstention",
+        rankedMemoryLabels: null,
+      };
   }
 }
 
@@ -299,13 +377,66 @@ function replayItem(item: CorpusItem): ReplayCorpusItemResult {
   }
 
   // Get scripted engine response
-  const engineResponse = getScriptedEngineAction(
+  const engineResponse = getScriptedEngineResponse(
     item.input.type as "remember" | "recall-query",
-    safetyClass ?? "safe"
+    safetyClass ?? "safe",
+    item.recallQuality ?? null
   );
 
   // Compare to ground truth
   const actionMatchesGroundTruth = engineResponse.action === item.groundTruth.expectedAction;
+
+  // Compute recall quality result for recall-query items
+  let recallQualityResult: ReplayCorpusItemResult["recallQuality"] = null;
+  if (item.input.type === "recall-query" && item.recallQuality) {
+    const rq = item.recallQuality;
+    const rankedLabels = engineResponse.rankedMemoryLabels ?? [];
+
+    // Privacy validation for recall query
+    const privacyForbidden = detectForbiddenPatternsInRecallQuery(rq.recallQuery);
+    const privacyPII = !recallQueryAppearsCleanOfPII(rq.recallQuery);
+    const privacyValidationPassed = privacyForbidden.length === 0 && !privacyPII;
+
+    // Compute match metrics
+    const expectedSourceSet = new Set(rq.expectedSourceLabels);
+    const actualSourceSet = new Set(rankedLabels);
+    const sourceMatch =
+      rankedLabels.length > 0 && expectedSourceSet.size > 0
+        ? [...expectedSourceSet].every((l) => actualSourceSet.has(l))
+        : null;
+
+    const expectedRank1Set = new Set(rq.expectedRank1Labels);
+    const rank1Match =
+      rankedLabels.length > 0 && expectedRank1Set.size > 0
+        ? expectedRank1Set.has(rankedLabels[0]!)
+        : null;
+
+    const currentTruthSet = new Set(rq.currentTruthLabels);
+    const currentTruthMatch =
+      rankedLabels.length > 0 && currentTruthSet.size > 0
+        ? currentTruthSet.has(rankedLabels[0]!)
+        : null;
+
+    const noAnswerCorrect =
+      rq.noAnswerExpected !== null
+        ? (rq.noAnswerExpected && rankedLabels.length === 0) ||
+          (!rq.noAnswerExpected && rankedLabels.length > 0)
+        : null;
+
+    recallQualityResult = {
+      recallQuery: rq.recallQuery,
+      expectedSourceLabels: rq.expectedSourceLabels,
+      expectedRank1Labels: rq.expectedRank1Labels,
+      currentTruthLabels: rq.currentTruthLabels,
+      noAnswerExpected: rq.noAnswerExpected,
+      scriptedRankedMemoryLabels: rankedLabels.length > 0 ? rankedLabels : null,
+      sourceMatch,
+      rank1Match,
+      currentTruthMatch,
+      noAnswerCorrect,
+      privacyValidationPassed,
+    };
+  }
 
   // Build result
   const result: ReplayCorpusItemResult = {
@@ -323,6 +454,7 @@ function replayItem(item: CorpusItem): ReplayCorpusItemResult {
     groundTruthConfidence: item.groundTruth.confidence,
     safetyRelevant: item.groundTruth.safetyRelevant,
     privacyRelevant: item.groundTruth.privacyRelevant,
+    recallQuality: recallQualityResult,
   };
 
   return result;
@@ -417,17 +549,107 @@ function computeMetrics(items: ReplayCorpusItemResult[]): {
       lowConfidenceActionRate,
       noOpRate,
     },
-    recallQuality: {
-      topKMatchRate: null,
-      currentTruthMatchRate: null,
-      noAnswerTnr: null,
-      note: "Recall quality metrics require Phase 3 applied simulation. These fields are null in the replay pipeline.",
-    },
+    recallQuality: computeRecallQualityMetrics(items),
     deltaComparison: {
       decisionDivergenceRate,
       deltaClassificationRate: { matches: matchesGroundTruth, diverges },
       inconclusiveRate,
     },
+  };
+}
+
+/**
+ * Compute recall quality metrics from per-item results.
+ * Metrics are computed only for items with recall quality labels.
+ */
+function computeRecallQualityMetrics(
+  items: ReplayCorpusItemResult[]
+): ReplayRecallQualityMetrics {
+  const recallItems = items.filter(
+    (i): i is ReplayCorpusItemResult & { recallQuality: NonNullable<ReplayCorpusItemResult["recallQuality"]> } =>
+      i.inputType === "recall-query" && i.recallQuality !== null
+  );
+
+  if (recallItems.length === 0) {
+    return {
+      sourceMatchRate: null,
+      rank1MatchRate: null,
+      currentTruthMatchRate: null,
+      noAnswerTnr: null,
+      usefulMemoryLossRate: null,
+      staleMemoryExposureRate: null,
+      labeledRecallQueryCount: 0,
+      noAnswerExpectedCount: 0,
+      note: "No recall-query items with recall-quality labels found.",
+    };
+  }
+
+  // Count items with labels
+  const labeledRecallQueryCount = recallItems.length;
+  const noAnswerExpectedCount = recallItems.filter((i) => i.recallQuality.noAnswerExpected).length;
+
+  // Source match: all expected sources are in the retrieved set
+  const sourceMatches = recallItems.filter(
+    (i) => i.recallQuality.sourceMatch === true
+  ).length;
+  const sourceMatchRate =
+    recallItems.length > 0 ? sourceMatches / recallItems.length : null;
+
+  // Rank-1 match: the top-ranked memory is in the expected rank-1 set
+  const rank1Matches = recallItems.filter(
+    (i) => i.recallQuality.rank1Match === true
+  ).length;
+  const rank1MatchRate =
+    recallItems.length > 0 ? rank1Matches / recallItems.length : null;
+
+  // Current truth match: the top-ranked memory is in the current truth set
+  const currentTruthMatches = recallItems.filter(
+    (i) => i.recallQuality.currentTruthMatch === true
+  ).length;
+  const currentTruthMatchRate =
+    recallItems.length > 0 ? currentTruthMatches / recallItems.length : null;
+
+  // No-answer TNR: correct abstention on no-answer queries
+  const noAnswerItems = recallItems.filter((i) => i.recallQuality.noAnswerExpected);
+  const noAnswerCorrect = noAnswerItems.filter(
+    (i) => i.recallQuality.noAnswerCorrect === true
+  ).length;
+  const noAnswerTnr = noAnswerItems.length > 0 ? noAnswerCorrect / noAnswerItems.length : null;
+
+  // Useful memory loss: an expected source was NOT retrieved
+  // This is the inverse of source match for positive queries
+  const positiveQueryItems = recallItems.filter((i) => !i.recallQuality.noAnswerExpected);
+  const usefulMemoryLoss = positiveQueryItems.filter(
+    (i) => i.recallQuality.sourceMatch === false
+  ).length;
+  const usefulMemoryLossRate =
+    positiveQueryItems.length > 0 ? usefulMemoryLoss / positiveQueryItems.length : null;
+
+  // Stale memory exposure: a stale (non-current-truth) memory was ranked first
+  // This is detected when rank-1 matches but current truth doesn't
+  const staleMemoryExposure = recallItems.filter(
+    (i) =>
+      i.recallQuality.rank1Match === true &&
+      i.recallQuality.currentTruthMatch === false
+  ).length;
+  const staleMemoryExposureRate =
+    recallItems.length > 0 ? staleMemoryExposure / recallItems.length : null;
+
+  const note =
+    labeledRecallQueryCount > 0
+      ? `Recall quality metrics computed from ${labeledRecallQueryCount} labeled recall-query items. Scripted engine returns expected labels deterministically. Metrics reflect measurement infrastructure readiness, not engine quality.`
+      : "Recall quality metrics require Phase 3 applied simulation. These fields are null in the replay pipeline.";
+
+  return {
+    sourceMatchRate,
+    rank1MatchRate,
+    currentTruthMatchRate,
+    noAnswerTnr,
+    usefulMemoryLossRate,
+    staleMemoryExposureRate,
+    labeledRecallQueryCount,
+    noAnswerExpectedCount,
+    note,
   };
 }
 
@@ -521,6 +743,30 @@ export function formatReplayCorpusReport(report: ReplayCorpusEvaluationReport): 
   lines.push(`  inconclusiveRate: ${(report.deltaComparison.inconclusiveRate * 100).toFixed(1)}%`);
   lines.push("");
   lines.push("--- recall quality ---");
+  lines.push(
+    `  sourceMatchRate:           ${report.recallQuality.sourceMatchRate !== null ? (report.recallQuality.sourceMatchRate * 100).toFixed(1) + "%" : "n/a"}`
+  );
+  lines.push(
+    `  rank1MatchRate:            ${report.recallQuality.rank1MatchRate !== null ? (report.recallQuality.rank1MatchRate * 100).toFixed(1) + "%" : "n/a"}`
+  );
+  lines.push(
+    `  currentTruthMatchRate:     ${report.recallQuality.currentTruthMatchRate !== null ? (report.recallQuality.currentTruthMatchRate * 100).toFixed(1) + "%" : "n/a"}`
+  );
+  lines.push(
+    `  noAnswerTnr:              ${report.recallQuality.noAnswerTnr !== null ? (report.recallQuality.noAnswerTnr * 100).toFixed(1) + "%" : "n/a"}`
+  );
+  lines.push(
+    `  usefulMemoryLossRate:     ${report.recallQuality.usefulMemoryLossRate !== null ? (report.recallQuality.usefulMemoryLossRate * 100).toFixed(1) + "%" : "n/a"}`
+  );
+  lines.push(
+    `  staleMemoryExposureRate:   ${report.recallQuality.staleMemoryExposureRate !== null ? (report.recallQuality.staleMemoryExposureRate * 100).toFixed(1) + "%" : "n/a"}`
+  );
+  lines.push(
+    `  labeledRecallQueryCount:   ${report.recallQuality.labeledRecallQueryCount}`
+  );
+  lines.push(
+    `  noAnswerExpectedCount:    ${report.recallQuality.noAnswerExpectedCount}`
+  );
   lines.push(`  note: ${report.recallQuality.note}`);
   lines.push("");
   lines.push("--- limitations (research-only) ---");

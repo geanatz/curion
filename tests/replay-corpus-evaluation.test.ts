@@ -38,9 +38,13 @@ import {
   REPLAY_CORPUS_ITEMS,
   REPLAY_CORPUS_VERSION,
   appearsCleanOfPII,
+  buildLabelToCorpusItemIdMap,
   computeCorpusItemId,
   computeTextHash,
   detectForbiddenPatterns,
+  detectForbiddenPatternsInRecallQuery,
+  recallQueryAppearsCleanOfPII,
+  resolveStableLabelToCorpusItemId,
   validateSeedCorpus,
 } from "../src/benchmark/replay-corpus-items.ts";
 import { parseReplayCorpusEvaluationCli } from "../src/benchmark/replay-corpus-runner.ts";
@@ -254,10 +258,29 @@ test("replay-corpus: report has all required fields", () => {
   assert.equal(typeof report.memoryLifecycle.lowConfidenceActionRate, "number");
   assert.equal(typeof report.memoryLifecycle.noOpRate, "number");
 
-  // Recall quality fields (deferred)
-  assert.equal(report.recallQuality.topKMatchRate, null);
-  assert.equal(report.recallQuality.currentTruthMatchRate, null);
-  assert.equal(report.recallQuality.noAnswerTnr, null);
+  // Recall quality fields (now computed from labels)
+  assert.equal(typeof report.recallQuality.sourceMatchRate, "number");
+  assert.equal(typeof report.recallQuality.rank1MatchRate, "number");
+  assert.equal(typeof report.recallQuality.currentTruthMatchRate, "number");
+  // noAnswerTnr can be null if there are no no-answer items
+  assert.ok(
+    report.recallQuality.noAnswerTnr === null || typeof report.recallQuality.noAnswerTnr === "number",
+    "noAnswerTnr should be null or number"
+  );
+  // usefulMemoryLossRate can be null if there are no positive query items
+  assert.ok(
+    report.recallQuality.usefulMemoryLossRate === null ||
+      typeof report.recallQuality.usefulMemoryLossRate === "number",
+    "usefulMemoryLossRate should be null or number"
+  );
+  // staleMemoryExposureRate can be null if there are no items
+  assert.ok(
+    report.recallQuality.staleMemoryExposureRate === null ||
+      typeof report.recallQuality.staleMemoryExposureRate === "number",
+    "staleMemoryExposureRate should be null or number"
+  );
+  assert.equal(typeof report.recallQuality.labeledRecallQueryCount, "number");
+  assert.equal(typeof report.recallQuality.noAnswerExpectedCount, "number");
   assert.ok(typeof report.recallQuality.note === "string");
 
   // Delta comparison fields
@@ -487,10 +510,11 @@ test("replay-corpus: limitations block surfaces the required research-only cavea
   const text = REPLAY_CORPUS_LIMITATIONS.join("\n");
   assert.match(text, /proof-of-feasibility/i);
   assert.match(text, /not a statistically representative/i);
-  assert.match(text, /recall quality.*null/i);
   assert.match(text, /synthetic-proxy.*manual-curated/i);
   assert.match(text, /sanitised-production.*deferred/i);
   assert.match(text, /offline evidence.*not.*activation/i);
+  assert.match(text, /measurement infrastructure/i);
+  assert.match(text, /recall query privacy checks/i);
 });
 
 // ---------------------------------------------------------------------------
@@ -532,4 +556,257 @@ test("replay-corpus: evaluation produces results without any network access", ()
   // Action distribution should be populated
   const actions = Object.keys(report.memoryLifecycle.actionDistribution);
   assert.ok(actions.length > 0, "Action distribution should be non-empty");
+});
+
+// ---------------------------------------------------------------------------
+// 18. Recall quality labels are present on recall-query items
+// ---------------------------------------------------------------------------
+
+test("replay-corpus: recall-query items have recall quality labels", () => {
+  const recallQueryItems = REPLAY_CORPUS_ITEMS.filter((i) => i.input.type === "recall-query");
+  assert.ok(recallQueryItems.length > 0, "Should have recall-query items");
+
+  for (const item of recallQueryItems) {
+    assert.ok(item.recallQuality !== null, `Item ${item.corpusItemId} should have recallQuality`);
+    assert.ok(
+      item.recallQuality!.recallQuery.length > 0,
+      `Item ${item.corpusItemId} should have non-empty recallQuery`
+    );
+    assert.ok(
+      Array.isArray(item.recallQuality!.expectedSourceLabels),
+      `Item ${item.corpusItemId} should have expectedSourceLabels array`
+    );
+    assert.ok(
+      Array.isArray(item.recallQuality!.expectedRank1Labels),
+      `Item ${item.corpusItemId} should have expectedRank1Labels array`
+    );
+    assert.ok(
+      Array.isArray(item.recallQuality!.currentTruthLabels),
+      `Item ${item.corpusItemId} should have currentTruthLabels array`
+    );
+    assert.ok(
+      typeof item.recallQuality!.noAnswerExpected === "boolean",
+      `Item ${item.corpusItemId} should have noAnswerExpected boolean`
+    );
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 19. Recall-query items have stable labels that match remember items
+// ---------------------------------------------------------------------------
+
+test("replay-corpus: expected source labels are stable corpus IDs", () => {
+  const recallQueryItems = REPLAY_CORPUS_ITEMS.filter((i) => i.input.type === "recall-query");
+
+  for (const item of recallQueryItems) {
+    if (!item.recallQuality) continue;
+    for (const label of item.recallQuality!.expectedSourceLabels) {
+      assert.ok(
+        label.startsWith("corpus-"),
+        `Label ${label} should be a stable corpus ID starting with "corpus-"`
+      );
+    }
+    for (const label of item.recallQuality!.expectedRank1Labels) {
+      assert.ok(
+        label.startsWith("corpus-"),
+        `Label ${label} should be a stable corpus ID starting with "corpus-"`
+      );
+    }
+    for (const label of item.recallQuality!.currentTruthLabels) {
+      assert.ok(
+        label.startsWith("corpus-"),
+        `Label ${label} should be a stable corpus ID starting with "corpus-"`
+      );
+    }
+  }
+});
+
+test("replay-corpus: expected source labels exist as remember item IDs", () => {
+  const recallQueryItems = REPLAY_CORPUS_ITEMS.filter((i) => i.input.type === "recall-query");
+  const rememberItemIds = new Set(
+    REPLAY_CORPUS_ITEMS.filter((i) => i.input.type === "remember").map((i) => i.corpusItemId)
+  );
+
+  for (const item of recallQueryItems) {
+    if (!item.recallQuality) continue;
+    for (const label of item.recallQuality!.expectedSourceLabels) {
+      assert.ok(
+        rememberItemIds.has(label),
+        `Expected source label ${label} should exist as a remember item ID`
+      );
+    }
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 20. Recall query privacy checks
+// ---------------------------------------------------------------------------
+
+test("replay-corpus: recall queries pass privacy checks (no forbidden patterns)", () => {
+  const recallQueryItems = REPLAY_CORPUS_ITEMS.filter((i) => i.input.type === "recall-query");
+
+  for (const item of recallQueryItems) {
+    if (!item.recallQuality) continue;
+    const forbidden = detectForbiddenPatternsInRecallQuery(item.recallQuality!.recallQuery);
+    assert.deepEqual(
+      forbidden,
+      [],
+      `Item ${item.corpusItemId} recall query "${item.recallQuality!.recallQuery}" contains forbidden patterns: ${forbidden.join(", ")}`
+    );
+  }
+});
+
+test("replay-corpus: recall queries pass privacy checks (no obvious PII)", () => {
+  const recallQueryItems = REPLAY_CORPUS_ITEMS.filter((i) => i.input.type === "recall-query");
+
+  for (const item of recallQueryItems) {
+    if (!item.recallQuality) continue;
+    const clean = recallQueryAppearsCleanOfPII(item.recallQuality!.recallQuery);
+    assert.ok(
+      clean,
+      `Item ${item.corpusItemId} recall query "${item.recallQuality!.recallQuery}" appears to contain obvious PII`
+    );
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 21. Stable label mapping
+// ---------------------------------------------------------------------------
+
+test("replay-corpus: buildLabelToCorpusItemIdMap produces correct mapping", () => {
+  const map = buildLabelToCorpusItemIdMap(REPLAY_CORPUS_ITEMS);
+
+  for (const item of REPLAY_CORPUS_ITEMS) {
+    const resolved = resolveStableLabelToCorpusItemId(item.corpusItemId, map);
+    assert.equal(
+      resolved,
+      item.corpusItemId,
+      `Stable label ${item.corpusItemId} should resolve to itself`
+    );
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 22. Recall quality metrics are computed
+// ---------------------------------------------------------------------------
+
+test("replay-corpus: recall quality metrics are computed for labeled items", () => {
+  const report = runReplayCorpusEvaluation();
+
+  assert.ok(
+    report.recallQuality.labeledRecallQueryCount > 0,
+    `Should have labeled recall query items, got ${report.recallQuality.labeledRecallQueryCount}`
+  );
+  assert.ok(
+    report.recallQuality.labeledRecallQueryCount <=
+      REPLAY_CORPUS_ITEMS.filter((i) => i.input.type === "recall-query").length,
+    "Labeled count should not exceed total recall query items"
+  );
+});
+
+test("replay-corpus: recall quality metrics have expected types", () => {
+  const report = runReplayCorpusEvaluation();
+
+  // All metrics should be numbers (or null if no labeled items)
+  if (report.recallQuality.labeledRecallQueryCount > 0) {
+    assert.equal(
+      typeof report.recallQuality.sourceMatchRate,
+      "number",
+      "sourceMatchRate should be a number"
+    );
+    assert.equal(
+      typeof report.recallQuality.rank1MatchRate,
+      "number",
+      "rank1MatchRate should be a number"
+    );
+    assert.equal(
+      typeof report.recallQuality.currentTruthMatchRate,
+      "number",
+      "currentTruthMatchRate should be a number"
+    );
+  }
+});
+
+test("replay-corpus: per-item recall quality results are present", () => {
+  const report = runReplayCorpusEvaluation();
+  const recallQueryResults = report.items.filter((i) => i.inputType === "recall-query");
+
+  for (const item of recallQueryResults) {
+    assert.ok(item.recallQuality !== null, `Item ${item.corpusItemId} should have recallQuality result`);
+    assert.ok(
+      typeof item.recallQuality!.recallQuery === "string",
+      `Item ${item.corpusItemId} should have recallQuery string`
+    );
+    assert.ok(
+      Array.isArray(item.recallQuality!.expectedSourceLabels),
+      `Item ${item.corpusItemId} should have expectedSourceLabels array`
+    );
+    assert.ok(
+      Array.isArray(item.recallQuality!.expectedRank1Labels),
+      `Item ${item.corpusItemId} should have expectedRank1Labels array`
+    );
+    assert.ok(
+      Array.isArray(item.recallQuality!.currentTruthLabels),
+      `Item ${item.corpusItemId} should have currentTruthLabels array`
+    );
+    assert.ok(
+      typeof item.recallQuality!.noAnswerExpected === "boolean",
+      `Item ${item.corpusItemId} should have noAnswerExpected boolean`
+    );
+    assert.ok(
+      typeof item.recallQuality!.privacyValidationPassed === "boolean",
+      `Item ${item.corpusItemId} should have privacyValidationPassed boolean`
+    );
+  }
+});
+
+test("replay-corpus: all labeled recall queries pass privacy validation", () => {
+  const report = runReplayCorpusEvaluation();
+  const recallQueryResults = report.items.filter((i) => i.inputType === "recall-query");
+
+  for (const item of recallQueryResults) {
+    if (item.recallQuality) {
+      assert.ok(
+        item.recallQuality.privacyValidationPassed,
+        `Item ${item.corpusItemId} should pass privacy validation`
+      );
+    }
+  }
+});
+
+test("replay-corpus: human formatter includes recall quality section", () => {
+  const report = runReplayCorpusEvaluation();
+  const text = formatReplayCorpusReport(report);
+  assert.ok(text.includes("--- recall quality ---"), "Human formatter should include recall quality section");
+  assert.ok(text.includes("labeledRecallQueryCount"), "Human formatter should include labeledRecallQueryCount");
+});
+
+// ---------------------------------------------------------------------------
+// 23. Deterministic replay output (recall quality)
+// ---------------------------------------------------------------------------
+
+test("replay-corpus: repeated runs produce identical recall quality metrics", () => {
+  const report1 = runReplayCorpusEvaluation();
+  const report2 = runReplayCorpusEvaluation();
+
+  assert.equal(
+    report1.recallQuality.labeledRecallQueryCount,
+    report2.recallQuality.labeledRecallQueryCount,
+    "Labeled recall query count must be identical"
+  );
+  assert.equal(
+    report1.recallQuality.sourceMatchRate,
+    report2.recallQuality.sourceMatchRate,
+    "Source match rate must be identical"
+  );
+  assert.equal(
+    report1.recallQuality.rank1MatchRate,
+    report2.recallQuality.rank1MatchRate,
+    "Rank-1 match rate must be identical"
+  );
+  assert.equal(
+    report1.recallQuality.currentTruthMatchRate,
+    report2.recallQuality.currentTruthMatchRate,
+    "Current truth match rate must be identical"
+  );
 });

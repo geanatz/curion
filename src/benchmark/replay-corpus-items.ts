@@ -70,6 +70,55 @@ export const CORPUS_ITEM_REPLAY_STATUSES = ["pending", "completed", "skipped"] a
 export type CorpusItemReplayStatus = (typeof CORPUS_ITEM_REPLAY_STATUSES)[number];
 
 // ---------------------------------------------------------------------------
+// Recall-quality label types
+// ---------------------------------------------------------------------------
+
+/**
+ * Stable label for a corpus item, used to link recall-query items
+ * to their expected source memories without referencing production DB IDs.
+ * Format: `corpus-<hex>` where hex is derived from the remember item's
+ * content hash.
+ */
+export type CorpusItemLabel = string;
+
+/**
+ * Recall-quality ground truth for a corpus item.
+ * Populated only where expected behavior is honest and unambiguous.
+ * Uses stable content-derived labels, not production DB IDs.
+ */
+export interface CorpusItemRecallQuality {
+  /**
+   * The recall query text. Present only for `recall-query` items.
+   * When set, the item represents a recall quality test case.
+   */
+  recallQuery: string;
+  /**
+   * Stable labels of all memories that are relevant sources for this query.
+   * These are the memories a correct recall system should include in top-K.
+   */
+  expectedSourceLabels: CorpusItemLabel[];
+  /**
+   * Stable labels of the memory that should rank first for this query.
+   * Subset of expectedSourceLabels. A correct recall system should
+   * return this as the top result.
+   */
+  expectedRank1Labels: CorpusItemLabel[];
+  /**
+   * Stable labels representing the CURRENT (non-stale) truth for this query.
+   * For non-temporal queries, equals expectedRank1Labels.
+   * For temporal queries where an old fact is superseded, this is the
+   * updated memory while expectedRank1Labels might include the superseded fact.
+   */
+  currentTruthLabels: CorpusItemLabel[];
+  /**
+   * Whether the expected answer is NO answer (abstention).
+   * When true, expectedSourceLabels and expectedRank1Labels should be empty,
+   * and the recall system should abstain.
+   */
+  noAnswerExpected: boolean;
+}
+
+// ---------------------------------------------------------------------------
 // Topic categories for diversity tracking
 // ---------------------------------------------------------------------------
 
@@ -169,6 +218,28 @@ export const CorpusItemSchema = z.object({
    * Not part of the design doc schema; used for corpus management only.
    */
   topic: z.enum(CORPUS_TOPIC_CATEGORIES).optional(),
+  /**
+   * Recall-quality ground truth labels.
+   * Present only for items where expected recall behavior is honest and unambiguous.
+   * Uses stable content-derived labels, never production DB IDs.
+   * For `recall-query` items, this defines what correct recall should return.
+   * For `remember` items, this defines what recall should find after storage.
+   */
+  recallQuality: z
+    .object({
+      /** The recall query text (for recall-query items). */
+      recallQuery: z.string().min(1),
+      /** Stable labels of all memories relevant to this query. */
+      expectedSourceLabels: z.array(z.string()).min(0),
+      /** Stable labels of memories that should rank first. */
+      expectedRank1Labels: z.array(z.string()).min(0),
+      /** Stable labels of the current (non-stale) truth. */
+      currentTruthLabels: z.array(z.string()).min(0),
+      /** Whether the expected answer is no answer (abstention). */
+      noAnswerExpected: z.boolean(),
+    })
+    .nullable()
+    .default(null),
 });
 
 export type CorpusItem = z.infer<typeof CorpusItemSchema>;
@@ -285,6 +356,80 @@ export function appearsCleanOfPII(item: CorpusItem): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Recall-quality helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Detect forbidden patterns in a recall query string.
+ * Applies the same privacy checks as for replay input text.
+ * Returns an array of detected forbidden pattern labels, or empty
+ * array if clean.
+ */
+export function detectForbiddenPatternsInRecallQuery(recallQuery: string): string[] {
+  const findings: string[] = [];
+
+  for (const { re, label } of FORBIDDEN_PATTERNS) {
+    // Clone regex to avoid global state issues
+    const r = new RegExp(re.source, re.flags.includes("g") ? re.flags : re.flags + "g");
+    if (r.test(recallQuery)) {
+      findings.push(label);
+    }
+  }
+
+  return findings;
+}
+
+/**
+ * Validate that a recall query has no obvious PII indicators.
+ * Applies the same privacy checks as for replay input text.
+ * Returns true if the query appears clean of obvious PII.
+ */
+export function recallQueryAppearsCleanOfPII(recallQuery: string): boolean {
+  // Lightweight heuristics for common PII patterns
+  const piiPatterns = [
+    /\b\d{3}-\d{2}-\d{4}\b/g, // SSN
+    /\b\d{10,}\b/g, // Long numeric IDs that might be phone/fax
+    /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g, // Email
+  ];
+
+  for (const re of piiPatterns) {
+    if (re.test(recallQuery)) return false;
+  }
+
+  return true;
+}
+
+/**
+ * Build a mapping from stable corpus item labels to their corpus item IDs.
+ * This allows resolving "expected source labels" to the actual corpus item IDs
+ * for metric computation.
+ *
+ * The stable label is the corpusItemId of the remember item.
+ */
+export function buildLabelToCorpusItemIdMap(
+  items: ReadonlyArray<CorpusItem>
+): Map<CorpusItemLabel, CorpusItemLabel> {
+  const map = new Map<CorpusItemLabel, CorpusItemLabel>();
+  for (const item of items) {
+    map.set(item.corpusItemId, item.corpusItemId);
+  }
+  return map;
+}
+
+/**
+ * Resolve stable labels to corpus item IDs.
+ * In this implementation, stable labels ARE the corpus item IDs,
+ * so this is an identity function. The function exists to provide
+ * a stable interface for future changes.
+ */
+export function resolveStableLabelToCorpusItemId(
+  label: CorpusItemLabel,
+  _labelMap: ReadonlyMap<CorpusItemLabel, CorpusItemLabel>
+): CorpusItemLabel {
+  return label;
+}
+
+// ---------------------------------------------------------------------------
 // Seed corpus items
 // ---------------------------------------------------------------------------
 //
@@ -315,6 +460,14 @@ interface SeedItemInput {
   privacyRelevant: boolean;
   confidence: CorpusItemConfidenceLevel;
   topic: CorpusTopicCategory;
+  /** Optional recall-quality labels. Present only where expected behavior is unambiguous. */
+  recallQuality?: {
+    recallQuery: string;
+    expectedSourceLabels: string[];
+    expectedRank1Labels: string[];
+    currentTruthLabels: string[];
+    noAnswerExpected: boolean;
+  };
 }
 
 function makeSeedItem(input: SeedItemInput): CorpusItem {
@@ -346,6 +499,7 @@ function makeSeedItem(input: SeedItemInput): CorpusItem {
     replayStatus: "pending",
     replayResult: null,
     topic: input.topic,
+    recallQuality: input.recallQuality ?? null,
   };
 }
 
@@ -581,6 +735,13 @@ export const REPLAY_CORPUS_ITEMS: CorpusItem[] = [
     privacyRelevant: false,
     confidence: "high",
     topic: "stack-infrastructure",
+    recallQuality: {
+      recallQuery: "What database does the project use for primary storage?",
+      expectedSourceLabels: ["corpus-13e01eda"],
+      expectedRank1Labels: ["corpus-13e01eda"],
+      currentTruthLabels: ["corpus-13e01eda"],
+      noAnswerExpected: false,
+    },
   }),
 
   makeSeedItem({
@@ -596,6 +757,13 @@ export const REPLAY_CORPUS_ITEMS: CorpusItem[] = [
     privacyRelevant: false,
     confidence: "high",
     topic: "stack-infrastructure",
+    recallQuality: {
+      recallQuery: "What is the retrieval layer architecture?",
+      expectedSourceLabels: ["corpus-9850a6db"],
+      expectedRank1Labels: ["corpus-9850a6db"],
+      currentTruthLabels: ["corpus-9850a6db"],
+      noAnswerExpected: false,
+    },
   }),
 
   // --- team-process (1 recall-query) ---
@@ -613,6 +781,13 @@ export const REPLAY_CORPUS_ITEMS: CorpusItem[] = [
     privacyRelevant: false,
     confidence: "high",
     topic: "team-process",
+    recallQuality: {
+      recallQuery: "What are the code review expectations?",
+      expectedSourceLabels: ["corpus-5e89abae"],
+      expectedRank1Labels: ["corpus-5e89abae"],
+      currentTruthLabels: ["corpus-5e89abae"],
+      noAnswerExpected: false,
+    },
   }),
 
   // --- testing (2 recall-query) ---
@@ -630,6 +805,13 @@ export const REPLAY_CORPUS_ITEMS: CorpusItem[] = [
     privacyRelevant: false,
     confidence: "high",
     topic: "testing",
+    recallQuality: {
+      recallQuery: "How are tests structured and where do they live?",
+      expectedSourceLabels: ["corpus-f37f9467"],
+      expectedRank1Labels: ["corpus-f37f9467"],
+      currentTruthLabels: ["corpus-f37f9467"],
+      noAnswerExpected: false,
+    },
   }),
 
   makeSeedItem({
@@ -645,6 +827,13 @@ export const REPLAY_CORPUS_ITEMS: CorpusItem[] = [
     privacyRelevant: false,
     confidence: "high",
     topic: "testing",
+    recallQuality: {
+      recallQuery: "What test runner does the project use?",
+      expectedSourceLabels: ["corpus-f581d5f8"],
+      expectedRank1Labels: ["corpus-f581d5f8"],
+      currentTruthLabels: ["corpus-f581d5f8"],
+      noAnswerExpected: false,
+    },
   }),
 
   // --- deployment (1 recall-query) ---
@@ -662,6 +851,13 @@ export const REPLAY_CORPUS_ITEMS: CorpusItem[] = [
     privacyRelevant: false,
     confidence: "high",
     topic: "deployment",
+    recallQuality: {
+      recallQuery: "How are deployments handled in production?",
+      expectedSourceLabels: ["corpus-5cfa0ba1"],
+      expectedRank1Labels: ["corpus-5cfa0ba1"],
+      currentTruthLabels: ["corpus-5cfa0ba1"],
+      noAnswerExpected: false,
+    },
   }),
 
   // --- security (2 recall-query) ---
@@ -679,6 +875,13 @@ export const REPLAY_CORPUS_ITEMS: CorpusItem[] = [
     privacyRelevant: false,
     confidence: "high",
     topic: "security",
+    recallQuality: {
+      recallQuery: "How does the project handle API keys and secrets?",
+      expectedSourceLabels: ["corpus-75d171d0"],
+      expectedRank1Labels: ["corpus-75d171d0"],
+      currentTruthLabels: ["corpus-75d171d0"],
+      noAnswerExpected: false,
+    },
   }),
 
   makeSeedItem({
@@ -695,6 +898,13 @@ export const REPLAY_CORPUS_ITEMS: CorpusItem[] = [
     privacyRelevant: false,
     confidence: "high",
     topic: "security",
+    recallQuality: {
+      recallQuery: "What happens to credentials in error responses?",
+      expectedSourceLabels: ["corpus-935286e7"],
+      expectedRank1Labels: ["corpus-935286e7"],
+      currentTruthLabels: ["corpus-935286e7"],
+      noAnswerExpected: false,
+    },
   }),
 
   // ===================================================================
@@ -776,6 +986,13 @@ export const REPLAY_CORPUS_ITEMS: CorpusItem[] = [
     privacyRelevant: false,
     confidence: "high",
     topic: "deployment",
+    recallQuality: {
+      recallQuery: "What is the release schedule for the project?",
+      expectedSourceLabels: ["corpus-33e3f6b2"],
+      expectedRank1Labels: ["corpus-33e3f6b2"],
+      currentTruthLabels: ["corpus-33e3f6b2"],
+      noAnswerExpected: false,
+    },
   }),
 
   makeSeedItem({
@@ -792,6 +1009,13 @@ export const REPLAY_CORPUS_ITEMS: CorpusItem[] = [
     privacyRelevant: false,
     confidence: "high",
     topic: "dependencies",
+    recallQuality: {
+      recallQuery: "How does the team handle dependency upgrades?",
+      expectedSourceLabels: ["corpus-57a63d86"],
+      expectedRank1Labels: ["corpus-57a63d86"],
+      currentTruthLabels: ["corpus-57a63d86"],
+      noAnswerExpected: false,
+    },
   }),
 ];
 

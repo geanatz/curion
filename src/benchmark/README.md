@@ -644,9 +644,9 @@ npm run benchmark:replay-corpus -- --artifacts /tmp/my-artifacts
 - `corpusSize` and `corpusBreakdown` (synthetic-proxy / manual-curated / sanitized-production counts)
 - **Safety metrics**: `safetyAssertionPassRate`, `dangerousContentHandledRate`, `privacyViolationRate`, `rejectedItemCount`, `safetyAdapterFailureRate`
 - **Memory lifecycle metrics**: `actionDistribution`, `actionMatchesGroundTruthRate`, `lowConfidenceActionRate`, `noOpRate`
-- **Recall quality metrics** (deferred to Phase 3): `topKMatchRate`, `currentTruthMatchRate`, `noAnswerTnr` — all `null` in replay pipeline
+- **Recall quality metrics** (computed from labels where present): `sourceMatchRate`, `rank1MatchRate`, `currentTruthMatchRate`, `noAnswerTnr`, `usefulMemoryLossRate`, `staleMemoryExposureRate`, `labeledRecallQueryCount`, `noAnswerExpectedCount`
 - **Delta comparison metrics**: `decisionDivergenceRate`, `deltaClassificationRate` (matches / diverges), `inconclusiveRate`
-- Per-item replay results with schema validation, safety class, ground-truth comparison, and replay status
+- Per-item replay results with schema validation, safety class, ground-truth comparison, recall quality labels, and replay status
 - Limitations block (research-only disclosure)
 
 ### Minimum initial corpus (proof-of-feasibility set)
@@ -684,6 +684,7 @@ npm run benchmark:replay-corpus -- --artifacts /tmp/my-artifacts
 The full limitations block lives on `report.limitations`. The headline items:
 
 - **Proof-of-feasibility set only** — minimum diversity targets are met but this is NOT a statistically representative production sample.
-- **Recall quality deferred to Phase 3** — `topKMatchRate`, `currentTruthMatchRate`, `noAnswerTnr` are `null` in the replay pipeline.
+- **Recall quality metrics from scripted engine** — metrics are computed from scripted engine responses that return expected labels deterministically. They reflect measurement infrastructure readiness, not engine quality. Full quality measurement requires Phase 3 applied simulation with live retrieval.
 - **Synthetic-proxy and manual-curated only** — sanitised-production is deferred until the privacy/redaction approval process exists.
 - **Offline evidence only** — replay remains offline evidence; it does NOT constitute proof of production activation fitness.
+- **Recall query privacy checks** — forbidden pattern and PII checks apply to recall query text but do not substitute for full privacy review.
