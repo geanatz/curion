@@ -4,7 +4,7 @@ This document defines the classification criteria for the comparative delta betw
 the production `decisionMode=off` path and the smart-librarian shadow decision
 path. It establishes when the delta supports a "better / same / worse /
 inconclusive" classification, what evidence is required for each phase, and why
-the current `delta.status="future"` is the correct standing until those gates are
+the current `delta.status="counterfactual"` is the correct Phase 2 standing until those gates are
 passed.
 
 This is a criteria document only. It does not change code behaviour, activate any
@@ -266,20 +266,28 @@ but this is a synthetic proxy, not a production-quality measurement.
 
 ---
 
-## What Requires Counterfactual Projection (Phase 2)
+## What Is Phase 2 Counterfactual Projection
 
-Counterfactual projection estimates what would have happened if the engine's
-decision had been applied, without actually applying it. Phase 2 gates:
+Phase 2 is the **counterfactual projection** currently implemented in the
+shadow-comparison harness. It derives delta fields by comparing production
+outcome vs. engine shadow decision for each scenario in the existing
+`runs[]` — without applying engine decisions to any store.
 
-1. **A production baseline storage capture** — the actual memory state produced
-   by running the production controller against a representative scenario set.
-2. **A projected engine storage state** — estimated by applying engine
-   decisions to the production baseline state without persisting.
-3. **Recall side-by-side comparison** — querying both the production baseline
-   store and the projected engine store to measure recall accuracy delta.
+Phase 2 populates:
 
-Phase 2 is not complete until all three of the above exist. Until then,
-`delta.status` remains `"future"` and the delta fields are a synthetic proxy.
+- `memorySizeDelta` — projected net memory count change if engine decisions were applied.
+- `decisionDivergenceRate` — rate at which engine decisions diverge from production outcomes.
+- `counterfactualClassification` — conservative "same" (no divergence) or "inconclusive" (any divergence); "better"/"worse" are never emitted in Phase 2.
+- `projectedMemoryDeltaPerScenario` — per-scenario projected memory deltas.
+
+**Phase 2 does NOT require:**
+
+- Applied simulation or cloned production storage snapshots — those belong to Phase 3.
+- A separate production baseline capture beyond the production outcome already captured per scenario in the shadow-comparison `runs[]`.
+- Recall side-by-side measurement — `recallHitRateDelta` and `recallCurrentTruthRateDelta` remain null in Phase 2; measured recall quality impact requires Phase 3.
+
+Phase 2 is complete when the shadow-comparison harness has run and produced
+delta fields. `delta.status` is `"counterfactual"` (Phase 2 standing, not a placeholder).
 
 ---
 
@@ -304,32 +312,33 @@ classification with evidence sufficient for a promotion decision.
 
 ---
 
-## Why `delta.status="future"` Is Currently Correct
+## Why `delta.status="counterfactual"` Is the Correct Phase 2 Standing
 
-The current `delta.status="future"` is correct because:
+`delta.status="counterfactual"` is the correct Phase 2 standing because:
 
-1. **No production baseline artifact exists.** The shadow-comparison harness
-   compares two shadow-side runs (production path vs. engine path) against
-   isolated temp storage. There is no production storage capture against which
-   the delta can be measured. A delta without a production baseline is by
-   definition a synthetic proxy.
+1. **Phase 2 is projection-only.** It derives delta fields from comparing
+   production outcome vs. engine shadow decision in the existing `runs[]`
+   without applying engine decisions to any store. This is a counterfactual
+   projection — it estimates what *would* change if engine decisions were
+   applied — not a measured production quality impact.
 
-2. **No counterfactual projection exists.** Phase 2 requires a production
-   baseline storage capture and a projected engine store. Neither exists.
+2. **Recall deltas remain null.** `recallHitRateDelta` and
+   `recallCurrentTruthRateDelta` are null in Phase 2. Measured recall quality
+   impact requires Phase 3 applied simulation with a cloned production storage
+   snapshot.
 
-3. **No applied simulation exists.** Phase 3 requires a cloned production
-   storage snapshot and applied mutations. This does not exist and requires
-   separate approval and data-handling controls.
+3. **Decision-divergence without quality-impact is not a verdict.** Divergence
+   rates and projected memory deltas show what the engine *would* do differently,
+   but not whether different is better or worse. That determination requires
+   Phase 3 measured quality impact.
 
-4. **Decision-divergence without quality-impact is not a verdict.** The current
-   artifact shows divergence rates and synthetic recall accuracy, but these do
-   not constitute evidence that the engine produces better outcomes — only that
-   it produces different ones. The question of whether different is better
-   cannot be answered until Phase 2 or Phase 3 evidence exists.
+4. **Phase 2 conservative classification.** `counterfactualClassification`
+   emits only "same" (no divergence) or "inconclusive" (any divergence). It
+   never emits "better" or "worse" — those require Phase 3 measured evidence.
 
-Setting `delta.status` to anything other than `"future"` would imply a measured
-quality verdict that does not exist. That would be misleading and outside the
-conservative gate logic governing the promotion framework.
+Setting `delta.status` to anything other than `"counterfactual"` (Phase 2) would
+misrepresent the nature of the delta as measured rather than projected. That
+would violate the conservative gate logic governing the promotion framework.
 
 ---
 
@@ -337,19 +346,25 @@ conservative gate logic governing the promotion framework.
 
 ### Before Phase 2 — Counterfactual Fields Populated
 
-All of the following must be true:
+Phase 2 delta fields are populated when the shadow-comparison harness has run
+and produced `runs[]` for a representative scenario set. The following are
+required for Phase 2 to be complete:
 
-- [ ] Production baseline storage capture exists (representative scenario set,
-  run through production controller path, with proper data handling).
-- [ ] Projected engine storage state is computed by applying engine decisions
-  to the production baseline.
-- [ ] Recall side-by-side comparison is run on both stores.
-- [ ] Recall Quality metrics are non-null and consistent across the scenario set.
-- [ ] Safety gates remain passing on the production baseline run.
+- [x] Shadow-comparison harness has run and produced per-scenario `runs[]` with
+  production outcome and shadow decision for each scenario.
+- [x] `memorySizeDelta`, `decisionDivergenceRate`,
+  `counterfactualClassification`, and `projectedMemoryDeltaPerScenario` are
+  computed from the `runs[]` without applying engine decisions.
+- [x] Recall deltas (`recallHitRateDelta`, `recallCurrentTruthRateDelta`) are
+  null — measured recall quality impact requires Phase 3.
+- [x] `counterfactualClassification` is conservative: "same" when no
+  divergence, "inconclusive" when any divergence; "better"/"worse" are never
+  emitted in Phase 2.
+- [x] Safety gates remain passing on the production outcome run.
 
 ### Before Phase 3 — Applied Simulation Authorised and Executed
 
-All Phase 2 gates, plus:
+Phase 2 (counterfactual projection) must be complete, plus:
 
 - [ ] Explicit project-owner approval for applied simulation, covering data
     handling and redaction controls for the cloned storage snapshot.
@@ -395,7 +410,7 @@ This document does not include and does not authorise:
 | Document | Role |
 |---|---|
 | [comparison-methodology.md](./comparison-methodology.md) | Defines the Balanced Score methodology and the three-pillar composite. This document defines the delta classification criteria within that methodology. |
-| [promotion-readiness.md](./promotion-readiness.md) | Summarises current evidence gaps and owner decision options. References this document for the criteria that must be satisfied before the delta can move from `"future"` to measured. |
+| [promotion-readiness.md](./promotion-readiness.md) | Summarises current evidence gaps and owner decision options. References this document for the criteria that must be satisfied before the delta can move from `"counterfactual"` (Phase 2 projection) to measured (Phase 3). |
 
 This document is the **delta classification criteria** within the Balanced Score
 framework established by comparison-methodology. It answers: "given a measured
@@ -414,7 +429,7 @@ delta, how should it be classified?" The promotion-readiness document answers:
 | When is delta "same"? | No divergence, or divergence with no measurable quality-impact. |
 | When is delta "worse"? | Any measurable negative recall/memory impact, or Safety regression. |
 | When is delta "inconclusive"? | Divergence present but no measurable quality-impact can be established. |
-| Why is `delta.status="future"`? | No production baseline exists. No counterfactual projection or applied simulation has been executed. |
-| Can Phase 2 begin now? | No. Phase 2 requires a production baseline storage capture, which does not yet exist. |
-| Can a "better" classification be claimed today? | No. Phase 3 applied simulation is required before any quality verdict is supported. |
+| Why is `delta.status="counterfactual"`? | Phase 2 counterfactual projection is populated (comparing production outcome vs engine decision without applying changes). No production baseline or measured quality-impact yet — that requires Phase 3. |
+| When does delta become "measured"? | Phase 3 applied simulation with a cloned production storage snapshot and measured recall delta. |
+| Can a "better" classification be claimed in Phase 2? | No. Phase 2 counterfactual projection is projection only, not measured quality-impact. Phase 3 applied simulation is required before any quality verdict is supported. |
 | What is in scope for this document? | Delta classification criteria only. No activation, no traffic capture, no auto-routing. |

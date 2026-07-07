@@ -238,9 +238,9 @@ existing `writeTimestampedJsonArtifact` convention. Artifact prefix:
     "projectedMemoryDeltaPerScenario": [
       {
         "scenarioId": "string",
-        "action": "supersede",
+        "action": "reject",
         "projectedDelta": -1,
-        "rationale": "engine recommends supersede; projected memory count -1 if applied"
+        "rationale": "engine recommends reject; production stored — projected memory count -1 if applied (memory would not be stored)"
       }
     ],
     "recallHitRateDelta": null,
@@ -277,8 +277,10 @@ fields are populated — `memorySizeDelta`, `decisionDivergenceRate`,
 `counterfactualClassification`, and `projectedMemoryDeltaPerScenario`. This is
 **projection only**, not measured production quality improvement. Phase 2 derives
 these fields from comparing production outcome vs shadow decision without applying
-engine decisions to any store. `"future"` means delta fields are not yet available.
-A true measured delta requires Phase 3 applied simulation.
+engine decisions to any store. `"future"` (delta fields not yet available) is a
+legacy/Phase-1 empty state — the current implementation only emits `"counterfactual"`
+when Phase 2 delta fields are populated. A true measured delta requires Phase 3
+applied simulation.
 
 **Note on `coverageComplete`:** The Recall Quality pillar sets
 `coverageComplete: true` only when all three labelled coverage metrics
@@ -421,5 +423,5 @@ identifies the owner's decision choices.
 | What is the expected artifact? | `shadow-comparison-<timestamp>.json` in `.curion/benchmark/` — implemented; `delta.status` is `"counterfactual"` for Phase 2 projection; `delta.status="measured"` requires Phase 3 applied simulation. |
 | Does this replace existing benchmarks? | No. It complements them. All four existing benchmarks must pass before shadow comparison. |
 | What does `coverageComplete` mean? | Recall Quality metrics are fully captured (all three labelled coverage metrics non-null). Incomplete coverage should be investigated before promotion review. |
-| What does `delta.status=counterfactual` mean? | Phase 2 counterfactual projection is populated — `memorySizeDelta`, `decisionDivergenceRate`, `counterfactualClassification`, and `projectedMemoryDeltaPerScenario` are derived from comparing production outcome vs. engine decision without applying engine decisions. Measured recall quality delta remains future. |
+| What does `delta.status=counterfactual` mean? | Phase 2 counterfactual projection is populated — `memorySizeDelta`, `decisionDivergenceRate`, `counterfactualClassification`, and `projectedMemoryDeltaPerScenario` are derived from comparing production outcome vs. engine decision without applying engine decisions. Measured recall quality delta (recallHitRateDelta, recallCurrentTruthRateDelta) remains null until Phase 3 applied simulation. |
 | What is the adapter-only benchmark insufficient? | It exercises only the adapter in isolation; it does not measure end-to-end outcomes or downstream recall impact. |

@@ -798,9 +798,12 @@ export interface BalancedScore {
   recallQuality: BalancedScoreRecallQuality;
   gate: BalancedScoreGate;
   /**
-   * Delta against production baseline. Currently marked as "future" since
-   * no production baseline artifact is available. Will be populated once
-   * a baseline capture run is performed.
+   * Delta against production baseline. Populated with Phase 2 counterfactual
+   * projection — `memorySizeDelta`, `decisionDivergenceRate`,
+   * `counterfactualClassification`, and `projectedMemoryDeltaPerScenario` are
+   * derived from comparing production outcome vs. engine shadow decision
+   * without applying engine decisions to any store. Recall deltas remain null
+   * (measured recall quality impact requires Phase 3 applied simulation).
    */
   delta: BalancedScoreDelta;
 }
@@ -1142,7 +1145,8 @@ function computeBalancedScore(
       // - "unknown": divergence (can't determine)
       if (engineAction === "reject") {
         diverged = true;
-        rationale = "engine recommends reject; production stored — divergence: engine would have prevented storage";
+        projectedDelta = -1;
+        rationale = "engine recommends reject; production stored — divergence: applying reject would prevent storage, projected memory count -1 if applied";
       } else if (engineAction === "invalidate") {
         diverged = true;
         projectedDelta = -1;
