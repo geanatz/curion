@@ -410,6 +410,7 @@ export const SHADOW_COMPARISON_LIMITATIONS: ReadonlyArray<string> = [
   "v1 Balanced Score: Safety (from engine-reached scenarios and provider errors) and Cleaner Memory (from engine-reached memory-management actions) are measurable. Recall Quality (from adaptive-depth evaluation) is available and coverageComplete is true when all three recall coverage metrics are non-null. Even when all gate conditions pass, project-owner approval is always required. No auto-promotion.",
   "Benchmark-only / research-only. The harness does NOT activate the production decision engine, modify the public MCP API, change tool schemas, or mutate production storage. It is a measurement tool for the Balanced Score methodology.",
   "No auto-promotion. A passing gate result does not activate the engine. Project-owner approval is always required for activation.",
+  "Phase 2 counterfactual projection (delta.status=counterfactual): Delta fields (memorySizeDelta, decisionDivergenceRate, counterfactualClassification, projectedMemoryDeltaPerScenario) are derived from comparing production outcome vs. engine shadow decision WITHOUT applying engine decisions to any store. This is projection only, NOT measured production quality impact. Recall deltas (recallHitRateDelta, recallCurrentTruthRateDelta) remain null — measured recall quality impact requires Phase 3 applied simulation. counterfactualClassification is conservative: 'same' when no divergence, 'inconclusive' when any divergence; Phase 2 never emits 'better' or 'worse' — that requires Phase 3 measured quality impact.",
 ];
 
 // ---------------------------------------------------------------------------
@@ -696,27 +697,90 @@ export interface BalancedScoreGate {
 }
 
 /**
- * Delta block (future use).
+ * Per-scenario projected memory delta item.
  *
- * Delta compares engine-shadow outcomes against production baseline.
- * A proper delta requires a previously captured production baseline artifact,
- * which is not yet available. This block is included for schema stability
- * and documents that delta measurement is planned for future evaluation cycles.
+ * Each item represents the engine's projected effect on memory count
+ * for a single scenario, computed by comparing the production outcome
+ * against the shadow decision without applying any engine decisions.
+ *
+ * This is a Phase 2 counterfactual projection only — it does not
+ * reflect measured storage impact.
+ */
+export interface ProjectedMemoryDeltaItem {
+  /** Scenario id. */
+  scenarioId: string;
+  /** The action the engine recommended in shadow mode. */
+  action: string;
+  /**
+   * Projected memory count delta if the engine decision were applied.
+   * Negative means memory count would decrease (e.g., supersession removes 1).
+   * Positive means memory count would increase (e.g., store adds 1).
+   * Zero means no net change.
+   */
+  projectedDelta: number;
+  /**
+   * Human-readable rationale for the projected delta.
+   * @example "engine recommends supersede; projected memory count -1 if applied"
+   */
+  rationale: string;
+}
+
+/**
+ * Delta block (Phase 2 counterfactual).
+ *
+ * Delta compares engine-shadow outcomes against production baseline
+ * using Phase 2 counterfactual projection. This is NOT measured
+ * quality impact — it is a projection derived from comparing
+ * production outcome vs. engine decision without applying engine
+ * decisions to any store.
+ *
+ * Phase 2 derives `memorySizeDelta`, `decisionDivergenceRate`,
+ * `counterfactualClassification`, and `projectedMemoryDeltaPerScenario`
+ * from the runs[] without mutating storage. A true measured delta
+ * requires Phase 3 applied simulation.
  */
 export interface BalancedScoreDelta {
-  /** Always null — no production baseline is available for comparison yet. */
-  memorySizeDelta: null;
-  /** Always null — no production baseline is available for comparison yet. */
+  /**
+   * Phase 2 projected memory size delta (total projected memory count change
+   * if engine decisions were applied across all scenarios). Negative is
+   * better (cleaner store). Null when projection is not computable.
+   */
+  memorySizeDelta: number | null;
+  /** Always null — measured recall delta requires Phase 3 applied simulation. */
   recallHitRateDelta: null;
-  /** Always null — no production baseline is available for comparison yet. */
+  /** Always null — measured recall delta requires Phase 3 applied simulation. */
   recallCurrentTruthRateDelta: null;
   /**
-   * Always the string "future" — delta requires a previously captured
-   * production baseline artifact.
+   * Phase 2 status: always "counterfactual". This signals that delta
+   * fields are populated from counterfactual projection, not measured
+   * production impact. Phase 3 applied simulation produces "measured".
    */
-  status: "future";
+  status: "counterfactual";
   /**
-   * Explanation of why delta cannot yet be measured.
+   * Rate at which engine decisions diverge from production outcomes.
+   * Divergence means the engine recommended a different action than
+   * what production stored. Computed as divergent scenarios / total
+   * engine-reached scenarios. Null when no scenarios reached engine.
+   */
+  decisionDivergenceRate: number | null;
+  /**
+   * Conservative Phase 2 counterfactual classification: "same" if no
+   * scenarios diverged (engine aligned with production on all decisions);
+   * "inconclusive" if any scenario diverged (engine and production
+   * disagreed). Phase 2 never emits "better" or "worse" — that
+   * requires Phase 3 measured quality impact.
+   */
+  counterfactualClassification: "same" | "inconclusive" | null;
+  /**
+   * Per-scenario projected memory deltas. Each item shows the engine's
+   * recommended action and the projected memory count change if that
+   * action were applied. This is a Phase 2 counterfactual projection
+   * only — no storage is mutated.
+   */
+  projectedMemoryDeltaPerScenario: ReadonlyArray<ProjectedMemoryDeltaItem>;
+  /**
+   * Explanation of the Phase 2 counterfactual projection basis,
+   * its limitations, and what Phase 3 would enable.
    */
   note: string;
 }
@@ -1026,13 +1090,126 @@ function computeBalancedScore(
     promotionEligible: promotionEligibleFinal,
   };
 
-  // --- Delta (future) ---
+  // --- Phase 2 Delta (counterfactual projection) ---
+  // Phase 2 counterfactual projection derives delta fields from comparing
+  // production outcome vs. engine shadow decision WITHOUT applying engine
+  // decisions to any store. This is NOT measured quality impact — it is a
+  // projection from the current scenario run only.
+  //
+  // Divergence: engine recommended a different memory-management outcome than
+  // what production produced. For engine-reached scenarios, we compare:
+  //   - production outcome ("saved" or "rejected")
+  //   - engine action (store, supersede, invalidate, flag_redundant,
+  //     flag_conflict, redact, reject)
+  //
+  // Phase 2 never emits "better" or "worse" — those require Phase 3 measured
+  // quality impact. Phase 2 classification is conservative: "same" when no
+  // divergence, "inconclusive" when any divergence exists.
+
+  const projectedMemoryDeltaPerScenario: ProjectedMemoryDeltaItem[] = [];
+  let divergentCount = 0;
+  let engineReachedForDelta = 0;
+
+  for (const run of runs) {
+    if (!run.shadow.engineReached) {
+      // Engine not reached — no shadow decision to compare; skip for delta
+      continue;
+    }
+    engineReachedForDelta++;
+
+    const engineAction = run.shadow.decision?.action ?? "unknown";
+    const prodOutcome = run.production.outcome;
+
+    // Determine if engine and production diverged on memory outcome.
+    // Divergence = engine recommended a different storage outcome than production.
+    // For engine-reached scenarios where production stored the memory, divergence
+    // occurs when the engine recommended a cleanup action that production did not
+    // perform (reject, invalidate) or would have prevented storage.
+    let diverged = false;
+    let projectedDelta = 0;
+    let rationale = "";
+
+    if (prodOutcome === "saved") {
+      // Production stored the memory. Engine recommended:
+      // - "store": no divergence, no projected delta
+      // - "supersede": no divergence (new memory stored, old superseded), projectedDelta=0
+      // - "flag_redundant": no divergence (stored, flagged), projectedDelta=0
+      // - "flag_conflict": no divergence (stored, flagged), projectedDelta=0
+      // - "redact": no divergence (stored with redaction), projectedDelta=0
+      // - "reject": DIVERGENCE — engine would have rejected but production stored
+      // - "invalidate": DIVERGENCE — engine would have invalidated but production stored
+      //   (projectedDelta=-1 if engine action were applied: memory invalidated)
+      // - "unknown": divergence (can't determine)
+      if (engineAction === "reject") {
+        diverged = true;
+        rationale = "engine recommends reject; production stored — divergence: engine would have prevented storage";
+      } else if (engineAction === "invalidate") {
+        diverged = true;
+        projectedDelta = -1;
+        rationale = "engine recommends invalidate; projected memory count -1 if applied (production stored)";
+      } else if (engineAction === "store") {
+        rationale = "engine recommends store; production stored — no divergence, no projected memory change";
+      } else if (engineAction === "supersede") {
+        rationale = "engine recommends supersede; production stored new memory — no projected memory count change (supersession metadata added)";
+      } else if (engineAction === "flag_redundant") {
+        rationale = "engine recommends flag_redundant; production stored — no projected memory count change (flag added)";
+      } else if (engineAction === "flag_conflict") {
+        rationale = "engine recommends flag_conflict; production stored — no projected memory count change (conflict metadata added)";
+      } else if (engineAction === "redact") {
+        rationale = "engine recommends redact; production stored — no projected memory count change (redaction applied)";
+      } else {
+        diverged = true;
+        rationale = `engine recommended action '${engineAction}'; cannot determine divergence — treating as divergent`;
+      }
+    } else if (prodOutcome === "rejected" || prodOutcome === "provider_error") {
+      // Production rejected. Engine was reached but recommendation was not applied.
+      // This is NOT divergence in the standard sense — production short-circuited
+      // before engine decision was relevant. We don't count this as engine divergence.
+      rationale = `production ${prodOutcome}; engine recommended '${engineAction}' but production short-circuited — no divergence for delta purposes`;
+    }
+
+    if (diverged) {
+      divergentCount++;
+    }
+
+    projectedMemoryDeltaPerScenario.push({
+      scenarioId: run.scenarioId,
+      action: engineAction,
+      projectedDelta,
+      rationale,
+    });
+  }
+
+  const decisionDivergenceRate =
+    engineReachedForDelta > 0 ? divergentCount / engineReachedForDelta : null;
+
+  // Compute total projected memory delta (sum of per-scenario projected deltas)
+  const memorySizeDelta =
+    projectedMemoryDeltaPerScenario.length > 0
+      ? projectedMemoryDeltaPerScenario.reduce((sum, item) => sum + item.projectedDelta, 0)
+      : null;
+
+  // Phase 2 conservative classification: "same" if no divergence, "inconclusive" if any
+  // Phase 2 never emits "better" or "worse" — that requires Phase 3 measured quality impact
+  let counterfactualClassification: "same" | "inconclusive" | null = null;
+  if (engineReachedForDelta > 0) {
+    counterfactualClassification = divergentCount === 0 ? "same" : "inconclusive";
+  }
+
+  const deltaNote =
+    memorySizeDelta !== null
+      ? `Phase 2 counterfactual projection: memorySizeDelta=${memorySizeDelta} (projected net memory count change if engine decisions were applied across ${projectedMemoryDeltaPerScenario.length} engine-reached scenarios). decisionDivergenceRate=${decisionDivergenceRate !== null ? decisionDivergenceRate.toFixed(3) : "null"}. counterfactualClassification=${counterfactualClassification ?? "null"} (conservative Phase 2: no divergence="same", any divergence="inconclusive"; "better"/"worse" requires Phase 3 measured quality impact). projectedMemoryDeltaPerScenario[${projectedMemoryDeltaPerScenario.length}] items. Recall deltas remain null — measured recall quality impact requires Phase 3 applied simulation.`
+      : `Phase 2 counterfactual projection: no engine-reached scenarios available for delta computation. Recall deltas remain null — measured recall quality impact requires Phase 3 applied simulation.`;
+
   const delta: BalancedScoreDelta = {
-    memorySizeDelta: null,
+    memorySizeDelta,
     recallHitRateDelta: null,
     recallCurrentTruthRateDelta: null,
-    status: "future",
-    note: "Delta measurement requires a previously captured production baseline artifact. Run the shadow comparison against a baseline-capture run to compute deltas.",
+    status: "counterfactual",
+    decisionDivergenceRate,
+    counterfactualClassification,
+    projectedMemoryDeltaPerScenario,
+    note: deltaNote,
   };
 
   return { safety, cleanerMemory, recallQuality, gate, delta };
@@ -1478,7 +1655,18 @@ export function formatShadowComparisonReport(report: ShadowComparisonReport): st
   lines.push(`    recallQuality signal:         ${bs.gate.recallQualitySignal}`);
   lines.push(`    promotion eligible:           ${bs.gate.promotionEligible}`);
   lines.push(`  [Delta]`);
-  lines.push(`    status:                      ${bs.delta.status}`);
+  lines.push(`    status:                      ${bs.delta.status} (counterfactual = Phase 2 projection only; measured requires Phase 3)`);
+  lines.push(`    memorySizeDelta:             ${bs.delta.memorySizeDelta}`);
+  lines.push(`    decisionDivergenceRate:       ${bs.delta.decisionDivergenceRate !== null ? bs.delta.decisionDivergenceRate.toFixed(3) : "null"}`);
+  lines.push(`    counterfactualClassification: ${bs.delta.counterfactualClassification ?? "null"}`);
+  lines.push(`    projectedMemoryDeltaPerScenario count: ${bs.delta.projectedMemoryDeltaPerScenario.length}`);
+  if (bs.delta.projectedMemoryDeltaPerScenario.length > 0) {
+    for (const item of bs.delta.projectedMemoryDeltaPerScenario) {
+      lines.push(`      ${item.scenarioId}: action=${item.action}, projectedDelta=${item.projectedDelta}`);
+    }
+  }
+  lines.push(`    recallHitRateDelta:           ${bs.delta.recallHitRateDelta} (Phase 2: not measured)`);
+  lines.push(`    recallCurrentTruthRateDelta:  ${bs.delta.recallCurrentTruthRateDelta} (Phase 2: not measured)`);
   lines.push(`    note:                         ${bs.delta.note}`);
   lines.push("");
   lines.push("--- mutation confirmation ---");

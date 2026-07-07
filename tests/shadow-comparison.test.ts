@@ -502,12 +502,27 @@ test("shadow-comparison: balancedScore blocks are present and have correct types
   assert.ok(bs.gate.recallQualitySignal === "positive" || bs.gate.recallQualitySignal === "neutral" || bs.gate.recallQualitySignal === "negative" || bs.gate.recallQualitySignal === null);
   assert.ok(typeof bs.gate.promotionEligible === "boolean");
 
-  // Delta block
-  assert.equal(bs.delta.status, "future");
-  assert.equal(bs.delta.memorySizeDelta, null);
-  assert.equal(bs.delta.recallHitRateDelta, null);
-  assert.equal(bs.delta.recallCurrentTruthRateDelta, null);
+  // Delta block — Phase 2 counterfactual
+  assert.equal(bs.delta.status, "counterfactual");
+  assert.ok(typeof bs.delta.memorySizeDelta === "number" || bs.delta.memorySizeDelta === null);
+  assert.equal(bs.delta.recallHitRateDelta, null); // Phase 2: recall not measured
+  assert.equal(bs.delta.recallCurrentTruthRateDelta, null); // Phase 2: recall not measured
+  assert.ok(typeof bs.delta.decisionDivergenceRate === "number" || bs.delta.decisionDivergenceRate === null);
+  assert.ok(
+    bs.delta.counterfactualClassification === "same" ||
+    bs.delta.counterfactualClassification === "inconclusive" ||
+    bs.delta.counterfactualClassification === null,
+    "counterfactualClassification must be 'same', 'inconclusive', or null"
+  );
+  // Phase 2 never emits 'better' or 'worse'
+  assert.ok(
+    bs.delta.counterfactualClassification !== "better" &&
+    bs.delta.counterfactualClassification !== "worse",
+    "Phase 2 counterfactualClassification must not be 'better' or 'worse'"
+  );
+  assert.ok(Array.isArray(bs.delta.projectedMemoryDeltaPerScenario));
   assert.ok(typeof bs.delta.note === "string");
+  assert.ok(bs.delta.note.length > 0);
 });
 
 test("shadow-comparison: safety counts are internally consistent with meta", async () => {
@@ -702,16 +717,97 @@ test("shadow-comparison: balancedScore provider error count is 0 in default scri
   );
 });
 
-test("shadow-comparison: delta block is marked as future with null values", async () => {
+test("shadow-comparison: delta block Phase 2 counterfactual projection", async () => {
   const report = await runShadowComparison();
   const { delta } = report.balancedScore;
 
-  assert.equal(delta.status, "future");
-  assert.equal(delta.memorySizeDelta, null);
+  // Phase 2 status is counterfactual
+  assert.equal(delta.status, "counterfactual");
+
+  // Recall deltas remain null in Phase 2 (measured recall impact requires Phase 3)
   assert.equal(delta.recallHitRateDelta, null);
   assert.equal(delta.recallCurrentTruthRateDelta, null);
-  assert.ok(typeof delta.note === "string");
-  assert.ok(delta.note.length > 0);
+
+  // Projection fields are present
+  assert.ok(typeof delta.decisionDivergenceRate === "number" || delta.decisionDivergenceRate === null);
+  assert.ok(
+    delta.counterfactualClassification === "same" ||
+    delta.counterfactualClassification === "inconclusive" ||
+    delta.counterfactualClassification === null
+  );
+  assert.ok(Array.isArray(delta.projectedMemoryDeltaPerScenario));
+
+  // Phase 2 never emits 'better' or 'worse'
+  assert.ok(
+    delta.counterfactualClassification !== "better" && delta.counterfactualClassification !== "worse",
+    "Phase 2 counterfactualClassification must not be 'better' or 'worse'"
+  );
+
+  // Phase 2 note must mention counterfactual/projection
+  assert.ok(
+    delta.note.toLowerCase().includes("counterfactual") ||
+    delta.note.toLowerCase().includes("projection"),
+    "delta.note must mention counterfactual/projection"
+  );
+
+  // Phase 2 note must mention recall deltas remain null (not measured)
+  assert.ok(
+    delta.note.toLowerCase().includes("recall") &&
+    (delta.note.toLowerCase().includes("null") || delta.note.toLowerCase().includes("phase 3")),
+    "delta.note must mention recall deltas are null/not measured"
+  );
+});
+
+test("shadow-comparison: projectedMemoryDeltaPerScenario items have correct structure", async () => {
+  const report = await runShadowComparison();
+  const { delta, meta } = report.balancedScore;
+
+  // Items are only for engine-reached scenarios
+  const engineReachedScenarios = report.runs.filter((r) => r.shadow.engineReached);
+
+  if (engineReachedScenarios.length > 0) {
+    assert.equal(
+      delta.projectedMemoryDeltaPerScenario.length,
+      engineReachedScenarios.length,
+      "projectedMemoryDeltaPerScenario must have one item per engine-reached scenario"
+    );
+  }
+
+  for (const item of delta.projectedMemoryDeltaPerScenario) {
+    assert.ok(typeof item.scenarioId === "string", "item must have scenarioId");
+    assert.ok(typeof item.action === "string", "item must have action");
+    assert.ok(typeof item.projectedDelta === "number", "item must have projectedDelta");
+    assert.ok(typeof item.rationale === "string", "item must have rationale");
+  }
+});
+
+test("shadow-comparison: delta classification is conservative (same/inconclusive only, never better/worse)", async () => {
+  const report = await runShadowComparison();
+  const { delta } = report.balancedScore;
+
+  // Phase 2 classification is only 'same' or 'inconclusive'
+  assert.ok(
+    delta.counterfactualClassification === "same" ||
+    delta.counterfactualClassification === "inconclusive" ||
+    delta.counterfactualClassification === null,
+    `counterfactualClassification must be 'same', 'inconclusive', or null, got: ${delta.counterfactualClassification}`
+  );
+
+  // Phase 2 never classifies as 'better' or 'worse'
+  assert.ok(
+    delta.counterfactualClassification !== "better" && delta.counterfactualClassification !== "worse",
+    "Phase 2 counterfactualClassification must never be 'better' or 'worse'"
+  );
+
+  // If classification is 'inconclusive', there must have been divergence
+  if (delta.counterfactualClassification === "inconclusive") {
+    assert.ok(delta.decisionDivergenceRate !== null && delta.decisionDivergenceRate > 0);
+  }
+
+  // If classification is 'same', divergence rate should be 0
+  if (delta.counterfactualClassification === "same") {
+    assert.ok(delta.decisionDivergenceRate === 0 || delta.decisionDivergenceRate === null);
+  }
 });
 
 test("shadow-comparison: limitations mention v1 partial Balanced Score and Recall Quality partial coverage", async () => {
@@ -736,5 +832,21 @@ test("shadow-comparison: limitations mention v1 partial Balanced Score and Recal
     limText.toLowerCase().includes("coverage") ||
     limText.toLowerCase().includes("coveragecomplete"),
     "limitations must mention Recall Quality partial coverage or coverageComplete"
+  );
+
+  // Phase 2 counterfactual projection limitation must be present
+  assert.ok(
+    limText.toLowerCase().includes("counterfactual") ||
+    limText.toLowerCase().includes("projection only"),
+    "limitations must mention Phase 2 counterfactual/projection-only"
+  );
+
+  // Limitations must mention Phase 2 does not measure recall impact
+  assert.ok(
+    limText.toLowerCase().includes("recall") &&
+    (limText.toLowerCase().includes("null") ||
+     limText.toLowerCase().includes("phase 3") ||
+     limText.toLowerCase().includes("measured")),
+    "limitations must mention recall deltas are not measured in Phase 2"
   );
 });
