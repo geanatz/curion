@@ -217,6 +217,9 @@ persistent state.
 ### Constraints
 
 - **No live production traffic.** The replay uses synthetic scenarios only.
+  Production traffic replay (sanitised-production corpus) is governed by the
+  production replay corpus design document — see
+  [production-replay-corpus.md](./production-replay-corpus.md).
 - **No credential exposure.** The scenario set contains no raw user inputs,
   no secrets, and no PII.
 - **No persistent mutation in shadow mode.** The engine's shadow decisions are

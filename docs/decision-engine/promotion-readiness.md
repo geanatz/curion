@@ -180,7 +180,8 @@ The following must be satisfied before any activation decision can be made:
 
 1. **Production replay corpus** — a representative set of real production
    traffic scenarios captured, sanitised, and incorporated into the scenario
-   set.
+   set. See [production-replay-corpus.md](./production-replay-corpus.md) for
+   the corpus design and governance rules.
 2. **Shadow telemetry review process** — a documented, periodic review
    process for shadow-mode decision telemetry (distribution, confidence,
    non-skip action rate).
