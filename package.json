@@ -113,6 +113,8 @@
     "test:decision-policy-evaluation": "node --import tsx --test tests/decision-policy-evaluation.test.ts",
     "benchmark:shadow-comparison": "tsx src/benchmark/shadow-comparison-runner.ts",
     "test:shadow-comparison": "node --import tsx --test tests/shadow-comparison.test.ts",
+    "benchmark:applied-simulation": "tsx src/benchmark/applied-simulation-evaluation-runner.ts",
+    "test:applied-simulation": "node --import tsx --test tests/applied-simulation-evaluation.test.ts",
     "benchmark:recall-policy-evaluation": "tsx src/benchmark/recall-policy-evaluation-runner.ts",
     "benchmark:recall-policy-evaluation:no-write": "tsx src/benchmark/recall-policy-evaluation-runner.ts --no-write",
     "test:recall-policy-evaluation": "node --import tsx --test tests/recall-policy-evaluation.test.ts",

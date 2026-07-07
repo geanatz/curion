@@ -531,3 +531,86 @@ The full limitations block lives on `report.limitations`. The headline items:
 - **Shadow decisions are NOT applied** — the engine's structured decision is captured via `setShadowRememberDecisionImpl` and recorded on the report. No engine-applied state transitions (supersession, invalidation, conflict-flag, redundant-flag) occur in shadow mode — both shadow and production paths store memories through the ordinary production storage path.
 - **Benchmark-only / research-only** — the harness does NOT activate the production decision engine, modify the public MCP API, or mutate production storage.
 - **No auto-promotion** — a passing gate does not activate the engine. Project-owner approval is always required.
+
+---
+
+## Applied-simulation evaluation (`benchmark:applied-simulation`)
+
+A self-contained, deterministic, **scripted / no-network** Phase 3 benchmark harness that implements the applied-simulation methodology. Unlike Phase 2 (counterfactual projection), Phase 3 **applies** smart-librarian decisions to cloned temp storage and **measures** the actual recall quality impact against a production-baseline temp store.
+
+This harness uses **Path A**: captures the smart-librarian decision, then applies storage/lifecycle-relevant effects inside the benchmark harness using storage lifecycle seams. It does **NOT** use production active-mode controller wiring.
+
+### Quick start
+
+```sh
+# Default scripted run — no network, no cost, deterministic.
+npm run benchmark:applied-simulation
+```
+
+### What it measures
+
+The harness implements the Phase 3 applied-simulation methodology:
+
+1. **Production baseline** — for each scenario, seeds temp storage with related memories, runs `runRememberController` with `decisionMode=off` (production behavior), then runs `runRecallController` to capture baseline recall metrics.
+2. **Applied simulation** — seeds an identical temp storage, runs with smart-librarian decisions captured via shadow seam, then **applies** storage/lifecycle effects via storage seams (`transitionMemoryState`, `addSupersededByToMemory`, `updateMemoryMetadata`).
+3. **Measured delta** — runs `runRecallController` on the post-apply state and computes recall quality deltas.
+
+The report covers:
+- `delta.status: "applied"` — measured delta (NOT counterfactual projection)
+- `memorySizeDelta` — measured change in active memory count
+- `recallHitRateDelta` — measured change in recall hit rate
+- `recallCurrentTruthRateDelta` — measured change in current-truth ranking rate
+- `recallNoAnswerTnrDelta` — measured change in no-answer true-negative rate
+- `recallRank1MatchRateDelta` — measured change in rank-1 match rate (if supported)
+
+### Classification
+
+Per-scenario classification as `better | same | worse | inconclusive`:
+- `better` — safety passes, no recall metric regresses, at least one metric improves, useful memories not lost, minimum scenario coverage satisfied
+- `worse` — any recall metric regresses, current-truth ranking regresses, no-answer TNR regresses, useful memory lost, or safety worsens
+- `same` — recall outputs equivalent and memory-health impact neutral
+- `inconclusive` — mixed results, metadata-only effects without measurable recall impact, or under-covered scenarios
+
+### Minimum scenario gate
+
+Classification as `better` or `worse` requires at least 12 scenarios with minimum coverage:
+- ≥4 current-truth/supersession scenarios
+- ≥2 no-answer scenarios
+- ≥2 rank-1 current-truth scenarios
+- ≥2 cleaner-memory improvement scenarios
+- ≥2 safety scenarios
+
+### Allowed applied storage actions (for scoring)
+
+- `store` — no-op (memory already stored)
+- `no_op` — no-op
+- `supersede` — `active → superseded` transition + `addSupersededByToMemory`
+- `invalidate` — `active → invalidated` transition
+- `flag_redundant` — metadata update only (soft relationship)
+- `flag_conflict` — metadata update only (soft relationship)
+- `reject` — no storage mutation (production already rejected)
+
+### Excluded from scoring
+
+- `redact` — excluded (treated as metadata-only or inconclusive)
+- `clarify` — excluded (treated as metadata-only or inconclusive)
+
+### CLI flags
+
+```
+--artifacts <path>      override the artifact directory (default: .curion/benchmark)
+--no-write              suppress the JSON artifact
+--no-stdout             suppress the human report on stdout
+```
+
+### Limitations
+
+The full limitations block lives on `report.limitations`. The headline items:
+
+- **Phase 3 applied simulation (NOT Phase 2 counterfactual)** — delta fields are MEASURED from paired applied/baseline runs, NOT projections.
+- **Synthetic-scenario evaluation** (v1 scenario set, 14 scenarios covering current-truth/supersession, no-answer, rank-1 current-truth, cleaner-memory improvement, safety, invalidation, and no-op/store-agreement categories).
+- **No-network (scripted mode)** — the harness wires scripted fetch implementations. No live HTTP calls.
+- **Temp-storage isolated** — each scenario uses fresh temp storage handles. Production `.curion/curion.sqlite` is NEVER touched.
+- **Path A (storage lifecycle seams)** — smart-librarian decisions are captured via shadow seam and applied using `transitionMemoryState`, `addSupersededByToMemory`, `updateMemoryMetadata`. This is NOT production active-mode wiring.
+- **Benchmark-only / research-only** — the harness does NOT activate the production decision engine in active mode, modify the public MCP API, or mutate production storage.
+- **Minimum scenario gate required** — classification as `better`/`worse` requires minimum 12 scenarios with full category coverage.
