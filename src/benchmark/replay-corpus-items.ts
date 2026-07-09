@@ -1018,6 +1018,29 @@ export const REPLAY_CORPUS_ITEMS: CorpusItem[] = [
     },
   }),
 
+  makeSeedItem({
+    type: "recall-query",
+    text: "What is the data retention policy for user memory snapshots?",
+    source: "manual-curated",
+    addedBy: "eval-team",
+    reviewStatus: "approved",
+    reviewer: "eval-team",
+    expectedAction: "no_op",
+    expectedRationale:
+      "Manually reviewed recall query about data retention. No stored memory about this policy. Engine should abstain.",
+    safetyRelevant: false,
+    privacyRelevant: false,
+    confidence: "high",
+    topic: "security",
+    recallQuality: {
+      recallQuery: "What is the data retention policy for user memory snapshots?",
+      expectedSourceLabels: [],
+      expectedRank1Labels: [],
+      currentTruthLabels: [],
+      noAnswerExpected: true,
+    },
+  }),
+
   // ===================================================================
   // No-answer recall-query items — synthetic-proxy
   // These items test the system's ability to correctly abstain when
@@ -1064,6 +1087,75 @@ export const REPLAY_CORPUS_ITEMS: CorpusItem[] = [
     topic: "documentation",
     recallQuality: {
       recallQuery: "What is the capital of Australia?",
+      expectedSourceLabels: [],
+      expectedRank1Labels: [],
+      currentTruthLabels: [],
+      noAnswerExpected: true,
+    },
+  }),
+
+  makeSeedItem({
+    type: "recall-query",
+    text: "What alerts are configured for the production API service?",
+    source: "synthetic-proxy",
+    addedBy: "synthetic-author",
+    reviewStatus: "approved",
+    reviewer: "eval-team",
+    expectedAction: "no_op",
+    expectedRationale:
+      "Recall query about monitoring/alerting configuration. No stored memory about monitoring setup. Engine should abstain.",
+    safetyRelevant: false,
+    privacyRelevant: false,
+    confidence: "high",
+    topic: "monitoring",
+    recallQuality: {
+      recallQuery: "What alerts are configured for the production API service?",
+      expectedSourceLabels: [],
+      expectedRank1Labels: [],
+      currentTruthLabels: [],
+      noAnswerExpected: true,
+    },
+  }),
+
+  makeSeedItem({
+    type: "recall-query",
+    text: "Which package manager does the project use?",
+    source: "synthetic-proxy",
+    addedBy: "synthetic-author",
+    reviewStatus: "approved",
+    reviewer: "eval-team",
+    expectedAction: "no_op",
+    expectedRationale:
+      "Recall query about dependency management. No stored memory about package manager choice. Engine should abstain.",
+    safetyRelevant: false,
+    privacyRelevant: false,
+    confidence: "high",
+    topic: "dependencies",
+    recallQuality: {
+      recallQuery: "Which package manager does the project use?",
+      expectedSourceLabels: [],
+      expectedRank1Labels: [],
+      currentTruthLabels: [],
+      noAnswerExpected: true,
+    },
+  }),
+
+  makeSeedItem({
+    type: "recall-query",
+    text: "Where is the internal API documentation hosted?",
+    source: "synthetic-proxy",
+    addedBy: "synthetic-author",
+    reviewStatus: "approved",
+    reviewer: "eval-team",
+    expectedAction: "no_op",
+    expectedRationale:
+      "Recall query about documentation hosting. No stored memory about documentation infrastructure. Engine should abstain.",
+    safetyRelevant: false,
+    privacyRelevant: false,
+    confidence: "high",
+    topic: "documentation",
+    recallQuality: {
+      recallQuery: "Where is the internal API documentation hosted?",
       expectedSourceLabels: [],
       expectedRank1Labels: [],
       currentTruthLabels: [],

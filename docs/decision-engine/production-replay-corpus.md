@@ -432,8 +432,8 @@ Replay output is written to `.curion/benchmark/` following the existing
     "noAnswerTnr": 1.0,
     "usefulMemoryLossRate": 0.0,
     "staleMemoryExposureRate": 0.0,
-    "labeledRecallQueryCount": 12,
-    "noAnswerExpectedCount": 2,
+    "labeledRecallQueryCount": 16,
+    "noAnswerExpectedCount": 6,
     "note": "Recall quality metrics computed from labeled recall-query items. Scripted engine returns expected labels deterministically. Metrics reflect measurement infrastructure readiness, not engine quality."
   },
   "deltaComparison": {

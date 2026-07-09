@@ -925,3 +925,53 @@ test("replay-corpus: no sanitised-production recall-query items exist", () => {
     `Should have 0 sanitized-production recall-query items, got ${sanitizedRecallQueries.length}`
   );
 });
+
+// ---------------------------------------------------------------------------
+// 25. Expanded no-answer corpus coverage (with diversity)
+// ---------------------------------------------------------------------------
+
+test("replay-corpus: expanded corpus has at least 5 no-answer items", () => {
+  const report = runReplayCorpusEvaluation();
+  // The expanded corpus now has 6 no-answer items (was 2 before expansion)
+  assert.ok(
+    report.recallQuality.noAnswerExpectedCount >= 5,
+    `Expected noAnswerExpectedCount >= 5, got ${report.recallQuality.noAnswerExpectedCount}`
+  );
+});
+
+test("replay-corpus: no-answer items include both synthetic-proxy and manual-curated sources", () => {
+  const noAnswerItems = REPLAY_CORPUS_ITEMS.filter(
+    (i) => i.input.type === "recall-query" && i.recallQuality?.noAnswerExpected === true
+  );
+  const sources = new Set(noAnswerItems.map((i) => i.source));
+  assert.ok(
+    sources.has("synthetic-proxy"),
+    "No-answer items should include synthetic-proxy items"
+  );
+  assert.ok(
+    sources.has("manual-curated"),
+    "No-answer items should include manual-curated items"
+  );
+});
+
+test("replay-corpus: noAnswerTnr remains 1.0 with expanded no-answer corpus", () => {
+  const report = runReplayCorpusEvaluation();
+  // With the expanded corpus, all no-answer items should still correctly abstain
+  // (scripted engine returns null for no-answer queries, meaning correct abstention)
+  assert.equal(
+    report.recallQuality.noAnswerTnr,
+    1.0,
+    `Expected noAnswerTnr to remain 1.0 with expanded corpus, got ${report.recallQuality.noAnswerTnr}`
+  );
+});
+
+test("replay-corpus: expanded corpus has diverse no-answer topic coverage", () => {
+  const noAnswerItems = REPLAY_CORPUS_ITEMS.filter(
+    (i) => i.input.type === "recall-query" && i.recallQuality?.noAnswerExpected === true
+  );
+  const topics = new Set(noAnswerItems.map((i) => i.topic));
+  assert.ok(
+    topics.size >= 3,
+    `Expected no-answer items to cover >= 3 topics, got ${topics.size}: ${[...topics].join(", ")}`
+  );
+});
