@@ -837,7 +837,6 @@ test("related-memory seam: returns top lexical related memories from active reco
       providerId: "minimax",
       modelId: "MiniMax-M3",
       confidence: 0.9,
-      safetyFlags: ["controller-normalized"],
       metadata: { tags: ["postgres", "storage"] },
     });
     insertMemoryRecord(handle, {
@@ -847,7 +846,6 @@ test("related-memory seam: returns top lexical related memories from active reco
       providerId: "minimax",
       modelId: "MiniMax-M3",
       confidence: 0.8,
-      safetyFlags: ["controller-normalized"],
       metadata: { tags: ["analytics"] },
     });
     insertMemoryRecord(handle, {
@@ -857,7 +855,6 @@ test("related-memory seam: returns top lexical related memories from active reco
       providerId: "minimax",
       modelId: "MiniMax-M3",
       confidence: 0.7,
-      safetyFlags: ["controller-normalized"],
       metadata: { tags: ["ui"] },
     });
     const out = findRelatedMemories(handle, {
@@ -900,7 +897,6 @@ test("related-memory seam: respects the default topK of 5", () => {
         providerId: "minimax",
         modelId: "MiniMax-M3",
         confidence: 0.8,
-        safetyFlags: ["controller-normalized"],
         metadata: { tags: ["postgres", "storage"] },
       });
     }
@@ -924,7 +920,6 @@ test("related-memory seam: respects an explicit topK override", () => {
         providerId: "minimax",
         modelId: "MiniMax-M3",
         confidence: 0.8,
-        safetyFlags: ["controller-normalized"],
         metadata: { tags: ["postgres", "storage"] },
       });
     }
@@ -952,7 +947,6 @@ test("related-memory seam: ignores superseded/invalidated memories (active only)
       providerId: "minimax",
       modelId: "MiniMax-M3",
       confidence: 0.9,
-      safetyFlags: ["controller-normalized"],
       metadata: { tags: ["postgres", "storage"] },
     });
     insertMemoryRecord(handle, {
@@ -962,7 +956,6 @@ test("related-memory seam: ignores superseded/invalidated memories (active only)
       providerId: "minimax",
       modelId: "MiniMax-M3",
       confidence: 0.5,
-      safetyFlags: ["controller-normalized"],
       metadata: { tags: ["postgres", "storage"] },
     });
     const out = findRelatedMemories(handle, {
@@ -989,7 +982,6 @@ test("related-memory seam: returns empty when query has no lexical overlap with 
       providerId: "minimax",
       modelId: "MiniMax-M3",
       confidence: 0.7,
-      safetyFlags: ["controller-normalized"],
       metadata: { tags: ["ui"] },
     });
     const out = findRelatedMemories(handle, {

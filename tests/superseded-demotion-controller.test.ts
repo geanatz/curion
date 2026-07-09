@@ -103,7 +103,6 @@ function insertWithRelationship(
     providerId: "minimax",
     modelId: "MiniMax-M3",
     confidence: 0.9,
-    safetyFlags: ["controller-normalized"],
     metadata: {
       tags: [],
       classification: null,
@@ -619,7 +618,6 @@ test("recall: malformed supersedes (non-array) -> safely ignored, no crash", asy
       providerId: "minimax",
       modelId: "MiniMax-M3",
       confidence: 0.9,
-      safetyFlags: ["controller-normalized"],
       metadata: {
         tags: [],
         classification: null,
@@ -664,7 +662,6 @@ test("recall: missing metadata relationship block -> treated as no relationship"
       providerId: "minimax",
       modelId: "MiniMax-M3",
       confidence: 0.9,
-      safetyFlags: ["controller-normalized"],
       metadata: {
         tags: [],
         classification: null,

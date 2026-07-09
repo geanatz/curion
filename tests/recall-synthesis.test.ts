@@ -116,7 +116,74 @@ test("recall: loadRecallAdapterConfig with no env vars: all slots empty, generic
     assert.equal(cfg.timeoutMs, RECALL_DEFAULT_TIMEOUT_MS);
     assert.equal(cfg.timeoutMs, 30_000);
     assert.equal(cfg.maxTokens, RECALL_DEFAULT_MAX_TOKENS);
-    assert.equal(cfg.maxTokens, 512);
+    assert.equal(cfg.maxTokens, 4096);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Default max_tokens flows to the wire body (experiment:
+// `experiment/adaptive-recall-depth` — raise recall-synthesis max
+// output tokens from 512 to 4096). These tests pin the
+// provider-facing request body value to `RECALL_DEFAULT_MAX_TOKENS`
+// and confirm explicit per-call overrides still win.
+// ---------------------------------------------------------------------------
+
+test("recall: synthesizeRecallWithFallback sends RECALL_DEFAULT_MAX_TOKENS as max_tokens to the provider when no override is set", async () => {
+  return withCleanEnv(ENV_KEYS, async () => {
+    const log: Array<{ url: string; body: string }> = [];
+    const fetchImpl = scriptedFetch([() => okChatResponse("ok", TEST_PRIMARY_MODEL)], log);
+    const r = await synthesizeRecallWithFallback(
+      "What database does the project use?",
+      SAMPLE_MEMORIES,
+      {
+        primaryApiKey: TEST_PRIMARY_KEY,
+        primaryBaseUrl: TEST_PRIMARY_BASE_URL,
+        primaryModel: TEST_PRIMARY_MODEL,
+        // No `maxTokens` override: the role default must reach the wire.
+        fetchImpl,
+      }
+    );
+    assert.equal(r.ok, true);
+    assert.equal(log.length, 1);
+    const body = JSON.parse(log[0]!.body);
+    assert.equal(
+      body.max_tokens,
+      RECALL_DEFAULT_MAX_TOKENS,
+      `default max_tokens sent to provider must equal RECALL_DEFAULT_MAX_TOKENS (${RECALL_DEFAULT_MAX_TOKENS})`
+    );
+    assert.equal(body.max_tokens, 4096);
+  });
+});
+
+test("recall: synthesizeRecallWithFallback per-call maxTokens override wins over the default", async () => {
+  return withCleanEnv(ENV_KEYS, async () => {
+    const log: Array<{ url: string; body: string }> = [];
+    const fetchImpl = scriptedFetch([() => okChatResponse("ok", TEST_PRIMARY_MODEL)], log);
+    const override = 1024;
+    assert.notEqual(
+      override,
+      RECALL_DEFAULT_MAX_TOKENS,
+      "override must differ from the default to be a meaningful assertion"
+    );
+    const r = await synthesizeRecallWithFallback(
+      "What database does the project use?",
+      SAMPLE_MEMORIES,
+      {
+        primaryApiKey: TEST_PRIMARY_KEY,
+        primaryBaseUrl: TEST_PRIMARY_BASE_URL,
+        primaryModel: TEST_PRIMARY_MODEL,
+        maxTokens: override,
+        fetchImpl,
+      }
+    );
+    assert.equal(r.ok, true);
+    assert.equal(log.length, 1);
+    const body = JSON.parse(log[0]!.body);
+    assert.equal(
+      body.max_tokens,
+      override,
+      `explicit maxTokens override must reach the wire unchanged (${override})`
+    );
   });
 });
 

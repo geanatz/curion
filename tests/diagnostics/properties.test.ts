@@ -63,7 +63,6 @@ function makeMemoryInput(memoryContent: string): MemoryRecordInput {
     providerId: "test",
     modelId: "test",
     confidence: 0.9,
-    safetyFlags: [],
     metadata: { tags: ["prop-test"] },
   };
 }

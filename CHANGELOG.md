@@ -8,18 +8,270 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 Public-adoption polish (Phase 3) plus a narrow
-`recall.answered.source` projection alignment. The schema, the
-tool names, the strict input schemas, the
-`text` / `structuredContent` surfaces, the `clarification_needed`
-contract, the storage layout, the `.curion/config.json`
-semantics, the controller behavior, the ranking thresholds, the
-provider prompts, the `weak_match` public message, and the
-memory storage behavior are unchanged. The only source-code
-change is a narrow projection update that populates the
-already-declared `source` field on `recall.answered`
+`recall.answered.source` projection alignment, plus the Phase 3
+supersession lifecycle wiring, plus the Phase 1 Memory Decision
+Engine skeleton in shadow mode. The schema, the tool names, the
+strict input schemas, the `text` / `structuredContent` surfaces,
+the `clarification_needed` contract, the storage layout, the
+`.curion/config.json` semantics, the controller behavior (except
+for the new lifecycle wiring and the new shadow-mode decision
+invocation), the ranking thresholds, the provider prompts, the
+`weak_match` public message, and the memory storage behavior
+are unchanged. The only source-code change unrelated to the
+lifecycle wiring is a narrow projection update that populates
+the already-declared `source` field on `recall.answered`
 `structuredContent`; the schema was already carrying it, and
-the internal `RecallResult` already recorded it. The on-the-
-wire shape is now aligned with the declared schema.
+the internal `RecallResult` already recorded it. The on-the-wire
+shape is now aligned with the declared schema.
+
+### Added
+
+- **Long-horizon memory evaluation benchmark (`benchmark:long-horizon-memory-evaluation`).**
+  A scripted / no-network, temp-storage-isolated benchmark
+  harness that drives the production storage lifecycle
+  seams (`insertMemoryRecord`, `transitionMemoryState`,
+  `addSupersededByToMemory`, `updateMemoryMetadata`,
+  `listActiveMemorySummaries`, `listMemoryTransitions`)
+  against a curated v1 scenario set of 8 multi-step
+  lifecycle stories and evaluates the captured state
+  against typed expectations. Scenarios cover the brief's
+  required multi-step lifecycle axes: repeated
+  supersession chains, invalidation / retraction,
+  conflict preservation (NOT auto-invalidated), redundancy
+  linked via soft pointer (NOT invalidated), recall of
+  current truth after multiple updates, false premise
+  about a stale memory, multi-topic / project-like
+  separation, and invalidate-after-supersede. The
+  benchmark emits per-step results, per-memory final
+  state captures, audit-history snapshots, and a
+  headline gate stack (lifecycle-state /
+  current-truth / stale-exclusion /
+  conflict-preservation / audit / all-scenarios /
+  overall) with category summaries and aggregate
+  accuracy metrics. The artifact prefix is
+  `long-horizon-memory-evaluation-`. The benchmark is
+  benchmark-only / research-only: it does NOT touch
+  production storage, does NOT mutate the public MCP
+  `remember` / `recall` tool behavior, does NOT call
+  any provider, does NOT mutate the public
+  `structuredContent` shape, and does NOT activate
+  decision engine actions. The harness is added at
+  `src/benchmark/long-horizon-memory-evaluation.ts`
+  with the scenario set under
+  `src/benchmark/long-horizon/scenarios.ts`, metrics
+  + report shape under
+  `src/benchmark/long-horizon/metrics.ts`, and the
+  CLI runner at
+  `src/benchmark/long-horizon-memory-evaluation-runner.ts`.
+  Companion test suite at
+  `tests/long-horizon-memory-evaluation.test.ts` covers
+  determinism, no-network, temp-storage isolation,
+  report shape, scenario coverage, the public-API guard
+  (`PUBLIC_TOOL_NAMES` unchanged, no benchmark import
+  from production code paths), and the artifact-writer
+  contract.
+
+- **Phase 1 Memory Decision Engine skeleton in shadow mode.**
+  A unified `src/decision/` foundation that will become the
+  single consolidated semantic decision system for Curion.
+  Phase 1 ships SHADOW MODE ONLY: the engine emits a structured
+  decision (action, reason, id lists, confidence) for every
+  safe-input `remember` call, but the controller never mutates
+  persisted memory, public output, public `structuredContent`,
+  or the MCP tool schema based on the engine output.
+
+  - `src/decision/types.ts` defines the strict Zod schemas:
+    `RememberPolicyDecisionSchema` (the decision output),
+    `RememberDecisionEvidencePacketSchema` (the compact,
+    privacy-conscious input packet), and bounded action /
+    reason vocabularies that cover the forward-looking
+    `store` / `supersede` / `invalidate` / `redact` /
+    `clarify` / `reject` / `flag_conflict` / `flag_redundant` /
+    `no_op` set. Phase 1 executes none of these actions.
+  - `src/decision/structured-output.ts` is a parser / repair
+    helper that mirrors the existing `parseMemoryAnalysis`
+    pattern (raw -> fenced -> balanced -> repaired). Same
+    project pattern; only the target schema differs.
+  - `src/decision/evidence.ts` builds a typed evidence packet
+    (length + stable FNV-1a hash of the raw input, coarse
+    safety class, bounded related-memory excerpts with id
+    tokens stripped from the prompt header) — the raw input
+    is never echoed into the prompt header; the prompt body
+    renders it as a JSON-encoded `INPUT:` block, exactly as
+    the existing memory-analysis adapter does.
+  - `src/decision/policy.ts` resolves the activation policy
+    from `CURION_REMEMBER_DECISION_MODE` (default `"off"`).
+    `"shadow"` enables observation; `"active"` is downgraded
+    to `"shadow"` in Phase 1 so a future caller cannot
+    accidentally activate actions on engine output.
+  - `src/decision/adapter.ts` is the provider-facing decision
+    call, modeled on `analyzeMemoryWithFallback`: same role-
+    based primary/fallback config, same fetch override seam,
+    same same-provider repair attempt on parse / schema
+    failure, same redacted failure contract.
+  - `src/controller/remember-controller.ts` invokes the
+    engine in shadow mode after the deterministic safety
+    pre-check and the related-memory lookup. A provider hard
+    failure, an invalid structured response, or any other
+    `DecisionAdapterResult` `ok: false` branch is logged at
+    debug level and the controller proceeds with the existing
+    deterministic path unchanged. The `setShadowRememberDecisionImpl`
+    test seam lets tests drive the shadow path without making
+    any HTTP call.
+  - The activation is OFF by default for existing tests and
+    deployments. No env var is required for the existing test
+    suite to pass.
+  - New `tests/decision-engine.test.ts` covers schema
+    validation, parser / repair, evidence builder, policy
+    resolution, hermetic provider adapter behavior
+    (missing-config, invalid-input, scripted happy path, 5xx
+    failure, invalid-output repair), shadow integration with
+    the remember controller (off mode = no HTTP call, shadow
+    mode preserves public outcome byte-equal, shadow mode
+    with provider failure does NOT crash remember, secret-
+    classified input short-circuits before the engine), and
+    the public-API invariant (`remember` + `recall`, single
+    `text` parameter).
+
+### Added
+
+- **Decision Engine prompt refinement + live-eval v2.1
+  attribution split.** A focused refinement pass on the
+  Phase 1 Memory Decision Engine: the consolidated system
+  prompt now carries an explicit "ACTION BOUNDARIES" section
+  that documents the `reject` vs `no_op`, `reject` vs
+  `clarify`, `redact` vs `reject`, and temporal /
+  current-vs-old ambiguity distinctions, plus a refined
+  reason-vocabulary guide that ties `low_quality` to
+  `no_op` (low-information abstention) and `ambiguous_or_vague`
+  to `clarify` / `reject` / `no_op` when the dominant
+  signal is ambiguity. The live-eval metrics module now
+  tags each per-scenario assertion row with a `group`
+  (`decision-quality` vs `provider-path`) so the headline
+  `modelQualityGate` reads `decisionQualityPass` per
+  scenario (NOT the full `pass` conjunction). This means a
+  live provider that exercises a different call shape than
+  the scripted expectation (e.g. httpCalls=1 instead of the
+  scripted expected 2 because a live provider typically
+  succeeds on the first call) does NOT fail the model-quality
+  verdict — the provider-path difference is surfaced under
+  `gates.modelQualityProviderPathMismatchScenarioIds` (a
+  new v2.1 field) so a live reviewer can audit "the model
+  was right, the harness state machine just took a different
+  path". Scripted mode is unchanged in contract: every
+  scenario still passes under the scripted fetch, and the
+  per-scenario mismatch list is always empty. Three
+  affected scripted scenarios (`reject-vague`,
+  `no-op-low-value`, `reject-mixed-sensitive-case`) had
+  their expected action / reason updated to match the
+  refined boundary guidance; target-id semantics and the
+  v2 scenario set version stamp are unchanged. Live-mode
+  measured improvement: model-quality (decision) 12/21 →
+  20/21; safety-privacy 4/5 → 5/5.
+
+- **Benchmark-only live-eval mode for the decision-policy
+  evaluation.** A new manual opt-in mode that drives the
+  real `decideRememberPolicyWithFallback` adapter against
+  the configured `CURION_PRIMARY_*` / `CURION_FALLBACK_*`
+  provider/model with the same curated v2 scenario set as
+  the existing scripted evaluation. The mode is impossible
+  to reach accidentally: it requires BOTH
+  `CURION_DECISION_EVAL_LIVE=1` AND the `--live` CLI flag
+  (either alone falls back to scripted with a clear
+  stderr notice). In live mode the harness does NOT pass
+  `fetchImpl` to the adapter, so the adapter's HTTP path
+  uses `globalThis.fetch` against the user's real provider.
+  The captured structured decision is recorded on the
+  artifact but NEVER applied to persisted memory, public
+  output, public `structuredContent`, or any controller
+  state; the production `CURION_REMEMBER_DECISION_MODE`
+  activation gate is untouched. Live artifacts carry a
+  top-level `live` metadata block with the env / CLI opt-in
+  evidence, a provider config snapshot WITHOUT API key
+  values (only `hasPrimaryApiKey` / `hasFallbackApiKey`
+  booleans), aggregate providerUsed / modelUsed counts, the
+  total live HTTP call count, and a reviewer-must-read-first
+  warnings list. Scripted artifacts stay byte-equal to the
+  v2 baseline apart from the new `evaluationMode` label; the
+  live block is absent. The runner's CLI surface gains the
+  `--live` flag (opt-in via the shared benchmark CLI helper)
+  and the package ships a `benchmark:decision-policy-evaluation:live`
+  npm script that wires both opt-in signals in one command.
+  See `src/benchmark/README.md` for the full command and the
+  reviewer-must-read-first list of caveats (cost, provider
+  policy, latency, etc.).
+
+### Added
+
+- **Phase 3 supersession lifecycle wiring.** When the
+  remember controller's existing conservative
+  `detectSupersession` heuristic emits a high-confidence
+  signal against one or more older active memories, the
+  controller now drives an `active → superseded` state
+  transition for each superseded old memory through the
+  audit-backed `transitionMemoryState` seam. Each transition
+  writes exactly one coherent row to the existing
+  `memory_transitions` audit table inside the same SQLite
+  transaction as the `memories.state` update, so the audit
+  log and the live row are always in lock-step. The old row
+  is then hidden from normal recall through the existing
+  `state = 'active'` filter on
+  `listActiveMemorySummaries`,
+  `listActiveMemorySummariesByFts5`, and
+  `listActiveMemoryRelationshipBlocks`.
+- **Audit row contract.** Every controller-driven
+  supersession writes an audit row with `reason:
+  "supersession"`, `actor: "supersession-controller"`,
+  `triggering_memory_id` set to the new memory's id, the
+  detector's `confidence` (0..1), and an `metadata` blob
+  carrying `source: "detectSupersession"`,
+  `detector: "controller"`, and the detector's `supersededIds`
+  array. This is the same `memory_transitions` table the
+  Phase 1+2 foundation added; the foundation's "no automatic
+  transitions wired" caveat is now lifted for the
+  supersession path only (invalidation and manual
+  reactivation remain explicitly out of scope).
+- **Relationship metadata preserved through the
+  transition.** The existing
+  `addSupersededByToMemory` back-patch still runs
+  before the state transition; the old row's
+  `metadata.relationship.supersededBy` pointer and the
+  new row's `metadata.relationship.supersedes` pointer
+  are both preserved verbatim on disk after the state
+  change. The controller does not overwrite either
+  pointer, and the existing read-side paths project
+  `superseded` rows through the same
+  `listActiveMemoryRelationshipBlocks` shape (which
+  filters on `state = 'active'`, so the hidden row is
+  not surfaced through the public recall pipeline).
+- **Conservative guard preserved.** The detector's
+  heuristic is unchanged. `detectSupersession` still
+  requires explicit supersession phrasing plus topical
+  overlap plus a higher-id directional rule, and it
+  still skips memories whose `state !== "active"`.
+  Conflicts without explicit replacement language and
+  older-variant paraphrases without supersession
+  phrasing keep both rows active; only explicit
+  supersession signals drive the state transition.
+- **Safe skip on transition failure.** The transition
+  call is wrapped in a defensive `try`/`catch`: if
+  `transitionMemoryState` throws (e.g. the row was
+  already moved out of `active` by a concurrent
+  writer), the controller logs a structured `warn`
+  line and skips the transition without crashing. The
+  relationship metadata back-patch is unaffected
+  because it runs first and has its own transaction.
+- **New Phase 3 tests.** Eleven new integration tests
+  in `tests/supersession-wiring.test.ts` cover:
+  audit-row fields, the three recall-exclusion paths
+  (`listActiveMemorySummaries`,
+  `listActiveMemorySummariesByFts5`,
+  `listActiveMemoryRelationshipBlocks`), relationship-
+  metadata preservation through the transition, the
+  conservative non-supersession paths (olderVariants,
+  conflicts, no-supersession-language), multiple
+  superseded memories, public-message shape, and
+  already-superseded rows.
 
 ### Added
 
@@ -91,12 +343,92 @@ wire shape is now aligned with the declared schema.
   `privacy-storage.md` section and clarifying that the trace is not
   part of the public MCP surface.
 - **`CONTRIBUTING.md` → Documentation scope section.** Adds a
-  short "Documentation scope" section so contributors know which
-  user-facing doc owns which topic and that broken links / stale
-  shape examples are review blockers.
+   short "Documentation scope" section so contributors know which
+   user-facing doc owns which topic and that broken links / stale
+   shape examples are review blockers.
+
+- **Recall-policy evaluation benchmark (v1, scripted / no-network).**
+  A small, deterministic, scripted benchmark harness for the
+  recall-side decision vocabulary — the symmetric counterpart of
+  the existing decision-policy evaluation. The benchmark exercises
+  a benchmark-only recall-policy adapter (NOT a production
+  adapter — none exists yet; see Limitations) against a curated
+  v1 scenario set of 16 scenarios across 5 categories
+  (`answerable` / `no-memory-weak-match` / `ambiguity` /
+  `lifecycle` / `robustness`). The harness is benchmark-only and
+  does NOT touch the production `recall(text)` controller, the
+  public MCP API, the public MCP tool schema, or storage. New
+  files:
+
+  - `src/benchmark/recall/spec.ts` — declarative scripted
+    provider spec (primary / repair / fallback).
+  - `src/benchmark/recall/scenarios.ts` — the curated v1
+    scenario set + the `RecallPolicyStatus` /
+    `RecallPolicyReason` vocabularies + the
+    `RECALL_POLICY_SCENARIO_SET_VERSION = "v1"` stamp.
+  - `src/benchmark/recall/metrics.ts` — the report shape:
+    `scenarioSetVersion`, `meta`, `categories`, `scopes`,
+    `statusHistogram` / `reasonHistogram`,
+    `perStatusAccuracy` / `perReasonAccuracy`,
+    `statusConfusionMatrix`, `targetMemoryMatch` (Jaccard = IoU),
+    `providerCallStats`, four gates (`abstentionGate` /
+    `safetyGate` / `modelQualityGate` / `providerPathGate`),
+    `runs`, and `limitations`. The human
+    `formatRecallPolicyEvaluationReport` formatter mirrors the
+    decision-policy layout.
+  - `src/benchmark/recall-policy-evaluation.ts` — the harness
+    function (`runRecallPolicyEvaluation`), the
+    `runBenchmarkOnlyRecallPolicyAdapter` private adapter, the
+    scripted fetch state machine, the per-scenario runner, and
+    `writeRecallPolicyEvaluationReport` (artifact prefix
+    `recall-policy-evaluation-`).
+  - `src/benchmark/recall-policy-evaluation-runner.ts` — the
+    CLI runner with `--artifacts` / `--no-write` /
+    `--no-stdout`; `--live` is deliberately NOT supported in
+    v1 because the production recall-policy adapter does not
+    yet exist.
+  - `tests/recall-policy-evaluation.test.ts` — covers the
+    scripted-mode determinism contract, the no-network contract
+    (no `globalThis.fetch` invocation), the report / metrics
+    shape, the gates, the CLI parser, the artifact writer
+    behavior, the scenario-set integrity, the abstention /
+    model-quality gate semantics, and the public-API guard.
+  - Package scripts: `benchmark:recall-policy-evaluation`,
+    `benchmark:recall-policy-evaluation:no-write`, and
+    `test:recall-policy-evaluation`.
+
+  Limitations: the recall-policy decision vocabulary does NOT
+  exist as a production code path; the benchmark-only adapter
+  is a research probe ahead of one. The captured structured
+  decision is recorded on the report but NEVER applied to
+  persisted memory, public output, public `structuredContent`,
+  the MCP `recall` tool, or any controller state. Activation
+  is reserved for a future Phase that adds a production
+  recall-policy adapter; the harness's wiring (scripted
+  fetch, evidence builder, expectation evaluator) is designed
+  to migrate to a real adapter with minimal churn at that
+  point.
 
 ### Changed
 
+- **Recall-synthesis default `max_tokens` raised from `512` to
+  `4096` (experiment on `experiment/adaptive-recall-depth`).**
+  The `RECALL_DEFAULT_MAX_TOKENS` constant in
+  `src/providers/recall-synthesis.ts` is now `4096`; the
+  `RecallSynthesisOptions.maxTokens` doc comment, the
+  default-pinning test, and a new wire-body test (asserting
+  that the value sent to providers equals
+  `RECALL_DEFAULT_MAX_TOKENS`) are updated to match. Explicit
+  per-call `maxTokens` overrides and the shared
+  `CURION_ADAPTER_MAX_TOKENS` env var continue to win, and the
+  memory-analysis role default is unchanged at `1024`. The
+  public MCP surface, the controller, the adaptive-depth
+  selection, the prompt budgets, the provider routing, and the
+  retry / repair behavior are all unchanged. The
+  `docs/configuration.md` row for `CURION_ADAPTER_MAX_TOKENS`
+  now notes that the per-role defaults differ
+  (`1024` for memory-analysis, `4096` for recall-synthesis) and
+  that setting the env var overrides both.
 - **`recall.answered` `structuredContent.source` is now
   populated by `buildRecallStructuredContent`.** The declared
   `source?: "local" | "cross_project"` field on

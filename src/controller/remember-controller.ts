@@ -23,6 +23,14 @@
  * the model and never echoes it back).
  */
 
+import {
+  type DecisionAdapterOptions,
+  type DecisionAdapterResult,
+  type RememberDecisionMode,
+  buildRememberDecisionEvidence,
+  decideRememberPolicyWithFallback,
+  resolveRememberDecisionPolicy,
+} from "../decision/index.js";
 import { logger } from "../logging/logger.js";
 import {
   type MemoryAnalysisResult,
@@ -37,6 +45,7 @@ import {
 } from "../retrieval/relationship.js";
 import { findRelatedMemories } from "../retrieval/seam.js";
 import { detectSupersession } from "../retrieval/supersession.js";
+import type { SafetyCheckResult } from "../safety/precheck.js";
 import { classifyInput, redactSummary } from "../safety/precheck.js";
 import {
   MEMORY_KINDS,
@@ -46,9 +55,21 @@ import {
   type StorageHandle,
   addSupersededByToMemory,
   insertMemoryRecord,
+  transitionMemoryState,
   updateMemoryMetadata,
 } from "../storage/storage.js";
 import type { Clarification } from "../tools/remember-structured-content.js";
+
+/**
+ * Actor tag written on the `memory_transitions` audit row when
+ * the remember controller drives an automatic
+ * `active → superseded` transition in response to a high-
+ * confidence supersession signal. The value is intentionally
+ * distinct from the `'internal'` default so forensic / debugging
+ * consumers can attribute the row to the controller path without
+ * having to cross-reference the call site.
+ */
+const SUPERSESSION_CONTROLLER_ACTOR = "supersession-controller";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -122,6 +143,44 @@ export interface RememberControllerOptions {
    * timestamp to make the persisted JSON byte-stable.
    */
   now?: () => number;
+  /**
+   * Phase 1 Memory Decision Engine activation mode.
+   *   - `"off"` (default): the engine is skipped. The controller
+   *     behaves exactly as it did before the engine existed.
+   *   - `"shadow"`: the engine runs after the deterministic
+   *     pre-check and emits a structured decision. The
+   *     controller traces the decision at debug level but
+   *     NEVER mutates persisted memory, public output, public
+   *     structured content, or the MCP tool schema.
+   *
+   * The env var `CURION_REMEMBER_DECISION_MODE` is the
+   * production source of truth; this field overrides the env
+   * for tests. The active mode is intentionally NOT exposed —
+   * Phase 1 cannot activate actions on engine output.
+   */
+  decisionMode?: RememberDecisionMode;
+  /**
+   * Optional fetch override for the decision adapter (test-only).
+   * Mirrors `providerFetchImpl` so tests can drive the shadow
+   * engine end-to-end without network access. Production code
+   * does not set this.
+   */
+  decisionProviderFetchImpl?: typeof fetch;
+  /**
+   * Optional API key override for the decision adapter
+   * (test-only). Mirrors `providerPrimaryApiKey`.
+   */
+  decisionProviderPrimaryApiKey?: string;
+  /** Optional fallback API key override for the decision adapter (test-only). */
+  decisionProviderFallbackApiKey?: string;
+  /** Optional primary base URL override for the decision adapter (test-only). */
+  decisionProviderPrimaryBaseUrl?: string;
+  /** Optional fallback base URL override for the decision adapter (test-only). */
+  decisionProviderFallbackBaseUrl?: string;
+  /** Optional primary model override for the decision adapter (test-only). */
+  decisionProviderPrimaryModel?: string;
+  /** Optional fallback model override for the decision adapter (test-only). */
+  decisionProviderFallbackModel?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -296,6 +355,48 @@ export async function runRememberController(
   });
   const relatedForProvider: readonly RelatedMemory[] = related;
 
+  // -- 2b. Memory Decision Engine (Phase 1, shadow only) ------------
+  // Phase 1 of Curion's normalized LLM-assisted decision
+  // architecture ships SHADOW MODE ONLY. The engine emits a
+  // structured decision (action, reason, ids, confidence) for
+  // every safe-input remember call; the controller logs it at
+  // debug level and NEVER mutates persisted memory, public
+  // output, public structured content, or the MCP tool schema
+  // based on the engine output.
+  //
+  // Activation:
+  //   - The policy module resolves the activation mode from
+  //     `CURION_REMEMBER_DECISION_MODE` (default `"off"`). Tests
+  //     can override via `options.decisionMode`.
+  //   - When `mode === "off"` (the default), the engine is
+  //     skipped entirely: no evidence build, no HTTP call, no
+  //     decision. Existing behavior is byte-equal to pre-Phase-1.
+  //   - When `mode === "shadow"`, the engine runs. Its output is
+  //     observed-only.
+  //
+  // Safety invariants:
+  //   - The deterministic safety pre-check above ALWAYS runs
+  //     before the engine is invoked. A `secret`,
+  //     `mixed-safe-sensitive`, `prompt-injection`,
+  //     `unsafe-preference`, `raw-dump`, `vague-junk`,
+  //     `self-conflict`, `vague-memory`, or
+  //     `replacement-correction` classification short-circuits
+  //     before this block; the engine never sees unsafe input.
+  //   - The engine adapter fails safely: a provider hard
+  //     failure, an invalid structured response, or any other
+  //     `DecisionAdapterResult` `ok: false` branch is logged
+  //     at debug level and the controller proceeds with the
+  //     existing deterministic path unchanged.
+  //   - The engine never receives a `fetchImpl` override that
+  //     shadows the existing provider fetch override; the
+  //     decision path has its own dedicated override seam.
+  await invokeShadowRememberDecision({
+    rawInput,
+    safety,
+    relatedForProvider,
+    controllerOptions: options,
+  });
+
   // -- 3. Provider call ----------------------------------------------
   // Build the adapter options object with only defined fields, so
   // the adapter does not receive undefined values for keys that
@@ -398,7 +499,6 @@ export async function runRememberController(
     providerId: result.providerUsed,
     modelId: result.modelUsed,
     confidence,
-    safetyFlags: ["controller-normalized"],
     metadata: existingMetadata,
   });
 
@@ -484,12 +584,77 @@ export async function runRememberController(
     if (supersession.confidence > derived.detectionConfidence) {
       derived.detectionConfidence = supersession.confidence;
     }
-    // Back-patch each superseded old row: add supersededBy pointing
-    // to the new candidate's id. Safe for missing/deleted rows —
-    // `addSupersededByToMemory` is a no-op when the row does not
-    // exist.
+    // For each superseded old memory, write BOTH the
+    // relationship-metadata pointer AND the
+    // `active → superseded` state transition:
+    //
+    //   1. Back-patch the old row's metadata to add
+    //      `supersededBy: [newId]`. The
+    //      `addSupersededByToMemory` helper is a no-op when
+    //      the row does not exist, so missing rows are
+    //      handled safely without affecting state.
+    //
+    //   2. Transition the old row's `state` to `superseded`
+    //      through the audit-backed `transitionMemoryState`
+    //      seam. This is Phase 3 wiring: it makes
+    //      explicitly-superseded memories disappear from
+    //      normal recall (the existing
+    //      `listActiveMemorySummaries` /
+    //      `listActiveMemorySummariesByFts5` /
+    //      `listActiveMemoryRelationshipBlocks` reads all
+    //      filter on `state = 'active'`).
+    //
+    // The audit row captures `reason: "supersession"`,
+    // `actor: "supersession-controller"`, the detector
+    // confidence, and `triggering_memory_id = record.id`,
+    // so forensic / debugging consumers can attribute the
+    // transition to the controller-driven path.
+    //
+    // Coherence with relationship metadata: the metadata
+    // back-patch happens BEFORE the state transition. If
+    // the transition throws (e.g. a concurrent writer
+    // already moved the row out of `active`), we log and
+    // skip the transition; the relationship pointer is
+    // already persisted. The transition itself is
+    // transaction-safe (state update + audit row commit
+    // atomically), so a partial success is impossible.
     for (const supersededId of supersession.supersededIds) {
+      // 1. Relationship metadata (existing behavior).
       addSupersededByToMemory(storage, supersededId, record.id);
+      // 2. State transition (Phase 3 wiring).
+      try {
+        transitionMemoryState(storage, {
+          memoryId: supersededId,
+          toState: "superseded",
+          reason: "supersession",
+          triggeringMemoryId: record.id,
+          confidence: supersession.confidence,
+          actor: SUPERSESSION_CONTROLLER_ACTOR,
+          metadata: {
+            source: "detectSupersession",
+            detector: "controller",
+            // Round-trip the raw `supersedes` signal so a
+            // future forensic consumer can correlate the
+            // transition with the controller's signal
+            // shape without having to re-run the detector.
+            supersededIds: supersession.supersededIds.slice(),
+          },
+        });
+      } catch (err) {
+        // The detector already filters on `state ===
+        // "active"`, but a concurrent writer could have
+        // transitioned the row between the detector scan
+        // and this call (e.g. an earlier `remember` in
+        // flight, or a future admin path). Skip silently
+        // with a structured warn log so the controller
+        // never crashes on a benign race; the
+        // relationship-metadata pointer above is already
+        // persisted, and the audit log is unaffected
+        // because the transaction rolled back.
+        logger.warn(
+          `remember: supersession transition skipped for memory ${supersededId} (new memory ${record.id}): ${(err as Error).message}`
+        );
+      }
     }
   }
 
@@ -731,4 +896,131 @@ function toSafeMemorySummary(r: RelatedMemory): SafeMemorySummary | null {
     classification: null,
     confidence: null,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Memory Decision Engine — Phase 1 shadow invocation
+// ---------------------------------------------------------------------------
+//
+// Phase 1 ships SHADOW MODE ONLY. The engine is invoked after
+// the deterministic safety pre-check and the related-memory
+// lookup; its output is captured locally and logged at debug
+// level. The controller NEVER mutates persisted memory, public
+// output, public structured content, or the MCP tool schema
+// based on the engine output.
+//
+// The helper is structured as a separate function so the
+// controller stays readable. Tests can override the engine
+// implementation via `setShadowRememberDecisionImpl` to drive
+// the shadow path without making any HTTP call.
+
+interface InvokeShadowArgs {
+  rawInput: string;
+  safety: SafetyCheckResult;
+  relatedForProvider: readonly RelatedMemory[];
+  controllerOptions: RememberControllerOptions;
+}
+
+type ShadowRememberDecisionImpl = (args: InvokeShadowArgs) => Promise<void> | void;
+
+let shadowRememberDecisionImpl: ShadowRememberDecisionImpl = defaultShadowRememberDecisionImpl;
+
+/**
+ * Test-only override for the shadow decision invocation. Lets
+ * tests exercise the controller's shadow integration path
+ * without making any HTTP call. Production code MUST NOT call
+ * this — the override is intentionally not part of the
+ * controller's public surface.
+ */
+export function setShadowRememberDecisionImpl(impl: ShadowRememberDecisionImpl | null): void {
+  shadowRememberDecisionImpl = impl ?? defaultShadowRememberDecisionImpl;
+}
+
+/** Test-only reset to the default engine-backed implementation. */
+export function resetShadowRememberDecisionImpl(): void {
+  shadowRememberDecisionImpl = defaultShadowRememberDecisionImpl;
+}
+
+async function invokeShadowRememberDecision(args: InvokeShadowArgs): Promise<void> {
+  return shadowRememberDecisionImpl(args);
+}
+
+/**
+ * Default shadow implementation: resolve the policy, build the
+ * evidence packet, and (in shadow mode) call the decision
+ * adapter. The result is logged at debug level. A failure on
+ * any path is logged and swallowed; the controller proceeds
+ * with the existing deterministic path.
+ *
+ * The function NEVER throws on expected error paths.
+ */
+async function defaultShadowRememberDecisionImpl(args: InvokeShadowArgs): Promise<void> {
+  const policy = resolveRememberDecisionPolicy({
+    ...(args.controllerOptions.decisionMode !== undefined
+      ? { mode: args.controllerOptions.decisionMode }
+      : {}),
+  });
+  if (!policy.shadowMode) {
+    // Off mode (the default). Existing behavior is preserved
+    // exactly; the engine is not invoked. No HTTP call, no
+    // evidence build, no decision.
+    return;
+  }
+
+  const evidence = buildRememberDecisionEvidence({
+    rawInput: args.rawInput,
+    safety: args.safety,
+    related: args.relatedForProvider,
+  });
+
+  const adapterOptions: DecisionAdapterOptions = {};
+  if (args.controllerOptions.decisionProviderFetchImpl !== undefined) {
+    adapterOptions.fetchImpl = args.controllerOptions.decisionProviderFetchImpl;
+  }
+  if (args.controllerOptions.decisionProviderPrimaryApiKey !== undefined) {
+    adapterOptions.primaryApiKey = args.controllerOptions.decisionProviderPrimaryApiKey;
+  }
+  if (args.controllerOptions.decisionProviderFallbackApiKey !== undefined) {
+    adapterOptions.fallbackApiKey = args.controllerOptions.decisionProviderFallbackApiKey;
+  }
+  if (args.controllerOptions.decisionProviderPrimaryBaseUrl !== undefined) {
+    adapterOptions.primaryBaseUrl = args.controllerOptions.decisionProviderPrimaryBaseUrl;
+  }
+  if (args.controllerOptions.decisionProviderFallbackBaseUrl !== undefined) {
+    adapterOptions.fallbackBaseUrl = args.controllerOptions.decisionProviderFallbackBaseUrl;
+  }
+  if (args.controllerOptions.decisionProviderPrimaryModel !== undefined) {
+    adapterOptions.primaryModel = args.controllerOptions.decisionProviderPrimaryModel;
+  }
+  if (args.controllerOptions.decisionProviderFallbackModel !== undefined) {
+    adapterOptions.fallbackModel = args.controllerOptions.decisionProviderFallbackModel;
+  }
+
+  let result: DecisionAdapterResult;
+  try {
+    result = await decideRememberPolicyWithFallback(evidence, args.rawInput, adapterOptions);
+  } catch (err) {
+    // Belt-and-braces: the adapter is documented to never
+    // throw on expected error paths, but a defensive catch
+    // here means a future bug in the adapter cannot break
+    // remember.
+    logger.debug(
+      `remember shadow decision: adapter threw unexpectedly (${(err as Error).message}); proceeding deterministically`
+    );
+    return;
+  }
+
+  if (!result.ok) {
+    logger.debug(
+      `remember shadow decision: adapter failure kind=${result.kind} httpCalls=${result.httpCalls}; proceeding deterministically`
+    );
+    return;
+  }
+
+  const d = result.value;
+  logger.debug(
+    `remember shadow decision: action=${d.action} reason=${d.reason} confidence=${d.confidence.toFixed(
+      2
+    )} supersededIds=${d.supersededIds.length} conflictsWithIds=${d.conflictsWithIds.length} redundantWithIds=${d.redundantWithIds.length} provider=${result.providerUsed} fallback=${result.fallbackUsed} httpCalls=${result.httpCalls}`
+  );
 }

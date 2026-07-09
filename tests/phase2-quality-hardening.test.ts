@@ -165,7 +165,6 @@ function seedPostgresFact(handle: StorageHandle): number {
     providerId: "test",
     modelId: "test-model",
     confidence: 0.9,
-    safetyFlags: ["controller-normalized"],
     metadata: { tags: ["postgres", "storage"] },
   });
   return r.id;
@@ -181,7 +180,6 @@ function seedSession2Fact(handle: StorageHandle): number {
     providerId: "test",
     modelId: "test-model",
     confidence: 0.9,
-    safetyFlags: ["controller-normalized"],
     metadata: { tags: ["session", "controller"] },
   });
   return r.id;
@@ -334,7 +332,6 @@ test("recall: weak_match with multiple similar-scoring candidates carries clarif
         providerId: "test",
         modelId: "test-model",
         confidence: 0.9,
-        safetyFlags: ["controller-normalized"],
         metadata: { tags: ["postgres", "storage"] },
       });
     }
@@ -394,7 +391,6 @@ test("recall: vague query -> no_memory with clarification_needed (vague-query he
       providerId: "test",
       modelId: "test-model",
       confidence: 0.9,
-      safetyFlags: ["controller-normalized"],
       metadata: { tags: ["postgres", "storage"] },
     });
     const { fetchImpl, calls } = scriptFetch(() =>
@@ -493,7 +489,6 @@ test("structuredContent (recall): every status passes strict schema and leaks no
         providerId: "test",
         modelId: "test-model",
         confidence: 0.9,
-        safetyFlags: ["controller-normalized"],
         metadata: { tags: ["postgres", "storage"] },
       });
       insertedIds.push(r.id);
@@ -808,7 +803,6 @@ test("recall cross-project promotion: no_memory + strong external -> answered wi
       providerId: "test",
       modelId: "test-model",
       confidence: 0.9,
-      safetyFlags: ["controller-normalized"],
       metadata: { tags: ["provider", "nvidia"] },
     });
 

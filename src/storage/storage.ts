@@ -107,19 +107,39 @@ export function initStorage(config: StorageConfig = {}): StorageHandle {
   // Each PRAGMA is wrapped so a partial upgrade cannot leave the
   // table in a half-migrated state. New columns:
   //   - summary         TEXT  (controller-normalized; never raw input)
-  //   - state           TEXT  (active|superseded|invalidated)
+  //   - state           TEXT  (active|superseded|invalidated).
+  //                     `state` is the DB-level lifecycle gate for
+  //                     the recall / retrieval path: only rows with
+  //                     state = 'active' are read by
+  //                     `listActiveMemorySummaries`,
+  //                     `listActiveMemorySummariesByFts5`, and
+  //                     `listActiveMemoryRelationshipBlocks`.
+  //                     Superseded / invalidated rows are kept on
+  //                     disk but hidden from recall. The recall
+  //                     controller never transitions state itself.
   //   - provider_id     TEXT  (which provider produced the analysis)
   //   - model_id        TEXT  (which model produced the analysis)
   //   - confidence      REAL  (provider-reported 0..1)
-  //   - safety_flags    TEXT  (JSON array of safety class strings)
-  //   - metadata        TEXT  (JSON blob for tags/entities/classification)
+  //   - metadata        TEXT  (JSON blob for tags/entities/classification
+  //                     and the `relationship` soft pointer block).
+  //                     The `relationship` block carries soft
+  //                     relationship / ranking information
+  //                     (conflictsWith, olderVariantsOf, supersedes,
+  //                     supersededBy, resolvedAt, detectionConfidence)
+  //                     and is NEVER the lifecycle gate. Lifecycle
+  //                     stays on the `state` column above.
   //   - updated_at      INTEGER
+  //
+  // `safety_flags` was removed: it was always controller-normalized
+  // to a single sentinel value, never read by recall / retrieval,
+  // and unused by any consumer. Existing DBs created before this
+  // removal keep the column on disk (SQLite preserves extra columns
+  // by default); the column is no longer added, written, or read.
   ensureColumn(db, "memories", "summary", "TEXT");
   ensureColumn(db, "memories", "state", "TEXT NOT NULL DEFAULT 'active'");
   ensureColumn(db, "memories", "provider_id", "TEXT");
   ensureColumn(db, "memories", "model_id", "TEXT");
   ensureColumn(db, "memories", "confidence", "REAL");
-  ensureColumn(db, "memories", "safety_flags", "TEXT");
   ensureColumn(db, "memories", "metadata", "TEXT");
   ensureColumn(db, "memories", "updated_at", "INTEGER");
 
@@ -203,6 +223,71 @@ export function initStorage(config: StorageConfig = {}): StorageHandle {
     // surface the limitation. We log and continue.
     logger.warn(`FTS5 virtual table unavailable: ${(err as Error).message}`);
   }
+
+  // Lifecycle audit table (Phase 1+2 foundation).
+  //
+  // `memory_transitions` is the additive, idempotent audit log
+  // backing the future lifecycle wiring (supersession, invalidation,
+  // reactivation). Every successful `transitionMemoryState` call
+  // inserts exactly one row here, inside the same transaction as the
+  // `memories.state` update, so the audit is always coherent with
+  // the live row.
+  //
+  // Schema notes:
+  //   - `id` is an autoincrement primary key for chronological
+  //     ordering and direct lookup.
+  //   - `memory_id` references `memories.id`. We intentionally do
+  //     NOT use `ON DELETE CASCADE` here — the audit trail must
+  //     outlive the memory row even if a destructive path is
+  //     introduced later (Phase 1+2 has no delete path, but the
+  //     contract holds). A dangling reference is acceptable for an
+  //     audit log; the orphan row still records the historical
+  //     transition accurately.
+  //   - `from_state` / `to_state` carry the full `active |
+  //     superseded | invalidated` vocabulary. They are checked at
+  //     write time against `MEMORY_STATES`; the DB does not enforce
+  //     a CHECK constraint so the audit can also record future
+  //     states without a schema bump (forward-compat).
+  //   - `reason` is a required machine-readable tag (e.g.
+  //     'supersession', 'invalidation', 'manual_reactivation').
+  //   - `triggering_memory_id` is the optional id of the other
+  //     memory that caused this transition (e.g. the superseding
+  //     memory). Nullable; not enforced as a FK for forward-compat
+  //     with future cross-row triggers.
+  //   - `confidence` is the optional numeric confidence (0..1) the
+  //     caller assigned to the transition. Stored verbatim; the
+  //     repository does not re-clamp.
+  //   - `actor` is a required string tag identifying the source of
+  //     the transition ('internal' default; future callers may pass
+  //     'supersession-controller', 'invalidator', etc.).
+  //   - `metadata` is an optional JSON blob for caller context. It
+  //     is treated as opaque by the repository — the same pattern
+  //     `memories.metadata` already uses.
+  //   - `created_at` is the transition timestamp in ms epoch.
+  //
+  // Index: `memory_id` for fast `listMemoryTransitions(memoryId)`
+  // lookups (the primary read-side access pattern is "show me the
+  // history of this row"). The index is created via `CREATE INDEX
+  // IF NOT EXISTS` so existing DBs converge on the same final
+  // shape without a destructive migration.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS memory_transitions (
+      id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+      memory_id            INTEGER NOT NULL,
+      from_state           TEXT NOT NULL,
+      to_state             TEXT NOT NULL,
+      reason               TEXT NOT NULL,
+      triggering_memory_id INTEGER,
+      confidence           REAL,
+      actor                TEXT NOT NULL,
+      metadata             TEXT,
+      created_at           INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_memory_transitions_memory_id
+      ON memory_transitions(memory_id);
+    CREATE INDEX IF NOT EXISTS idx_memory_transitions_created_at
+      ON memory_transitions(created_at);
+  `);
 
   const insertMeta = db.prepare("INSERT OR REPLACE INTO _meta (key, value) VALUES (?, ?)");
   insertMeta.run("schema_version", "v2-mvp-1");
@@ -307,7 +392,12 @@ export const MEMORY_STATES: readonly MemoryState[] = ["active", "superseded", "i
 export interface MemoryRecordInput {
   /** Internal kind enum. Falls back to `finding` if unknown. */
   kind: MemoryKind;
-  /** State. MVP only writes `active`. */
+  /**
+   * State. MVP only writes `active`. This column is the
+   * DB-level lifecycle gate for the recall / retrieval path:
+   * see the column-add comment in `initStorage` for the
+   * active / superseded / invalidated semantics.
+   */
   state: MemoryState;
   /**
    * Controller-normalized memory content. MUST NOT be raw input.
@@ -320,15 +410,27 @@ export interface MemoryRecordInput {
   modelId: string | null;
   /** Provider confidence (0..1) or null. */
   confidence: number | null;
-  /** Safety flags (e.g. `["raw-dump-redacted"]`). */
-  safetyFlags: string[];
-  /** Free-form metadata JSON (tags, entities, classification). */
+  /**
+   * Free-form metadata JSON (tags, entities, classification, and
+   * the soft `relationship` pointer block). The `relationship`
+   * block carries soft relationship / ranking info and is NEVER
+   * the lifecycle gate — `state` is.
+   */
   metadata: Record<string, unknown>;
 }
 
 export interface MemoryRecord {
   id: number;
   kind: MemoryKind;
+  /**
+   * Lifecycle state. This is the DB-level lifecycle gate for
+   * the recall / retrieval path: only `active` rows are
+   * returned by `listActiveMemorySummaries`,
+   * `listActiveMemorySummariesByFts5`, and
+   * `listActiveMemoryRelationshipBlocks`. `superseded` and
+   * `invalidated` rows stay on disk for audit but are hidden
+   * from recall.
+   */
   state: MemoryState;
   /**
    * Controller-normalized memory content. Source column on disk
@@ -338,7 +440,12 @@ export interface MemoryRecord {
   providerId: string | null;
   modelId: string | null;
   confidence: number | null;
-  safetyFlags: string[];
+  /**
+   * Free-form metadata JSON (tags, entities, classification, and
+   * the soft `relationship` pointer block). The `relationship`
+   * block carries soft relationship / ranking info and is NEVER
+   * the lifecycle gate — `state` is.
+   */
   metadata: Record<string, unknown>;
   createdAt: number;
   updatedAt: number | null;
@@ -394,10 +501,10 @@ export function insertMemoryRecord(handle: StorageHandle, input: MemoryRecordInp
   const stmt = handle.db.prepare(`
     INSERT INTO memories (
       kind, created_at, updated_at, summary, state,
-      provider_id, model_id, confidence, safety_flags, metadata
+      provider_id, model_id, confidence, metadata
     ) VALUES (
       @kind, @created_at, @updated_at, @summary, @state,
-      @provider_id, @model_id, @confidence, @safety_flags, @metadata
+      @provider_id, @model_id, @confidence, @metadata
     )
   `);
   const info = stmt.run({
@@ -409,7 +516,6 @@ export function insertMemoryRecord(handle: StorageHandle, input: MemoryRecordInp
     provider_id: input.providerId,
     model_id: input.modelId,
     confidence: input.confidence,
-    safety_flags: JSON.stringify(input.safetyFlags),
     metadata: JSON.stringify(input.metadata),
   });
   const id = Number(info.lastInsertRowid);
@@ -421,7 +527,6 @@ export function insertMemoryRecord(handle: StorageHandle, input: MemoryRecordInp
     providerId: input.providerId,
     modelId: input.modelId,
     confidence: input.confidence,
-    safetyFlags: [...input.safetyFlags],
     metadata: { ...input.metadata },
     createdAt: now,
     updatedAt: now,
@@ -491,7 +596,7 @@ export function updateMemoryMetadata(
   const row = handle.db
     .prepare(
       `SELECT id, kind, state, summary, provider_id, model_id,
-              confidence, safety_flags, metadata, created_at, updated_at
+              confidence, metadata, created_at, updated_at
          FROM memories
         WHERE id = ?`
     )
@@ -504,7 +609,6 @@ export function updateMemoryMetadata(
         provider_id: string | null;
         model_id: string | null;
         confidence: number | null;
-        safety_flags: string | null;
         metadata: string | null;
         created_at: number;
         updated_at: number | null;
@@ -525,17 +629,6 @@ export function updateMemoryMetadata(
       // read-side fallback in `listActiveMemorySummaries`.
     }
   }
-  let safetyFlags: string[] = [];
-  if (typeof row.safety_flags === "string" && row.safety_flags.length > 0) {
-    try {
-      const v = JSON.parse(row.safety_flags) as unknown;
-      if (Array.isArray(v)) {
-        safetyFlags = v.filter((s): s is string => typeof s === "string");
-      }
-    } catch {
-      // Malformed safety_flags: fall back to empty list.
-    }
-  }
   return {
     id: row.id,
     kind: MEMORY_KINDS.includes(row.kind as MemoryKind) ? (row.kind as MemoryKind) : "finding",
@@ -546,7 +639,6 @@ export function updateMemoryMetadata(
     providerId: row.provider_id,
     modelId: row.model_id,
     confidence: row.confidence,
-    safetyFlags,
     metadata: parsedMetadata,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -642,6 +734,412 @@ export function addSupersededByToMemory(
 
   // Use the existing narrow update seam; it handles the re-read.
   updateMemoryMetadata(handle, id, updatedMetadata);
+}
+
+// ---------------------------------------------------------------------------
+// Lifecycle foundation (Phase 1+2)
+//
+// Wires the audit-backed state-transition API. No automatic lifecycle
+// transitions are wired in this phase (supersession / invalidation /
+// reactivation are deliberately not triggered here); only the safe
+// transition seam and the audit log it writes to. See
+// `transitionMemoryState` for the full contract.
+// ---------------------------------------------------------------------------
+
+/**
+ * The set of `from_state → to_state` transitions the lifecycle
+ * foundation accepts. Anything outside this matrix is rejected.
+ *
+ * Conservative matrix for the foundation phase:
+ *   - `active → superseded`        — explicit supersession
+ *   - `active → invalidated`       — explicit invalidation
+ *   - `superseded → invalidated`   — direct invalidation of an
+ *                                   already-superseded row
+ *   - `superseded → active`        — manual reactivation of a
+ *                                   prematurely superseded row
+ *   - `invalidated → active`       — manual reactivation of a
+ *                                   prematurely invalidated row
+ *   - `invalidated → superseded`   — admin-level flip (rare)
+ *
+ * Self-transitions (e.g. `active → active`) are intentionally NOT
+ * allowed: they are no-ops that would still need an audit row,
+ * which has no informational value. Callers that need to record a
+ * non-state-changing event should write to the trace layer
+ * instead.
+ *
+ * The matrix is exported as a `Set<string>` of `"from→to"` keys so
+ * tests can introspect it directly.
+ */
+export const MEMORY_TRANSITIONS: ReadonlySet<string> = new Set([
+  "active→superseded",
+  "active→invalidated",
+  "superseded→invalidated",
+  "superseded→active",
+  "invalidated→active",
+  "invalidated→superseded",
+]);
+
+/**
+ * Built-in reason tags the lifecycle foundation recognizes. Callers
+ * may pass any non-empty string, but these are the canonical values
+ * the future wiring (supersession controller, invalidation
+ * detector, manual admin path) is expected to use.
+ */
+export const MEMORY_TRANSITION_REASONS: ReadonlySet<string> = new Set([
+  "supersession",
+  "invalidation",
+  "manual_reactivation",
+  "admin",
+]);
+
+/**
+ * Internal input shape for `transitionMemoryState`.
+ *
+ * The function performs the read-current-state + update +
+ * audit-insert inside a single SQLite transaction, so a partial
+ * success is impossible: either the audit row exists AND the
+ * `memories.state` reflects the transition, or neither side-effect
+ * happens.
+ *
+ * `actor` defaults to `'internal'` for callers that do not yet
+ * have a stable identity (this is the foundation phase; nothing
+ * calls this yet). Future wiring should pass an explicit actor
+ * tag (e.g. `'supersession-controller'`).
+ */
+export interface MemoryTransitionInput {
+  /** The id of the memory row whose state is changing. */
+  memoryId: number;
+  /** The target state. Must differ from the current state. */
+  toState: MemoryState;
+  /**
+   * Machine-readable reason tag. Callers may pass any non-empty
+   * string; the canonical set is `MEMORY_TRANSITION_REASONS`.
+   */
+  reason: string;
+  /** Optional: id of the other memory that triggered this. */
+  triggeringMemoryId?: number | null;
+  /** Optional: numeric confidence (0..1) the caller assigns. */
+  confidence?: number | null;
+  /** Optional: actor tag. Defaults to `'internal'`. */
+  actor?: string;
+  /** Optional: opaque caller metadata (JSON-encoded on disk). */
+  metadata?: Record<string, unknown> | null;
+}
+
+/**
+ * Persisted audit row shape. Mirrors the on-disk
+ * `memory_transitions` columns 1:1, with snake_case columns renamed
+ * to camelCase TypeScript properties.
+ */
+export interface MemoryTransitionRecord {
+  /** Autoincrement id of the audit row. */
+  id: number;
+  /** Memory row id this transition applies to. */
+  memoryId: number;
+  /** State the memory was in before this transition. */
+  fromState: MemoryState;
+  /** State the memory is in after this transition. */
+  toState: MemoryState;
+  /** Machine-readable reason tag. */
+  reason: string;
+  /** Optional id of the memory that caused this transition. */
+  triggeringMemoryId: number | null;
+  /** Optional numeric confidence (0..1) the caller assigned. */
+  confidence: number | null;
+  /** Actor tag identifying the source. */
+  actor: string;
+  /** Parsed metadata JSON object (safe-empty default `{}`). */
+  metadata: Record<string, unknown>;
+  /** Transition timestamp in ms epoch. */
+  createdAt: number;
+}
+
+/**
+ * Transition a memory row's `state` and write exactly one audit
+ * row to `memory_transitions`.
+ *
+ * Contract:
+ *   - The function is **transaction-safe**. The current-state
+ *     read, the `memories.state` update, and the audit insert
+ *     run inside one `db.transaction`; either all three succeed
+ *     and the caller sees a fully-formed audit record, or none
+ *     of them happen.
+ *   - **Unknown memory id is rejected.** If no row exists for
+ *     `input.memoryId`, the function throws and NO audit row is
+ *     written. The brief explicitly requires this: a transition
+ *     audit must never be created for a memory that does not
+ *     exist.
+ *   - **Invalid transitions are rejected.** The pair
+ *     `(currentState, input.toState)` must be present in
+ *     `MEMORY_TRANSITIONS`. Self-transitions (e.g.
+ *     `active → active`) are NOT allowed: callers should not
+ *     pollute the audit log with no-ops. The function throws
+ *     on a rejected transition and NO state change happens.
+ *   - **Unknown state values are rejected.** If the row's
+ *     current `state` is not in `MEMORY_STATES`, the function
+ *     throws and NO audit row is written. This guards against
+ *     legacy / corrupted rows whose `state` was written before
+ *     the state vocabulary was frozen.
+ *   - **Input validation is conservative.** Non-finite / negative
+ *     `memoryId` or `triggeringMemoryId`, non-string `reason`,
+ *     non-string `actor`, and out-of-range `confidence` all
+ *     throw with a clear message.
+ *   - **No recall behaviour is changed.** The function only
+ *     writes `memories.state` and `memory_transitions`; it does
+ *     NOT touch `metadata`, `summary`, `confidence`, or any
+ *     other column. Existing recall paths continue to filter on
+ *     `state = 'active'` exactly as before.
+ *
+ * Returns the inserted audit row (with its assigned `id` and
+ * `createdAt`). The `memories.state` column is updated to
+ * `input.toState` as part of the same transaction.
+ */
+export function transitionMemoryState(
+  handle: StorageHandle,
+  input: MemoryTransitionInput
+): MemoryTransitionRecord {
+  // ----- input validation -------------------------------------------------
+  if (
+    typeof input !== "object" ||
+    input === null ||
+    typeof input.memoryId !== "number" ||
+    !Number.isFinite(input.memoryId) ||
+    !Number.isInteger(input.memoryId) ||
+    input.memoryId <= 0
+  ) {
+    throw new Error("transitionMemoryState: memoryId must be a positive integer");
+  }
+  if (!MEMORY_STATES.includes(input.toState)) {
+    throw new Error(
+      `transitionMemoryState: toState must be one of ${MEMORY_STATES.join(
+        ", "
+      )}; got ${JSON.stringify(input.toState)}`
+    );
+  }
+  if (typeof input.reason !== "string" || input.reason.length === 0) {
+    throw new Error("transitionMemoryState: reason must be a non-empty string");
+  }
+  if (input.reason.length > 256) {
+    throw new Error("transitionMemoryState: reason must be at most 256 characters");
+  }
+  if (input.triggeringMemoryId !== undefined && input.triggeringMemoryId !== null) {
+    if (
+      typeof input.triggeringMemoryId !== "number" ||
+      !Number.isFinite(input.triggeringMemoryId) ||
+      !Number.isInteger(input.triggeringMemoryId) ||
+      input.triggeringMemoryId <= 0
+    ) {
+      throw new Error(
+        "transitionMemoryState: triggeringMemoryId must be a positive integer or null"
+      );
+    }
+  }
+  if (input.confidence !== undefined && input.confidence !== null) {
+    if (
+      typeof input.confidence !== "number" ||
+      !Number.isFinite(input.confidence) ||
+      input.confidence < 0 ||
+      input.confidence > 1
+    ) {
+      throw new Error("transitionMemoryState: confidence must be a number in [0, 1] or null");
+    }
+  }
+  const actor =
+    input.actor === undefined
+      ? "internal"
+      : input.actor === null
+        ? "internal"
+        : typeof input.actor === "string" && input.actor.length > 0
+          ? input.actor.length > 128
+            ? input.actor.slice(0, 128)
+            : input.actor
+          : (() => {
+              throw new Error(
+                "transitionMemoryState: actor must be a non-empty string when provided"
+              );
+            })();
+
+  const metadataJson =
+    input.metadata === undefined || input.metadata === null ? null : JSON.stringify(input.metadata);
+
+  // ----- transaction body -------------------------------------------------
+  const txn = handle.db.transaction((): MemoryTransitionRecord => {
+    // 1. Read the current state. If the row does not exist, throw
+    //    and the audit insert never runs.
+    const currentRow = handle.db
+      .prepare("SELECT state FROM memories WHERE id = ?")
+      .get(input.memoryId) as { state: string } | undefined;
+    if (!currentRow) {
+      throw new Error(`transitionMemoryState: no memory row found for id ${input.memoryId}`);
+    }
+    const fromState = currentRow.state;
+    if (!MEMORY_STATES.includes(fromState as MemoryState)) {
+      // Legacy / corrupted state value — refuse to write an
+      // audit row for a transition we cannot reason about.
+      throw new Error(
+        `transitionMemoryState: memory id ${input.memoryId} has unknown current state ${JSON.stringify(
+          fromState
+        )}`
+      );
+    }
+    const fromStateTyped = fromState as MemoryState;
+
+    // 2. Validate the (from, to) pair against the allowed matrix.
+    const key = `${fromStateTyped}→${input.toState}`;
+    if (!MEMORY_TRANSITIONS.has(key)) {
+      throw new Error(
+        `transitionMemoryState: transition ${key} is not allowed (allowed: ${Array.from(
+          MEMORY_TRANSITIONS
+        ).join(", ")})`
+      );
+    }
+
+    const now = Date.now();
+
+    // 3. Update memories.state. updated_at is bumped alongside
+    //    so existing readers that sort by updated_at see the
+    //    latest transition.
+    const updateInfo = handle.db
+      .prepare(
+        `UPDATE memories
+            SET state = @state, updated_at = @updated_at
+          WHERE id = @id`
+      )
+      .run({
+        id: input.memoryId,
+        state: input.toState,
+        updated_at: now,
+      });
+    if (updateInfo.changes !== 1) {
+      // Defensive: a concurrent write could in theory have
+      // removed the row between the read and the update. The
+      // txn will roll back; surface a clear error.
+      throw new Error(
+        `transitionMemoryState: update affected ${updateInfo.changes} rows for id ${input.memoryId} (expected 1)`
+      );
+    }
+
+    // 4. Insert the audit row.
+    const insertInfo = handle.db
+      .prepare(
+        `INSERT INTO memory_transitions (
+            memory_id, from_state, to_state, reason,
+            triggering_memory_id, confidence, actor,
+            metadata, created_at
+          ) VALUES (
+            @memory_id, @from_state, @to_state, @reason,
+            @triggering_memory_id, @confidence, @actor,
+            @metadata, @created_at
+          )`
+      )
+      .run({
+        memory_id: input.memoryId,
+        from_state: fromStateTyped,
+        to_state: input.toState,
+        reason: input.reason,
+        triggering_memory_id: input.triggeringMemoryId ?? null,
+        confidence: input.confidence ?? null,
+        actor,
+        metadata: metadataJson,
+        created_at: now,
+      });
+
+    return {
+      id: Number(insertInfo.lastInsertRowid),
+      memoryId: input.memoryId,
+      fromState: fromStateTyped,
+      toState: input.toState,
+      reason: input.reason,
+      triggeringMemoryId: input.triggeringMemoryId ?? null,
+      confidence: input.confidence ?? null,
+      actor,
+      metadata: input.metadata ? { ...input.metadata } : {},
+      createdAt: now,
+    };
+  });
+
+  return txn();
+}
+
+/**
+ * Return the audit history for a single memory row, in chronological
+ * order (oldest first by `created_at`, then `id`).
+ *
+ * Read-only; never mutates. Defensive against missing rows: if no
+ * memory exists for `memoryId`, the function returns an empty array
+ * (the audit table may still have orphan rows from a previous
+ * experimental delete path; we do not surface those as the primary
+ * lookup result, but they remain on disk for forensic purposes).
+ *
+ * `limit` defaults to 200 to mirror the recall read-side convention.
+ */
+export function listMemoryTransitions(
+  handle: StorageHandle,
+  memoryId: number,
+  options: { limit?: number } = {}
+): MemoryTransitionRecord[] {
+  if (
+    typeof memoryId !== "number" ||
+    !Number.isFinite(memoryId) ||
+    !Number.isInteger(memoryId) ||
+    memoryId <= 0
+  ) {
+    return [];
+  }
+  const limit = options.limit ?? 200;
+  const rows = handle.db
+    .prepare(
+      `SELECT id, memory_id, from_state, to_state, reason,
+              triggering_memory_id, confidence, actor, metadata, created_at
+         FROM memory_transitions
+        WHERE memory_id = ?
+        ORDER BY created_at ASC, id ASC
+        LIMIT ?`
+    )
+    .all(memoryId, limit) as Array<{
+    id: number;
+    memory_id: number;
+    from_state: string;
+    to_state: string;
+    reason: string;
+    triggering_memory_id: number | null;
+    confidence: number | null;
+    actor: string;
+    metadata: string | null;
+    created_at: number;
+  }>;
+  const out: MemoryTransitionRecord[] = [];
+  for (const r of rows) {
+    let parsedMetadata: Record<string, unknown> = {};
+    if (typeof r.metadata === "string" && r.metadata.length > 0) {
+      try {
+        const v = JSON.parse(r.metadata) as unknown;
+        if (v !== null && typeof v === "object" && !Array.isArray(v)) {
+          parsedMetadata = v as Record<string, unknown>;
+        }
+      } catch {
+        // Malformed metadata: same defensive fallback as the
+        // memory metadata reader.
+      }
+    }
+    out.push({
+      id: r.id,
+      memoryId: r.memory_id,
+      fromState: MEMORY_STATES.includes(r.from_state as MemoryState)
+        ? (r.from_state as MemoryState)
+        : "active",
+      toState: MEMORY_STATES.includes(r.to_state as MemoryState)
+        ? (r.to_state as MemoryState)
+        : "active",
+      reason: r.reason,
+      triggeringMemoryId: r.triggering_memory_id,
+      confidence: r.confidence,
+      actor: r.actor,
+      metadata: parsedMetadata,
+      createdAt: r.created_at,
+    });
+  }
+  return out;
 }
 
 /**

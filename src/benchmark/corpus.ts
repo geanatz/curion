@@ -565,10 +565,10 @@ export const BENCHMARK_RECORDS: BenchmarkMemoryRecord[] = [
   },
   {
     id: 48,
-    kind: "fact",
+    kind: "reference",
     summary:
-      "Safety flags are a comma-separated set of classifier labels attached to a record; the recall path filters out records flagged as secret or raw-dump.",
-    tags: ["domain", "memory", "safety"],
+      "A memory's metadata may carry a relationship block with soft pointers: conflictsWith, olderVariantsOf, supersedes, supersededBy, and a resolvedAt timestamp; the block is purely informational and never affects recall.",
+    tags: ["domain", "memory", "relationship"],
   },
 
   // -------------------------------------------------------------------------

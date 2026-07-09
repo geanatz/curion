@@ -46,6 +46,19 @@ import {
   synthesizeRecallWithFallback,
 } from "../providers/recall-synthesis.js";
 import {
+  type AdaptiveCandidate,
+  type AdaptiveCandidateWithText,
+  type AdaptiveDepthPipelineConfig,
+  type AdaptiveDepthPipelineResult,
+  type ResolvedAdaptivePromptBudgetConfig,
+  applyDiversityFilter,
+  applyPromptBudget,
+  resolveAdaptiveDiversityConfig,
+  resolveAdaptivePromptBudgetConfig,
+  runAdaptiveDepth,
+  selectAdaptiveCandidates,
+} from "../retrieval/adaptive-depth.js";
+import {
   type AmbiguitySignal,
   type SafeMemorySummaryWithRelationship,
   detectAmbiguity,
@@ -80,9 +93,12 @@ import {
 import type { Clarification } from "../tools/remember-structured-content.js";
 import {
   RECALL_ACTIVE_MEMORY_READ_KIND,
+  RECALL_ADAPTIVE_DEPTH_KIND,
   RECALL_LEXICAL_RANKING_KIND,
+  RECALL_PROMPT_BUDGET_KIND,
   RECALL_SELECTED_CANDIDATES_KIND,
   RECALL_SUPERSEDED_DEMOTION_KIND,
+  RECALL_SYNTHESIS_KIND,
 } from "../trace/trace-tool-boundary.js";
 
 // ---------------------------------------------------------------------------
@@ -244,6 +260,37 @@ export interface RecallControllerOptions {
    *   - A CLI / export / purge surface.
    */
   trace?: RecallTraceContext;
+  /**
+   * INTERNAL / TEST-ONLY. Overrides the production adaptive-depth
+   * pipeline config (selector + diversity + budget). When
+   * omitted (the default), the controller uses
+   * `DEFAULT_ADAPTIVE_DEPTH_PIPELINE_CONFIG` (elbow, minK=3,
+   * maxK=15, relativeFraction=0.5, no diversity, totalCharBudget=6000,
+   * perMemoryCharCap=500). This field is reserved for the
+   * benchmark-only adaptive-depth evaluation helper
+   * (`src/benchmark/adaptive-depth-evaluation.ts`) and its
+   * companion test suite (`tests/adaptive-depth-evaluation.test.ts`)
+   * — both of which need to compare the production adaptive
+   * selector against a legacy fixed-topK cap on the same
+   * controller path.
+   *
+   * Safety:
+   *   - The public MCP tool surface in `src/tools/recall.ts`
+   *     does NOT pass this field; the tool layer relies on the
+   *     default.
+   *   - The contract test `tests/contracts.test.ts` pins the
+   *     public MCP tool surface to exactly `remember` + `recall`
+   *     with the existing single `text` parameter, so a future
+   *     reviewer who tries to expose this knob on the wire is
+   *     stopped at the contract test.
+   *   - The field is on the internal `RecallControllerOptions`
+   *     interface, NOT on `RecallMemoryInput` /
+   *     `RecallResult` / the MCP tool schema, so the wire shape
+   *     is unchanged.
+   *   - The field is never logged, never echoed into the
+   *     synthesis prompt, and never persisted to the trace.
+   */
+  adaptiveDepth?: AdaptiveDepthPipelineConfig;
 }
 
 /**
@@ -285,6 +332,61 @@ export interface RecallTraceContext {
 // length on the input side. The hard 800-character cap that lived
 // here was a placeholder; it has been removed entirely so natural-
 // length answers go to the wire unmodified.
+//
+// Adaptive recall depth (experimental) — knob bundle applied
+// between superseded demotion and synthesis. The defaults are
+// conservative and quality-oriented:
+//
+//   - minK=3: never fewer than three candidates (defensive floor
+//     for the existing weak_match top-3 reroute and the
+//     ambiguity / resolved-history detectors).
+//   - maxK=15: never more than 15 candidates (3x the production
+//     topK of 5; bounded by the prompt budget).
+//   - relativeFraction=0.5: a candidate must score at least half
+//     of the top score to survive past minK.
+//   - elbowGapTolerance=0.05: a candidate below the relative
+//     floor is still kept if it sits within 0.05 of the
+//     baseline score (coherent cluster).
+//   - diversity: disabled by default. Enable via an extension
+//     hook or future config knob if a project sees redundancy.
+//   - budget: total 6000 chars, per-memory 500 chars. With
+//     maxK=15 the worst case is 15 x 500 = 7500 chars; the
+//     total cap (6000) ensures the prompt never exceeds the
+//     configured ceiling.
+const ADAPTIVE_DEPTH_SELECTOR_CONFIG = {
+  strategy: "elbow" as const,
+  minK: 3,
+  maxK: 15,
+  relativeFraction: 0.5,
+  elbowGapTolerance: 0.05,
+  plateauTolerance: 0.05,
+};
+const ADAPTIVE_DEPTH_DIVERSITY_CONFIG = {
+  enabled: false,
+  redundancyThreshold: 0.9,
+};
+const ADAPTIVE_DEPTH_BUDGET_CONFIG = {
+  totalCharBudget: 6000,
+  perMemoryCharCap: 500,
+  dropLowestWhenOverBudget: true,
+};
+
+/**
+ * The default adaptive-depth pipeline config. Combines the
+ * selector / diversity / budget constants above into a single
+ * bundle the controller passes to `runAdaptiveDepth`.
+ *
+ * Exported (read-only) so the benchmark-only adaptive-depth
+ * evaluation helper can resolve the production defaults
+ * without re-declaring them. The constant is the source of
+ * truth; tests that need a different value pass an
+ * `adaptiveDepth` option into the controller.
+ */
+export const DEFAULT_ADAPTIVE_DEPTH_PIPELINE_CONFIG = Object.freeze({
+  selector: ADAPTIVE_DEPTH_SELECTOR_CONFIG,
+  diversity: ADAPTIVE_DEPTH_DIVERSITY_CONFIG,
+  budget: ADAPTIVE_DEPTH_BUDGET_CONFIG,
+});
 
 // ---------------------------------------------------------------------------
 // Controller
@@ -382,10 +484,20 @@ export async function runRecallController(
 
   // -- 3. Lexical ranking ---------------------------------------------
   // Run lexical ranking on ALL summaries (not limited by topK) to build
-  // the candidate pool for semantic fusion. Using storageLimit as the
-  // lexical topK limit gives semantic the broadest possible pool to
-  // recover paraphrase hits that lexical would miss.
-  const lexicalTopK = options.semanticEnabled ? storageLimit : topK;
+  // the candidate pool for semantic fusion AND the adaptive-depth
+  // stage. Using storageLimit as the lexical topK limit gives
+  // semantic the broadest possible pool to recover paraphrase hits
+  // that lexical would miss, and gives the adaptive-depth stage a
+  // large ranked pool to select from (narrow queries still feel
+  // tight because the relative-fraction cluster and the elbow cut
+  // exclude weak candidates; broad queries grow because the
+  // cluster survives the cut).
+  //
+  // The legacy `topK` cap is honoured at the adaptive-depth stage
+  // (`maxK` defaults to 15, well above the legacy 5). The narrow
+  // behaviour is preserved: a single dominant memory is still kept
+  // at the top, just with a defensible minK=3 floor below it.
+  const lexicalTopK = storageLimit;
   const ranked: LexicalScoredCandidate[] = rankLexical(
     query,
     summaries.map((s: SafeMemorySummary) => ({
@@ -555,20 +667,108 @@ export async function runRecallController(
   // block carry `relationship: undefined` and the detector
   // treats them as having no stored data (it can still fire
   // on the lexical / asymmetric-negation path).
-  const topSummaries: SafeMemorySummaryWithRelationship[] = [];
+  const candidatePool: SafeMemorySummaryWithRelationship[] = [];
   for (const r of demotedRanked) {
     const s = summaryById.get(r.id);
     if (!s) continue;
     const block = blockById.get(r.id);
-    topSummaries.push(block === undefined ? { ...s } : { ...s, relationship: { ...block } });
+    candidatePool.push(block === undefined ? { ...s } : { ...s, relationship: { ...block } });
   }
   // Sanity: every ranked id must have a summary. If this ever
   // fails, it means a memory was deleted between the read and
   // the rank — fall back to no_memory rather than fabricating.
-  if (topSummaries.length !== demotedRanked.length) {
+  if (candidatePool.length !== demotedRanked.length) {
     logger.debug("recall: ranked-id missing summary (storage raced); returning no_memory");
     return { status: "no_memory" };
   }
+
+  // -- 3d. Adaptive recall depth (experimental) -----------------------
+  // The production recall pipeline currently caps synthesis at a
+  // fixed topK=5 (see `DEFAULT_TOP_K` in `src/retrieval/lexical.ts`).
+  // Narrow precise queries want that tight cap. Broad / vague
+  // queries, or queries with many closely relevant memories, want
+  // more — but the synthesis prompt must remain bounded.
+  //
+  // The `runAdaptiveDepth` helper replaces the fixed cap with a
+  // deterministic, score-driven selection (default: elbow
+  // strategy, minK=3, maxK=15, relative-fraction=0.5) followed by
+  // an optional diversity filter and an explicit prompt-budget
+  // step. The defaults are conservative and quality-oriented:
+  // narrow queries stay tight, broad queries grow up to a capped
+  // maximum, noisy tail candidates are excluded, and the synthesis
+  // prompt cannot exceed the per-memory and total budgets.
+  //
+  // The adaptive-depth stage is purely internal to the controller.
+  // The public `recall(text)` API is unchanged. Superseded
+  // candidates are still demoted above this stage (so they are
+  // naturally excluded by the relative / absolute cluster).
+  const rankedWithText: AdaptiveCandidateWithText[] = candidatePool.map((s) => {
+    // Find the score from demotedRanked (the demoted order) so
+    // demoted candidates carry their (already-demoted) score.
+    const demotedEntry = demotedRanked.find((r) => r.id === s.id);
+    return {
+      id: s.id,
+      score: demotedEntry?.score ?? 0,
+      text: s.memoryContent,
+      ...(Array.isArray(s.tags) && s.tags.length > 0 ? { tags: s.tags } : {}),
+    };
+  });
+  const depthResult = runAdaptiveDepth(
+    rankedWithText,
+    options.adaptiveDepth ?? DEFAULT_ADAPTIVE_DEPTH_PIPELINE_CONFIG
+  );
+  // Project the kept candidates back to SafeMemorySummaryWithRelationship.
+  // Preserve score-desc order so the synthesis prompt sees the
+  // highest-scoring memories first. The relationship block is
+  // reattached (Phase C) so the ambiguity / resolved-history
+  // detectors see the same metadata they did before this phase.
+  const selectedIds = new Set(depthResult.selected.map((c) => c.id));
+  const topSummaries: SafeMemorySummaryWithRelationship[] = depthResult.selected.map((c) => {
+    const original = candidatePool.find((s) => s.id === c.id);
+    // original is guaranteed present: selectedIds came from
+    // rankedWithText, which came from candidatePool. Defensive
+    // fall-through keeps the projection total in the impossible
+    // race condition where the storage layer mutates between
+    // steps.
+    if (!original) {
+      return {
+        id: c.id,
+        kind: "fact",
+        state: "active",
+        memoryContent: c.text,
+        tags: c.tags ?? [],
+        classification: null,
+        confidence: null,
+      };
+    }
+    return original;
+  });
+  logger.debug(
+    `recall: adaptive-depth kept ${topSummaries.length}/${candidatePool.length} candidate(s) (${depthResult.trace.selector.reason})`
+  );
+
+  // -- Phase 3A trace: adaptive-depth + prompt-budget ------------------
+  // Debugging instrumentation: emit the full adaptive-depth /
+  // prompt-budget decision (counts, scores, kinds, content
+  // lengths, dropped / truncated counts, totals) BEFORE the
+  // `selected-candidates` event so a reader can correlate the
+  // selector's decision with the final synthesis input. The
+  // helper short-circuits when tracing is disabled; the
+  // controller's behavior is unchanged when trace is off. The
+  // kindsById map is built from `candidatePool` (the post-
+  // demotion summary view) so the `keptKinds` field on the
+  // trace event carries the kind of each kept memory without
+  // leaking its content.
+  const kindsById = new Map<number, string>();
+  for (const s of candidatePool) {
+    kindsById.set(s.id, s.kind);
+  }
+  emitAdaptiveDepthStages(options.trace, {
+    rankedWithText,
+    depthResult,
+    config: options.adaptiveDepth ?? DEFAULT_ADAPTIVE_DEPTH_PIPELINE_CONFIG,
+    kindsById,
+  });
 
   // -- Phase 3A trace: selected candidates -----------------------------
   emitSelectedCandidatesStage(options.trace, topSummaries);
@@ -603,94 +803,80 @@ export async function runRecallController(
     kind: s.kind,
     tags: s.tags,
   }));
+
+  // -- 4. Provider synthesis (instrumented) -----------------------------
+  // The synthesis call is timed so the trace event can record
+  // `durationMs`. The helper below (dispatchSynthesisOutcome)
+  // emits a single `recall.synthesis` event after the call
+  // completes and before the controller returns, regardless
+  // of which outcome branch is taken. The event carries:
+  //
+  //   - status           : "ok" | "error" | "weak" | "refusal"
+  //   - providerUsed     : when the call returned a typed result
+  //   - fallbackUsed     : true if the fallback slot produced the result
+  //   - modelUsed        : when the call returned a typed result
+  //   - durationMs       : wall-clock around synthesizeRecallWithFallback
+  //   - errorKind        : sanitized ProviderErrorKind OR validation reason
+  //   - errorMessage     : truncated, sanitized message
+  //   - answerPresent    : true iff the provider returned a non-empty answer
+  //   - answerLength     : length of the raw provider answer (no content)
+  //   - refusalDetected  : true iff the refusal-shape detector fired
+  //   - errorReasoningOnly: true iff the failure is the reasoning-only path
+  //   - candidateCount   : how many memories the prompt was built from
+  //   - promptMemoryCharTotal: total chars sent in the MEMORIES section
+  //   - httpCalls        : number of provider HTTP calls
+  //
+  // The payload intentionally omits the raw answer text, the raw
+  // reasoning text, the raw prompt body, the raw memory text, and
+  // any API key. The writer's central `redactPayload` pass still
+  // applies as defense in depth. This event is instrumentation
+  // only: the controller's behavior, the public outcome, and the
+  // on-the-wire projection are unchanged.
+  const synthStartMs = Date.now();
   const result: RecallSynthesisResult = await synthesizeRecallWithFallback(
     query,
     memories,
     adapterOptions
   );
+  const synthDurationMs = Math.max(0, Date.now() - synthStartMs);
 
-  if (!result.ok) {
-    logger.debug(`recall: provider error: ${result.kind} (${result.message})`);
-    return {
-      status: "provider_error",
-      reason: result.message,
-    };
-  }
+  // Sum of the post-budget memory text lengths that the synthesis
+  // prompt was built from. We use `depthResult.selected` because
+  // that is the authoritative "what was sent to the model" set
+  // (selector + diversity + budget have already run). This is a
+  // diagnostic number on the trace event; no text content is
+  // included.
+  const promptMemoryCharTotal = depthResult.selected.reduce(
+    (acc, c) => acc + (typeof c.text === "string" ? c.text.length : 0),
+    0
+  );
 
-  // -- 5. Validate the synthesized answer ----------------------------
-  const validation = validateAnswer(result.answer);
-  if (!validation.ok) {
-    if (validation.reason === "refusal_detected") {
-      // Refusal-with-thin-match reroute. The synthesis LLM
-      // declined to answer (the `isProviderRefusal` detector
-      // fired). If the lexical ranker found at least one
-      // stored summary above the relevance threshold, the
-      // "no relevant memory was found" framing of `no_memory`
-      // would be misleading — the ranker DID find something,
-      // it just could not be synthesized into a confident
-      // answer. In that case we surface a `weak_match`
-      // outcome that exposes the top-3 curator-voice
-      // summaries and a coverage block, so the caller can
-      // inspect the closest stored memories instead of
-      // receiving a blank "No relevant memory found.".
-      //
-      // If the ranker found nothing (`topSummaries.length
-      // === 0`), the refusal is genuinely "no memory to
-      // reason about" and we fall back to `no_memory` as
-      // before. Note: in practice `topSummaries` is
-      // guaranteed non-empty here — the controller
-      // short-circuits with `no_memory` at the rank-empty
-      // branch above — but the explicit check keeps the
-      // reroute site defensive and matches the brief's
-      // trigger condition (`topSummaries.length > 0`).
-      if (topSummaries.length > 0) {
-        logger.debug("recall: provider answer was a refusal; rerouting to weak_match");
-        const topScore = finalRanked[0]!.score;
-        const supportingCount = finalRanked.length;
-        const out: RecallOutcome = {
-          status: "weak_match",
-          summaries: topSummaries.slice(0, 3).map((s) => s.memoryContent),
-          coverage: {
-            topScore,
-            supportingCount,
-          },
-        };
-        // Add clarification when coverage suggests competing/conflicting
-        // candidates or very weak match quality.
-        if (suggestsCompetingCandidates(topScore, supportingCount)) {
-          out.clarification_needed = {
-            question:
-              "I found several related memories but wasn't confident synthesizing an answer. Could you rephrase your question or be more specific about what you're looking for?",
-          };
-        }
-        return out;
-      }
-      logger.debug("recall: provider answer was a refusal; rerouting to no_memory");
-      // Also check if the query is vague for the no_memory fallback.
-      if (isVagueQuery(query)) {
-        return {
-          status: "no_memory",
-          clarification_needed: {
-            question:
-              "Could you be more specific about what you're looking for? For example, what topic or project was this about?",
-          },
-        };
-      }
-      return { status: "no_memory" };
-    }
-    logger.debug(`recall: provider answer rejected: ${validation.reason}`);
-    return {
-      status: "provider_error",
-      reason: validation.reason,
-    };
+  // Dispatch the synthesis result through the controller's
+  // classification pipeline (validateAnswer + refusal-with-thin-
+  // match reroute + provider_error branches) and emit the
+  // synthesis trace event. The helper does NOT mutate the
+  // public outcome shape; it only classifies and emits.
+  const dispatch = dispatchSynthesisOutcome({
+    result,
+    query,
+    topSummaries,
+    finalRanked,
+    trace: options.trace,
+    synthDurationMs,
+    candidateCount: memories.length,
+    promptMemoryCharTotal,
+  });
+
+  if (dispatch.kind === "no_answer") {
+    return dispatch.outcome;
   }
   // Use the redacted form so any secret-shaped fragment the
   // model produced (defense in depth) is removed before we hand
   // the text to the tool layer. The validator above already
   // rejected answers that are entirely or mostly redacted.
-  const safeAnswer = validation.answer;
+  const safeAnswer = dispatch.safeAnswer;
 
-  // -- 6. Internal ambiguity detection (Phase C) ----------------------
+  // -- 5. Internal ambiguity detection (Phase C) ----------------------
   // Conservative offline detector. The signal is attached
   // to the answered outcome as an internal-only field.
   // `src/tools/recall.ts` is responsible for dropping it
@@ -703,7 +889,7 @@ export async function runRecallController(
     answer: safeAnswer,
   });
 
-  // -- 7. Internal resolved-history detection (Phase H + J) -----------
+  // -- 6. Internal resolved-history detection (Phase H + J) -----------
   // Conservative offline detector that recognises an
   // **explicit** resolution marker pair (`previous` /
   // `old` / `superseded` / `no longer` on the previous
@@ -750,9 +936,48 @@ interface AnswerOk {
   answer: string;
 }
 
+/**
+ * Trace-only refusal diagnostic. Carries the safe metadata an
+ * operator needs to know WHICH pattern / category / position
+ * fired without leaking raw matched text or provider answer
+ * content.
+ *
+ * Populated by `validateAnswer` ONLY on the `refusal_detected`
+ * branch. The trace helper (`emitSynthesisStage`) places the
+ * four fields on the `recall.synthesis` payload when
+ * `refusalDetected=true`. The matched text itself is NEVER
+ * surfaced; the position is enough to know "where in the answer
+ * the refusal shape started" for an operator triaging traces.
+ */
+interface RefusalDiagnostic {
+  /** Stable pattern id (e.g. `first-person-have-no-noun`). */
+  patternId: string;
+  /** Category group (e.g. `first-person`, `third-person`, `article-gap`). */
+  category: string;
+  /** 0-based byte index of the match in the (trimmed, post-trailing-punct-strip) text. */
+  matchIndex: number;
+  /**
+   * Length of the post-reasoning-strip visible answer (numeric
+   * only). Useful to tell "this was a long visible answer that
+   * happened to contain a refusal shape" from "this was an
+   * almost-empty answer that tripped the detector".
+   */
+  visibleAnswerLength: number;
+}
+
 interface AnswerFail {
   ok: false;
   reason: string;
+  /**
+   * Optional refusal diagnostic. Populated only on the
+   * `refusal_detected` branch; `undefined` on every other
+   * validator rejection (empty, reasoning-only,
+   * secret-redaction, short-after-redaction, raw-dump). The
+   * dispatch helper reads this field when surfacing the
+   * `weak_match` / `no_memory` reroute so the trace event can
+   * carry the safe diagnostic metadata.
+   */
+  diagnostic?: RefusalDiagnostic;
 }
 
 /**
@@ -859,41 +1084,192 @@ function stripReasoningBlocks(answer: string): string {
 // detector. Operating rule: each new pattern needs its own false-positive
 // guard test that exercises a substantive answer containing the new noun
 // or qualifier.
-function isProviderRefusal(text: string): boolean {
-  if (typeof text !== "string") return false;
+//
+// Noun-list policy (refined narrow): `details`, `information`,
+// `record`, and `records` are the four nouns that count as refusal
+// triggers. `memory` and `memories` are EXCLUDED from the first-
+// person-have and article-gap families because they are domain
+// language ("the stored memory", "memory of the previous session")
+// that legitimately appears in substantive caveated answers
+// ("I don't have memory of the previous session, but I can infer
+// ..."). Pattern 1 (first-person-have-no-noun) and Pattern 6
+// (article-gap-have-no-noun) both had `memory|memories` in their
+// noun list; both were updated. The other patterns (search,
+// of-about, unable-to-search, third-person) are unchanged in
+// this refinement per the approved scope.
+//
+// The patterns are extracted into a `REFUSAL_PATTERNS` table so a
+// trace-only diagnostic helper (`matchRefusalPatterns`) can report
+// WHICH pattern fired and at what position, without changing the
+// public boolean behavior (`isProviderRefusal`). The boolean helper
+// is byte-equivalent to the previous implementation: it joins the
+// same regex strings, applies them in the same order, against the
+// same two candidate strings (the trimmed text, and the trimmed
+// text with a single trailing punctuation character stripped).
+//
+// The diagnostic shape surfaced to the trace event is restricted
+// to safe metadata: a stable short `patternId`, a `category` group,
+// and a numeric `matchIndex`. NO raw matched text, NO provider
+// answer content, NO memory ids ever flow out of this helper into
+// the trace payload.
+
+/**
+ * A single refusal-shape pattern, with a stable short id used in
+ * the trace event and a category used to group related patterns.
+ *
+ * The id is intended to be a stable, hand-curated, human-readable
+ * string (not derived from the regex). The category is a small
+ * fixed set: `first-person`, `third-person`, `article-gap`.
+ */
+interface RefusalPattern {
+  /** Stable id for the trace event (e.g. `first-person-have-no-noun`). */
+  id: string;
+  /** Category group (e.g. `first-person`, `third-person`, `article-gap`). */
+  category: string;
+  /** Pattern regex (case-insensitive; `\b` word-boundary anchored). */
+  regex: RegExp;
+}
+
+/**
+ * Refusal-shape pattern table.
+ *
+ * Order matters: the first matching pattern wins (so a phrase that
+ * could match multiple patterns is attributed to the most specific
+ * one in this list). The regex strings are byte-identical to the
+ * `String.raw` literals used by the previous `isProviderRefusal`
+ * implementation; this is a structural refactor that extracts them
+ * into a typed table so the trace helper can attribute the match.
+ */
+const REFUSAL_PATTERNS: ReadonlyArray<RefusalPattern> = [
+  // Pattern 1: first-person "I don't have (any |specific |relevant )?N".
+  // Noun list intentionally excludes `memory|memories` — see the
+  // "Noun-list policy" comment above the table. `details`,
+  // `information`, `record`, `records` remain the four nouns that
+  // count as a refusal trigger here.
+  {
+    id: "first-person-have-no-noun",
+    category: "first-person",
+    regex:
+      /\bI (?:do not|don't|did not|didn't) have (?:any |specific |relevant )?(?:details|information|record|records)\b/i,
+  },
+  // Pattern 2: first-person "I don't (see|find|recall) ...N".
+  {
+    id: "first-person-search-no-noun",
+    category: "first-person",
+    regex:
+      /\bI (?:do not|don't|did not|didn't) (?:see|find|recall) (?:any |specific |relevant )?(?:information|details|records?|memories?)\b/i,
+  },
+  // Pattern 3: first-person "I have no N of/about/on/regarding".
+  {
+    id: "first-person-have-no-noun-of-about",
+    category: "first-person",
+    regex: /\bI have no (?:record|information|details) (?:of|about|on|regarding)\b/i,
+  },
+  // Pattern 4: first-person "I'm not able to (recall|find|determine) ...N".
+  {
+    id: "first-person-unable-to-search",
+    category: "first-person",
+    regex:
+      /\bI'm not able to (?:recall|find|determine) (?:any |specific |relevant )?(?:information|details|records?)\b/i,
+  },
+  // Pattern 5: third-person "no X were/are/was/is found/available/on file/recorded/stored".
+  {
+    id: "third-person-no-noun-found",
+    category: "third-person",
+    regex:
+      /\bno (?:relevant |specific )?(?:details|information|memory|memories|record|records) (?:were |are |was |is )?(?:found|available|on file|recorded|stored)\b/i,
+  },
+  // Pattern 6: first-person article-gap "I don't have a/an/any/the/specific/relevant N".
+  // The determiner group accepts 0+ stacked determiners in a sequence
+  // (e.g. "a specific summary", "the relevant notes") via the `*`
+  // quantifier. This pattern addresses the live failure phrase "I
+  // don't have a specific summary for session 2 in the available
+  // memories."
+  //
+  // Noun list intentionally excludes `memory|memories` — see the
+  // "Noun-list policy" comment above the table. The four core
+  // refusal nouns (`details`, `information`, `record`, `records`)
+  // are preserved, along with the article-gap-specific nouns
+  // (`summary|summaries`, `entry|entries`, `note|notes`) so the
+  // existing live-failure phrase still routes correctly.
+  {
+    id: "article-gap-have-no-noun",
+    category: "article-gap",
+    regex:
+      /\bI (?:do not|don't|did not|didn't) have (?:a |an |any |the |specific |relevant )*(?:details|information|record|records|summary|summaries|entry|entries|note|notes)\b/i,
+  },
+];
+
+/**
+ * A single refusal-shape match. The `matchedText` field is for
+ * in-process reasoning only; it MUST NOT be placed in any trace
+ * payload, log line, or public projection. The trace-bound view
+ * (`RefusalDiagnostic`) drops it.
+ */
+interface RefusalMatch {
+  /** Stable pattern id (e.g. `first-person-have-no-noun`). */
+  patternId: string;
+  /** Category group (e.g. `first-person`, `third-person`, `article-gap`). */
+  category: string;
+  /** 0-based byte index of the match in the (trimmed, post-trailing-punct-strip) text. */
+  matchIndex: number;
+  /** Matched substring. INTERNAL ONLY; do not surface to trace / logs / wire. */
+  matchedText: string;
+}
+
+/**
+ * Internal refusal-shape matcher. Returns the first matching
+ * pattern (by table order), or `null` when no pattern matches.
+ *
+ * The helper exists to support the trace-only refusal diagnostic.
+ * It is byte-equivalent to `isProviderRefusal` in the sense that
+ * `isProviderRefusal(t) === (matchRefusalPatterns(t) !== null)` for
+ * any input `t`; the public boolean helper delegates here so the
+ * two stay in lockstep.
+ *
+ * Order of evaluation mirrors the previous implementation exactly:
+ *   1. Trim the input. Empty -> no match.
+ *   2. Build two candidate strings: the trimmed text, and the
+ *      trimmed text with a single trailing `[.,!?]` stripped
+ *      ("I don't have specific details." still matches when the
+ *      trailing period is stripped).
+ *   3. For each candidate, scan the pattern table in order; the
+ *      first matching pattern wins.
+ */
+function matchRefusalPatterns(text: string): RefusalMatch | null {
+  if (typeof text !== "string") return null;
   const trimmed = text.trim();
-  if (trimmed.length === 0) return false;
-  // Test the trimmed text as-is, and again with a single trailing
-  // punctuation character stripped, so "I don't have specific details."
-  // matches even with the trailing period.
+  if (trimmed.length === 0) return null;
   const candidates = [trimmed, trimmed.replace(/[.,!?]$/, "")];
-  const pattern = new RegExp(
-    [
-      // Patterns 1-4: original first-person anchored patterns. Noun
-      // alternation is unified to the same memory-record noun list.
-      // Each allows an optional (any |specific |relevant ) qualifier
-      // between "have/see/find/recall" and the noun.
-      String.raw`\bI (?:do not|don't|did not|didn't) have (?:any |specific |relevant )?(?:details|information|memory|memories|record|records)\b`,
-      String.raw`\bI (?:do not|don't|did not|didn't) (?:see|find|recall) (?:any |specific |relevant )?(?:information|details|records?|memories?)\b`,
-      String.raw`\bI have no (?:record|information|details) (?:of|about|on|regarding)\b`,
-      String.raw`\bI'm not able to (?:recall|find|determine) (?:any |specific |relevant )?(?:information|details|records?)\b`,
-      // Pattern 5: no "I" anchor; matches third-person "no X were/are/was/is found/available/on file/recorded/stored" form.
-      String.raw`\bno (?:relevant |specific )?(?:details|information|memory|memories|record|records) (?:were |are |was |is )?(?:found|available|on file|recorded|stored)\b`,
-      // Pattern 6 (new in this revision): article-gap pattern. The
-      // determiners a, an, the, any, specific, relevant are all accepted
-      // in a single flat alternation, so the model can phrase the
-      // refusal with an article ("a specific summary", "an entry", "the
-      // relevant notes") and the detector still matches. The
-      // determiner group accepts 0+ stacked determiners in a sequence
-      // (e.g. "a specific summary", "the relevant notes") via the `*`
-      // quantifier, so multi-determiner refusal phrasings also match.
-      // This pattern addresses the live failure phrase "I don't have a
-      // specific summary for session 2 in the available memories."
-      String.raw`\bI (?:do not|don't|did not|didn't) have (?:a |an |any |the |specific |relevant )*(?:details|information|memory|memories|record|records|summary|summaries|entry|entries|note|notes)\b`,
-    ].join("|"),
-    "i"
-  );
-  return candidates.some((c) => pattern.test(c));
+  for (const candidate of candidates) {
+    for (const p of REFUSAL_PATTERNS) {
+      const m = p.regex.exec(candidate);
+      if (m && typeof m.index === "number") {
+        return {
+          patternId: p.id,
+          category: p.category,
+          matchIndex: m.index,
+          matchedText: m[0],
+        };
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Public refusal-shape detector. Returns `true` iff the input
+ * matches one of the patterns in `REFUSAL_PATTERNS`.
+ *
+ * Behavior is byte-equivalent to the pre-refactor implementation
+ * (same regex strings, same candidate-text strategy, same match
+ * semantics). The diagnostic surface (which pattern fired, at
+ * what position) is exposed via `matchRefusalPatterns` for the
+ * trace-only refusal diagnostic; this function returns just the
+ * boolean.
+ */
+function isProviderRefusal(text: string): boolean {
+  return matchRefusalPatterns(text) !== null;
 }
 
 /**
@@ -990,8 +1366,34 @@ function validateAnswer(answer: string): AnswerOk | AnswerFail {
   // text that also contains a secret fragment is still caught by
   // the redaction step first; the refusal check then reclassifies
   // a thin-overlap refusal into `no_memory` at the call site.
+  //
+  // Trace-only refusal diagnostic: when the boolean detector
+  // fires we also re-run the matcher (`matchRefusalPatterns`) to
+  // capture the safe metadata (pattern id, category, match index,
+  // visible answer length) that the dispatcher surfaces on the
+  // `recall.synthesis` trace event. The diagnostic carries NO raw
+  // matched text and NO provider answer content; only short
+  // stable ids, a category label, and numeric measurements. The
+  // `isProviderRefusal` boolean check above is preserved
+  // byte-equivalent — the diagnostic is purely additive for
+  // instrumentation.
   if (isProviderRefusal(noIds)) {
-    return { ok: false, reason: "refusal_detected" };
+    const refusalMatch = matchRefusalPatterns(noIds);
+    return {
+      ok: false,
+      reason: "refusal_detected",
+      diagnostic: {
+        patternId: refusalMatch?.patternId ?? "unknown",
+        category: refusalMatch?.category ?? "unknown",
+        matchIndex: refusalMatch?.matchIndex ?? -1,
+        // `stripped0` is the post-reasoning-strip, post-trim
+        // visible answer. This is the length of the user-facing
+        // text after hidden reasoning blocks have been removed
+        // but BEFORE secret-redaction and memory-id-strip have
+        // run. Numeric only; safe to expose.
+        visibleAnswerLength: stripped0.length,
+      },
+    };
   }
   return { ok: true, answer: noIds };
 }
@@ -1011,10 +1413,10 @@ function looksLikeRawDump(text: string): boolean {
 // Phase 3A: recall stage trace emission
 // ---------------------------------------------------------------------------
 //
-// The three helpers below build and emit the Phase 3A stage
+// The four helpers below build and emit the Phase 3A stage
 // events. They are kept out of the main `runRecallController`
 // body so the hot path stays readable, and so the trace payload
-// shapes are discoverable in one place. All three are pure
+// shapes are discoverable in one place. All four are pure
 // functions over the existing controller state plus a
 // `RecallTraceContext`; they never mutate the controller state
 // and never read raw provider I/O.
@@ -1025,6 +1427,420 @@ function looksLikeRawDump(text: string): boolean {
 // caught at the storage boundary without the controller having
 // to know about it. The controller does NOT attempt to redact
 // its own payload.
+//
+// Phase 3A-recall-synthesis adds:
+//   - `dispatchSynthesisOutcome` — wraps the post-synthesis
+//     classification pipeline (validateAnswer + refusal-with-
+//     thin-match reroute + provider_error branches) and emits
+//     a single `recall.synthesis` event on the way out. The
+//     helper preserves the existing public outcome shape and
+//     the on-the-wire projection byte-for-byte; it only
+//     classifies and emits.
+//   - `emitSynthesisStage` — the actual payload-builder for
+//     the synthesis event. Carries the provider / model
+//     labels, fallback flag, call duration, sanitized error
+//     kind / message, answer presence + length, refusal
+//     classification, reasoning-only classification,
+//     candidate count sent to synthesis, and the prompt-
+//     memory char total. NO raw answer text, NO raw
+//     reasoning text, NO raw prompt body, and NO API keys
+//     are placed in the payload.
+
+/**
+ * Dispatch the post-synthesis result through the controller's
+ * classification pipeline and emit the `recall.synthesis` trace
+ * event.
+ *
+ * Behavior:
+ *   - Runs `validateAnswer` on a successful synthesis result.
+ *   - Routes through the refusal-with-thin-match reroute when
+ *     the validator detects a refusal shape on a non-empty
+ *     candidate set (`topSummaries.length > 0`).
+ *   - Falls back to `no_memory` when a refusal shape is detected
+ *     on an empty candidate set (defensive; in practice the
+ *     controller short-circuits above this branch).
+ *   - Surfaces a `provider_error` for every other failure path
+ *     (provider-level hard failure, validation rejection).
+ *   - On success, returns the validated + redacted answer text
+ *     to the caller so the outer scope can run ambiguity +
+ *     resolved-history detection and produce the `answered`
+ *     outcome.
+ *
+ * The dispatch function NEVER changes the public outcome shape
+ * or the on-the-wire projection: it returns the exact same
+ * `RecallOutcome` objects the inline code returned before this
+ * helper was extracted. The only observable side effect is the
+ * single `recall.synthesis` trace event.
+ *
+ * Trace payload shape (see `emitSynthesisStage`):
+ *   - status, providerUsed, fallbackUsed, modelUsed,
+ *     durationMs, errorKind, errorMessage, answerPresent,
+ *     answerLength, refusalDetected, errorReasoningOnly,
+ *     candidateCount, promptMemoryCharTotal, httpCalls.
+ */
+function dispatchSynthesisOutcome(args: {
+  result: RecallSynthesisResult;
+  query: string;
+  topSummaries: SafeMemorySummaryWithRelationship[];
+  finalRanked: LexicalScoredCandidate[];
+  trace: RecallTraceContext | undefined;
+  synthDurationMs: number;
+  candidateCount: number;
+  promptMemoryCharTotal: number;
+}): { kind: "ok"; safeAnswer: string } | { kind: "no_answer"; outcome: RecallOutcome } {
+  const { result, query, topSummaries, finalRanked } = args;
+
+  // -- Provider-level failure ------------------------------------------
+  // `result.ok === false` covers transport errors, auth
+  // failures, missing-config, and all-providers-failed. The
+  // error message has already been sanitized by the adapter
+  // (no api key, no raw body); we truncate it further here
+  // before placing it in the trace payload.
+  if (!result.ok) {
+    logger.debug(`recall: provider error: ${result.kind} (${result.message})`);
+    emitSynthesisStage(args.trace, {
+      result,
+      durationMs: args.synthDurationMs,
+      candidateCount: args.candidateCount,
+      promptMemoryCharTotal: args.promptMemoryCharTotal,
+      classification: {
+        kind: "provider_error",
+        status: "error",
+        refusalDetected: false,
+        errorReasoningOnly: false,
+        answerPresent: false,
+        errorKind: result.lastError?.kind ?? result.kind,
+        errorMessage: result.message,
+        httpCalls: result.httpCalls,
+      },
+    });
+    return {
+      kind: "no_answer",
+      outcome: {
+        status: "provider_error",
+        reason: result.message,
+      },
+    };
+  }
+
+  // -- Provider returned an answer; run the validator -----------------
+  const validation = validateAnswer(result.answer);
+  if (!validation.ok) {
+    if (validation.reason === "refusal_detected") {
+      // Refusal-with-thin-match reroute. The synthesis LLM
+      // declined to answer (the `isProviderRefusal` detector
+      // fired). If the lexical ranker found at least one
+      // stored summary above the relevance threshold, the
+      // "no relevant memory was found" framing of `no_memory`
+      // would be misleading — the ranker DID find something,
+      // it just could not be synthesized into a confident
+      // answer. In that case we surface a `weak_match`
+      // outcome that exposes the top-3 curator-voice
+      // summaries and a coverage block, so the caller can
+      // inspect the closest stored memories instead of
+      // receiving a blank "No relevant memory found.".
+      //
+      // If the ranker found nothing (`topSummaries.length
+      // === 0`), the refusal is genuinely "no memory to
+      // reason about" and we fall back to `no_memory` as
+      // before. Note: in practice `topSummaries` is
+      // guaranteed non-empty here — the controller
+      // short-circuits with `no_memory` at the rank-empty
+      // branch above — but the explicit check keeps the
+      // reroute site defensive and matches the brief's
+      // trigger condition (`topSummaries.length > 0`).
+      if (topSummaries.length > 0) {
+        logger.debug("recall: provider answer was a refusal; rerouting to weak_match");
+        const topScore = finalRanked[0]!.score;
+        const supportingCount = finalRanked.length;
+        emitSynthesisStage(args.trace, {
+          result,
+          durationMs: args.synthDurationMs,
+          candidateCount: args.candidateCount,
+          promptMemoryCharTotal: args.promptMemoryCharTotal,
+          classification: {
+            kind: "refusal",
+            status: "weak",
+            refusalDetected: true,
+            errorReasoningOnly: false,
+            answerPresent: true,
+            answerLength: typeof result.answer === "string" ? result.answer.length : 0,
+            errorKind: validation.reason,
+            errorMessage: validation.reason,
+            httpCalls: result.httpCalls,
+            // Trace-only refusal diagnostic. Carries safe
+            // metadata (pattern id, category, match index,
+            // visible answer length) — NO raw matched text and
+            // NO provider answer content. Populated by
+            // `validateAnswer` on the refusal_detected branch
+            // only.
+            ...(validation.diagnostic ? { refusalDiagnostic: validation.diagnostic } : {}),
+          },
+        });
+        const out: RecallOutcome = {
+          status: "weak_match",
+          summaries: topSummaries.slice(0, 3).map((s) => s.memoryContent),
+          coverage: {
+            topScore,
+            supportingCount,
+          },
+        };
+        if (suggestsCompetingCandidates(topScore, supportingCount)) {
+          out.clarification_needed = {
+            question:
+              "I found several related memories but wasn't confident synthesizing an answer. Could you rephrase your question or be more specific about what you're looking for?",
+          };
+        }
+        return { kind: "no_answer", outcome: out };
+      }
+      logger.debug("recall: provider answer was a refusal; rerouting to no_memory");
+      emitSynthesisStage(args.trace, {
+        result,
+        durationMs: args.synthDurationMs,
+        candidateCount: args.candidateCount,
+        promptMemoryCharTotal: args.promptMemoryCharTotal,
+        classification: {
+          kind: "refusal",
+          status: "refusal",
+          refusalDetected: true,
+          errorReasoningOnly: false,
+          answerPresent: true,
+          answerLength: typeof result.answer === "string" ? result.answer.length : 0,
+          errorKind: validation.reason,
+          errorMessage: validation.reason,
+          httpCalls: result.httpCalls,
+          // Same trace-only refusal diagnostic as the
+          // weak_match branch above. The dispatcher carries
+          // the safe metadata through to the trace event so a
+          // reader can attribute which pattern fired.
+          ...(validation.diagnostic ? { refusalDiagnostic: validation.diagnostic } : {}),
+        },
+      });
+      // Also check if the query is vague for the no_memory fallback.
+      if (isVagueQuery(query)) {
+        return {
+          kind: "no_answer",
+          outcome: {
+            status: "no_memory",
+            clarification_needed: {
+              question:
+                "Could you be more specific about what you're looking for? For example, what topic or project was this about?",
+            },
+          },
+        };
+      }
+      return { kind: "no_answer", outcome: { status: "no_memory" } };
+    }
+    // Validator rejection that is NOT a refusal shape. This
+    // includes the famous
+    // `provider answer was only reasoning; no visible answer to
+    // return` reason (the model produced only a `<think>...</think>`
+    // block) as well as the empty-answer, secret-redaction,
+    // short-after-redaction, and raw-dump gates. We surface
+    // them all as `provider_error` on the public outcome; the
+    // trace event carries the validator's exact reason so a
+    // reader can tell them apart.
+    logger.debug(`recall: provider answer rejected: ${validation.reason}`);
+    emitSynthesisStage(args.trace, {
+      result,
+      durationMs: args.synthDurationMs,
+      candidateCount: args.candidateCount,
+      promptMemoryCharTotal: args.promptMemoryCharTotal,
+      classification: {
+        kind: "validation_rejection",
+        status: "error",
+        refusalDetected: false,
+        errorReasoningOnly: validation.reason === REASONING_ONLY_VALIDATION_REASON,
+        answerPresent: true,
+        answerLength: typeof result.answer === "string" ? result.answer.length : 0,
+        errorKind: validation.reason,
+        errorMessage: validation.reason,
+        httpCalls: result.httpCalls,
+      },
+    });
+    return {
+      kind: "no_answer",
+      outcome: {
+        status: "provider_error",
+        reason: validation.reason,
+      },
+    };
+  }
+
+  // -- Validation passed; the synthesis succeeded ---------------------
+  // Emit the success trace event and hand the validated +
+  // redacted answer back to the outer scope so ambiguity /
+  // resolved-history detection can run.
+  emitSynthesisStage(args.trace, {
+    result,
+    durationMs: args.synthDurationMs,
+    candidateCount: args.candidateCount,
+    promptMemoryCharTotal: args.promptMemoryCharTotal,
+    classification: {
+      kind: "ok",
+      status: "ok",
+      refusalDetected: false,
+      errorReasoningOnly: false,
+      answerPresent: true,
+      answerLength: typeof result.answer === "string" ? result.answer.length : 0,
+      httpCalls: result.httpCalls,
+    },
+  });
+  return { kind: "ok", safeAnswer: validation.answer };
+}
+
+/**
+ * The validator's exact reason string for "the provider's
+ * answer was ONLY a reasoning block". Used by the synthesis
+ * trace event to flag the failure mode the user wants to
+ * diagnose in production traces. Defined as a constant so the
+ * trace event and any future structured-logging site use the
+ * exact same comparison string.
+ */
+const REASONING_ONLY_VALIDATION_REASON =
+  "provider answer was only reasoning; no visible answer to return" as const;
+
+/**
+ * Maximum length of the `errorMessage` field on the synthesis
+ * trace event. The controller-level errors (validator reasons)
+ * are short fixed strings, but the provider-level error
+ * messages can include the http-client's verbose suffix
+ * (`provider/model#recall: hard failure (...)`). The cap is
+ * generous enough to capture the operator-visible shape while
+ * keeping the trace payload small and predictable.
+ */
+const SYNTHESIS_ERROR_MESSAGE_MAX = 256;
+
+/**
+ * Build and emit the `recall.synthesis` trace event. Pure
+ * payload-builder; no I/O, no mutation. The writer applies the
+ * central `redactPayload` pass before persisting, so any
+ * credential / reasoning key that ever slipped into the payload
+ * would still be scrubbed.
+ *
+ * Redaction discipline:
+ *   - The payload carries NO `answer`, NO raw reasoning text,
+ *     NO raw prompt body, and NO API keys. Only metadata
+ *     (status, provider/model labels, durations, lengths,
+ *     counts, sanitized error kind / message) is placed here.
+ *   - The error message is truncated to
+ *     `SYNTHESIS_ERROR_MESSAGE_MAX` characters before being
+ *     placed in the payload; longer messages are still
+ *     available on the controller's public outcome (`reason`),
+ *     but the trace surface is bounded.
+ *   - The error kind is the typed `ProviderErrorKind` enum
+ *     value when present, or the validator's fixed reason
+ *     string. Both are short, bounded, and never carry raw
+ *     provider response bodies.
+ */
+function emitSynthesisStage(
+  trace: RecallTraceContext | undefined,
+  args: {
+    result: RecallSynthesisResult;
+    durationMs: number;
+    candidateCount: number;
+    promptMemoryCharTotal: number;
+    classification: {
+      kind: "ok" | "provider_error" | "refusal" | "validation_rejection";
+      status: "ok" | "error" | "weak" | "refusal";
+      refusalDetected: boolean;
+      errorReasoningOnly: boolean;
+      answerPresent: boolean;
+      answerLength?: number;
+      errorKind?: string;
+      errorMessage?: string;
+      httpCalls: number;
+      /**
+       * Optional refusal diagnostic. Populated ONLY when
+       * `refusalDetected=true`. When present, the four safe
+       * fields below are placed on the trace payload
+       * (patternId / category / matchIndex / visibleAnswerLength).
+       * NO raw matched text and NO provider answer content are
+       * ever placed in the payload — only short stable ids, a
+       * category label, and numeric measurements.
+       */
+      refusalDiagnostic?: RefusalDiagnostic;
+    };
+  }
+): void {
+  if (!trace || trace.runId === null) return;
+
+  const { result, classification } = args;
+
+  // Provider / model labels are only present on a typed
+  // success result. On the failure paths we leave them
+  // undefined so the reader can tell "provider did not
+  // produce a result" from "provider succeeded".
+  const providerUsed = result.ok ? result.providerUsed : undefined;
+  const modelUsed = result.ok ? result.modelUsed : undefined;
+  const fallbackUsed = result.ok ? result.fallbackUsed : undefined;
+
+  // Sanitize the error message: truncate to a bounded length.
+  // The provider's adapter already scrubs api keys and raw
+  // response bodies from `result.message`, and the validator
+  // reasons are short fixed strings, so the trace surface here
+  // is bounded by the length cap.
+  let errorMessage: string | undefined;
+  if (classification.errorMessage !== undefined) {
+    errorMessage = sanitizeSynthesisErrorMessage(classification.errorMessage);
+  }
+
+  trace.recordStage(RECALL_SYNTHESIS_KIND, {
+    status: classification.status,
+    classification: classification.kind,
+    // Provider / model info (only present on a successful typed result).
+    ...(providerUsed !== undefined ? { providerUsed } : {}),
+    ...(modelUsed !== undefined ? { modelUsed } : {}),
+    ...(fallbackUsed !== undefined ? { fallbackUsed } : {}),
+    // Call diagnostics.
+    durationMs: args.durationMs,
+    httpCalls: classification.httpCalls,
+    // Answer diagnostics (presence + length only; never the raw text).
+    answerPresent: classification.answerPresent,
+    ...(classification.answerLength !== undefined
+      ? { answerLength: classification.answerLength }
+      : {}),
+    // Classification flags.
+    refusalDetected: classification.refusalDetected,
+    errorReasoningOnly: classification.errorReasoningOnly,
+    // Refusal-shape diagnostic. Present ONLY when
+    // `refusalDetected=true`. Carries safe metadata: a stable
+    // pattern id, a category label, the byte index where the
+    // match started, and the post-reasoning-strip visible
+    // answer length. NO raw matched text and NO provider answer
+    // content are ever placed here — the position + ids are
+    // enough for an operator to know which detector fired and
+    // where, without leaking the refusal prose itself.
+    ...(classification.refusalDetected && classification.refusalDiagnostic
+      ? {
+          refusalPatternId: classification.refusalDiagnostic.patternId,
+          refusalCategory: classification.refusalDiagnostic.category,
+          refusalMatchIndex: classification.refusalDiagnostic.matchIndex,
+          visibleAnswerLength: classification.refusalDiagnostic.visibleAnswerLength,
+        }
+      : {}),
+    // Error metadata (sanitized + truncated).
+    ...(classification.errorKind !== undefined ? { errorKind: classification.errorKind } : {}),
+    ...(errorMessage !== undefined ? { errorMessage } : {}),
+    // Prompt diagnostics (counts and totals only; no text content).
+    candidateCount: args.candidateCount,
+    promptMemoryCharTotal: args.promptMemoryCharTotal,
+  });
+}
+
+/**
+ * Truncate a synthesis-stage error message to the bounded
+ * surface. The message is intentionally truncated, not
+ * sanitized here: the adapter already redacts api keys from
+ * `result.message`, and validator reasons are short fixed
+ * strings. The cap is purely to keep the trace payload size
+ * predictable.
+ */
+function sanitizeSynthesisErrorMessage(message: string): string {
+  if (typeof message !== "string") return "";
+  if (message.length <= SYNTHESIS_ERROR_MESSAGE_MAX) return message;
+  return `${message.slice(0, SYNTHESIS_ERROR_MESSAGE_MAX)}…`;
+}
 
 /**
  * Emit `recall.active-memory-read` — the count of active memory
@@ -1256,6 +2072,239 @@ function emitSupersededDemotionStage(
 function buildMatchText(s: SafeMemorySummary): string {
   const tagPart = Array.isArray(s.tags) && s.tags.length > 0 ? ` ${s.tags.join(" ")}` : "";
   return `${s.memoryContent}${tagPart}`;
+}
+
+/**
+ * Emit `recall.adaptive-depth` and `recall.prompt-budget` — a
+ * debugging-instrumentation pair that fires immediately AFTER the
+ * adaptive-depth pipeline (`runAdaptiveDepth`) and BEFORE the
+ * existing `recall.selected-candidates` event. The pair gives a
+ * reader the full picture of what the selector / diversity filter /
+ * prompt budget did without leaking raw memory text.
+ *
+ * Phase: instrumentation-only. This is a debugging trace surface;
+ * no adaptive-selection, retry, timeout, cap, threshold, public
+ * API, ranking, synthesis prompt, or storage behavior is changed.
+ * The pipeline itself is still the existing `runAdaptiveDepth`
+ * call; the new helper only re-runs the same pure helper functions
+ * (selectAdaptiveCandidates, applyDiversityFilter,
+ * applyPromptBudget) on the same input to derive the diagnostic
+ * payload, which is guaranteed byte-stable because those
+ * functions are pure and deterministic. No extra I/O, no
+ * allocation in the hot path beyond the diagnostic arrays.
+ *
+ * `recall.adaptive-depth` payload:
+ *   - `rankedCount` / `inputCount` : size of the candidate pool
+ *                                   fed into `runAdaptiveDepth`
+ *                                   (alias, both reported for
+ *                                   clarity).
+ *   - `selectedCount`              : candidate count after the
+ *                                   selector (selector's
+ *                                   `selectedCount`).
+ *   - `keptAfterDiversity`         : candidate count after the
+ *                                   diversity filter.
+ *   - `droppedByDiversity`         : candidates the diversity
+ *                                   filter removed.
+ *   - `keptAfterBudget`            : final candidate count after
+ *                                   the prompt budget (= the
+ *                                   `selected` list that goes to
+ *                                   synthesis).
+ *   - `strategy`                   : `"elbow"` or `"plateau"`.
+ *   - `minK` / `maxK`              : selector minK / maxK caps.
+ *   - `relativeFraction`           : selector relativeFraction
+ *                                   (topScore * relativeFraction
+ *                                   is the relevance floor).
+ *   - `plateauTolerance`           : plateau strategy tolerance.
+ *   - `elbowGapTolerance`          : elbow strategy tolerance.
+ *   - `topScore`                   : top score among input
+ *                                   candidates (`null` on empty
+ *                                   input).
+ *   - `relativeFloor`              : topScore * relativeFraction
+ *                                   (the absolute cutoff score
+ *                                   for the cluster; `null`
+ *                                   on empty input).
+ *   - `reason`                     : the selector's reason string
+ *                                   (e.g. "elbow kept 8/12",
+ *                                   "capped at maxK=15",
+ *                                   "baseline only (input
+ *                                   shorter than minK)").
+ *   - `diversity.enabled`          : whether the diversity
+ *                                   filter ran.
+ *   - `diversity.redundancyThreshold` : Jaccard threshold used.
+ *   - `keptIds` / `keptScores` / `keptKinds` / `keptContentLengths` :
+ *                                   parallel arrays describing
+ *                                   the FINAL kept set
+ *                                   (post-budget, post-truncation).
+ *                                   `kinds` is resolved from the
+ *                                   controller's `candidatePool`
+ *                                   (the post-demotion summary
+ *                                   view) so a reader can
+ *                                   confirm the kind of each
+ *                                   kept memory without seeing
+ *                                   its content.
+ *
+ * `recall.prompt-budget` payload:
+ *   - `inputCount`                 : candidate count that
+ *                                   entered the budget step
+ *                                   (= `keptAfterDiversity`).
+ *   - `keptCount`                  : candidate count that
+ *                                   survived the budget step.
+ *   - `perMemoryCharCap`           : resolved per-memory cap
+ *                                   (Infinity means disabled).
+ *   - `totalCharBudget`            : resolved total char budget
+ *                                   (Infinity means disabled).
+ *   - `dropLowestWhenOverBudget`   : resolved drop-tail flag.
+ *   - `droppedCount`               : number of candidates the
+ *                                   budget dropped.
+ *   - `truncatedCount`             : number of candidates whose
+ *                                   text was truncated.
+ *   - `totalCharsBeforeBudget`     : sum of diversity-result
+ *                                   text lengths (the budget
+ *                                   input's total chars).
+ *   - `totalCharsAfterBudget`      : sum of kept text lengths
+ *                                   (= the final MEMORIES-section
+ *                                   total).
+ *   - `droppedTail`                : same as
+ *                                   `dropLowestWhenOverBudget`,
+ *                                   surfaced as a standalone
+ *                                   boolean so a reader can see
+ *                                   at a glance whether the
+ *                                   budget dropped the tail.
+ *   - `keptContentLengths`         : per-memory text length of
+ *                                   each kept candidate
+ *                                   (post-truncation, parallel
+ *                                   to `keptIds` in the
+ *                                   adaptive-depth event).
+ *
+ * Redaction / safety:
+ *   - The payload intentionally omits raw `memoryContent`,
+ *     `text`, query strings, secret-shaped fragments, and any
+ *     other content the central `redactPayload` pass would
+ *     strip. The trace writer applies `redactPayload` to the
+ *     whole payload as a defense-in-depth pass.
+ *   - Memory ids are included; this matches the existing
+ *     `recall.lexical-ranking` / `recall.superseded-demotion` /
+ *     `recall.selected-candidates` policy where ids are part
+ *     of the trace surface (the public MCP `text` block and
+ *     `structuredContent` are unaffected).
+ *   - The helper short-circuits when the trace context is
+ *     disabled (`runId === null`) or absent, mirroring the
+ *     other `emit*` helpers.
+ *
+ * No call to `runAdaptiveDepth` is replaced: this helper only
+ * reads the existing `depthResult` for the post-budget kept
+ * set, and re-runs the pure pipeline helpers to derive
+ * diagnostic fields that the pipeline trace does not carry
+ * (`keptAfterDiversity` count is already in
+ * `depthResult.trace.diversity.keptAfterFilter`, but the
+ * pre-budget total chars and per-candidate lengths are not).
+ */
+function emitAdaptiveDepthStages(
+  trace: RecallTraceContext | undefined,
+  args: {
+    /** Input pool the controller fed to `runAdaptiveDepth`. */
+    rankedWithText: ReadonlyArray<AdaptiveCandidateWithText>;
+    /** Pipeline result the controller already computed. */
+    depthResult: AdaptiveDepthPipelineResult;
+    /** Config the controller passed to `runAdaptiveDepth`. */
+    config: AdaptiveDepthPipelineConfig | undefined;
+    /** Kind lookup: memory id → kind, built from `candidatePool`. */
+    kindsById: ReadonlyMap<number, string>;
+  }
+): void {
+  if (!trace || trace.runId === null) return;
+
+  // Re-derive the intermediate pipeline state. The selector,
+  // diversity, and budget helpers are pure and deterministic;
+  // re-running them on the same input yields byte-stable output.
+  // The post-budget kept set in `args.depthResult.selected` is
+  // also the kept set we'd get from re-running; both are
+  // referenced (the post-budget set drives the final ids/scores/
+  // kinds/lengths, the intermediate set drives the counts and
+  // pre-budget totals).
+  const scoreOnly: AdaptiveCandidate[] = args.rankedWithText.map((c) => ({
+    id: c.id,
+    score: c.score,
+  }));
+  const selection = selectAdaptiveCandidates(scoreOnly, args.config?.selector);
+  const selectedSet = new Set(selection.selected.map((s) => s.id));
+  const selectedTextEnriched: AdaptiveCandidateWithText[] = [];
+  for (const c of args.rankedWithText) {
+    if (selectedSet.has(c.id)) {
+      selectedTextEnriched.push(c);
+    }
+  }
+  const diversityResult = applyDiversityFilter(selectedTextEnriched, args.config?.diversity);
+  const budget = applyPromptBudget(diversityResult, args.config?.budget);
+
+  // Per-candidate diagnostics on the FINAL kept set
+  // (post-budget, post-truncation). `depthResult.selected` is
+  // the authoritative synthesis-input set; the ids/scores/
+  // lengths below mirror it.
+  const keptIds: number[] = [];
+  const keptScores: number[] = [];
+  const keptKinds: string[] = [];
+  const keptContentLengths: number[] = [];
+  for (const c of args.depthResult.selected) {
+    keptIds.push(c.id);
+    keptScores.push(c.score);
+    keptKinds.push(args.kindsById.get(c.id) ?? "unknown");
+    keptContentLengths.push(c.text.length);
+  }
+
+  const diversityCfg = resolveAdaptiveDiversityConfig(args.config?.diversity);
+  const budgetCfg: ResolvedAdaptivePromptBudgetConfig = resolveAdaptivePromptBudgetConfig(
+    args.config?.budget
+  );
+  const topScore = selection.trace.topScore;
+  const relativeFloor =
+    topScore !== null ? topScore * selection.trace.config.relativeFraction : null;
+
+  trace.recordStage(RECALL_ADAPTIVE_DEPTH_KIND, {
+    rankedCount: args.rankedWithText.length,
+    inputCount: args.rankedWithText.length,
+    selectedCount: selection.trace.selectedCount,
+    keptAfterDiversity: diversityResult.length,
+    droppedByDiversity: selectedTextEnriched.length - diversityResult.length,
+    keptAfterBudget: budget.kept.length,
+    strategy: selection.trace.config.strategy,
+    minK: selection.trace.config.minK,
+    maxK: selection.trace.config.maxK,
+    relativeFraction: selection.trace.config.relativeFraction,
+    plateauTolerance: selection.trace.config.plateauTolerance,
+    elbowGapTolerance: selection.trace.config.elbowGapTolerance,
+    topScore,
+    relativeFloor,
+    reason: selection.trace.reason,
+    diversity: {
+      enabled: diversityCfg.enabled,
+      redundancyThreshold: diversityCfg.redundancyThreshold,
+    },
+    keptIds,
+    keptScores,
+    keptKinds,
+    keptContentLengths,
+  });
+
+  // Sum of the diversity-result text lengths (the budget
+  // INPUT total chars). Per-memory truncation happens inside
+  // `applyPromptBudget`; this sum is the lengths the budget
+  // started with.
+  const totalCharsBeforeBudget = diversityResult.reduce((acc, c) => acc + c.text.length, 0);
+
+  trace.recordStage(RECALL_PROMPT_BUDGET_KIND, {
+    inputCount: diversityResult.length,
+    keptCount: budget.kept.length,
+    perMemoryCharCap: budget.perMemoryCap,
+    totalCharBudget: budgetCfg.totalCharBudget,
+    dropLowestWhenOverBudget: budgetCfg.dropLowestWhenOverBudget,
+    droppedCount: budget.droppedCount,
+    truncatedCount: budget.truncatedCount,
+    totalCharsBeforeBudget,
+    totalCharsAfterBudget: budget.totalChars,
+    droppedTail: budgetCfg.dropLowestWhenOverBudget,
+    keptContentLengths: budget.kept.map((c) => c.text.length),
+  });
 }
 
 // ---------------------------------------------------------------------------

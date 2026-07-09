@@ -82,6 +82,68 @@ export const TOOL_OUTPUT_KIND = "tool.output" as const;
 //                                   `recall.lexical-ranking` to
 //                                   see which ranked candidates
 //                                   were selected vs dropped.
+//   - `recall.adaptive-depth`      - what the adaptive-depth
+//                                   selector + diversity filter
+//                                   decided: ranked count,
+//                                   selected count, strategy
+//                                   (`elbow` / `plateau`),
+//                                   minK / maxK, relativeFraction,
+//                                   top score, relative floor,
+//                                   selector reason, diversity
+//                                   filter summary, and the
+//                                   final kept-set ids / scores /
+//                                   kinds / content lengths. The
+//                                   payload carries the FULL
+//                                   final kept-set diagnostics so
+//                                   a reader can confirm what
+//                                   survived selection. Raw
+//                                   memory text is NEVER
+//                                   included; only lengths and
+//                                   ids.
+//   - `recall.prompt-budget`       - what the prompt-budget step
+//                                   decided: per-memory char cap,
+//                                   total char budget,
+//                                   dropLowestWhenOverBudget,
+//                                   dropped count, truncated
+//                                   count, total chars before /
+//                                   after the budget step, and
+//                                   the kept-set per-memory
+//                                   content lengths. A reader
+//                                   can see exactly how much the
+//                                   budget cut and whether the
+//                                   tail was dropped.
+//   - `recall.superseded-demotion` - what the superseded-memory
+//                                   demotion step changed:
+//                                   demoted id, raw score,
+//                                   demoted score, reason
+//                                   (`supersedes` /
+//                                   `supersededBy`), and the
+//                                   superseding id when
+//                                   applicable.
+//   - `recall.synthesis`          - what the recall synthesis
+//                                   provider call did and how
+//                                   the controller classified
+//                                   the result. Carries the
+//                                   provider / model used, the
+//                                   fallback flag, the call
+//                                   duration, the answer
+//                                   presence + length, a
+//                                   sanitized error kind /
+//                                   message (truncated), and
+//                                   the controller's verdict
+//                                   (`ok` / `refusal` / `weak`
+//                                   / `error`). No raw answer
+//                                   text, no raw reasoning
+//                                   text, no raw prompt body,
+//                                   and no API keys are ever
+//                                   placed in this payload.
+//                                   Used to diagnose why some
+//                                   recalls surface as
+//                                   `provider_error: provider
+//                                   answer was only reasoning;
+//                                   no visible answer to
+//                                   return` without changing
+//                                   the recall behavior.
 //
 // The events are emitted on the tool-boundary run id (the same
 // run that carries `tool.input` and `tool.output`). The trace
@@ -96,6 +158,12 @@ export const RECALL_LEXICAL_RANKING_KIND = "recall.lexical-ranking" as const;
 export const RECALL_SELECTED_CANDIDATES_KIND = "recall.selected-candidates" as const;
 /** Kind tag for the recall superseded-demotion stage event. */
 export const RECALL_SUPERSEDED_DEMOTION_KIND = "recall.superseded-demotion" as const;
+/** Kind tag for the recall adaptive-depth stage event. */
+export const RECALL_ADAPTIVE_DEPTH_KIND = "recall.adaptive-depth" as const;
+/** Kind tag for the recall prompt-budget stage event. */
+export const RECALL_PROMPT_BUDGET_KIND = "recall.prompt-budget" as const;
+/** Kind tag for the recall synthesis stage event. */
+export const RECALL_SYNTHESIS_KIND = "recall.synthesis" as const;
 
 // ---------------------------------------------------------------------------
 // Public types

@@ -80,7 +80,6 @@ test("FTS5 sync: INSERT trigger populates memories_fts with the summary", () => 
       providerId: null,
       modelId: null,
       confidence: null,
-      safetyFlags: [],
       metadata: {},
     });
 
@@ -130,7 +129,6 @@ test("FTS5 sync: UPDATE trigger refreshes memories_fts when summary changes", ()
       providerId: null,
       modelId: null,
       confidence: null,
-      safetyFlags: [],
       metadata: {},
     });
 
@@ -203,7 +201,6 @@ test("FTS5 sync: DELETE trigger removes the corresponding memories_fts row", () 
       providerId: null,
       modelId: null,
       confidence: null,
-      safetyFlags: [],
       metadata: {},
     });
 
@@ -338,7 +335,6 @@ test("FTS5: listActiveMemorySummariesByFts5 retrieves all matched memories witho
         providerId: "test",
         modelId: "test",
         confidence: 0.9,
-        safetyFlags: [],
         metadata: { tags: [`tag-${i}`] },
       });
       insertedIds.push(record.id);
@@ -381,7 +377,6 @@ test("FTS5: listActiveMemorySummariesByFts5 returns empty for no-match query wit
       providerId: "test",
       modelId: "test",
       confidence: 0.9,
-      safetyFlags: [],
       metadata: { tags: ["postgres"] },
     });
 

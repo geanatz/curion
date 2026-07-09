@@ -28,7 +28,61 @@ that other users on a shared host cannot read stored memory. The
 
 The memory database schema is additive and idempotent. **Raw input
 text is never persisted** — only controller-normalized summaries and
-metadata (kind, confidence, safety flags, timestamps).
+metadata (kind, confidence, state, timestamps, soft `relationship`
+pointers in the metadata JSON). The `state` column
+(`active` | `superseded` | `invalidated`) is the DB-level lifecycle
+gate for the recall path; the `metadata.relationship` block carries
+soft relationship / ranking information and never affects recall.
+
+### Lifecycle foundation (audit-only)
+
+A `memory_transitions` audit table backs the lifecycle foundation
+exposed by `transitionMemoryState` /
+`listMemoryTransitions` in `src/storage/storage.ts`. Every
+successful state change writes exactly one coherent row there
+inside the same transaction as the `memories.state` update, so
+the audit log is always in lock-step with the live row.
+
+Key properties:
+
+- **Add-only.** The table is created with `CREATE TABLE IF NOT
+  EXISTS` plus two indexes (`memory_id`, `created_at`). Existing
+  v2 DBs converge on the same final shape on next `initStorage`
+  without a destructive migration.
+- **Phase 3 supersession wiring.** The remember controller
+  calls `transitionMemoryState` to drive an
+  `active → superseded` transition for each older memory
+  that its existing conservative `detectSupersession`
+  heuristic identifies as explicitly superseded. The
+  transition writes a `memory_transitions` row with
+  `reason: "supersession"`,
+  `actor: "supersession-controller"`,
+  `triggering_memory_id` set to the new memory's id, the
+  detector's `confidence`, and an `metadata` blob that
+  carries the controller-side signal shape. The old row's
+  state change hides it from normal recall through the
+  existing `state = 'active'` filter on
+  `listActiveMemorySummaries`,
+  `listActiveMemorySummariesByFts5`, and
+  `listActiveMemoryRelationshipBlocks`. Invalidations and
+  manual reactivations remain explicitly out of scope; no
+  controller path transitions to or from `invalidated`.
+- **Conservative detector unchanged.** The wiring uses the
+  existing `detectSupersession` heuristic as the sole
+  trigger. Conflicts without explicit replacement language
+  and older-variant paraphrases without supersession
+  phrasing keep both rows active; only explicit
+  supersession phrasings plus topical overlap plus a
+  higher-id directional rule drive the state transition.
+- **Conservative transition matrix.** Self-transitions
+  (e.g. `active → active`) are intentionally rejected — they are
+  no-ops that would only pollute the audit log. Unknown memory
+  ids, unknown state values, and out-of-matrix transitions all
+  throw with a clear error and write no audit row.
+- **Read-only history access.** `listMemoryTransitions(memoryId,
+  { limit })` returns the chronological history for a row, with
+  malformed audit metadata falling back to `{}` (matching the
+  defensive fallback used for `memories.metadata`).
 
 ## Cross-project semantic search
 

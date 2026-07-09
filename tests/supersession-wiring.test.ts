@@ -6,8 +6,16 @@
  * supersedes an older related memory, the controller:
  *   1. Writes `supersedes: [oldId]` on the new row.
  *   2. Back-patches the old row with `supersededBy: [newId]`.
- *   3. Keeps the old row `active` (no state transition).
- *   4. The recall demotion helper then ranks the current above stale.
+ *   3. **Phase 3 wiring:** transitions the old row's `state` from
+ *      `active` to `superseded` via the audit-backed
+ *      `transitionMemoryState` seam, so the existing active filter
+ *      hides it from normal recall.
+ *   4. Writes an audit row to `memory_transitions` with reason
+ *      `supersession`, actor `supersession-controller`, the
+ *      detector confidence, and `triggering_memory_id` set to the
+ *      new memory's id.
+ *   5. Public API is unchanged: the saved `message` carries no
+ *      supersession metadata, no memory id, and no audit detail.
  *
  * No live provider calls. Uses scripted fetch and seam overrides.
  */
@@ -114,11 +122,14 @@ test("controller supersession: new row carries supersedes, old row carries super
     const newRel = newParsed.relationship as Record<string, unknown>;
     assert.deepEqual(newRel.supersedes, [1], "new row must supersede the old memory's id");
 
-    // Verify old row has supersededBy.
+    // Verify old row has supersededBy AND has been transitioned
+    // to `superseded` by the Phase 3 wiring (the explicit
+    // supersession path now hides the older memory from normal
+    // recall through the existing `state = 'active'` filter).
     const oldRow = handle.db
       .prepare("SELECT metadata, state FROM memories WHERE id = ?")
       .get(1) as { metadata: string; state: string };
-    assert.equal(oldRow.state, "active", "old row must remain active");
+    assert.equal(oldRow.state, "superseded", "old row must be transitioned to superseded");
 
     const oldParsed = JSON.parse(oldRow.metadata) as Record<string, unknown>;
     assert.equal(
@@ -139,19 +150,25 @@ test("controller supersession: new row carries supersedes, old row carries super
 });
 
 // ---------------------------------------------------------------------------
-// Test 2: Old row remains active (no state transition)
+// Test 2: Old row is transitioned to `superseded` by Phase 3 wiring
 // ---------------------------------------------------------------------------
 
-test("controller supersession: superseded old row stays active", async () => {
+test("controller supersession: superseded old row transitions to 'superseded' state", async () => {
   const { tmp, handle } = mkStorage();
   try {
-    // Pre-insert old memory.
+    // Pre-insert old memory. Use wording with enough token
+    // overlap + an explicit supersession-style phrase in
+    // the candidate summary so the conservative detector
+    // fires. The raw input carries explicit supersession
+    // language ("no longer use") so the detector uses the
+    // reduced overlap threshold (0.2) — this is the
+    // standard Phase 1 supersession-detection shape.
     {
       setRelatedMemoriesImpl(() => ({ memories: [], reason: "empty" }));
       const { fetchImpl } = scriptFetch(() =>
         okChatResponse(
           safeAnalysis({
-            summary: "We use SQLite for local development.",
+            summary: "We use SQLite for local development databases.",
             tags: ["sqlite", "local", "dev"],
           })
         )
@@ -172,7 +189,7 @@ test("controller supersession: superseded old row stays active", async () => {
       memories: [
         {
           id: 1,
-          memoryContent: "We use SQLite for local development.",
+          memoryContent: "We use SQLite for local development databases.",
         },
       ],
       reason: "test",
@@ -182,31 +199,42 @@ test("controller supersession: superseded old row stays active", async () => {
       okChatResponse(
         safeAnalysis({
           summary:
-            "We no longer use SQLite for local development; use Docker Compose with PostgreSQL instead.",
+            "We no longer use SQLite for local development databases; use Docker Compose with PostgreSQL instead.",
           tags: ["docker", "postgres", "local"],
         })
       )
     );
-    await runRememberController(handle, "Local dev stack update.", {
-      providerFetchImpl: fetchImpl,
-      providerPrimaryApiKey: TEST_PRIMARY_KEY,
-      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
-      providerPrimaryModel: TEST_PRIMARY_MODEL,
-      providerFallbackApiKey: TEST_FALLBACK_KEY,
-      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
-      providerFallbackModel: TEST_FALLBACK_MODEL,
-      now: pinnedNow(2),
-    });
+    await runRememberController(
+      handle,
+      "Local dev stack update: we no longer use SQLite for local development databases.",
+      {
+        providerFetchImpl: fetchImpl,
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+        providerPrimaryModel: TEST_PRIMARY_MODEL,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
+        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+        providerFallbackModel: TEST_FALLBACK_MODEL,
+        now: pinnedNow(2),
+      }
+    );
 
     const oldRow = handle.db.prepare("SELECT state FROM memories WHERE id = ?").get(1) as {
       state: string;
     };
-    assert.equal(oldRow.state, "active", "superseded memory must stay active");
+    // Phase 3 wiring: the explicit supersession path
+    // transitions the old row to `superseded` so it is
+    // hidden from normal recall (existing
+    // `listActiveMemorySummaries` /
+    // `listActiveMemorySummariesByFts5` /
+    // `listActiveMemoryRelationshipBlocks` filter on
+    // `state = 'active'`).
+    assert.equal(oldRow.state, "superseded", "superseded memory must transition to 'superseded'");
 
     const newRow = handle.db.prepare("SELECT state FROM memories WHERE id = ?").get(2) as {
       state: string;
     };
-    assert.equal(newRow.state, "active");
+    assert.equal(newRow.state, "active", "new memory stays active");
   } finally {
     resetRelatedMemoriesImpl();
     rmStorage(tmp, handle);
@@ -214,10 +242,19 @@ test("controller supersession: superseded old row stays active", async () => {
 });
 
 // ---------------------------------------------------------------------------
-// Test 3: Recall demotion ranks current above stale
+// Test 3: Superseded old memory is hidden from recall
 // ---------------------------------------------------------------------------
+//
+// Phase 3 wiring changes the expected recall behaviour for
+// explicitly superseded memories: the old row's `state` is now
+// `superseded`, so `listActiveMemorySummaries` (and the FTS5 /
+// relationship-block parallel reads) filter it out. The
+// superseding memory remains the only candidate surfaced for
+// the query, which is the whole point of the lifecycle wiring:
+// once the user explicitly supersedes an old fact, the recall
+// path stops returning the stale value.
 
-test("controller supersession: recall demotion ranks current above superseded stale", async () => {
+test("controller supersession: superseded old memory is hidden from recall (only the new memory surfaces)", async () => {
   const { tmp, handle } = mkStorage();
   try {
     // Pre-insert the old memory.
@@ -273,9 +310,10 @@ test("controller supersession: recall demotion ranks current above superseded st
       now: pinnedNow(1_700_000_000_001),
     });
 
-    // Recall with a query that matches both memories via shared tags.
-    // (Uses "minimax embeddings" because the lexical matcher requires
-    // exact token overlap; "embedding" ≠ "embeddings" without stemming.)
+    // Recall with a query that would have matched both memories
+    // when both were active. (Uses "minimax embeddings" because
+    // the lexical matcher requires exact token overlap;
+    // "embedding" ≠ "embeddings" without stemming.)
     const recallFetch = async () =>
       new Response(
         JSON.stringify({
@@ -307,12 +345,16 @@ test("controller supersession: recall demotion ranks current above superseded st
 
     assert.equal(recallOut.status, "answered");
     if (recallOut.status === "answered") {
-      const currentIdx = recallOut.sourceIds.indexOf(2);
-      const staleIdx = recallOut.sourceIds.indexOf(1);
-      assert.ok(currentIdx >= 0 && staleIdx >= 0, "both memories must be in sourceIds");
+      // The new superseding memory MUST appear in sourceIds.
       assert.ok(
-        currentIdx < staleIdx,
-        "current superseding memory must rank above superseded stale memory"
+        recallOut.sourceIds.includes(2),
+        "new superseding memory must remain in recall sourceIds"
+      );
+      // The old superseded memory MUST NOT appear in sourceIds —
+      // Phase 3 wiring hides it via the `state = 'active'` filter.
+      assert.ok(
+        !recallOut.sourceIds.includes(1),
+        "superseded old memory must be hidden from recall"
       );
     }
   } finally {
@@ -1129,6 +1171,1004 @@ test("controller supersession: no false positive supersession for unrelated old 
         "unrelated old memory must not be superseded"
       );
     }
+  } finally {
+    resetRelatedMemoriesImpl();
+    rmStorage(tmp, handle);
+  }
+});
+
+// ===========================================================================
+// Phase 3 wiring — supersession audit log + recall-exclusion + non-supersession paths
+// ===========================================================================
+//
+// These tests pin the Phase 3 wiring: when an explicit
+// supersession signal fires in the controller, the old row is
+// transitioned to `superseded` through the audit-backed
+// `transitionMemoryState` seam. The transition writes exactly
+// one coherent row to `memory_transitions` per superseded old
+// id, the existing active filter hides the row from recall, and
+// non-supersession paths (olderVariantsOf, conflictsWith without
+// supersession language) leave state unchanged.
+//
+// All tests use the same scripted fetch / seam-override pattern
+// the rest of the file uses. No live provider calls.
+// ---------------------------------------------------------------------------
+
+import {
+  listActiveMemoryRelationshipBlocks,
+  listActiveMemorySummaries,
+  listActiveMemorySummariesByFts5,
+  listMemoryTransitions,
+} from "../src/storage/storage.ts";
+
+// ---------------------------------------------------------------------------
+// Phase 3 — Test 1: Audit row is written with correct fields
+// ---------------------------------------------------------------------------
+
+test("phase3 supersession wiring: writes exactly one audit row per superseded old memory with correct reason/actor/confidence/triggering memory id", async () => {
+  const { tmp, handle } = mkStorage();
+  try {
+    // Pre-insert old memory about MiniMax embeddings.
+    {
+      setRelatedMemoriesImpl(() => ({ memories: [], reason: "empty" }));
+      const { fetchImpl } = scriptFetch(() =>
+        okChatResponse(
+          safeAnalysis({
+            summary: "We use MiniMax for text embeddings in the recall pipeline.",
+            tags: ["minimax", "embeddings"],
+          })
+        )
+      );
+      await runRememberController(handle, "MiniMax embedding decision.", {
+        providerFetchImpl: fetchImpl,
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+        providerPrimaryModel: TEST_PRIMARY_MODEL,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
+        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+        providerFallbackModel: TEST_FALLBACK_MODEL,
+        now: pinnedNow(1),
+      });
+    }
+
+    // Sanity: no audit rows on the old memory before the
+    // supersession fires.
+    assert.equal(listMemoryTransitions(handle, 1).length, 0);
+
+    setRelatedMemoriesImpl(() => ({
+      memories: [
+        {
+          id: 1,
+          memoryContent: "We use MiniMax for text embeddings in the recall pipeline.",
+        },
+      ],
+      reason: "test",
+    }));
+
+    const { fetchImpl } = scriptFetch(() =>
+      okChatResponse(
+        safeAnalysis({
+          summary:
+            "We no longer use MiniMax for text embeddings in the recall pipeline; use NVIDIA NIM instead.",
+          tags: ["nvidia", "embeddings"],
+        })
+      )
+    );
+    const outcome = await runRememberController(handle, "Switch embedding provider.", {
+      providerFetchImpl: fetchImpl,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
+      now: pinnedNow(2),
+    });
+    assert.equal(outcome.status, "saved");
+    if (outcome.status !== "saved") throw new Error("unreachable");
+    const newMemoryId = outcome.record.id;
+    assert.equal(newMemoryId, 2, "new memory should have id 2");
+
+    // Phase 3 invariant: exactly ONE audit row exists for
+    // the old memory, with the controller-driven supersession
+    // contract.
+    const history = listMemoryTransitions(handle, 1);
+    assert.equal(history.length, 1, "exactly one audit row per superseded old memory");
+    const row = history[0] as (typeof history)[number];
+    assert.equal(row.memoryId, 1, "audit row must reference the old memory id");
+    assert.equal(row.fromState, "active", "from_state must be 'active'");
+    assert.equal(row.toState, "superseded", "to_state must be 'superseded'");
+    assert.equal(row.reason, "supersession", "reason must identify the canonical supersession tag");
+    assert.equal(row.actor, "supersession-controller", "actor must identify the controller path");
+    assert.equal(
+      row.triggeringMemoryId,
+      newMemoryId,
+      "triggering_memory_id must be the new (superseding) memory id"
+    );
+    assert.ok(
+      row.confidence !== null && row.confidence > 0 && row.confidence <= 1,
+      `confidence must be a non-null value in (0, 1]; got ${row.confidence}`
+    );
+    // The audit metadata round-trips the detector source so
+    // forensic consumers can correlate the row with the
+    // controller's signal shape.
+    assert.equal(row.metadata.source, "detectSupersession");
+    assert.equal(row.metadata.detector, "controller");
+    assert.deepEqual(
+      row.metadata.supersededIds,
+      [1],
+      "metadata.supersededIds must echo the detector's signal shape"
+    );
+
+    // The new memory must NOT have any audit row: it stays
+    // `active` and no transition was performed on it.
+    const newHistory = listMemoryTransitions(handle, newMemoryId);
+    assert.equal(
+      newHistory.length,
+      0,
+      "no audit row is written for the new memory (it stays active)"
+    );
+  } finally {
+    resetRelatedMemoriesImpl();
+    rmStorage(tmp, handle);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Phase 3 — Test 2: listActiveMemorySummaries excludes superseded old memory
+// ---------------------------------------------------------------------------
+
+test("phase3 supersession wiring: listActiveMemorySummaries excludes the superseded old memory", async () => {
+  const { tmp, handle } = mkStorage();
+  try {
+    // Pre-insert old memory.
+    {
+      setRelatedMemoriesImpl(() => ({ memories: [], reason: "empty" }));
+      const { fetchImpl } = scriptFetch(() =>
+        okChatResponse(
+          safeAnalysis({
+            summary: "We use MiniMax for text embeddings in the recall pipeline.",
+            tags: ["minimax", "embeddings"],
+          })
+        )
+      );
+      await runRememberController(handle, "MiniMax embedding decision.", {
+        providerFetchImpl: fetchImpl,
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+        providerPrimaryModel: TEST_PRIMARY_MODEL,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
+        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+        providerFallbackModel: TEST_FALLBACK_MODEL,
+        now: pinnedNow(1),
+      });
+    }
+
+    setRelatedMemoriesImpl(() => ({
+      memories: [
+        {
+          id: 1,
+          memoryContent: "We use MiniMax for text embeddings in the recall pipeline.",
+        },
+      ],
+      reason: "test",
+    }));
+
+    const { fetchImpl } = scriptFetch(() =>
+      okChatResponse(
+        safeAnalysis({
+          summary:
+            "We no longer use MiniMax for text embeddings in the recall pipeline; use NVIDIA NIM instead.",
+          tags: ["nvidia", "embeddings"],
+        })
+      )
+    );
+    await runRememberController(handle, "Switch embedding provider.", {
+      providerFetchImpl: fetchImpl,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
+      now: pinnedNow(2),
+    });
+
+    // The active summary list MUST exclude the superseded
+    // old memory and MUST include the new superseding one.
+    const summaries = listActiveMemorySummaries(handle, { limit: 50 });
+    const ids = summaries.map((s) => s.id);
+    assert.ok(!ids.includes(1), "superseded old memory must be hidden from active summaries");
+    assert.ok(ids.includes(2), "new superseding memory must remain in active summaries");
+  } finally {
+    resetRelatedMemoriesImpl();
+    rmStorage(tmp, handle);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Phase 3 — Test 3: listActiveMemorySummariesByFts5 excludes superseded old memory
+// ---------------------------------------------------------------------------
+
+test("phase3 supersession wiring: listActiveMemorySummariesByFts5 excludes the superseded old memory", async () => {
+  const { tmp, handle } = mkStorage();
+  try {
+    // Pre-insert old memory.
+    {
+      setRelatedMemoriesImpl(() => ({ memories: [], reason: "empty" }));
+      const { fetchImpl } = scriptFetch(() =>
+        okChatResponse(
+          safeAnalysis({
+            summary: "We use MiniMax for text embeddings in the recall pipeline.",
+            tags: ["minimax", "embeddings"],
+          })
+        )
+      );
+      await runRememberController(handle, "MiniMax embedding decision.", {
+        providerFetchImpl: fetchImpl,
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+        providerPrimaryModel: TEST_PRIMARY_MODEL,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
+        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+        providerFallbackModel: TEST_FALLBACK_MODEL,
+        now: pinnedNow(1),
+      });
+    }
+
+    setRelatedMemoriesImpl(() => ({
+      memories: [
+        {
+          id: 1,
+          memoryContent: "We use MiniMax for text embeddings in the recall pipeline.",
+        },
+      ],
+      reason: "test",
+    }));
+
+    const { fetchImpl } = scriptFetch(() =>
+      okChatResponse(
+        safeAnalysis({
+          summary:
+            "We no longer use MiniMax for text embeddings in the recall pipeline; use NVIDIA NIM instead.",
+          tags: ["nvidia", "embeddings"],
+        })
+      )
+    );
+    await runRememberController(handle, "Switch embedding provider.", {
+      providerFetchImpl: fetchImpl,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
+      now: pinnedNow(2),
+    });
+
+    // The FTS5 active-filtered read MUST exclude the
+    // superseded old memory even when the query token
+    // would have matched it. Use the distinctive `minimax`
+    // token with an explicit OR so the FTS5 parser doesn't
+    // try to AND it with `nvidia`.
+    const matches = listActiveMemorySummariesByFts5(handle, "minimax OR nvidia", { limit: 50 });
+    const ids = matches.map((m) => m.id);
+    assert.ok(!ids.includes(1), "superseded old memory must be hidden from FTS5 active read");
+    assert.ok(ids.includes(2), "new superseding memory must remain in FTS5 active read");
+  } finally {
+    resetRelatedMemoriesImpl();
+    rmStorage(tmp, handle);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Phase 3 — Test 4: listActiveMemoryRelationshipBlocks excludes superseded old memory
+// ---------------------------------------------------------------------------
+
+test("phase3 supersession wiring: listActiveMemoryRelationshipBlocks excludes the superseded old memory", async () => {
+  const { tmp, handle } = mkStorage();
+  try {
+    // Pre-insert old memory.
+    {
+      setRelatedMemoriesImpl(() => ({ memories: [], reason: "empty" }));
+      const { fetchImpl } = scriptFetch(() =>
+        okChatResponse(
+          safeAnalysis({
+            summary: "We use MiniMax for text embeddings in the recall pipeline.",
+            tags: ["minimax", "embeddings"],
+          })
+        )
+      );
+      await runRememberController(handle, "MiniMax embedding decision.", {
+        providerFetchImpl: fetchImpl,
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+        providerPrimaryModel: TEST_PRIMARY_MODEL,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
+        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+        providerFallbackModel: TEST_FALLBACK_MODEL,
+        now: pinnedNow(1),
+      });
+    }
+
+    setRelatedMemoriesImpl(() => ({
+      memories: [
+        {
+          id: 1,
+          memoryContent: "We use MiniMax for text embeddings in the recall pipeline.",
+        },
+      ],
+      reason: "test",
+    }));
+
+    const { fetchImpl } = scriptFetch(() =>
+      okChatResponse(
+        safeAnalysis({
+          summary:
+            "We no longer use MiniMax for text embeddings in the recall pipeline; use NVIDIA NIM instead.",
+          tags: ["nvidia", "embeddings"],
+        })
+      )
+    );
+    await runRememberController(handle, "Switch embedding provider.", {
+      providerFetchImpl: fetchImpl,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
+      now: pinnedNow(2),
+    });
+
+    // The parallel relationship-block read MUST also
+    // exclude the superseded old memory.
+    const blocks = listActiveMemoryRelationshipBlocks(handle, { limit: 50 });
+    const ids = blocks.map((b) => b.id);
+    assert.ok(
+      !ids.includes(1),
+      "superseded old memory must be hidden from relationship-block read"
+    );
+    assert.ok(ids.includes(2), "new superseding memory must remain in relationship-block read");
+  } finally {
+    resetRelatedMemoriesImpl();
+    rmStorage(tmp, handle);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Phase 3 — Test 5: Relationship metadata remains intact after state transition
+// ---------------------------------------------------------------------------
+
+test("phase3 supersession wiring: relationship metadata (supersededBy on old row, supersedes on new row) remains intact after state transition", async () => {
+  const { tmp, handle } = mkStorage();
+  try {
+    // Pre-insert old memory.
+    {
+      setRelatedMemoriesImpl(() => ({ memories: [], reason: "empty" }));
+      const { fetchImpl } = scriptFetch(() =>
+        okChatResponse(
+          safeAnalysis({
+            summary: "We use MiniMax for text embeddings in the recall pipeline.",
+            tags: ["minimax", "embeddings"],
+          })
+        )
+      );
+      await runRememberController(handle, "MiniMax embedding decision.", {
+        providerFetchImpl: fetchImpl,
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+        providerPrimaryModel: TEST_PRIMARY_MODEL,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
+        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+        providerFallbackModel: TEST_FALLBACK_MODEL,
+        now: pinnedNow(1),
+      });
+    }
+
+    setRelatedMemoriesImpl(() => ({
+      memories: [
+        {
+          id: 1,
+          memoryContent: "We use MiniMax for text embeddings in the recall pipeline.",
+        },
+      ],
+      reason: "test",
+    }));
+
+    const { fetchImpl } = scriptFetch(() =>
+      okChatResponse(
+        safeAnalysis({
+          summary:
+            "We no longer use MiniMax for text embeddings in the recall pipeline; use NVIDIA NIM instead.",
+          tags: ["nvidia", "embeddings"],
+        })
+      )
+    );
+    const outcome = await runRememberController(handle, "Switch embedding provider.", {
+      providerFetchImpl: fetchImpl,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
+      now: pinnedNow(2),
+    });
+    assert.equal(outcome.status, "saved");
+    if (outcome.status !== "saved") throw new Error("unreachable");
+    const newMemoryId = outcome.record.id;
+
+    // Old row state is `superseded` (Phase 3).
+    const oldRow = handle.db.prepare("SELECT state FROM memories WHERE id = ?").get(1) as {
+      state: string;
+    };
+    assert.equal(oldRow.state, "superseded");
+
+    // Old row's metadata STILL carries `supersededBy: [newId]`
+    // (relationship metadata is preserved on the audit-only row).
+    const oldMetadataRow = handle.db
+      .prepare("SELECT metadata FROM memories WHERE id = ?")
+      .get(1) as { metadata: string };
+    const oldParsed = JSON.parse(oldMetadataRow.metadata) as Record<string, unknown>;
+    const oldRel = oldParsed.relationship as Record<string, unknown> | undefined;
+    assert.ok(oldRel, "old row's relationship block must be preserved");
+    assert.deepEqual(
+      oldRel?.supersededBy,
+      [newMemoryId],
+      "old row's supersededBy pointer must be preserved after the state transition"
+    );
+
+    // New row's metadata STILL carries `supersedes: [1]`.
+    const newMetadataRow = handle.db
+      .prepare("SELECT metadata FROM memories WHERE id = ?")
+      .get(newMemoryId) as { metadata: string };
+    const newParsed = JSON.parse(newMetadataRow.metadata) as Record<string, unknown>;
+    const newRel = newParsed.relationship as Record<string, unknown> | undefined;
+    assert.ok(newRel, "new row's relationship block must be preserved");
+    assert.deepEqual(
+      newRel?.supersedes,
+      [1],
+      "new row's supersedes pointer must be preserved after the state transition"
+    );
+  } finally {
+    resetRelatedMemoriesImpl();
+    rmStorage(tmp, handle);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Phase 3 — Test 6: No transition for olderVariants-only (no supersession signal)
+// ---------------------------------------------------------------------------
+
+test("phase3 supersession wiring: olderVariants-of signal alone does NOT transition state (conservative)", async () => {
+  const { tmp, handle } = mkStorage();
+  try {
+    // Pre-insert old memory with content that triggers the
+    // `olderVariantsOf` heuristic but NOT supersession
+    // language. The candidate paraphrase is so close that
+    // the older-variant detector fires, but no supersession
+    // phrasings ("no longer", "supersedes", "replaced by")
+    // are present.
+    {
+      setRelatedMemoriesImpl(() => ({ memories: [], reason: "empty" }));
+      const { fetchImpl } = scriptFetch(() =>
+        okChatResponse(
+          safeAnalysis({
+            summary:
+              "Postgres 16 is the primary database for the project; it stores all customer records reliably.",
+            tags: ["postgres"],
+          })
+        )
+      );
+      await runRememberController(handle, "Postgres 16 database decision.", {
+        providerFetchImpl: fetchImpl,
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+        providerPrimaryModel: TEST_PRIMARY_MODEL,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
+        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+        providerFallbackModel: TEST_FALLBACK_MODEL,
+        now: pinnedNow(1),
+      });
+    }
+
+    setRelatedMemoriesImpl(() => ({
+      memories: [
+        {
+          id: 1,
+          memoryContent:
+            "Postgres 16 is the primary database for the project; it stores all customer records reliably.",
+        },
+      ],
+      reason: "test",
+    }));
+
+    // Near-paraphrase of the old memory, with NO supersession
+    // phrasings. The `olderVariantsOf` heuristic may fire
+    // here because the Jaccard is high; supersession must NOT.
+    const { fetchImpl } = scriptFetch(() =>
+      okChatResponse(
+        safeAnalysis({
+          summary:
+            "Postgres 16 is the primary database for the project; it stores all customer records reliably and consistently.",
+          tags: ["postgres"],
+        })
+      )
+    );
+    await runRememberController(handle, "Postgres 16 database decision revisited.", {
+      providerFetchImpl: fetchImpl,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
+      now: pinnedNow(2),
+    });
+
+    // Old row's state MUST remain `active`. No supersession
+    // language was present, so the detector did not fire
+    // and no transition was written.
+    const oldState = (
+      handle.db.prepare("SELECT state FROM memories WHERE id = ?").get(1) as { state: string }
+    ).state;
+    assert.equal(oldState, "active", "olderVariants-of alone must not transition state");
+
+    // No audit row should exist for the old memory.
+    assert.equal(listMemoryTransitions(handle, 1).length, 0);
+  } finally {
+    resetRelatedMemoriesImpl();
+    rmStorage(tmp, handle);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Phase 3 — Test 7: No transition for conflicts-only (no supersession signal)
+// ---------------------------------------------------------------------------
+
+test("phase3 supersession wiring: conflicts-with signal alone does NOT transition state (conservative)", async () => {
+  const { tmp, handle } = mkStorage();
+  try {
+    // Pre-insert old memory about Postgres 16.
+    {
+      setRelatedMemoriesImpl(() => ({ memories: [], reason: "empty" }));
+      const { fetchImpl } = scriptFetch(() =>
+        okChatResponse(
+          safeAnalysis({
+            summary:
+              "Postgres 16 is the primary database for the project; it stores all customer records reliably.",
+            tags: ["postgres"],
+          })
+        )
+      );
+      await runRememberController(handle, "Postgres 16 database decision.", {
+        providerFetchImpl: fetchImpl,
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+        providerPrimaryModel: TEST_PRIMARY_MODEL,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
+        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+        providerFallbackModel: TEST_FALLBACK_MODEL,
+        now: pinnedNow(1),
+      });
+    }
+
+    setRelatedMemoriesImpl(() => ({
+      memories: [
+        {
+          id: 1,
+          memoryContent:
+            "Postgres 16 is the primary database for the project; it stores all customer records reliably.",
+        },
+      ],
+      reason: "test",
+    }));
+
+    // High-overlap asymmetric negation: the candidate
+    // contains "not" but the old memory does not. This
+    // should fire `conflictsWith` (Phase B) but NOT
+    // supersession. The candidate wording intentionally
+    // avoids any supersession-trigger phrase ("no longer
+    // use", "do not use", "supersedes", "replaced by",
+    // "deprecated", "overrides", etc.) so the supersession
+    // detector stays silent and no transition happens.
+    const { fetchImpl } = scriptFetch(() =>
+      okChatResponse(
+        safeAnalysis({
+          summary:
+            "Postgres 16 is not the primary database for the project; customer records do not go there.",
+          tags: ["postgres"],
+        })
+      )
+    );
+    await runRememberController(
+      handle,
+      "Postgres 16 is not the primary database for the project.",
+      {
+        providerFetchImpl: fetchImpl,
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+        providerPrimaryModel: TEST_PRIMARY_MODEL,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
+        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+        providerFallbackModel: TEST_FALLBACK_MODEL,
+        now: pinnedNow(2),
+      }
+    );
+
+    // Old row's state MUST remain `active`. Conflicts are
+    // preserved per the conservative rule: they are kept
+    // visible (with both rows active) and flagged through
+    // metadata, not resolved by hiding the older memory.
+    const oldState = (
+      handle.db.prepare("SELECT state FROM memories WHERE id = ?").get(1) as { state: string }
+    ).state;
+    assert.equal(
+      oldState,
+      "active",
+      "conflicts-with alone must not transition state (conservative)"
+    );
+
+    // No audit row should exist for the old memory.
+    assert.equal(listMemoryTransitions(handle, 1).length, 0);
+  } finally {
+    resetRelatedMemoriesImpl();
+    rmStorage(tmp, handle);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Phase 3 — Test 8: No transition when no supersession language
+// ---------------------------------------------------------------------------
+
+test("phase3 supersession wiring: no supersession language → no transition and no audit row", async () => {
+  const { tmp, handle } = mkStorage();
+  try {
+    // Pre-insert old memory.
+    {
+      setRelatedMemoriesImpl(() => ({ memories: [], reason: "empty" }));
+      const { fetchImpl } = scriptFetch(() =>
+        okChatResponse(
+          safeAnalysis({
+            summary: "The project uses Postgres 16.",
+            tags: ["postgres"],
+          })
+        )
+      );
+      await runRememberController(handle, "Postgres 16 decision.", {
+        providerFetchImpl: fetchImpl,
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+        providerPrimaryModel: TEST_PRIMARY_MODEL,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
+        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+        providerFallbackModel: TEST_FALLBACK_MODEL,
+        now: pinnedNow(1),
+      });
+    }
+
+    setRelatedMemoriesImpl(() => ({
+      memories: [
+        {
+          id: 1,
+          memoryContent: "The project uses Postgres 16.",
+        },
+      ],
+      reason: "test",
+    }));
+
+    // New memory has high overlap but NO supersession
+    // language (no "no longer", "supersedes", "replaced",
+    // etc.). Detector must not fire; no transition.
+    const { fetchImpl } = scriptFetch(() =>
+      okChatResponse(
+        safeAnalysis({
+          summary: "After evaluation we decided to use Postgres 17 for better performance.",
+          tags: ["postgres"],
+        })
+      )
+    );
+    await runRememberController(handle, "Upgrade Postgres.", {
+      providerFetchImpl: fetchImpl,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
+      now: pinnedNow(2),
+    });
+
+    // Old row stays active. New row also stays active.
+    const oldState = (
+      handle.db.prepare("SELECT state FROM memories WHERE id = ?").get(1) as { state: string }
+    ).state;
+    assert.equal(oldState, "active", "no transition when no supersession language");
+
+    // No audit row for the old memory.
+    assert.equal(listMemoryTransitions(handle, 1).length, 0);
+  } finally {
+    resetRelatedMemoriesImpl();
+    rmStorage(tmp, handle);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Phase 3 — Test 9: Multiple superseded memories get multiple audit rows
+// ---------------------------------------------------------------------------
+
+test("phase3 supersession wiring: multiple superseded memories → one audit row per old memory, all transitioned", async () => {
+  const { tmp, handle } = mkStorage();
+  try {
+    // Pre-insert two related memories about MiniMax.
+    // Both summaries share enough tokens with the candidate
+    // (after dropping stopwords) for the conservative
+    // detector to fire supersession on each. Token Jaccard
+    // for the candidate against each old memory must clear
+    // the 0.5 floor the detector enforces when the raw
+    // input has no explicit supersession phrasing.
+    for (const summary of [
+      "We use MiniMax for text embeddings in the recall pipeline.",
+      "We use MiniMax text embeddings in the recall pipeline.",
+    ]) {
+      setRelatedMemoriesImpl(() => ({ memories: [], reason: "empty" }));
+      const { fetchImpl } = scriptFetch(() =>
+        okChatResponse(safeAnalysis({ summary, tags: ["minimax", "embeddings"] }))
+      );
+      const r = await runRememberController(handle, "MiniMax embedding decision.", {
+        providerFetchImpl: fetchImpl,
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+        providerPrimaryModel: TEST_PRIMARY_MODEL,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
+        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+        providerFallbackModel: TEST_FALLBACK_MODEL,
+        now: pinnedNow(1_700_000_000_000 + summary.length),
+      });
+      assert.equal(r.status, "saved");
+    }
+
+    setRelatedMemoriesImpl(() => ({
+      memories: [
+        {
+          id: 1,
+          memoryContent: "We use MiniMax for text embeddings in the recall pipeline.",
+        },
+        {
+          id: 2,
+          memoryContent: "We use MiniMax text embeddings in the recall pipeline.",
+        },
+      ],
+      reason: "test",
+    }));
+
+    const { fetchImpl } = scriptFetch(() =>
+      okChatResponse(
+        safeAnalysis({
+          summary:
+            "We no longer use MiniMax for text embeddings in the recall pipeline; use NVIDIA NIM instead.",
+          tags: ["nvidia", "embeddings"],
+        })
+      )
+    );
+    const outcome = await runRememberController(handle, "Switch embeddings.", {
+      providerFetchImpl: fetchImpl,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
+      now: pinnedNow(1_700_000_000_999),
+    });
+    assert.equal(outcome.status, "saved");
+    if (outcome.status !== "saved") throw new Error("unreachable");
+    const newMemoryId = outcome.record.id;
+
+    // Both old rows are transitioned to `superseded`.
+    for (const oldId of [1, 2]) {
+      const state = (
+        handle.db.prepare("SELECT state FROM memories WHERE id = ?").get(oldId) as {
+          state: string;
+        }
+      ).state;
+      assert.equal(state, "superseded", `old memory ${oldId} must be superseded`);
+
+      // Exactly one audit row per old memory, with the new
+      // memory id as triggering_memory_id.
+      const history = listMemoryTransitions(handle, oldId);
+      assert.equal(history.length, 1, `old memory ${oldId} must have exactly one audit row`);
+      const row = history[0] as (typeof history)[number];
+      assert.equal(row.fromState, "active");
+      assert.equal(row.toState, "superseded");
+      assert.equal(row.reason, "supersession");
+      assert.equal(row.actor, "supersession-controller");
+      assert.equal(row.triggeringMemoryId, newMemoryId);
+    }
+  } finally {
+    resetRelatedMemoriesImpl();
+    rmStorage(tmp, handle);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Phase 3 — Test 10: Public API is unchanged (controller message shape)
+// ---------------------------------------------------------------------------
+
+test("phase3 supersession wiring: public message does NOT mention state transition or audit row", async () => {
+  const { tmp, handle } = mkStorage();
+  try {
+    // Pre-insert old memory.
+    {
+      setRelatedMemoriesImpl(() => ({ memories: [], reason: "empty" }));
+      const { fetchImpl } = scriptFetch(() =>
+        okChatResponse(
+          safeAnalysis({
+            summary: "We use MiniMax for text embeddings in the recall pipeline.",
+            tags: ["minimax", "embeddings"],
+          })
+        )
+      );
+      await runRememberController(handle, "MiniMax embedding decision.", {
+        providerFetchImpl: fetchImpl,
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+        providerPrimaryModel: TEST_PRIMARY_MODEL,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
+        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+        providerFallbackModel: TEST_FALLBACK_MODEL,
+        now: pinnedNow(1),
+      });
+    }
+
+    setRelatedMemoriesImpl(() => ({
+      memories: [
+        {
+          id: 1,
+          memoryContent: "We use MiniMax for text embeddings in the recall pipeline.",
+        },
+      ],
+      reason: "test",
+    }));
+
+    const { fetchImpl } = scriptFetch(() =>
+      okChatResponse(
+        safeAnalysis({
+          summary:
+            "We no longer use MiniMax for text embeddings in the recall pipeline; use NVIDIA NIM instead.",
+          tags: ["nvidia", "embeddings"],
+        })
+      )
+    );
+    const outcome = await runRememberController(handle, "Switch embedding provider.", {
+      providerFetchImpl: fetchImpl,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
+      now: pinnedNow(2),
+    });
+
+    assert.equal(outcome.status, "saved");
+    if (outcome.status !== "saved") throw new Error("unreachable");
+
+    // The controller's `message` (the public surface the tool
+    // layer serializes into the MCP `text` content block) is
+    // byte-identical to the pre-Phase-3 shape: it carries the
+    // kind and confidence only, with no id, no
+    // "superseded", and no audit detail.
+    assert.match(outcome.message, /^saved \([a-z]+, confidence \d+\.\d{2}\)$/);
+    for (const tok of [
+      "supersedes",
+      "supersededBy",
+      "superseded",
+      "supersession",
+      "supersession-controller",
+      "transitionMemoryState",
+      "memory_transitions",
+    ]) {
+      assert.ok(
+        !outcome.message.includes(tok),
+        `public message must not mention '${tok}'; got ${JSON.stringify(outcome.message)}`
+      );
+    }
+    assert.ok(!/#\d+/.test(outcome.message), "public message must not include any #N memory id");
+  } finally {
+    resetRelatedMemoriesImpl();
+    rmStorage(tmp, handle);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Phase 3 — Test 11: Already-superseded old row is handled safely (no crash)
+// ---------------------------------------------------------------------------
+
+test("phase3 supersession wiring: already-superseded old row is skipped safely (no crash, no duplicate audit row)", async () => {
+  const { tmp, handle } = mkStorage();
+  try {
+    // Pre-insert old memory.
+    {
+      setRelatedMemoriesImpl(() => ({ memories: [], reason: "empty" }));
+      const { fetchImpl } = scriptFetch(() =>
+        okChatResponse(
+          safeAnalysis({
+            summary: "We use MiniMax for text embeddings in the recall pipeline.",
+            tags: ["minimax", "embeddings"],
+          })
+        )
+      );
+      await runRememberController(handle, "MiniMax embedding decision.", {
+        providerFetchImpl: fetchImpl,
+        providerPrimaryApiKey: TEST_PRIMARY_KEY,
+        providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+        providerPrimaryModel: TEST_PRIMARY_MODEL,
+        providerFallbackApiKey: TEST_FALLBACK_KEY,
+        providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+        providerFallbackModel: TEST_FALLBACK_MODEL,
+        now: pinnedNow(1),
+      });
+    }
+
+    // Manually transition the old memory to `superseded`
+    // (simulating a prior explicit supersession) BEFORE the
+    // candidate runs. The detector will skip the row
+    // (because `other.state !== "active"`), so no transition
+    // is attempted.
+    handle.db.prepare("UPDATE memories SET state = 'superseded' WHERE id = 1").run();
+
+    setRelatedMemoriesImpl(() => ({
+      memories: [
+        {
+          id: 1,
+          memoryContent: "We use MiniMax for text embeddings in the recall pipeline.",
+        },
+      ],
+      reason: "test",
+    }));
+
+    const { fetchImpl } = scriptFetch(() =>
+      okChatResponse(
+        safeAnalysis({
+          summary:
+            "We no longer use MiniMax for text embeddings in the recall pipeline; use NVIDIA NIM instead.",
+          tags: ["nvidia", "embeddings"],
+        })
+      )
+    );
+    // The detector filters on `state === "active"`, so the
+    // candidate's `supersession` signal would already be
+    // empty when the old memory is inactive — but we drive
+    // the seam explicitly so the test simulates the
+    // detector's normal candidate projection. The seam
+    // projects the related memory's summary as-is (the
+    // detector itself is what filters on state).
+    //
+    // Result: the controller call succeeds without
+    // crashing, the new row is saved, and the old row's
+    // state stays `superseded` (the detector skips it).
+    const outcome = await runRememberController(handle, "Switch embedding provider.", {
+      providerFetchImpl: fetchImpl,
+      providerPrimaryApiKey: TEST_PRIMARY_KEY,
+      providerPrimaryBaseUrl: TEST_PRIMARY_BASE_URL,
+      providerPrimaryModel: TEST_PRIMARY_MODEL,
+      providerFallbackApiKey: TEST_FALLBACK_KEY,
+      providerFallbackBaseUrl: TEST_FALLBACK_BASE_URL,
+      providerFallbackModel: TEST_FALLBACK_MODEL,
+      now: pinnedNow(2),
+    });
+    assert.equal(outcome.status, "saved", "controller must save the new memory");
+    if (outcome.status !== "saved") throw new Error("unreachable");
+
+    // The old memory's state stays `superseded` (no
+    // duplicate transition attempted because the detector
+    // filters on `state === "active"`).
+    const oldState = (
+      handle.db.prepare("SELECT state FROM memories WHERE id = ?").get(1) as { state: string }
+    ).state;
+    assert.equal(oldState, "superseded", "already-superseded old row must not be re-transitioned");
   } finally {
     resetRelatedMemoriesImpl();
     rmStorage(tmp, handle);
