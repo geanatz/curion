@@ -187,10 +187,9 @@ function getProjectRootFromHandle(handle: StorageHandle): string {
  */
 export async function handleRemember(input: unknown): Promise<RememberResult> {
   // Open the trace run at the public tool boundary. The helper
-  // is a no-op when `CURION_TRACE_ENABLED=0` or the writer is
-  // unavailable; in either case the rest of the handler runs
-  // unchanged.
-  const trace = startToolBoundaryTrace({ toolName: "remember", input });
+  // Trace only the tool identity; request text remains exclusively in the
+  // public handler and is never passed into trace persistence.
+  const trace = startToolBoundaryTrace({ toolName: "remember", input: undefined });
   try {
     if (
       typeof input !== "object" ||
@@ -271,7 +270,7 @@ export async function handleRemember(input: unknown): Promise<RememberResult> {
       // `structuredContent`; we just persist the public shape
       // here so the trace DB never carries internal ids / model
       // metadata / safety class strings.
-      trace.recordOutput(buildRememberStructuredContent(result));
+      trace.recordOutput({ status: result.status });
       trace.finish("ok");
       return result;
     } finally {
@@ -302,7 +301,7 @@ export async function handleRemember(input: unknown): Promise<RememberResult> {
     // the public `message` field. The trace lifecycle
     // (input -> output -> finish) and the non-fatal error
     // contract are preserved.
-    trace.recordOutput(buildRememberStructuredContent(result));
+    trace.recordOutput({ status: result.status });
     trace.finish("ok");
     return result;
   } catch (err) {

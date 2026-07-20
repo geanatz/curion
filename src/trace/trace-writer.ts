@@ -39,7 +39,6 @@
 import type { Database, Statement } from "better-sqlite3";
 import { logger } from "../logging/logger.js";
 import { isTraceEnabled } from "./trace-enabled.js";
-import { redactPayload } from "./trace-redaction.js";
 import {
   type StorageConfig,
   type TraceStorageHandle,
@@ -205,7 +204,7 @@ export function writeTraceRun(input: TraceRunInput): number | null {
   const state = requireState();
   if (!state) return null;
   const startedAt = input.startedAt ?? Date.now();
-  const metadataJson = safeStringify(input.metadata);
+  const metadataJson = safeStringify(sanitizeTraceRunMetadata(input.metadata));
   try {
     const info = state.stmts.insertRun.run({
       name: input.name,
@@ -237,13 +236,14 @@ export function writeTraceEvent(input: TraceEventInput): boolean {
     return false;
   }
   const ts = input.ts ?? Date.now();
-  // Redact first; capture the top-level redacted keys separately
-  // so a reader can see at a glance which keys were scrubbed.
-  const redacted = redactPayload(input.payload);
-  const redactedKeys = captureRedactedKeys(input.payload, redacted);
+  // Defense in depth: project every payload into the closed metadata schema
+  // before any redaction or serialization. Unknown/content-bearing fields are
+  // dropped, so even a future caller cannot persist prose or secrets here.
+  const metadataPayload = sanitizeTraceEventPayload(input.payload);
+  const redactedKeys: string[] = [];
   let payloadJson: string | null;
   try {
-    payloadJson = safeStringify(redacted);
+    payloadJson = safeStringify(metadataPayload);
   } catch (err) {
     logWarn(`trace writer: writeTraceEvent: payload not serializable: ${(err as Error).message}`);
     return false;
@@ -287,7 +287,10 @@ export function updateTraceRun(id: number, patch: TraceRunPatch): boolean {
       id,
       ended_at: typeof patch.endedAt === "number" ? patch.endedAt : null,
       status: typeof patch.status === "string" ? patch.status : null,
-      metadata: patch.metadata === undefined ? null : safeStringify(patch.metadata),
+      metadata:
+        patch.metadata === undefined
+          ? null
+          : safeStringify(sanitizeTraceRunMetadata(patch.metadata)),
     });
     return info.changes > 0;
   } catch (err) {
@@ -387,6 +390,56 @@ function requireState(): WriterState | null {
   const handle = getOrInitTraceWriter();
   if (!handle) return null;
   return writerState;
+}
+
+function sanitizeTraceRunMetadata(value: unknown): Record<string, unknown> {
+  const source = isPlainObject(value) ? value : {};
+  const out: Record<string, unknown> = { schemaVersion: 1 };
+  if (source.tool === "remember" || source.tool === "recall") out.tool = source.tool;
+  if (source.boundary === "public-tool-handler") out.boundary = source.boundary;
+  if (isSafeNonNegativeNumber(source.durationMs)) out.durationMs = source.durationMs;
+  return out;
+}
+
+const SAFE_STATUSES = new Set([
+  "in_progress",
+  "ok",
+  "error",
+  "cancelled",
+  "saved",
+  "rejected",
+  "no_memory",
+  "weak_match",
+  "answered",
+  "provider_error",
+]);
+const SAFE_COUNT_KEYS = [
+  "count",
+  "readCount",
+  "storageLimit",
+  "candidateCount",
+  "topK",
+  "httpCalls",
+  "projectsTouched",
+  "semanticResultsAdded",
+  "lexicalResultsCount",
+] as const;
+
+/** Closed projection for persisted event metadata. Never copy arbitrary fields. */
+function sanitizeTraceEventPayload(value: unknown): Record<string, unknown> {
+  const source = isPlainObject(value) ? value : {};
+  const out: Record<string, unknown> = { schemaVersion: 1 };
+  if (source.tool === "remember" || source.tool === "recall") out.tool = source.tool;
+  if (typeof source.status === "string" && SAFE_STATUSES.has(source.status))
+    out.status = source.status;
+  for (const key of SAFE_COUNT_KEYS) {
+    if (isSafeNonNegativeNumber(source[key])) out[key] = source[key];
+  }
+  return out;
+}
+
+function isSafeNonNegativeNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
 
 function safeStringify(value: unknown): string {

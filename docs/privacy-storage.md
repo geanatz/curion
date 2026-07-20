@@ -172,6 +172,18 @@ For the recent dependency-graph security work (the `protobufjs` CVE
 cluster and the `esbuild` dev-only advisory), see
 [SECURITY.md](../SECURITY.md).
 
+## Trace diagnostics
+
+Trace diagnostics are stored separately at `<projectRoot>/.curion/trace.sqlite`
+and are **off unless `CURION_TRACE_ENABLED` is explicitly set to `1`, `true`,
+`yes`, or `on`**. The trace database keeps its existing tables for compatibility,
+but new records use a closed metadata-only schema. Trace rows may contain event
+type, status, timestamps/duration, approved counts, bounded enums, and schema
+version. They never contain remember input, recall queries, memory or summary
+text, public tool results, provider prompts/responses, synthesized answers, or
+arbitrary error messages. The writer independently drops unknown fields before
+SQLite serialization.
+
 ## Secrets and `.env` files
 
 Curion does **not** load `.env` files at runtime. All configuration —

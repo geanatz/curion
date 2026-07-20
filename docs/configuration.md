@@ -32,6 +32,19 @@ primary provider to use `remember` and `recall`.
 | `CURION_PRIMARY_MODEL`    | Model id for the primary provider (e.g. `gpt-4o`, or any Anthropic model you have access to). |
 | `CURION_PRIMARY_API_FORMAT` | API format: `openai-compatible` (default) or `anthropic`. Controls whether to use the OpenAI-compatible HTTP path or the official Anthropic SDK. |
 
+### Privacy-preserving trace diagnostics
+
+Tracing is **disabled by default**. To enable local operational diagnostics, set
+`CURION_TRACE_ENABLED` to one of the explicit allowlisted values: `1`, `true`,
+`yes`, or `on` (case-insensitive, surrounding whitespace ignored). Any other
+value—including unset, empty, whitespace-only, and `enabled`—keeps tracing off.
+
+When enabled, Curion writes only a closed metadata schema to the separate
+`trace.sqlite` database: event type, status, timestamps/duration, approved
+numeric counts, bounded enums, and schema version. It never stores tool input,
+queries, memory text, summaries, public output, provider content, synthesized
+answers, or arbitrary error messages.
+
 Optional primary-provider knobs:
 
 | Variable                          | Default           | Description |

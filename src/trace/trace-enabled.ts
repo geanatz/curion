@@ -1,38 +1,18 @@
 /**
- * Trace enable / disable switch.
+ * Trace enable switch.
  *
- * Phase 1 contract:
- *   - Tracing is ON by default. The trace storage module is
- *     lazily initialized on first use, and the writer API is a
- *     no-op when disabled.
- *   - Tracing can be turned OFF via the environment variable
- *     `CURION_TRACE_ENABLED`. The following case-insensitive
- *     values turn tracing OFF: `0`, `false`, `no`, `off`. Any
- *     other value (including the empty string) leaves tracing
- *     ON. This matches common CLI / env-flag conventions
- *     (`CURION_*_ENABLED=0` is the documented off switch).
- *   - The check is computed at call time so tests can flip the
- *     switch by mutating `process.env` between calls.
- *
- * The switch is intentionally separate from the storage handle.
- * The writer asks `isTraceEnabled()` before doing any work, so a
- * disabled trace never opens a DB connection and never touches
- * the filesystem.
+ * Privacy contract: tracing is disabled by default. It is enabled only by an
+ * explicit, allowlisted CURION_TRACE_ENABLED value. Disabled tracing never
+ * opens the trace database or performs trace I/O.
  */
-
-/** Names of environment variables whose value disables tracing. */
-const OFF_VALUES: ReadonlySet<string> = new Set(["0", "false", "no", "off"]);
+const ENABLED_VALUES: ReadonlySet<string> = new Set(["1", "true", "yes", "on"]);
 
 /**
- * True if the trace writer should be active. Reads
- * `process.env.CURION_TRACE_ENABLED` at call time. Defaults to
- * `true` (enabled) when the variable is unset or has any value
- * other than the recognized off values.
+ * Returns true only when CURION_TRACE_ENABLED is an explicit allowlisted value.
+ * Unset, empty, whitespace-only, unknown, and false-like values are disabled.
  */
 export function isTraceEnabled(): boolean {
   const raw = process.env.CURION_TRACE_ENABLED;
-  if (typeof raw !== "string") return true;
-  const v = raw.trim().toLowerCase();
-  if (v === "") return true;
-  return !OFF_VALUES.has(v);
+  if (typeof raw !== "string") return false;
+  return ENABLED_VALUES.has(raw.trim().toLowerCase());
 }

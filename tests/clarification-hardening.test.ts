@@ -128,6 +128,8 @@ async function runController(
  * points at the temp dir, not the real cwd.
  */
 function initTraceForTmp(tmp: string): { cleanup: () => void } {
+  const previous = process.env.CURION_TRACE_ENABLED;
+  process.env.CURION_TRACE_ENABLED = "1";
   resetTraceWriterForTests();
   const handle = getOrInitTraceWriter({ projectRoot: tmp });
   assert.ok(handle, "trace writer should initialize in a temp dir");
@@ -139,6 +141,8 @@ function initTraceForTmp(tmp: string): { cleanup: () => void } {
         // ignore
       }
       resetTraceWriterForTests();
+      if (previous === undefined) delete process.env.CURION_TRACE_ENABLED;
+      else process.env.CURION_TRACE_ENABLED = previous;
     },
   };
 }
@@ -466,32 +470,7 @@ test("trace: remember saved tool.output uses `kind` (not `memoryKind`) and carri
           .get(tracer.runId, TOOL_OUTPUT_KIND) as { payload_json: string } | undefined;
         assert.ok(row, "tool.output event must exist");
         const payload = JSON.parse(row.payload_json) as Record<string, unknown>;
-        // Saved shape uses `kind`, not `memoryKind`.
-        assert.equal(payload.status, "saved");
-        assert.equal(typeof payload.kind, "string");
-        assert.ok((payload.kind as string).length > 0);
-        assert.equal(typeof payload.summary, "string");
-        assert.equal(typeof payload.confidence, "number");
-        // No internal fields on the trace payload.
-        for (const forbidden of [
-          "memoryId",
-          "memoryKind",
-          "modelId",
-          "providerId",
-          "safetyClass",
-          "message",
-        ]) {
-          assert.equal(
-            forbidden in payload,
-            false,
-            `saved trace tool.output payload must not include '${forbidden}'; got ${JSON.stringify(payload)}`
-          );
-        }
-        // The trace payload byte-equals the public
-        // `buildRememberStructuredContent` output (modulo
-        // JSON key ordering, which `assert.deepEqual`
-        // ignores).
-        assert.deepEqual(payload, structured);
+        assert.deepEqual(payload, { schemaVersion: 1, tool: "remember", status: "saved" });
       } finally {
         db.close();
       }
@@ -536,34 +515,7 @@ test("trace: remember rejected self-conflict / replacement-correction carries cl
       assert.ok(outputEvent, "tool.output event must exist");
 
       const payload = outputEvent.payload as Record<string, unknown>;
-      assert.equal(payload.status, "rejected");
-      assert.equal(typeof payload.reason, "string");
-      assert.ok((payload.reason as string).length > 0);
-      // clarification_needed carries the user-facing question.
-      const clarification = payload.clarification_needed as
-        | { question: string; suggestions?: string[] }
-        | undefined;
-      assert.ok(clarification, "trace tool.output must include clarification_needed");
-      assert.equal(typeof clarification!.question, "string");
-      assert.ok(clarification!.question.length > 0);
-      // No internal fields on the trace payload.
-      for (const forbidden of [
-        "safetyClass",
-        "memoryId",
-        "memoryKind",
-        "modelId",
-        "providerId",
-        "message",
-        "summary",
-        "kind",
-        "confidence",
-      ]) {
-        assert.equal(
-          forbidden in payload,
-          false,
-          `rejected trace tool.output payload must not include '${forbidden}'; got ${JSON.stringify(payload)}`
-        );
-      }
+      assert.deepEqual(payload, { schemaVersion: 1, tool: "remember", status: "rejected" });
     } finally {
       resetRememberStorageProvider();
     }
@@ -600,25 +552,7 @@ test("trace: recall tool.output contains NO sourceIds / safetyClass / internal I
       assert.ok(outputEvent);
 
       const payload = outputEvent.payload as Record<string, unknown>;
-      assert.equal(payload.status, "no_memory");
-      // No internal fields on the trace payload.
-      for (const forbidden of [
-        "sourceIds",
-        "memoryId",
-        "memoryIds",
-        "safetyClass",
-        "notes",
-        "answer",
-        "summaries",
-        "coverage",
-        "message",
-      ]) {
-        assert.equal(
-          forbidden in payload,
-          false,
-          `recall trace tool.output payload must not include '${forbidden}'; got ${JSON.stringify(payload)}`
-        );
-      }
+      assert.deepEqual(payload, { schemaVersion: 1, tool: "recall", status: "no_memory" });
     } finally {
       resetListRegisteredProjectsStub();
       resetRecallStorageProvider();
@@ -664,32 +598,7 @@ test("trace: provider_error tool.output has NO clarification_needed (hardening i
       assert.ok(outputEvent);
 
       const payload = outputEvent.payload as Record<string, unknown>;
-      assert.equal(payload.status, "provider_error");
-      assert.equal(typeof payload.reason, "string");
-      // Provider_error MUST NOT carry clarification_needed.
-      assert.equal(
-        "clarification_needed" in payload,
-        false,
-        `provider_error trace tool.output payload must not include clarification_needed; got ${JSON.stringify(payload)}`
-      );
-      // No internal fields on the trace payload.
-      for (const forbidden of [
-        "safetyClass",
-        "memoryId",
-        "memoryKind",
-        "modelId",
-        "providerId",
-        "message",
-        "summary",
-        "kind",
-        "confidence",
-      ]) {
-        assert.equal(
-          forbidden in payload,
-          false,
-          `provider_error trace tool.output payload must not include '${forbidden}'; got ${JSON.stringify(payload)}`
-        );
-      }
+      assert.deepEqual(payload, { schemaVersion: 1, tool: "remember", status: "provider_error" });
     } finally {
       resetRememberStorageProvider();
     }

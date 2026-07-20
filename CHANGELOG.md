@@ -176,6 +176,18 @@ wire shape is now aligned with the declared schema.
   server-runtime policy are unchanged; the new docs only describe
   what was already true.
 
+## [0.3.7] - 2026-07-20
+
+### Security
+
+- **Trace diagnostics are now opt-in and metadata-only.** `CURION_TRACE_ENABLED`
+  is disabled unless explicitly set to `1`, `true`, `yes`, or `on`. When enabled,
+  trace records retain only a closed allowlist of operational metadata; tool
+  inputs and outputs, memory/query text, provider content, synthesized answers,
+  and arbitrary error messages are excluded. The trace writer independently
+  drops unknown fields before persistence while retaining the existing trace
+  SQLite table layout.
+
 ## [0.3.6] - 2026-06-30
 
 User-facing CLI release. Adds the two metadata flags

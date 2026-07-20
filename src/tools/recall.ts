@@ -870,10 +870,9 @@ function formatExternalContext(
  */
 export async function handleRecall(input: unknown): Promise<RecallResult> {
   // Open the trace run at the public tool boundary. The helper
-  // is a no-op when `CURION_TRACE_ENABLED=0` or the writer is
-  // unavailable; in either case the rest of the handler runs
-  // unchanged.
-  const trace = startToolBoundaryTrace({ toolName: "recall", input });
+  // Trace only the tool identity; the recall query remains in the handler and
+  // is never passed into trace persistence.
+  const trace = startToolBoundaryTrace({ toolName: "recall", input: undefined });
   try {
     if (
       typeof input !== "object" ||
@@ -973,7 +972,7 @@ export async function handleRecall(input: unknown): Promise<RecallResult> {
       // just persist the public shape here so the trace DB
       // never carries internal memory ids / safety class
       // strings / the public `message` field.
-      trace.recordOutput(buildRecallStructuredContent(result));
+      trace.recordOutput({ status: result.status });
       trace.finish("ok");
       return result;
     } finally {
@@ -1112,7 +1111,7 @@ export async function handleRecall(input: unknown): Promise<RecallResult> {
     // or the note `Note:` prefix. The trace lifecycle
     // (input -> stage events -> output -> finish) and the
     // non-fatal error contract are preserved.
-    trace.recordOutput(buildRecallStructuredContent(result));
+    trace.recordOutput({ status: result.status });
     trace.finish("ok");
     return result;
   } catch (err) {
