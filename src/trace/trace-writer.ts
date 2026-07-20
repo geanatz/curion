@@ -207,7 +207,7 @@ export function writeTraceRun(input: TraceRunInput): number | null {
   const metadataJson = safeStringify(sanitizeTraceRunMetadata(input.metadata));
   try {
     const info = state.stmts.insertRun.run({
-      name: input.name,
+      name: safeRunName(input.name),
       started_at: startedAt,
       ended_at: null,
       status: "in_progress",
@@ -259,7 +259,7 @@ export function writeTraceEvent(input: TraceEventInput): boolean {
     state.stmts.insertEvent.run({
       run_id: input.runId,
       ts,
-      kind: input.kind,
+      kind: safeEventKind(input.kind),
       payload_json: payloadJson,
       redacted_keys: safeStringify(redactedKeys),
       sequence,
@@ -390,6 +390,24 @@ function requireState(): WriterState | null {
   const handle = getOrInitTraceWriter();
   if (!handle) return null;
   return writerState;
+}
+
+const SAFE_RUN_NAMES = new Set(["remember", "recall"]);
+const SAFE_EVENT_KINDS = new Set([
+  "tool.input",
+  "tool.output",
+  "recall.active-memory-read",
+  "recall.lexical-ranking",
+  "recall.selected-candidates",
+  "recall.superseded-demotion",
+]);
+
+function safeRunName(value: unknown): string {
+  return typeof value === "string" && SAFE_RUN_NAMES.has(value) ? value : "unknown";
+}
+
+function safeEventKind(value: unknown): string {
+  return typeof value === "string" && SAFE_EVENT_KINDS.has(value) ? value : "unknown";
 }
 
 function sanitizeTraceRunMetadata(value: unknown): Record<string, unknown> {

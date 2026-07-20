@@ -142,3 +142,37 @@ test("trace-writer: disabled tracing does not create trace SQLite", () => {
     cleanup(projectRoot);
   }
 });
+
+test("trace-writer: run names and event kinds never persist arbitrary input, provider text, or error prose", () => {
+  const projectRoot = mkProjectRoot();
+  const rawInput = "raw user input must not persist";
+  const providerText = "provider response text must not persist";
+  const errorProse = "Error: detailed provider failure prose must not persist";
+  try {
+    withEnv("1", () => {
+      resetTraceWriterForTests();
+      assert.ok(getOrInitTraceWriter({ projectRoot }));
+      const runId = writeTraceRun({ name: rawInput });
+      assert.ok(runId);
+      assert.equal(
+        writeTraceEvent({ runId, kind: `${providerText}: ${errorProse}`, payload: {} }),
+        true
+      );
+      assert.equal(listTraceRuns()[0]?.name, "unknown");
+      assert.equal(listTraceEventsForRun(runId)[0]?.kind, "unknown");
+      closeTraceWriter();
+      const db = new Database(resolveTraceDbPath({ projectRoot }), { readonly: true });
+      try {
+        const rows = db.prepare("SELECT name FROM trace_runs UNION ALL SELECT kind FROM trace_events").all() as Array<{ name?: string; kind?: string }>;
+        const stored = JSON.stringify(rows);
+        assert.equal(stored.includes(rawInput), false);
+        assert.equal(stored.includes(providerText), false);
+        assert.equal(stored.includes(errorProse), false);
+      } finally {
+        db.close();
+      }
+    });
+  } finally {
+    cleanup(projectRoot);
+  }
+});
