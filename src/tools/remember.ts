@@ -47,7 +47,6 @@ import { embedOnRemember } from "../retrieval/semantic/embed-on-remember.js";
 import { createSemanticEmbedder } from "../retrieval/semantic/embedder.js";
 import { type StorageHandle, closeStorage, initStorage } from "../storage/storage.js";
 import { startToolBoundaryTrace } from "../trace/index.js";
-import { buildRememberStructuredContent } from "./remember-projection.js";
 import type { Clarification } from "./remember-structured-content.js";
 
 export const REMEMBER_TOOL_NAME = "remember" as const;

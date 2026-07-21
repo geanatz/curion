@@ -110,7 +110,6 @@ import {
   listActiveMemorySummariesByFts5,
 } from "../storage/storage.js";
 import { startToolBoundaryTrace } from "../trace/index.js";
-import { buildRecallStructuredContent } from "./recall-projection.js";
 import type { Clarification } from "./remember-structured-content.js";
 
 export const RECALL_TOOL_NAME = "recall" as const;
