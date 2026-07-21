@@ -163,11 +163,75 @@ test("trace-writer: run names and event kinds never persist arbitrary input, pro
       closeTraceWriter();
       const db = new Database(resolveTraceDbPath({ projectRoot }), { readonly: true });
       try {
-        const rows = db.prepare("SELECT name FROM trace_runs UNION ALL SELECT kind FROM trace_events").all() as Array<{ name?: string; kind?: string }>;
+        const rows = db
+          .prepare("SELECT name FROM trace_runs UNION ALL SELECT kind FROM trace_events")
+          .all() as Array<{ name?: string; kind?: string }>;
         const stored = JSON.stringify(rows);
         assert.equal(stored.includes(rawInput), false);
         assert.equal(stored.includes(providerText), false);
         assert.equal(stored.includes(errorProse), false);
+      } finally {
+        db.close();
+      }
+    });
+  } finally {
+    cleanup(projectRoot);
+  }
+});
+
+test("trace-writer: run statuses are runtime allowlisted and cross-project semantic kind remains intact", () => {
+  const projectRoot = mkProjectRoot();
+  const maliciousStatus = "provider error prose must not persist";
+
+  try {
+    withEnv("1", () => {
+      resetTraceWriterForTests();
+      assert.ok(getOrInitTraceWriter({ projectRoot }));
+
+      const runId = writeTraceRun({ name: "recall" });
+      assert.ok(runId);
+
+      assert.equal(
+        updateTraceRun(runId as number, {
+          endedAt: 123,
+          status: maliciousStatus as never,
+        }),
+        true
+      );
+
+      assert.equal(
+        writeTraceEvent({
+          runId: runId as number,
+          kind: "recall.cross-project-semantic",
+          payload: {},
+        }),
+        true
+      );
+
+      closeTraceWriter();
+
+      const db = new Database(resolveTraceDbPath({ projectRoot }), {
+        readonly: true,
+        fileMustExist: true,
+      });
+
+      try {
+        const run = db
+          .prepare("SELECT status, ended_at AS endedAt FROM trace_runs WHERE id = ?")
+          .get(runId) as {
+          status: string;
+          endedAt: number | null;
+        };
+
+        const event = db.prepare("SELECT kind FROM trace_events WHERE run_id = ?").get(runId) as {
+          kind: string;
+        };
+
+        assert.equal(run.status, "in_progress");
+        assert.equal(run.endedAt, 123);
+        assert.equal(event.kind, "recall.cross-project-semantic");
+
+        assert.equal(JSON.stringify({ run, event }).includes(maliciousStatus), false);
       } finally {
         db.close();
       }

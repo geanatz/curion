@@ -286,7 +286,7 @@ export function updateTraceRun(id: number, patch: TraceRunPatch): boolean {
     const info = state.stmts.updateRun.run({
       id,
       ended_at: typeof patch.endedAt === "number" ? patch.endedAt : null,
-      status: typeof patch.status === "string" ? patch.status : null,
+      status: safeRunStatus(patch.status),
       metadata:
         patch.metadata === undefined
           ? null
@@ -392,6 +392,8 @@ function requireState(): WriterState | null {
   return writerState;
 }
 
+const SAFE_RUN_STATUSES = new Set<string>(["in_progress", "ok", "error", "cancelled"]);
+
 const SAFE_RUN_NAMES = new Set(["remember", "recall"]);
 const SAFE_EVENT_KINDS = new Set([
   "tool.input",
@@ -400,7 +402,14 @@ const SAFE_EVENT_KINDS = new Set([
   "recall.lexical-ranking",
   "recall.selected-candidates",
   "recall.superseded-demotion",
+  "recall.cross-project-semantic",
 ]);
+
+function safeRunStatus(value: unknown): TraceRunStatus | null {
+  return typeof value === "string" && SAFE_RUN_STATUSES.has(value)
+    ? (value as TraceRunStatus)
+    : null;
+}
 
 function safeRunName(value: unknown): string {
   return typeof value === "string" && SAFE_RUN_NAMES.has(value) ? value : "unknown";
