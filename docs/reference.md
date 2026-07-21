@@ -221,14 +221,13 @@ are display-only — the agent should not switch on their content.
 
 ## Local trace layer (background)
 
-Curion keeps a separate, local trace database (`.curion/trace.sqlite`)
-that records a `run` + `input/output` event pair per public tool
-invocation, plus internal retrieval diagnostics (lexical rankings,
-selected candidates, superseded demotions). The trace is **on** by
-default; set `CURION_TRACE_ENABLED=0` to turn it off. Trace payloads
-are redacted: raw input and sensitive keys are stripped before write.
-See [Privacy & storage](privacy-storage.md#local-trace) for the full
-contract.
+Curion can keep a separate local diagnostics database at
+`.curion/trace.sqlite`. Tracing is **disabled by default** and activates
+only for the explicit values `1`, `true`, `yes`, or `on`. Enabled records
+contain only closed, allowlisted operational metadata; tool input,
+memory content, public output, provider content, secrets, arbitrary error
+prose, and unknown fields are not persisted. See
+[Privacy & storage](privacy-storage.md#local-trace) for the full contract.
 
 The trace is **not** part of the public MCP surface. It is internal to
 Curion and is not surfaced to agents.

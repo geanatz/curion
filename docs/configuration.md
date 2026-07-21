@@ -148,16 +148,21 @@ synthesis-decision trace — useful for "I stored it but `recall` says
 
 ## Local trace
 
-Curion keeps a separate, local trace database (`.curion/trace.sqlite`)
-that records a `run` + `input/output` event pair per public tool
-invocation, plus internal retrieval diagnostics (lexical rankings,
-selected candidates, superseded demotions). The trace is **on** by
-default. Trace payloads are redacted before write: raw input and
-sensitive keys are stripped.
+Curion can keep a separate local diagnostics database at
+`.curion/trace.sqlite`. Tracing is **disabled by default** and activates
+only when `CURION_TRACE_ENABLED` is explicitly set to `1`, `true`, `yes`,
+or `on` (case-insensitive, surrounding whitespace ignored).
+
+When enabled, the writer persists only a closed metadata schema:
+allowlisted event types and statuses, timestamps and duration, approved
+numeric counts, bounded enums, and schema version. Tool input, queries,
+memory text, summaries, public output, provider content, synthesized
+answers, arbitrary error prose, secrets, and unknown fields are never
+persisted.
 
 | Variable                | Default | Description |
 |-------------------------|---------|---|
-| `CURION_TRACE_ENABLED`  | `on`    | Set to `0`, `false`, `no`, or `off` to disable the trace writer. The DB is never opened when disabled. |
+| `CURION_TRACE_ENABLED`  | unset / off | Set to `1`, `true`, `yes`, or `on` to enable metadata-only local diagnostics. Every other value keeps tracing disabled and the trace DB unopened. |
 
 The trace writer itself does **not** auto-purge on startup. The default
 retention window for the internal `purgeTraceRunsOlderThan` helper is

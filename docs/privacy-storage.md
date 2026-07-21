@@ -89,28 +89,19 @@ is created with mode `0700`.
 
 ## Local trace
 
-Curion keeps a separate, local trace database (`.curion/trace.sqlite`)
-that records a `run` + `input/output` event pair per public tool
-invocation, plus internal retrieval diagnostics (lexical rankings,
-selected candidates, superseded demotions).
+Curion can keep a separate local diagnostics database at
+`.curion/trace.sqlite`. The trace is **disabled by default** and activates
+only when `CURION_TRACE_ENABLED` is explicitly set to `1`, `true`, `yes`,
+or `on`.
 
-**The trace is ON by default.** Set `CURION_TRACE_ENABLED=0` to disable
-it; when disabled, the trace DB is never opened.
-
-### Redaction
-
-Trace payloads are redacted before write:
-
-- **Raw input text** is never written to the trace. Only event metadata
-  (kind, payload-shape fields) is recorded.
-- **Sensitive keys** (`apiKey`, `token`, `authorization`, `password`,
-  `secret`, etc.) are stripped from any structured payload before
-  persistence. Reasoning blocks are redacted; `Note:` and `message:`
-  wrappers are stripped.
-- The redaction pattern set lives in
-  `src/trace/trace-redaction.ts`; it is intentionally conservative
-  (broad-stripping for ambiguous key names) and is enforced at the
-  writer boundary, not by callers.
+Enabled trace records use a closed metadata-only schema. They may contain
+allowlisted run names, event kinds and statuses, timestamps, duration,
+approved numeric counts, bounded enums, and schema version. They never
+contain remember input, recall queries, memory or summary text, public
+tool output, provider prompts or responses, synthesized answers,
+arbitrary error prose, credentials, or unknown caller-supplied fields.
+The writer independently projects allowlisted metadata before SQLite
+serialization; privacy does not depend on redacting arbitrary payloads.
 
 The trace is **internal** to Curion:
 
