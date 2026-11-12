@@ -131,8 +131,11 @@ export function initStorage(config: StorageConfig = {}): StorageHandle {
   ensureColumn(db, "embeddings", "model_id", "TEXT");
   ensureColumn(db, "embeddings", "schema_version", "TEXT NOT NULL DEFAULT 'v1'");
   ensureColumn(db, "embeddings", "summary_hash", "TEXT");
-  ensureColumn(db, "embeddings", "created_at", "INTEGER NOT NULL");
-  ensureColumn(db, "embeddings", "updated_at", "INTEGER NOT NULL");
+  // Legacy databases may already contain embeddings. SQLite cannot add a
+  // NOT NULL column without a non-NULL default to a populated table. Zero
+  // marks an unknown historical timestamp; new writes supply real timestamps.
+  ensureColumn(db, "embeddings", "created_at", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(db, "embeddings", "updated_at", "INTEGER NOT NULL DEFAULT 0");
 
   // FTS5 is part of the retrieval variant set. We create the virtual
   // table on top of a stub columns; raw text persistence is gated by

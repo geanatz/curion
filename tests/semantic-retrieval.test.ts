@@ -14,7 +14,10 @@
 
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { test } from "node:test";
+import Database from "better-sqlite3";
 
 // ---------------------------------------------------------------------------
 // Imports from production modules (NOT benchmark)
@@ -38,6 +41,7 @@ import {
 } from "../src/retrieval/semantic/score.ts";
 import {
   type StorageHandle,
+  initStorage,
   deleteEmbedding,
   getEmbedding,
   getEmbeddingsForMemories,
@@ -265,6 +269,54 @@ test("storage: embeddings table has new columns", () => {
     assert.ok(colNames.has("updated_at"), "missing updated_at column");
   } finally {
     rmStorage(tmp, handle);
+  }
+});
+
+test("storage: populated legacy embeddings migrate without losing data", () => {
+  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), "curion-legacy-embeddings-"));
+  const curionDir = path.join(projectRoot, ".curion");
+  fs.mkdirSync(curionDir);
+  const legacyDb = new Database(path.join(curionDir, "curion.sqlite"));
+  const originalVector = Buffer.from(new Float32Array([0.25, 0.75]).buffer);
+  try {
+    legacyDb.exec(`
+      CREATE TABLE memories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind TEXT NOT NULL DEFAULT 'memory',
+        created_at INTEGER NOT NULL
+      );
+      CREATE TABLE embeddings (
+        memory_id INTEGER PRIMARY KEY,
+        dim INTEGER NOT NULL,
+        vec BLOB NOT NULL,
+        FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE
+      );
+      INSERT INTO memories (id, kind, created_at) VALUES (1, 'fact', 1234);
+    `);
+    legacyDb.prepare("INSERT INTO embeddings (memory_id, dim, vec) VALUES (?, ?, ?)")
+      .run(1, 2, originalVector);
+  } finally {
+    legacyDb.close();
+  }
+
+  let handle: StorageHandle | undefined;
+  try {
+    // Both the first migration and a repeat open must preserve the original row.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      handle = initStorage({ projectRoot });
+      const row = handle.db.prepare(
+        "SELECT dim, vec, created_at, updated_at FROM embeddings WHERE memory_id = 1"
+      ).get() as { dim: number; vec: Buffer; created_at: number; updated_at: number };
+      assert.equal(row.dim, 2);
+      assert.deepEqual(row.vec, originalVector);
+      assert.equal(row.created_at, 0);
+      assert.equal(row.updated_at, 0);
+      handle.db.close();
+      handle = undefined;
+    }
+  } finally {
+    handle?.db.close();
+    fs.rmSync(projectRoot, { recursive: true, force: true });
   }
 });
 
