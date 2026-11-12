@@ -8,6 +8,7 @@
 
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import path from "node:path";
 import { test } from "node:test";
 
 import {
@@ -30,7 +31,7 @@ import { mkStorage, rmStorage } from "./_helpers/test-storage.ts";
 
 test("project config: resolveProjectConfigPath returns correct path", () => {
   const configPath = resolveProjectConfigPath("/tmp/myproject");
-  assert.ok(configPath.endsWith("/tmp/myproject/.curion/config.json"), `got: ${configPath}`);
+  assert.equal(configPath, path.join("/tmp/myproject", ".curion", "config.json"));
 });
 
 test("project config: readProjectConfig returns non-private for missing file", () => {

@@ -580,8 +580,8 @@ test("hybrid variant is benchmark-only: production recall() controller is not mo
   // public tool surface is still exactly `remember` +
   // `recall`.
   assert.deepEqual(
-    serverSrc.match(/server\.registerTool\(\s*"(\w+)"/g),
-    ['server.registerTool(\n    "remember"', 'server.registerTool(\n    "recall"'],
+    Array.from(serverSrc.matchAll(/server\.registerTool\(\s*"(\w+)"/g), (match) => match[1]),
+    ["remember", "recall"],
     "public MCP tool surface must remain exactly remember + recall"
   );
 });

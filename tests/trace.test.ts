@@ -301,7 +301,12 @@ function modeStr(path: string): string | null {
   }
 }
 
-test("trace-storage: initTraceStorage sets owner-only (0o600) on the main DB file", () => {
+test("trace-storage: initTraceStorage sets owner-only (0o600) on the main DB file", (t) => {
+  if (process.platform === "win32") {
+    // Windows reports synthesized POSIX mode bits; this cannot verify NTFS ACLs.
+    t.skip("POSIX mode check is not meaningful on Windows; verify NTFS ACLs separately");
+    return;
+  }
   const tmp = mkTraceDir();
   let handle: ReturnType<typeof initTraceStorage> | null = null;
   try {
