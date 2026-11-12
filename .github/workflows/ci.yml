@@ -1,8 +1,11 @@
 name: CI
 
 on:
-  # Stable-release policy: only manual dispatch, no automatic PR or push CI.
   workflow_dispatch:
+  # TEMPORARY: PR #7 synthetic NTFS diagnosis only; revert after evidence capture.
+  pull_request:
+    branches: [main]
+    types: [synchronize]
 
 # Least-privilege: the workflow only needs to read the repository contents.
 # No write permissions, no token scopes beyond what is strictly necessary.
@@ -11,6 +14,7 @@ permissions:
 
 jobs:
   build-and-test:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ${{ matrix.os }}
 
     strategy:
@@ -39,3 +43,23 @@ jobs:
 
       - name: Smoke-test packaged npm artifact
         run: npm run test:package
+
+
+  ntfs-diagnostic:
+    # Single disposable Windows runner, only PR #7; no main/release changes.
+    if: github.event_name == 'pull_request' && github.event.pull_request.number == 7
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Build candidate
+        run: npm run build
+      - name: Inspect synthetic NTFS ACL inheritance
+        shell: pwsh
+        run: ./.github/scripts/ntfs-acl-probe.ps1
