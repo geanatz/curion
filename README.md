@@ -280,6 +280,10 @@ on shell resolution — see the same page.
 
 ## Documentation
 
+- **[Project direction](docs/direction.md)** — stable product boundaries
+  and links to authoritative technical references.
+- **[Decision retrieval](docs/decisions/README.md)** — how to distinguish
+  approved decisions from experiments and unverified historical notes.
 - **[MCP client setup](docs/mcp-clients.md)** — Claude Code, Codex CLI,
   OpenCode, Claude Desktop, Pi caveat, generic stdio, Windows `npx`
   wrapper, absolute-path guidance.
