@@ -1,8 +1,11 @@
 name: CI
 
 on:
-  # Stable-release policy: CI is dispatched explicitly by the owner.
   workflow_dispatch:
+  # TEMPORARY exception for PR #7 review, remove after capturing checks.
+  pull_request:
+    branches: [main]
+    types: [synchronize]
 
 # Least-privilege: the workflow only needs to read the repository contents.
 # No write permissions, no token scopes beyond what is strictly necessary.
@@ -11,6 +14,8 @@ permissions:
 
 jobs:
   build-and-test:
+    # Only draft PR #7 may use the temporary automatic trigger.
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.number == 7
     runs-on: ${{ matrix.os }}
 
     strategy:
