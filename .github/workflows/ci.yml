@@ -34,3 +34,6 @@ jobs:
 
       - name: Run tests
         run: npm test
+
+      - name: Smoke-test packaged npm artifact
+        run: npm run test:package

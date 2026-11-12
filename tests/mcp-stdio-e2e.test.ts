@@ -237,21 +237,18 @@ class StdioMcpClient {
    * a socket. PATH / HOME / TMPDIR / NODE_* are kept so
    * `node` can resolve and load modules.
    */
-  static isolatedEnv(): NodeJS.ProcessEnv {
+  static isolatedEnv(parentEnv: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
     const env: NodeJS.ProcessEnv = {};
-    for (const [k, v] of Object.entries(process.env)) {
+    for (const [k, v] of Object.entries(parentEnv)) {
       if (v === undefined) continue;
-      // Strip every CURION_* key (project config), the
-      // provider-specific aliases, and any key that
-      // could enable a real network call.
+      // Do not inherit either current CURION_PRIMARY_* / CURION_FALLBACK_*
+      // provider settings or legacy provider aliases from the developer's
+      // environment. E2E tests must never contact live provider APIs.
       if (
-        k === "CURION_PROVIDER_PRIMARY_KEY" ||
-        k === "CURION_PROVIDER_FALLBACK_KEY" ||
+        k.startsWith("CURION_") ||
         k === "MINIMAX_API_KEY" ||
         k === "NVIDIA_NIM_API_KEY" ||
-        k === "GROQ_API_KEY" ||
-        k === "CURION_PROJECT_ROOT" ||
-        k === "CURION_LOG_LEVEL"
+        k === "GROQ_API_KEY"
       ) {
         continue;
       }
@@ -578,6 +575,34 @@ function rmTempHome(tmpHome: string): void {
     }
   }
 }
+
+test("e2e: isolatedEnv excludes current and legacy provider credentials", () => {
+  const inherited = {
+    PATH: "/synthetic-path",
+    HOME: "/synthetic-home",
+    CURION_PRIMARY_API_KEY: "synthetic-primary",
+    CURION_PRIMARY_BASE_URL: "https://example.invalid",
+    CURION_PRIMARY_MODEL: "synthetic-model",
+    CURION_FALLBACK_API_KEY: "synthetic-fallback",
+    CURION_FALLBACK_BASE_URL: "https://example.invalid",
+    CURION_FALLBACK_MODEL: "synthetic-model",
+    CURION_SEMANTIC_ALLOW_REMOTE: "1",
+    CURION_PROVIDER_PRIMARY_KEY: "legacy-primary",
+    CURION_LOG_LEVEL: "debug",
+    MINIMAX_API_KEY: "synthetic-minimax",
+    NVIDIA_NIM_API_KEY: "synthetic-nvidia",
+    GROQ_API_KEY: "synthetic-groq",
+  };
+  const env = StdioMcpClient.isolatedEnv(inherited);
+  for (const key of Object.keys(inherited)) {
+    if (key !== "CURION_LOG_LEVEL" && (key.startsWith("CURION_") || key.endsWith("_API_KEY"))) {
+      assert.equal(env[key], undefined, key + " must not leak into the child");
+    }
+  }
+  assert.equal(env.PATH, inherited.PATH);
+  assert.equal(env.HOME, inherited.HOME);
+  assert.equal(env.CURION_LOG_LEVEL, "info");
+});
 
 // ---------------------------------------------------------------------------
 // 1. initialize handshake

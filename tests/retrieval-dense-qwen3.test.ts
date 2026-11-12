@@ -482,6 +482,7 @@ test("createDenseEmbedder: 'qwen3:pooling=<unknown>' falls back to the default",
 test("createDenseEmbedder: object spec with backend=qwen3 dispatches to Qwen3", async () => {
   const { embedder } = await createDenseEmbedder({
     backend: "qwen3",
+    skip: true,
     cacheDir: "/tmp/curion-qwen3-obj-spec-cache",
   });
   assert.equal(embedder.metadata.backend, "qwen3");

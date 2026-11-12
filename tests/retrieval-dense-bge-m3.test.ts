@@ -439,6 +439,7 @@ test("createDenseEmbedder: 'bge-m3:pooling=<unknown>' falls back to the default"
 test("createDenseEmbedder: object spec with backend=bge-m3 dispatches to BGE-M3", async () => {
   const { embedder } = await createDenseEmbedder({
     backend: "bge-m3",
+    skip: true,
     cacheDir: "/tmp/curion-bge-m3-obj-spec-cache",
   });
   assert.equal(embedder.metadata.backend, "bge-m3");

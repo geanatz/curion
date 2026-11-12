@@ -21,8 +21,33 @@ permissions:
   contents: read
 
 jobs:
+  verify:
+    name: verify release on ${{ matrix.os }}
+    if: github.ref == 'refs/heads/main'
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install from lockfile
+        run: npm ci --no-audit --no-fund
+      - name: Build candidate
+        run: npm run build
+      - name: Run full test suite
+        run: npm test
+      - name: Verify packaged npm artifact
+        run: npm run test:package
+
   publish:
     name: publish to npm with provenance
+    needs: verify
     # Reject dispatches against any branch other than main.
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
@@ -52,12 +77,12 @@ jobs:
           # not silently re-enable caching for this job.
           cache: ""
 
-      - name: Install latest npm and print diagnostic version
+      - name: Install pinned npm 11.21.2 for OIDC publishing
         # npm Trusted Publishing via OIDC requires npm >= 11.5.1 on the
         # runner. Node 22 LTS ships with npm 10.x and Node 20 LTS ships
         # with npm 9.x, both of which pre-date the OIDC publish
         # credential exchange. We pin Node 24 above and explicitly
-        # install the latest npm from the public registry here so the
+        # install npm 11.21.2 from the public registry here so the
         # publish step runs against a known-good CLI. The
         # `npm --version` line is a diagnostic that prints the exact
         # CLI version that will run the publish, so any future
@@ -65,7 +90,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npm install -g npm@latest
+          npm install -g npm@11.21.2
           echo "npm version: $(npm --version)"
           echo "node version: $(node --version)"
 

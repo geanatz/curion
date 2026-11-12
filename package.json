@@ -47,6 +47,7 @@
     "test": "node --import tsx --test --test-concurrency=4 \"tests/*.test.ts\" \"tests/diagnostics/*.test.ts\"",
     "test:contracts": "node --import tsx --test tests/contracts.test.ts",
     "test:e2e": "node --import tsx --test tests/mcp-stdio-e2e.test.ts",
+    "test:package": "node scripts/smoke-npm-package.mjs",
     "test:coverage": "c8 --reporter=text --reporter=text-summary --reporter=html --reporter=lcov node --import tsx --test --test-concurrency=4 tests/*.test.ts",
     "start": "node dist/index.js",
     "clean": "rm -rf dist",
