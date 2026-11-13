@@ -30,5 +30,7 @@ export function rmStorage(tmp: string, handle: StorageHandle): void {
   } catch {
     // ignore
   }
-  fs.rmSync(tmp, { recursive: true, force: true });
+  // Windows can briefly retain SQLite file handles after db.close().
+  // Retry transient EBUSY/EPERM failures, but still fail on persistent locks.
+  fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });
 }
