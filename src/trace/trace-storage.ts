@@ -36,6 +36,7 @@ import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { logger } from "../logging/logger.js";
+import { ensurePrivateDirectory } from "../security/private-directory.js";
 import { CURION_DIRNAME, type StorageConfig } from "../storage/storage.js";
 
 /** Filename of the trace DB inside `.curion/`. */
@@ -88,8 +89,7 @@ export function resolveTraceDbPath(config: StorageConfig = {}): string {
 export function initTraceStorage(config: StorageConfig = {}): TraceStorageHandle {
   const root = config.projectRoot ?? process.cwd();
   const dir = path.join(root, CURION_DIRNAME);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  if (ensurePrivateDirectory(dir)) {
     logger.info(`created project storage at ${dir} (trace)`);
   }
   const dbPath = path.join(dir, CURION_TRACE_DB_FILENAME);

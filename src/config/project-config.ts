@@ -27,6 +27,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { logger } from "../logging/logger.js";
+import { ensurePrivateDirectory } from "../security/private-directory.js";
 import { CURION_DIRNAME } from "../storage/storage.js";
 
 export interface ProjectConfig {
@@ -103,9 +104,7 @@ export function writeProjectConfig(projectRoot: string, config: ProjectConfig): 
   const configPath = resolveProjectConfigPath(projectRoot);
   try {
     const dir = path.dirname(configPath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-    }
+    ensurePrivateDirectory(dir);
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2), "utf-8");
     fs.chmodSync(configPath, 0o600);
     logger.debug(`project config: wrote ${configPath}`);

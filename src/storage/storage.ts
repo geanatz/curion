@@ -24,6 +24,7 @@ import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { logger } from "../logging/logger.js";
+import { ensurePrivateDirectory } from "../security/private-directory.js";
 
 export const CURION_DIRNAME = ".curion";
 export const CURION_DB_FILENAME = "curion.sqlite";
@@ -61,8 +62,7 @@ export function resolveCurionDir(config: StorageConfig = {}): string {
 export function initStorage(config: StorageConfig = {}): StorageHandle {
   const dir = resolveCurionDir(config);
 
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  if (ensurePrivateDirectory(dir)) {
     logger.info(`created project storage at ${dir}`);
   }
 

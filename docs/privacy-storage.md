@@ -22,9 +22,26 @@ local.
   config.json              # Project config (e.g. { isPrivate: true })
 ```
 
-The `.curion/` directory is created with mode `0700` on first use so
-that other users on a shared host cannot read stored memory. The
-`config.json` file is written with mode `0600`.
+On Linux/macOS, new .curion/ directories are created with POSIX mode 0700
+and sensitive files with mode 0600. On Windows, each **new** project or
+home-registry .curion/ directory is staged, assigned a protected NTFS ACL
+for the current user, SYSTEM and Administrators, then moved into place
+before any Curion files are written. If ACL setup fails, Curion refuses
+to create a new memory store or write config/registry data there.
+
+**Existing Windows directories are not modified automatically.** Older
+Curion stores may have inherited broad read access from their parent
+folders; verify native NTFS ACLs before assuming they are private.
+Existing data requires an explicit, reviewed ACL migration. Windows
+SYSTEM and Administrators retain access to newly created stores.
+
+Windows security decision (owner-approved, 2026-11-13): protect newly
+created Curion data directories by default and fail before saving data
+if native ACL setup fails. Defer changing existing directories to a
+separate opt-in operation, since they may be intentionally shared. This
+replaces the previous assumption that POSIX modes alone isolate
+Windows data. See the evidence and unresolved validation in GitHub
+Issue #8.
 
 The memory database schema is additive and idempotent. **Raw input
 text is never persisted** — only controller-normalized summaries and

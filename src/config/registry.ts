@@ -20,6 +20,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { logger } from "../logging/logger.js";
+import { ensurePrivateDirectory } from "../security/private-directory.js";
 
 const REGISTRY_DIRNAME = ".curion";
 const REGISTRY_FILENAME = "registry.json";
@@ -59,18 +60,19 @@ export function resolveRegistryPath(): { dir: string; file: string } {
  * Ensure the `~/.curion/` directory exists with mode 0700.
  * Idempotent and best-effort: failures are logged and ignored.
  */
-export function ensureRegistryDir(): void {
+export function ensureRegistryDir(): boolean {
   const { dir } = resolveRegistryPath();
   try {
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    if (ensurePrivateDirectory(dir)) {
       logger.info(`created registry directory at ${dir}`);
-    } else {
-      // Ensure correct permissions even if directory already exists.
+    } else if (process.platform !== "win32") {
+      // Preserve the existing POSIX behavior; do not rewrite old Windows ACLs.
       fs.chmodSync(dir, 0o700);
     }
+    return true;
   } catch (err) {
-    logger.debug(`ensureRegistryDir: ${(err as Error).message}`);
+    logger.error(`ensureRegistryDir: ${(err as Error).message}`);
+    return false;
   }
 }
 
@@ -120,7 +122,7 @@ export function readRegistry(): Registry {
 export function writeRegistry(registry: Registry): void {
   const { dir, file } = resolveRegistryPath();
   try {
-    ensureRegistryDir();
+    if (!ensureRegistryDir()) return;
     // Atomic write: write to temp file then rename.
     const tmpFile = `${file}.tmp.${Date.now()}`;
     fs.writeFileSync(tmpFile, JSON.stringify(registry, null, 2), "utf-8");
