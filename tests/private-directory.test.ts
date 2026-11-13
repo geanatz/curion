@@ -12,23 +12,27 @@ function fixture(t: { after: (fn: () => void) => void }): { root: string; dir: s
   return { root, dir: path.join(root, ".curion") };
 }
 
-test("private directory: POSIX new directory uses 0700 without Windows commands", (t) => {
-  const { dir } = fixture(t);
-  let commands = 0;
-  assert.equal(
-    ensurePrivateDirectory(dir, {
-      platform: "linux",
-      runCommand: () => {
-        commands++;
-        throw new Error("no Windows commands on Linux");
-      },
-    }),
-    true
-  );
-  assert.equal(fs.statSync(dir).mode & 0o777, 0o700);
-  assert.equal(commands, 0);
-  assert.equal(ensurePrivateDirectory(dir, { platform: "linux" }), false);
-});
+test(
+  "private directory: POSIX new directory uses 0700 without Windows commands",
+  { skip: process.platform === "win32" },
+  (t) => {
+    const { dir } = fixture(t);
+    let commands = 0;
+    assert.equal(
+      ensurePrivateDirectory(dir, {
+        platform: "linux",
+        runCommand: () => {
+          commands++;
+          throw new Error("no Windows commands on Linux");
+        },
+      }),
+      true
+    );
+    assert.equal(fs.statSync(dir).mode & 0o777, 0o700);
+    assert.equal(commands, 0);
+    assert.equal(ensurePrivateDirectory(dir, { platform: "linux" }), false);
+  }
+);
 
 test("private directory: Windows new dir is staged, granted SID rights and de-inherited before rename", (t) => {
   const { root, dir } = fixture(t);

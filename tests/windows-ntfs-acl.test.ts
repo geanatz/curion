@@ -38,7 +38,11 @@ test(
       [
         "param([string]$Target, [string]$Mode)",
         '$ErrorActionPreference = "Stop"',
-        "$acl = Get-Acl -LiteralPath $Target",
+        "if ([System.IO.Directory]::Exists($Target)) {",
+        "  $acl = [System.IO.Directory]::GetAccessControl($Target)",
+        "} else {",
+        "  $acl = [System.IO.File]::GetAccessControl($Target)",
+        "}",
         "$rules = $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])",
         '$broad = @("S-1-1-0", "S-1-5-11", "S-1-5-32-545")',
         "$readBit = [int][System.Security.AccessControl.FileSystemRights]::ReadData",
