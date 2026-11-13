@@ -252,10 +252,10 @@ test("remember tool: still exposes exactly one text param", () => {
   )._registeredTools;
   const remember = registered["remember"] as {
     inputSchema: {
-      _def?: { shape?: () => Record<string, unknown> };
+      shape: Record<string, unknown>;
     };
   };
-  const shape = remember.inputSchema._def?.shape?.();
+  const shape = remember.inputSchema.shape;
   assert.ok(shape, "remember tool inputSchema must expose a shape");
   assert.deepEqual(Object.keys(shape), ["text"]);
 });
@@ -269,10 +269,10 @@ test("recall tool: still exposes exactly one text param", () => {
   )._registeredTools;
   const recall = registered["recall"] as {
     inputSchema: {
-      _def?: { shape?: () => Record<string, unknown> };
+      shape: Record<string, unknown>;
     };
   };
-  const shape = recall.inputSchema._def?.shape?.();
+  const shape = recall.inputSchema.shape;
   assert.ok(shape, "recall tool inputSchema must expose a shape");
   assert.deepEqual(Object.keys(shape), ["text"]);
 });
@@ -294,17 +294,17 @@ test("server: remember tool outputSchema exposes the user-approved discriminated
   // schema instance is the one wired into the server.
   assert.equal(remember.outputSchema, REMEMBER_STRUCTURED_CONTENT_SCHEMA);
   // The schema's JSON-shape round-trips through the SDK
-  // (the SDK calls `normalizeObjectSchema` to read the
-  // shape). We assert the schema's `.shape` exposes a
+  // (the SDK reads the public Zod `.shape` getter).
+  // We assert the schema's `.shape` exposes a
   // `status` field with the four user-approved status
   // values.
   const shape = (
     remember.outputSchema as {
-      shape: { status: { _def: { values: string[] } } };
+      shape: { status: { options: readonly string[] } };
     }
   ).shape;
   assert.ok(shape.status, "outputSchema must include a `status` field");
-  const statusValues = (shape.status._def.values as string[]).slice().sort();
+  const statusValues = (shape.status.options as readonly string[]).slice().sort();
   assert.deepEqual(statusValues, ["provider_error", "rejected", "saved"]);
 });
 
@@ -320,11 +320,11 @@ test("server: recall tool outputSchema exposes the user-approved discriminated s
   assert.equal(recall.outputSchema, RECALL_STRUCTURED_CONTENT_SCHEMA);
   const shape = (
     recall.outputSchema as {
-      shape: { status: { _def: { values: string[] } } };
+      shape: { status: { options: readonly string[] } };
     }
   ).shape;
   assert.ok(shape.status, "outputSchema must include a `status` field");
-  const statusValues = (shape.status._def.values as string[]).slice().sort();
+  const statusValues = (shape.status.options as readonly string[]).slice().sort();
   assert.deepEqual(statusValues, [
     "answered",
     "no_memory",

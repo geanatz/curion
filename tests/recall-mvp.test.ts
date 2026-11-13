@@ -458,12 +458,10 @@ test("recall tool: exposes exactly one text param", () => {
   )._registeredTools;
   const recall = registered["recall"] as {
     inputSchema: {
-      _def?: {
-        shape?: () => Record<string, unknown>;
-      };
+      shape: Record<string, unknown>;
     };
   };
-  const shape = recall.inputSchema._def?.shape?.();
+  const shape = recall.inputSchema.shape;
   assert.ok(shape, "recall tool inputSchema must expose a shape");
   assert.deepEqual(Object.keys(shape), ["text"]);
 });
