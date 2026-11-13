@@ -33,6 +33,16 @@ See [decision retrieval](decisions/README.md) for how to handle undocumented
 choices. This file describes product boundaries, not a record of approval for
 an experiment or a release.
 
+## Release process
+
+For future versions, manually dispatch `.github/workflows/publish.yml` on
+`main` with the exact version and `PUBLISH` confirmation. The workflow
+verifies Linux/macOS/Windows, publishes npm with provenance, and **only on
+successful npm publication** creates the matching tag and GitHub Release
+from the version's `CHANGELOG.md` entry. It attaches no duplicate packages.
+The release step may be retried independently if the GitHub API fails
+after npm publication. This process does not authorize automatic releases.
+
 ## Documentation
 
 - [API contract](reference.md)

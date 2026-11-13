@@ -116,6 +116,11 @@ jobs:
           fi
           echo "Confirmed manual npm release ${pkg_version} from main."
 
+          if ! grep -Fq "## [${RELEASE_VERSION}]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md is missing version ${RELEASE_VERSION}."
+            exit 1
+          fi
+
       - name: Install dependencies from the lockfile
         run: npm ci --no-audit --no-fund
 
@@ -146,3 +151,54 @@ jobs:
           echo "publish-time npm version: $(npm --version)"
           echo "publish-time node version: $(node --version)"
           npm publish --provenance --access public
+
+  github_release:
+    name: Create GitHub Release after npm publication
+    needs: publish
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create version tag and GitHub Release from changelog
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="v${RELEASE_VERSION}"
+          notes="$(mktemp)"
+          trap 'rm -f "$notes"' EXIT
+
+          awk -v version="$RELEASE_VERSION" '
+            index($0, "## [" version "]") == 1 { emit=1; next }
+            emit && /^## \[/ { exit }
+            emit { print }
+          ' CHANGELOG.md > "$notes"
+          if ! grep -q '[^[:space:]]' "$notes"; then
+            echo "::error::Missing changelog notes for $RELEASE_VERSION."
+            exit 1
+          fi
+
+          # Never attach a release to a tag pointing at a different commit.
+          tag_sha="$(git ls-remote --tags origin "refs/tags/${tag}^{}" | awk 'NR==1 { print $1 }')"
+          if [[ -z "$tag_sha" ]]; then
+            tag_sha="$(git ls-remote --tags origin "refs/tags/$tag" | awk 'NR==1 { print $1 }')"
+          fi
+          if [[ -n "$tag_sha" && "$tag_sha" != "$GITHUB_SHA" ]]; then
+            echo "::error::$tag already points to a different commit."
+            exit 1
+          fi
+
+          # Makes the release step safe to rerun after transient failures.
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "GitHub Release $tag already exists."
+            exit 0
+          fi
+
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" --title "Curion $tag" \
+            --notes-file "$notes" --latest
