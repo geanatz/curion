@@ -737,12 +737,10 @@ test("remember tool: still exposes exactly one text param", () => {
   )._registeredTools;
   const remember = registered["remember"] as {
     inputSchema: {
-      _def?: {
-        shape?: () => Record<string, unknown>;
-      };
+      shape: Record<string, unknown>;
     };
   };
-  const shape = remember.inputSchema._def?.shape?.();
+  const shape = remember.inputSchema.shape;
   assert.ok(shape, "remember tool inputSchema must expose a shape");
   assert.deepEqual(Object.keys(shape), ["text"]);
 });

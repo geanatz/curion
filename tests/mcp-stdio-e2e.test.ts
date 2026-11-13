@@ -239,20 +239,22 @@ class StdioMcpClient {
    */
   static isolatedEnv(parentEnv: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
     const env: NodeJS.ProcessEnv = {};
+    const allowed = new Set([
+      "PATH",
+      "SystemRoot",
+      "WINDIR",
+      "COMSPEC",
+      "PATHEXT",
+      "TMP",
+      "TEMP",
+      "TMPDIR",
+      "LANG",
+      "LC_ALL",
+      "TZ",
+    ]);
     for (const [k, v] of Object.entries(parentEnv)) {
       if (v === undefined) continue;
-      // Do not inherit either current CURION_PRIMARY_* / CURION_FALLBACK_*
-      // provider settings or legacy provider aliases from the developer's
-      // environment. E2E tests must never contact live provider APIs.
-      if (
-        k.startsWith("CURION_") ||
-        k === "MINIMAX_API_KEY" ||
-        k === "NVIDIA_NIM_API_KEY" ||
-        k === "GROQ_API_KEY"
-      ) {
-        continue;
-      }
-      env[k] = v;
+      if (allowed.has(k)) env[k] = v;
     }
     // Force a deterministic log level: `info` so the
     // cold-start `starting` line is emitted on stderr
@@ -576,10 +578,21 @@ function rmTempHome(tmpHome: string): void {
   }
 }
 
-test("e2e: isolatedEnv excludes current and legacy provider credentials", () => {
+test("e2e: isolatedEnv uses only safe OS variables and excludes inherited settings", () => {
   const inherited = {
     PATH: "/synthetic-path",
+    SystemRoot: "C:\\Windows",
+    WINDIR: "C:\\Windows",
+    COMSPEC: "C:\\Windows\\system32\\cmd.exe",
+    PATHEXT: ".COM;.EXE",
+    TMP: "/synthetic-tmp",
+    TEMP: "/synthetic-temp",
+    TMPDIR: "/synthetic-tmpdir",
+    LANG: "C.UTF-8",
+    LC_ALL: "C.UTF-8",
+    TZ: "UTC",
     HOME: "/synthetic-home",
+    NODE_OPTIONS: "--require /tmp/unexpected.cjs",
     CURION_PRIMARY_API_KEY: "synthetic-primary",
     CURION_PRIMARY_BASE_URL: "https://example.invalid",
     CURION_PRIMARY_MODEL: "synthetic-model",
@@ -592,15 +605,33 @@ test("e2e: isolatedEnv excludes current and legacy provider credentials", () => 
     MINIMAX_API_KEY: "synthetic-minimax",
     NVIDIA_NIM_API_KEY: "synthetic-nvidia",
     GROQ_API_KEY: "synthetic-groq",
+    UNEXPECTED_RUNTIME_SETTING: "unexpected",
   };
   const env = StdioMcpClient.isolatedEnv(inherited);
-  for (const key of Object.keys(inherited)) {
-    if (key !== "CURION_LOG_LEVEL" && (key.startsWith("CURION_") || key.endsWith("_API_KEY"))) {
-      assert.equal(env[key], undefined, key + " must not leak into the child");
-    }
-  }
+  for (const key of [
+    "HOME",
+    "NODE_OPTIONS",
+    "UNEXPECTED_RUNTIME_SETTING",
+    "CURION_PRIMARY_API_KEY",
+    "CURION_PRIMARY_BASE_URL",
+    "CURION_PRIMARY_MODEL",
+    "CURION_FALLBACK_API_KEY",
+    "CURION_FALLBACK_BASE_URL",
+    "CURION_FALLBACK_MODEL",
+    "CURION_SEMANTIC_ALLOW_REMOTE",
+    "CURION_PROVIDER_PRIMARY_KEY",
+    "MINIMAX_API_KEY",
+    "NVIDIA_NIM_API_KEY",
+    "GROQ_API_KEY",
+  ])
+    assert.equal(env[key], undefined, key + " must not leak into the child");
   assert.equal(env.PATH, inherited.PATH);
-  assert.equal(env.HOME, inherited.HOME);
+  assert.equal(env.SystemRoot, inherited.SystemRoot);
+  assert.equal(env.WINDIR, inherited.WINDIR);
+  assert.equal(env.COMSPEC, inherited.COMSPEC);
+  assert.equal(env.PATHEXT, inherited.PATHEXT);
+  assert.equal(env.TMPDIR, inherited.TMPDIR);
+  assert.equal(env.LANG, inherited.LANG);
   assert.equal(env.CURION_LOG_LEVEL, "info");
 });
 

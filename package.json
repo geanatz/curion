@@ -1,7 +1,7 @@
 {
   "name": "@geanatz/curion",
   "version": "0.3.7",
-  "description": "Curion — project-local memory layer for AI agents",
+  "description": "Curion \u2014 project-local memory layer for AI agents",
   "mcpName": "io.github.geanatz/curion",
   "type": "module",
   "license": "Apache-2.0",
@@ -165,16 +165,20 @@
     "@modelcontextprotocol/sdk": "^1.32.2",
     "@xenova/transformers": "^2.0.1",
     "better-sqlite3": "^12.10.0",
-    "zod": "^3.25.0"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
     "@huggingface/transformers": "^3.8.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.10.0",
     "c8": "^11.0.0",
     "fast-check": "^4.8.0",
     "tsx": "^4.20.0",
-    "typescript": "^5.7.2",
-    "@biomejs/biome": "^1.9.4"
+    "typescript": "^5.7.2"
+  },
+  "overrides": {
+    "sharp": "^0.35.5",
+    "protobufjs": "^7.6.6"
   }
 }

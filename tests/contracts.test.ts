@@ -15,6 +15,7 @@
  */
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -169,20 +170,31 @@ test("logger writes to stderr, never stdout", () => {
   assert.equal(stdoutCalls, 0, `expected 0 stdout writes, got ${stdoutCalls}`);
 });
 
-test("logger respects CURION_LOG_LEVEL threshold", () => {
-  const orig = process.env.CURION_LOG_LEVEL;
-  process.env.CURION_LOG_LEVEL = "error";
-  try {
-    // Re-import to pick up the new level? No — logger reads env at
-    // module load. Instead, verify the helper without re-importing
-    // by exercising the level table directly. (Acceptable: the
-    // important stderr-only contract is verified above.)
-    const { logger: _ignored } = { logger };
-    void _ignored;
-  } finally {
-    if (orig === undefined) delete process.env.CURION_LOG_LEVEL;
-    else process.env.CURION_LOG_LEVEL = orig;
-  }
+test("logger filters levels below CURION_LOG_LEVEL threshold at module import", () => {
+  const result = spawnSync(
+    process.execPath,
+    ["--import", "tsx", "tests/_helpers/logging-threshold-subprocess.mts"],
+    {
+      cwd: process.cwd(),
+      env: {
+        PATH: process.env.PATH,
+        ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
+        ...(process.env.WINDIR ? { WINDIR: process.env.WINDIR } : {}),
+        ...(process.env.COMSPEC ? { COMSPEC: process.env.COMSPEC } : {}),
+        ...(process.env.PATHEXT ? { PATHEXT: process.env.PATHEXT } : {}),
+        ...(process.env.TMP ? { TMP: process.env.TMP } : {}),
+        ...(process.env.TEMP ? { TEMP: process.env.TEMP } : {}),
+        ...(process.env.TMPDIR ? { TMPDIR: process.env.TMPDIR } : {}),
+        CURION_LOG_LEVEL: "warn",
+      },
+      encoding: "utf8",
+    }
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.doesNotMatch(result.stderr, /hidden-(?:debug|info)/);
+  assert.match(result.stderr, /visible-warn/);
+  assert.match(result.stderr, /visible-error/);
+  assert.equal(result.stdout, "");
 });
 
 test("storage path is project-local .curion/ under cwd", () => {

@@ -7,186 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Public-adoption polish (Phase 3) plus a narrow
-`recall.answered.source` projection alignment. The schema, the
-tool names, the strict input schemas, the
-`text` / `structuredContent` surfaces, the `clarification_needed`
-contract, the storage layout, the `.curion/config.json`
-semantics, the controller behavior, the ranking thresholds, the
-provider prompts, the `weak_match` public message, and the
-memory storage behavior are unchanged. The only source-code
-change is a narrow projection update that populates the
-already-declared `source` field on `recall.answered`
-`structuredContent`; the schema was already carrying it, and
-the internal `RecallResult` already recorded it. The on-the-
-wire shape is now aligned with the declared schema.
+No changes recorded.
+
+## [0.3.7] - 2026-11-13
 
 ### Added
 
-- **CI and provenance badges in the README.** Adds a CI build badge
-  (`github/actions/workflow/status/geanatz/curion/ci.yml`) and a
-  provenance-verified badge to the README header so the package
-  landing page signals reproducibility out of the box.
-- **README → Example prompts section.** Adds a short block of
-  concrete `remember` / `recall` examples (store a design decision,
-  store a convention, recall later) so first-time users can see what
-  the public MCP surface looks like in practice.
-- **README → Troubleshooting section.** Adds a six-entry troubleshooting
-  block covering the most common operator failures (host cannot see
-  the tools, "no relevant memory found" despite a remembered row,
-  `provider_error`, MCP Inspector use, stdout-corruption warning, and
-  Windows / `npx` / absolute-path gotchas). The Inspector section
-  references the official `@modelcontextprotocol/inspector` tool.
-- **`docs/privacy-storage.md` → Security model section.** Adds an
-  explicit security model section that consolidates the existing
-  per-area threat notes (MCP stdio-only transport, no secrets in
-  code, SQL injection safety, path safety, `.env` files are not loaded
-  by the server runtime, structured-output projection) and links out
-  to `SECURITY.md` for the recent CVE work.
-- **`docs/privacy-storage.md` → Local trace section.** Adds a
-  dedicated section for `.curion/trace.sqlite` covering the default
-  on-state, the `CURION_TRACE_ENABLED=0` off switch, the redaction
-  contract (raw input never written; sensitive keys stripped; `Note:`
-  / `message:` wrappers stripped), and the fact that the trace is
-  internal — never part of the public MCP surface and never surfaced
-  to agents.
-- **`docs/privacy-storage.md` → Semantic cache section.** Adds a
-  section covering the on-device embedder default, the Hugging Face
-  CDN model download, the `CURION_SEMANTIC_ALLOW_REMOTE=0` opt-out,
-  and the `0700` cache-directory permissions.
-- **`docs/mcp-clients.md` → Common pitfalls section.** Adds a
-  "Common pitfalls" section with four entries: absolute paths beat
-  shell resolution (with `which curion` / `where curion` guidance),
-  the Windows `cmd /c npx -y @geanatz/curion` wrapper (plus a
-  PowerShell `npx.cmd` variant), provider env vars must be in the
-  spawn environment, and an MCP Inspector pointer for ad-hoc debugging.
-- **`docs/mcp-clients.md` → stdio transport notice.** Adds an
-  explicit "stdio is the only transport" section, including the
-  "anything written to stdout corrupts the protocol" warning.
-- **`docs/configuration.md` → Local trace, per-request adapter knobs,
-  project root, operator checklist.** Adds new env-var sections for
-  the trace toggle (`CURION_TRACE_ENABLED`) and the adapter knobs
-  (`CURION_ADAPTER_TIMEOUT_MS`, `CURION_ADAPTER_MAX_TOKENS`); adds a
-  project-root section covering `CURION_PROJECT_ROOT` and the
-  `.curion/config.json` field set; and adds an operator checklist that
-  walks a new user through the minimum configuration.
-- **`docs/configuration.md` → `.env` caveat.** Adds an explicit note
-  that `.env` loading is wired only into the prototype runner and
-  benchmark harness, never into the MCP server runtime.
-- **`docs/reference.md` → Inputs and outputs at a glance table.**
-  Adds a summary table mapping each tool to its statuses and side
-  effects, so the reader does not have to read the full schema to
-  know the contract.
-- **`docs/reference.md` → Contract guarantees section.** Adds an
-  explicit section listing the strict-Zod input/output guarantees
-  (no leakage), the no-internal-IDs rule, the no-raw-input rule, the
-  no model / provider metadata rule, and the "notes are plain
-  strings" rule.
-- **`docs/reference.md` → Status semantics table.** Adds a per-status
-  table that explains what each status means and what the agent
-  should do with it (in particular, that `provider_error` never
-  carries `clarification_needed`).
-- **`docs/reference.md` → Local trace layer (background) section.**
-  Adds a short background note pointing to the dedicated
-  `privacy-storage.md` section and clarifying that the trace is not
-  part of the public MCP surface.
-- **`CONTRIBUTING.md` → Documentation scope section.** Adds a
-  short "Documentation scope" section so contributors know which
-  user-facing doc owns which topic and that broken links / stale
-  shape examples are review blockers.
+- Native Windows NTFS access protection for newly created project and registry
+  data directories. Existing directories are deliberately not migrated.
+- Synthetic Windows ACL regression, cross-platform package-install smoke tests,
+  and stronger isolated MCP subprocess/logging tests.
+- A concise, Codex-first README with clearer provider and privacy guidance.
 
 ### Changed
 
-- **`recall.answered` `structuredContent.source` is now
-  populated by `buildRecallStructuredContent`.** The declared
-  `source?: "local" | "cross_project"` field on
-  `RECALL_STRUCTURED_CONTENT_SCHEMA` is now actually carried
-  by the projection on the wire. The internal `RecallResult`
-  already recorded the value (`"local"` for answers drawn
-  from the current project's own memory; `"cross_project"`
-  for outcomes promoted from `no_memory` based on strong
-  non-private cross-project recall), but the projection
-  helper was dropping it. The projection now copies
-  `result.source` into the `structuredContent` payload for
-  `answered` results when the internal result carries it;
-  the field is omitted (not invented) when the internal
-  result does not set it. The `weak_match` / `no_memory` /
-  `rejected` / `provider_error` statuses never carry
-  `source` (the schema and contract do not require it on
-  these statuses, and the projection does not introduce it).
-  The strict Zod schema validation, the no-IDs rule, and
-  every other contract guarantee are preserved unchanged.
-- **`README.md` → Storage layout diagram.** The `.curion/`
-  directory listing now mentions `trace.sqlite`,
-  `transformers-cache/`, and `config.json` alongside the memory
-  store, instead of only the SQLite DB.
-- **`README.md` → Quality / provenance signal.** The README now
-  advertises the Trusted Publishing / OIDC provenance path
-  (`publishConfig.provenance: true`) as a key feature.
-- **`docs/reference.md` → `recall.answered` shape.** The shape
-  documentation was incomplete: `notes?` was documented as a single
-  `string?` and the `source?: "local" | "cross_project"` field was
-  missing. The shape now matches the actual `RECALL_STRUCTURED_CONTENT_SCHEMA`
-  (`notes?: string[]`, `source?: "local" | "cross_project"`).
-- **`docs/reference.md` → `recall.answered.source` documented as
-  populated.** The `source` field semantics were previously
-  marked as "reserved — not yet populated on the wire"; the
-  reference now documents the field as populated and describes
-  when it is present, what `"local"` vs `"cross_project"` mean,
-  and that clients may safely switch on it on
-  `recall.answered`. The "Known limitations" section that
-  pinned the gap is removed (the gap is closed by the
-  projection change above).
-- **`docs/reference.md` → Field semantics.** The reference now
-  documents `answer`, `notes`, `source`, `summaries`, `coverage`,
-  and `reason` field-by-field, instead of only listing the status
-  variants.
-- **`docs/privacy-storage.md` → Cross-project semantic search
-  signal updated.** The cross-project promotion section no
-  longer describes `structuredContent.source` as "not yet
-  populated"; the section now documents `source` as the
-  stable machine-readable discriminator on
-  `recall.answered` and points to the API reference for the
-  full semantics. The `text`-prefix human signal is retained
-  as a display-only signal.
-- **`CONTRIBUTING.md` → Frozen public API version.** The
-  "public MCP surface is frozen at v0.2.x" reference has been
-  updated to `v0.3.x` to match the current shipped version
-  (`0.3.6`).
+- Updated dependencies, including Zod 4.6.7, the MCP SDK 1.32.2, and patched
+  Sharp/Protobuf versions through explicit dependency overrides. The production
+  dependency audit reports no known advisories at release preparation time.
+- Updated schema contract tests to inspect Zod's public shape/options API rather
+  than version-specific internal structures.
+- Made CI and npm release workflows manual-only. Release publication requires an
+  explicit version, confirmation and cross-platform verification.
+- Updated `SECURITY.md` to reflect the supported 0.3.x line, correct CI behavior,
+  and Windows storage limitations.
 
 ### Fixed
 
-- **`README.md` → Table of contents anchor.** The README's table of
-  contents referenced a `#license` anchor that did not match any
-  heading; the entry was removed (the license is now linked from
-  the bottom-line list only, not as a TOC entry).
+- Reading older Float32 embeddings alongside the current Float64 storage format.
+- Oversized structured provider responses are rejected before JSON/Zod parsing.
+- MCP stdio tests no longer inherit real provider credentials or unrelated
+  environment settings.
+- More portable Windows test fixtures and explicit CLI package smoke tests.
+- Local trace diagnostics remain opt-in and persist metadata only; no raw tool,
+  memory or provider content is stored in the trace database.
 
-### Deprecated
-
-- Nothing in this release.
-
-### Removed
-
-- Nothing in this release.
-
-### Security
-
-- Nothing in this release. The threat model, the redaction contract,
-  the prepared-statement SQL layer, and the `.env`-not-loaded-by-the-
-  server-runtime policy are unchanged; the new docs only describe
-  what was already true.
-
-## [0.3.7] - 2026-07-20
-
-### Security
-
-- **Trace diagnostics are now opt-in and metadata-only.** `CURION_TRACE_ENABLED`
-  is disabled unless explicitly set to `1`, `true`, `yes`, or `on`. When enabled,
-  trace records retain only a closed allowlist of operational metadata; tool
-  inputs and outputs, memory/query text, provider content, synthesized answers,
-  and arbitrary error messages are excluded. The trace writer independently
-  drops unknown fields before persistence while retaining the existing trace
-  SQLite table layout.
+Public MCP tools remain `remember(text)` and `recall(text)`. No automatic
+modification of existing user stores or migration of real project data occurs.
 
 ## [0.3.6] - 2026-06-30
 
