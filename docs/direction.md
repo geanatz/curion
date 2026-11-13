@@ -29,9 +29,9 @@ destructive or externally consequential actions. Worktree contents,
 experimental results, draft plans, and unmerged pull requests are not proof of
 approval or release readiness.
 
-See [decision retrieval](decisions/README.md) for how to handle undocumented
-choices. This file describes product boundaries, not a record of approval for
-an experiment or a release.
+See [accepted decisions and provenance](decisions/README.md) for
+scope-specific authority and supersession. This file describes enduring
+product boundaries; historical approvals do not authorize future operations.
 
 ## Release process
 
@@ -40,8 +40,17 @@ For future versions, manually dispatch `.github/workflows/publish.yml` on
 verifies Linux/macOS/Windows, publishes npm with provenance, and **only on
 successful npm publication** creates the matching tag and GitHub Release
 from the version's `CHANGELOG.md` entry. It attaches no duplicate packages.
-The release step may be retried independently if the GitHub API fails
-after npm publication. This process does not authorize automatic releases.
+The release step can be retried without a second npm publication if the
+GitHub API fails afterward. The integrated GitHub Release step has passed
+static/synthetic checks, but its real end-to-end behavior remains unverified
+until a separately approved future release. This process does **not**
+authorize automatic releases or provider-backed test calls.
+
+Outstanding work belongs in GitHub Issues, particularly
+[legacy Windows ACLs (#8)](https://github.com/geanatz/curion/issues/8) and
+[optional offline MCP success tests (#6)](https://github.com/geanatz/curion/issues/6).
+Experimental adaptive-recall [PR #1](https://github.com/geanatz/curion/pull/1)
+remains separate from the published product.
 
 ## Documentation
 
@@ -49,4 +58,4 @@ after npm publication. This process does not authorize automatic releases.
 - [Configuration](configuration.md)
 - [MCP clients](mcp-clients.md)
 - [Privacy and storage](privacy-storage.md)
-- [Decision retrieval](decisions/README.md)
+- [Accepted decisions and provenance](decisions/README.md)

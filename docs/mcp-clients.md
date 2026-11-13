@@ -5,8 +5,8 @@ Curion is a [Model Context Protocol](https://modelcontextprotocol.io) (MCP)
 subprocess and exchanges JSON-RPC with it over stdin/stdout. Curion writes
 all of its own logs to stderr so they cannot corrupt the MCP protocol stream.
 
-This page covers each supported client in detail. For a quick start with
-Claude Code, see the [README](../README.md).
+This page covers MCP clients in detail. For the shortest Codex setup,
+start with the [README](../README.md).
 
 ## Conventions used in the examples
 
@@ -130,12 +130,41 @@ the recommended first step when a tool call is failing unexpectedly.
 
 ---
 
-## Claude Code (recommended)
+## Codex CLI
 
-Claude Code is the recommended MCP client for Curion. Registering Curion with
-`--scope project` keeps the configuration inside the repo (via a `.mcp.json`
-file at the project root), so every contributor on the project gets the same
-server setup without touching their global MCP config.
+The Codex CLI `recall` MCP handshake was tested with an isolated
+project during the 0.3.7 release preparation. You can add a
+`[mcp_servers.curion]` entry either to the user-wide
+`~/.codex/config.toml` or to `.codex/config.toml` in the project root:
+
+```toml
+[mcp_servers.curion]
+command = "curion"
+
+[mcp_servers.curion.env]
+CURION_PRIMARY_API_KEY = "sk-..."
+CURION_PRIMARY_BASE_URL = "https://api.openai.com/v1"
+CURION_PRIMARY_MODEL = "your-model-id"
+CURION_PRIMARY_API_FORMAT = "openai-compatible"
+```
+
+Or register from the command line:
+
+```sh
+codex mcp add curion -- curion
+```
+
+---
+
+## Claude Code (optional)
+
+The configuration format is documented; a real Claude Code login and
+provider-backed call were **not** part of the 0.3.7 release validation.
+
+Claude Code is another compatible MCP client. Registering Curion with
+`--scope project` stores a `.mcp.json` configuration at the project root
+without changing your global MCP configuration. The file is normally
+gitignored and is local to each developer unless deliberately shared.
 
 ### Register for the current project
 
@@ -192,30 +221,6 @@ config itself, extend `.mcp.json` with an `env` block:
 
 ---
 
-## OpenAI Codex CLI
-
-Add a `[mcp_servers.curion]` entry either to the user-wide
-`~/.codex/config.toml` or to `.codex/config.toml` in the project root:
-
-```toml
-[mcp_servers.curion]
-command = "curion"
-
-[mcp_servers.curion.env]
-CURION_PRIMARY_API_KEY = "sk-..."
-CURION_PRIMARY_BASE_URL = "https://api.openai.com/v1"
-CURION_PRIMARY_MODEL = "your-model-id"
-CURION_PRIMARY_API_FORMAT = "openai-compatible"
-```
-
-Or register from the command line:
-
-```sh
-codex mcp add curion -- curion
-```
-
----
-
 ## OpenCode
 
 Add an entry to the user-wide `~/.config/opencode/opencode.json` or to
@@ -263,14 +268,21 @@ Add an entry to `~/.claude.json` (or the project-level equivalent):
 
 ---
 
-## Pi Coding Agent (no native MCP support)
+## Pi Coding Agent
 
-Pi Coding Agent does **not** natively support the Model Context Protocol, so
-Curion cannot be registered through Pi's built-in settings. Using Curion
-from Pi would require a custom or third-party MCP extension that bridges
-Pi to a stdio MCP server, which is outside Curion's scope and is not
-officially supported. For native MCP support, use Claude Code, Codex CLI,
-or OpenCode above.
+Current Pi releases document built-in MCP stdio support. With Curion on
+`PATH`, configure the current project and inspect the connection:
+
+```sh
+pi mcp add -l curion -- curion
+pi mcp list
+```
+
+Pi stores project-level MCP settings in `.pi/mcp.json` and user-level
+settings in `~/.pi/agent/mcp.json`. Pass provider keys via the parent
+environment or a secure client setting, never a committed file. This
+integration is documented from [Pi's official MCP guidance](https://pi.dev/docs/latest/mcp);
+a real Pi-to-Curion handshake was **not** run for 0.3.7.
 
 ---
 

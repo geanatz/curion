@@ -45,8 +45,8 @@ enabled (see [Configuration](configuration.md)), Curion additionally
 runs dense-vector retrieval and fuses the rankings.
 
 **Side effects:** none on the memory store. A row may be written to
-`.curion/trace.sqlite` for the local trace layer (turn it off with
-`CURION_TRACE_ENABLED=0`).
+`.curion/trace.sqlite` for the opt-in local trace layer (disabled by
+default; enable with `CURION_TRACE_ENABLED=1`).
 
 **Statuses:** `answered` | `weak_match` | `no_memory` | `rejected` |
 `provider_error`
@@ -163,7 +163,7 @@ duplicated inside the clarification object.
 
 ### Strict object schemas (no leakage)
 
-Both `inputSchema` and `outputSchema` are strict Zod v3 object schemas.
+Both `inputSchema` and `outputSchema` are strict Zod 4 object schemas.
 The MCP SDK's input validation rejects any unknown top-level key
 (`text` is the only acceptable input property); the SDK's output
 validation rejects any unknown field on `structuredContent` (so an
