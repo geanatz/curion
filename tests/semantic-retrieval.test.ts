@@ -41,10 +41,10 @@ import {
 } from "../src/retrieval/semantic/score.ts";
 import {
   type StorageHandle,
-  initStorage,
   deleteEmbedding,
   getEmbedding,
   getEmbeddingsForMemories,
+  initStorage,
   insertMemoryRecord,
   storeEmbedding,
 } from "../src/storage/storage.ts";
@@ -293,7 +293,8 @@ test("storage: populated legacy embeddings migrate without losing data", () => {
       );
       INSERT INTO memories (id, kind, created_at) VALUES (1, 'fact', 1234);
     `);
-    legacyDb.prepare("INSERT INTO embeddings (memory_id, dim, vec) VALUES (?, ?, ?)")
+    legacyDb
+      .prepare("INSERT INTO embeddings (memory_id, dim, vec) VALUES (?, ?, ?)")
       .run(1, 2, originalVector);
   } finally {
     legacyDb.close();
@@ -304,11 +305,14 @@ test("storage: populated legacy embeddings migrate without losing data", () => {
     // Both the first migration and a repeat open must preserve the original row.
     for (let attempt = 0; attempt < 2; attempt++) {
       handle = initStorage({ projectRoot });
-      const row = handle.db.prepare(
-        "SELECT dim, vec, created_at, updated_at FROM embeddings WHERE memory_id = 1"
-      ).get() as { dim: number; vec: Buffer; created_at: number; updated_at: number };
+      const row = handle.db
+        .prepare("SELECT dim, vec, created_at, updated_at FROM embeddings WHERE memory_id = 1")
+        .get() as { dim: number; vec: Buffer; created_at: number; updated_at: number };
       assert.equal(row.dim, 2);
       assert.deepEqual(row.vec, originalVector);
+      // A preserved legacy Float32 blob must remain usable after migration.
+      assert.deepEqual(getEmbedding(handle, 1)?.vec, [0.25, 0.75]);
+      assert.deepEqual(getEmbeddingsForMemories(handle, [1]).get(1)?.vec, [0.25, 0.75]);
       assert.equal(row.created_at, 0);
       assert.equal(row.updated_at, 0);
       handle.db.close();

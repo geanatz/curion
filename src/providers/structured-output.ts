@@ -63,10 +63,17 @@ export interface ParseResult {
 const FENCE_RE = /```(?:json|JSON)?\s*([\s\S]*?)```/;
 const OBJECT_RE = /\{[\s\S]*\}/;
 
+// Provider output is normally bounded to ~1,024 generated tokens. Reject
+// unusually large replies before JSON parsing or Zod issue allocation.
+const MAX_STRUCTURED_OUTPUT_CHARS = 64 * 1024;
+
 export function parseMemoryAnalysis(text: string): ParseResult {
   const errors: string[] = [];
   if (typeof text !== "string" || text.trim() === "") {
     return { ok: false, errors: ["empty response"], repaired: false };
+  }
+  if (text.length > MAX_STRUCTURED_OUTPUT_CHARS) {
+    return { ok: false, errors: ["response exceeds size limit"], repaired: false };
   }
 
   // Strategy 1: full text parses as JSON.

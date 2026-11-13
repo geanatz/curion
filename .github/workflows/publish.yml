@@ -1,28 +1,19 @@
 name: publish
 
-# Publish to the npm registry using OIDC Trusted Publishing. Triggered
-# exclusively by a pushed tag matching `v*` (for example `v0.3.2`). The
-# workflow exchanges a GitHub OIDC token for a short-lived npm publish
-# credential; no long-lived NPM_TOKEN secret is required or read.
-#
-# Prerequisites on npmjs.org (one-time setup under the `@geanatz/curion`
-# package page -> "Trusted Publisher" -> "GitHub Actions"):
-#   - Owner / Organization: geanatz
-#   - Repository:           curion
-#   - Workflow filename:    publish.yml
-#   - Environment:          (optional, leave blank unless a GitHub
-#                           Environment is configured)
-#
-# Tag convention: a release is cut by pushing a tag of the form
-# `v<semver>` against `main`. The tag's `v`-prefixed version is the
-# npm dist-tag. The `package.json` version must already be bumped and
-# committed before the tag is pushed; the publish job does not mutate
-# `package.json` itself.
-
+# Manual release gate. Only an explicit workflow_dispatch on main can publish.
+# The workflow retains npm OIDC Trusted Publishing and provenance.
+# Version and confirmation inputs must match the checked-out package.
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Exact package.json version to publish (e.g. 0.3.7)"
+        required: true
+        type: string
+      confirmation:
+        description: "Type PUBLISH to authorize this npm release"
+        required: true
+        type: string
 
 # Least-privilege default at the workflow level. The publish job below
 # adds `id-token: write` (required for npm Trusted Publishing / OIDC).
@@ -30,8 +21,35 @@ permissions:
   contents: read
 
 jobs:
+  verify:
+    name: verify release on ${{ matrix.os }}
+    if: github.ref == 'refs/heads/main'
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install from lockfile
+        run: npm ci --no-audit --no-fund
+      - name: Build candidate
+        run: npm run build
+      - name: Run full test suite
+        run: npm test
+      - name: Verify packaged npm artifact
+        run: npm run test:package
+
   publish:
     name: publish to npm with provenance
+    needs: verify
+    # Reject dispatches against any branch other than main.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
 
     # `id-token: write` is required for the OIDC exchange that produces
@@ -59,12 +77,12 @@ jobs:
           # not silently re-enable caching for this job.
           cache: ""
 
-      - name: Install latest npm and print diagnostic version
+      - name: Install pinned npm 11.21.2 for OIDC publishing
         # npm Trusted Publishing via OIDC requires npm >= 11.5.1 on the
         # runner. Node 22 LTS ships with npm 10.x and Node 20 LTS ships
         # with npm 9.x, both of which pre-date the OIDC publish
         # credential exchange. We pin Node 24 above and explicitly
-        # install the latest npm from the public registry here so the
+        # install npm 11.21.2 from the public registry here so the
         # publish step runs against a known-good CLI. The
         # `npm --version` line is a diagnostic that prints the exact
         # CLI version that will run the publish, so any future
@@ -72,23 +90,31 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npm install -g npm@latest
+          npm install -g npm@11.21.2
           echo "npm version: $(npm --version)"
           echo "node version: $(node --version)"
 
-      - name: Verify the tag matches package.json version
+      - name: Verify explicit approval and package version
         shell: bash
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_CONFIRMATION: ${{ inputs.confirmation }}
         run: |
           set -euo pipefail
-          tag="${GITHUB_REF_NAME}"
-          pkg_version="$(node -p "require('./package.json').version")"
-          tag_version="${tag#v}"
-          if [ "${tag_version}" != "${pkg_version}" ]; then
-            echo "::error::Tag ${tag} (version ${tag_version}) does not match package.json version ${pkg_version}."
-            echo "::error::Bump package.json (and the lockfile) to ${tag_version}, commit, then push the tag."
+          if [[ "${RELEASE_CONFIRMATION}" != "PUBLISH" ]]; then
+            echo "::error::Explicit PUBLISH confirmation is required."
             exit 1
           fi
-          echo "Tag ${tag} matches package.json version ${pkg_version}."
+          if [[ ! "${RELEASE_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Only stable semver releases are allowed."
+            exit 1
+          fi
+          pkg_version="$(node -p "require('./package.json').version")"
+          if [[ "${RELEASE_VERSION}" != "${pkg_version}" ]]; then
+            echo "::error::Requested version does not match package.json."
+            exit 1
+          fi
+          echo "Confirmed manual npm release ${pkg_version} from main."
 
       - name: Install dependencies from the lockfile
         run: npm ci --no-audit --no-fund

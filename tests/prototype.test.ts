@@ -343,6 +343,20 @@ test("http-client: parses OpenAI-compatible content from a 200 response", async 
 // structured-output
 // ---------------------------------------------------------------------------
 
+test("structured-output: rejects excessively large provider responses before validation", () => {
+  // Large provider-generated arrays could exhaust Zod v3 issue allocation.
+  // Keep the public MCP schema unchanged; bound only internal provider output.
+  const oversized = JSON.stringify({
+    summary: "synthetic",
+    confidence: 0.5,
+    tags: new Array(40000).fill(123),
+  });
+  const result = parseMemoryAnalysis(oversized);
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.errors, ["response exceeds size limit"]);
+  assert.equal(result.repaired, false);
+});
+
 test("structured-output: schema accepts a valid analysis", () => {
   const ok = MemoryAnalysisSchema.safeParse({
     summary: "ok",

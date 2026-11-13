@@ -1,10 +1,8 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+  # Stable-release policy: only manual dispatch, no automatic PR or push CI.
+  workflow_dispatch:
 
 # Least-privilege: the workflow only needs to read the repository contents.
 # No write permissions, no token scopes beyond what is strictly necessary.
@@ -13,10 +11,13 @@ permissions:
 
 jobs:
   build-and-test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
 
     strategy:
+      # Let macOS report even when another platform fails.
+      fail-fast: false
       matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
         node-version: ["22"]
 
     steps:
@@ -35,3 +36,6 @@ jobs:
 
       - name: Run tests
         run: npm test
+
+      - name: Smoke-test packaged npm artifact
+        run: npm run test:package

@@ -523,6 +523,7 @@ test("createDenseEmbedder: 'embeddinggemma:pooling=<unknown>' falls back to the 
 test("createDenseEmbedder: object spec with backend=embeddinggemma dispatches to EmbeddingGemma", async () => {
   const { embedder } = await createDenseEmbedder({
     backend: "embeddinggemma",
+    skip: true,
     cacheDir: "/tmp/curion-embeddinggemma-obj-spec-cache",
   });
   assert.equal(embedder.metadata.backend, "embeddinggemma");

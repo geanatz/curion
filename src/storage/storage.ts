@@ -24,6 +24,7 @@ import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { logger } from "../logging/logger.js";
+import { ensurePrivateDirectory } from "../security/private-directory.js";
 
 export const CURION_DIRNAME = ".curion";
 export const CURION_DB_FILENAME = "curion.sqlite";
@@ -61,8 +62,7 @@ export function resolveCurionDir(config: StorageConfig = {}): string {
 export function initStorage(config: StorageConfig = {}): StorageHandle {
   const dir = resolveCurionDir(config);
 
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  if (ensurePrivateDirectory(dir)) {
     logger.info(`created project storage at ${dir}`);
   }
 
@@ -1150,6 +1150,23 @@ export function storeEmbedding(
 }
 
 /**
+ * Decode both current Float64 vectors and preserved legacy Float32 vectors.
+ * The declared dimension must agree with the stored byte length; never read
+ * through the Buffer's potentially larger underlying ArrayBuffer.
+ */
+function decodeEmbeddingVector(vec: Buffer, dim: number): number[] | null {
+  if (!Number.isSafeInteger(dim) || dim < 0) return null;
+  const bytesPerValue = vec.byteLength === dim * 8 ? 8 : vec.byteLength === dim * 4 ? 4 : 0;
+  if (bytesPerValue === 0) return null;
+
+  const values: number[] = [];
+  for (let i = 0; i < dim; i++) {
+    values.push(bytesPerValue === 8 ? vec.readDoubleLE(i * 8) : vec.readFloatLE(i * 4));
+  }
+  return values;
+}
+
+/**
  * Retrieve the stored embedding for a memory, or null if none exists.
  */
 export function getEmbedding(handle: StorageHandle, memoryId: number): EmbeddingRecord | null {
@@ -1171,11 +1188,12 @@ export function getEmbedding(handle: StorageHandle, memoryId: number): Embedding
       }
     | undefined;
   if (!row) return null;
-  const vecArr = new Float64Array(row.vec.buffer);
+  const vec = decodeEmbeddingVector(row.vec, row.dim);
+  if (!vec) return null;
   return {
     memoryId: row.memory_id,
     dim: row.dim,
-    vec: Array.from(vecArr),
+    vec,
     modelId: row.model_id,
     summaryHash: row.summary_hash,
     createdAt: row.created_at,
@@ -1222,11 +1240,12 @@ export function getEmbeddingsForMemories(
   }>;
   const out = new Map<number, EmbeddingRecord>();
   for (const row of rows) {
-    const vecArr = new Float64Array(row.vec.buffer);
+    const vec = decodeEmbeddingVector(row.vec, row.dim);
+    if (!vec) continue;
     out.set(row.memory_id, {
       memoryId: row.memory_id,
       dim: row.dim,
-      vec: Array.from(vecArr),
+      vec,
       modelId: row.model_id,
       summaryHash: row.summary_hash,
       createdAt: row.created_at,

@@ -32,6 +32,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   type AbstentionPolicyReport,
@@ -1109,7 +1110,7 @@ function normalizeReport(r: AbstentionPolicyReport): void {
  */
 test("docs/experiments.md: per-query FP bullet headers match the number of query IDs in their bodies", () => {
   const docsPath = path.resolve(
-    path.dirname(new URL(import.meta.url).pathname),
+    path.dirname(fileURLToPath(import.meta.url)),
     "..",
     "src",
     "benchmark",
