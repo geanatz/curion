@@ -8,9 +8,12 @@ conventions, and anything else you store via `remember(text)`. When you
 ask via `recall(text)`, it retrieves relevant memories from your local
 project store.
 
-Curion is **not** a shared team memory. Each project has its own private
-store. Memories are never sent to a shared backend — everything stays
-local.
+Curion is **not** a shared team-memory service: each project stores memory
+in its local SQLite database. However, when an external AI provider is
+configured, Curion sends the content needed for analysis or synthesis to that
+provider. "Stored locally" does **not** mean "never transmitted to a provider".
+Optional semantic-model downloads also contact the model host. Only projects
+explicitly marked `isPrivate: true` are hidden from cross-project recall.
 
 ## Storage layout
 
@@ -32,16 +35,13 @@ to create a new memory store or write config/registry data there.
 **Existing Windows directories are not modified automatically.** Older
 Curion stores may have inherited broad read access from their parent
 folders; verify native NTFS ACLs before assuming they are private.
-Existing data requires an explicit, reviewed ACL migration. Windows
-SYSTEM and Administrators retain access to newly created stores.
-
-Windows security decision (owner-approved, 2026-11-13): protect newly
-created Curion data directories by default and fail before saving data
-if native ACL setup fails. Defer changing existing directories to a
-separate opt-in operation, since they may be intentionally shared. This
-replaces the previous assumption that POSIX modes alone isolate
-Windows data. See the evidence and unresolved validation in GitHub
-Issue #8.
+Existing data requires an explicit, reviewed, opt-in ACL migration. Windows
+SYSTEM and Administrators retain access to newly created stores. Native Windows
+CI verified the new-directory behavior with synthetic data, including a shared
+parent directory; it did **not** verify or migrate older user stores. See
+[the accepted Windows security decision](decisions/2026-11-13-release.md)
+and [Issue #8](https://github.com/geanatz/curion/issues/8) for the
+remaining legacy-folder follow-up.
 
 The memory database schema is additive and idempotent. **Raw input
 text is never persisted** — only controller-normalized summaries and
@@ -101,8 +101,9 @@ Set `CURION_SEMANTIC_ALLOW_REMOTE=0` to disable the CDN download — the
 embedder will only load if the model is already in the local cache;
 otherwise semantic retrieval gracefully falls back to lexical-only.
 
-The embedder runs entirely on-device (CPU, no GPU). The cache directory
-is created with mode `0700`.
+The embedder runs on-device (CPU, no GPU). The default cache lives under
+the protected project-local `.curion/` directory. Operators must secure any
+external directory selected with `CURION_SEMANTIC_CACHE_DIR`.
 
 ## Local trace
 
@@ -119,6 +120,8 @@ tool output, provider prompts or responses, synthesized answers,
 arbitrary error prose, credentials, or unknown caller-supplied fields.
 The writer independently projects allowlisted metadata before SQLite
 serialization; privacy does not depend on redacting arbitrary payloads.
+Existing trace tables remain for compatibility; new writes use the restricted
+metadata schema.
 
 The trace is **internal** to Curion:
 
@@ -135,12 +138,13 @@ never fails the public tool call.
 Curion's threat model is small and the trust boundary is the parent
 process boundary.
 
-- **MCP stdio transport only.** Curion does **not** open any network
-  sockets. It does not accept inbound HTTP, WebSocket, or any other
-  network connection. The MCP host (the parent process that spawned
-  Curion) is responsible for all network communication, all
-  authentication, and all authorization. A malicious MCP host can send
-  Curion any JSON-RPC payload it likes — Curion treats its inputs as
+- **MCP stdio transport only.** Curion does not expose an inbound HTTP
+  or WebSocket server; external AI-provider requests and optional model
+  downloads are **outbound** network operations. The MCP host controls
+  who can invoke Curion and which environment settings it inherits;
+  Curion authenticates its outbound AI-provider calls using those configured
+  credentials. A malicious MCP host can send Curion arbitrary JSON-RPC
+  payloads — Curion treats its inputs as
   untrusted: the strict input schema rejects unknown top-level keys
   at the SDK boundary, the safety pre-check filters harmful or
   off-policy input, and the controller validates everything before it
@@ -176,21 +180,9 @@ process boundary.
   and `message:` wrappers. Trace and provider internals cannot leak
   into the wire surface.
 
-For the recent dependency-graph security work (the `protobufjs` CVE
-cluster and the `esbuild` dev-only advisory), see
-[SECURITY.md](../SECURITY.md).
-
-## Trace diagnostics
-
-Trace diagnostics are stored separately at `<projectRoot>/.curion/trace.sqlite`
-and are **off unless `CURION_TRACE_ENABLED` is explicitly set to `1`, `true`,
-`yes`, or `on`**. The trace database keeps its existing tables for compatibility,
-but new records use a closed metadata-only schema. Trace rows may contain event
-type, status, timestamps/duration, approved counts, bounded enums, and schema
-version. They never contain remember input, recall queries, memory or summary
-text, public tool results, provider prompts/responses, synthesized answers, or
-arbitrary error messages. The writer independently drops unknown fields before
-SQLite serialization.
+For security-reporting guidance and the supported version policy, see
+[SECURITY.md](../SECURITY.md). Dependency risk changes by version; the
+release audit is evidence for its run date, not a permanent guarantee.
 
 ## Secrets and `.env` files
 
@@ -218,8 +210,8 @@ by the server runtime.
   only. See [Configuration → Logging](configuration.md#logging).
 - **Treat `.curion/trace.sqlite` as project-local debug data.** It is
   redacted, internal, and gitignored; do not copy it across hosts
-  without understanding what it contains. Turn it off with
-  `CURION_TRACE_ENABLED=0` if you would rather have nothing local.
+  without understanding what it contains. Tracing is off by default;
+  enable it only when needed with `CURION_TRACE_ENABLED=1`.
 - **Mark sensitive projects private.** Add
   `.curion/config.json` with `{ "version": 1, "isPrivate": true }` to
   projects that must never appear in cross-project recall.

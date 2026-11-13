@@ -32,19 +32,6 @@ primary provider to use `remember` and `recall`.
 | `CURION_PRIMARY_MODEL`    | Model id for the primary provider (e.g. `gpt-4o`, or any Anthropic model you have access to). |
 | `CURION_PRIMARY_API_FORMAT` | API format: `openai-compatible` (default) or `anthropic`. Controls whether to use the OpenAI-compatible HTTP path or the official Anthropic SDK. |
 
-### Privacy-preserving trace diagnostics
-
-Tracing is **disabled by default**. To enable local operational diagnostics, set
-`CURION_TRACE_ENABLED` to one of the explicit allowlisted values: `1`, `true`,
-`yes`, or `on` (case-insensitive, surrounding whitespace ignored). Any other
-value—including unset, empty, whitespace-only, and `enabled`—keeps tracing off.
-
-When enabled, Curion writes only a closed metadata schema to the separate
-`trace.sqlite` database: event type, status, timestamps/duration, approved
-numeric counts, bounded enums, and schema version. It never stores tool input,
-queries, memory text, summaries, public output, provider content, synthesized
-answers, or arbitrary error messages.
-
 Optional primary-provider knobs:
 
 | Variable                          | Default           | Description |
@@ -230,8 +217,8 @@ want to accidentally hide a project due to a corrupt config file).
 - [ ] (Optional) `CURION_SEMANTIC_ENABLED=1` for paraphrase recall.
 - [ ] (Optional) `CURION_LOG_LEVEL=debug` during initial bring-up; drop
       back to `info` for steady state.
-- [ ] (Optional) `CURION_TRACE_ENABLED=0` if you want zero on-disk trace
-      activity.
+- [ ] (Optional) Enable metadata-only local diagnostics with
+      `CURION_TRACE_ENABLED=1`; leave unset to keep tracing off.
 - [ ] (Optional) `.curion/config.json` with `{ "isPrivate": true }` for
       projects that must never surface in cross-project recall.
 - [ ] `.env` is **not** sufficient — secrets must come from the parent

@@ -1,10 +1,17 @@
 # Decision retrieval and provenance
 
-## Current status
+## Accepted scope-limited decisions
 
-No accepted architecture decision records are indexed in the `main`
-baseline at the time of this consolidation. This page is a retrieval guide,
-**not** an invented list of historical approvals.
+- [2026-11-12: maintenance and consolidation](2026-11-12-maintenance.md)
+  — historical maintenance-only approval, superseded for the specific 0.3.7
+  release where stated in the later record.
+- [2026-11-13: release, Windows privacy and manual publishing](2026-11-13-release.md)
+  — verified 0.3.7 decisions, evidence and remaining approval boundaries.
+
+These records describe **owner-approved scope**, not permission to activate
+experimental work, change existing user data, spend provider API credits, or
+publish another version without specific approval. Current source and CI still
+need independent verification.
 
 ## When reviewing a technical decision
 
