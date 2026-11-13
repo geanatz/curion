@@ -2,14 +2,16 @@
 
 ## Supported Versions
 
-Only the latest minor release receives security updates. Older
-minors are best-effort and depend on whether the fix can be
-backported without breaking the frozen public API.
+Only the latest **published** minor release receives regular security
+updates. Older minors are best-effort when a fix can be safely backported
+without breaking the frozen public API. An unreleased candidate is not
+a published, supported release.
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 0.2.x   | :white_check_mark: |
-| 0.1.x   | :x:                |
+| Version | Security support |
+| ------- | ---------------- |
+| 0.3.x   | Supported (latest published minor) |
+| 0.2.x   | Best-effort backports; no regular security updates |
+| 0.1.x   | Unsupported |
 
 ## Reporting a Vulnerability
 
@@ -78,8 +80,9 @@ constants (`sk-test-primary-not-real-12345`,
 accidentally embed a real key.
 
 A repo-wide guard test (`tests/contracts.test.ts`) refuses any
-key-shaped string in source or tests. CI runs that test on every
-push.
+key-shaped string in source or tests. This test runs with the full
+suite; GitHub CI is deliberately **manual-only** (`workflow_dispatch`),
+not automatically triggered by pushes or pull requests.
 
 ### SQL injection safety
 
@@ -101,11 +104,19 @@ The `.curion/` directory is created in `process.cwd()` (or
   the project root, which is set by the operator (or by
   `process.cwd()` if the operator did not set one). Operators on
   a shared host should set `CURION_PROJECT_ROOT` explicitly.
-- The `.curion/` directory is created with file mode `0700` so
-  that other users on a shared host cannot read stored memory.
-- Semantic-retrieval model files are written to
-  `CURION_SEMANTIC_CACHE_DIR` (default: `<projectRoot>/.curion/transformers-cache/`)
-  with the same `0700` permission.
+- On Linux/macOS, new project-local `.curion/` directories use POSIX
+  mode `0700`. On Windows, **new** directories receive a protected NTFS
+  ACL granting the current user plus SYSTEM and Administrators access
+  before any Curion data is written. The native Windows ACL regression
+  passed on a disposable Windows runner for ordinary and shared parent
+  folders; it is not a cross-account penetration test.
+- **Existing Windows data folders are not changed automatically** and
+  may retain permissive inherited ACLs. Inspect older stores explicitly;
+  remediation requires a separately approved, opt-in procedure.
+- Semantic-retrieval model files normally live under the protected
+  `<projectRoot>/.curion/transformers-cache/`. When overriding
+  `CURION_SEMANTIC_CACHE_DIR`, operators must ensure that the chosen
+  external directory has suitable access controls.
 
 ### `.env` files are not loaded
 
