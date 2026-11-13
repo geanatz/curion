@@ -1,8 +1,11 @@
 name: CI
 
 on:
-  # Stable-release policy: only manual dispatch, no automatic PR or push CI.
   workflow_dispatch:
+  # TEMPORARY: only the approved Curion PR #7 validation run.
+  pull_request:
+    branches: [main]
+    types: [synchronize]
 
 # Least-privilege: the workflow only needs to read the repository contents.
 # No write permissions, no token scopes beyond what is strictly necessary.
@@ -11,6 +14,7 @@ permissions:
 
 jobs:
   build-and-test:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.number == 7
     runs-on: ${{ matrix.os }}
 
     strategy:
